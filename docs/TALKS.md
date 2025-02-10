@@ -1,8 +1,38 @@
 # Talks
 
+## June 23, 2024: Money2020
+
+Joran Dirk Greef explains how the world is becoming more transactional, that general purpose 
+databases designed 20 to 30 years ago won't power the future of online transactions, and how 
+TigerBeetle is designed to help.
+
+https://youtu.be/wkHP30tCZmw
+
+## 14 May, 2024: Biodigital Jazz!
+
+Joran Dirk Greef presents at Software You Can Love on the the intersection of software, art 
+(and business) at TigerBeetle.
+
+https://www.youtube.com/watch?v=C98cyJ-wJuY
+
+## 14 May, 2024: TigerStyle! (Or How To Design Safer Systems in Less Time)
+
+Our final talk from Systems Distributed '23, Joran Dirk Greef dives into how to design safer 
+systems in less time. 
+
+https://www.youtube.com/watch?v=w3WYdYyjek4
+
+## November 18, 2024: Redesigning OLTP for a New Order of Magnitude
+
+Joran Dirk Greef discusses TigerBeetle, a new database, and why OLTP has a growing impedance 
+mismatch, why the OLTP workload is becoming more contentious, why row locks, why storage 
+faults, write stalls, and why non-determinism is now a problem.
+
+https://www.youtube.com/watch?v=32LMicc0gRA 
+
 ## February 26, 2024: The FASTEST and SAFEST Database
 
-Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle
+Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle 
 solves, technical details about how it works, and shows a demo of the simulator at the end.
 ThePrimeagen was blown away.
 
@@ -14,7 +44,16 @@ In this impromptu talk, matklad discusses build and release process of TigerBeet
 
 https://www.youtube.com/watch?v=eFTQzhfO6nc
 
-## October 2, 2023: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
+## 23 October, 2023: P99 CONF 2023 | A Deterministic Walk Down TigerBeetle’s main() Street
+
+Learn how to use Zig to implement a fully deterministic distributed system which will never 
+fail with an out of memory error, for predictable performance and 700x faster tests, 
+with matklad.
+
+
+https://www.youtube.com/watch?v=AGxAnkrhDGY 
+
+## October 2, 2024: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
 
 Joran Dirk Greef discusses how the world is becoming more transactional, why Online
 Transaction Processing (OLTP) needs to be redesigned for today's massive scale, and
