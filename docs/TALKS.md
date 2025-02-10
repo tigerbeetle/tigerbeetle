@@ -1,6 +1,14 @@
 # Talks
 
-## June 23, 2024: Money2020
+## June 28, 2024: Durability and the Art of Consensus
+
+In this talk from Systems Distributed '24, join Joran Dirk Greef as he pushes past the limits,
+over-specifications and assumptions of popular protocols, to build a backup system from first
+principles.
+
+https://www.youtube.com/watch?v=tRgvaqpQPwE
+
+## June 06, 2024: Money2020
 
 Joran Dirk Greef explains how the world is becoming more transactional, that general purpose 
 databases designed 20 to 30 years ago won't power the future of online transactions, and how 
@@ -8,21 +16,15 @@ TigerBeetle is designed to help.
 
 https://youtu.be/wkHP30tCZmw
 
-## 14 May, 2024: Biodigital Jazz!
+## May 14, 2024: Biodigital Jazz!
 
 Joran Dirk Greef presents at Software You Can Love on the the intersection of software, art 
 (and business) at TigerBeetle.
 
 https://www.youtube.com/watch?v=C98cyJ-wJuY
 
-## 14 May, 2024: TigerStyle! (Or How To Design Safer Systems in Less Time)
 
-Our final talk from Systems Distributed '23, Joran Dirk Greef dives into how to design safer 
-systems in less time. 
-
-https://www.youtube.com/watch?v=w3WYdYyjek4
-
-## November 18, 2024: Redesigning OLTP for a New Order of Magnitude
+## March 22, 2024: Redesigning OLTP for a New Order of Magnitude
 
 Joran Dirk Greef discusses TigerBeetle, a new database, and why OLTP has a growing impedance 
 mismatch, why the OLTP workload is becoming more contentious, why row locks, why storage 
@@ -44,7 +46,7 @@ In this impromptu talk, matklad discusses build and release process of TigerBeet
 
 https://www.youtube.com/watch?v=eFTQzhfO6nc
 
-## 23 October, 2023: P99 CONF 2023 | A Deterministic Walk Down TigerBeetle’s main() Street
+## October 23, 2023: P99 CONF 2023 | A Deterministic Walk Down TigerBeetle’s main() Street
 
 Learn how to use Zig to implement a fully deterministic distributed system which will never 
 fail with an out of memory error, for predictable performance and 700x faster tests, 
@@ -52,14 +54,6 @@ with matklad.
 
 
 https://www.youtube.com/watch?v=AGxAnkrhDGY 
-
-## October 2, 2024: Redesigning OLTP for a New Order of Magnitude at QCon San Francisco 2024
-
-Joran Dirk Greef discusses how the world is becoming more transactional, why Online
-Transaction Processing (OLTP) needs to be redesigned for today's massive scale, and
-he goes into technical detail about how TigerBeetle achieves this.
-
-https://www.infoq.com/presentations/redesign-oltp/
 
 ## March 27, 2023: A New Era for Database Design with TigerBeetle at QCon London 2023
 
@@ -77,6 +71,13 @@ https://www.youtube.com/watch?v=ehYcCTHRyFs
 > database.
 
 https://www.youtube.com/watch?v=QwXddaB8tj0
+
+## February 10, 2023: TigerStyle! (Or How To Design Safer Systems in Less Time)
+
+Our final talk from Systems Distributed '23, Joran Dirk Greef dives into how to design safer
+systems in less time.
+
+https://www.youtube.com/watch?v=w3WYdYyjek4
 
 ## January 18, 2023: Why Accounting Needs Its Own Database with Joran Greef of Tiger Beetle on The datastack Show
 
