@@ -3,6 +3,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.journal_checker);
 
+const constants = @import("../../constants.zig");
+const stdx = @import("../../stdx.zig");
+const vsr = @import("../../vsr.zig");
 const TestStorage = @import("../storage.zig").Storage;
 
 pub fn JournalCheckerType(comptime Replica: type) type {
@@ -42,6 +45,16 @@ pub fn JournalCheckerType(comptime Replica: type) type {
                     }
                 }
                 assert(wal_header_errors == 0);
+
+                // Verify that prepares' trailing sector padding is zeroed.
+                for (0..constants.journal_slot_count) |slot| {
+                    const prepare =
+                        replica_storage.area_memory(.{ .wal_prepares = .{ .slot = slot } });
+                    const header =
+                        std.mem.bytesAsValue(vsr.Header, prepare[0..@sizeOf(vsr.Header)]);
+                    const prepare_padding = prepare[header.size..vsr.sector_ceil(header.size)];
+                    assert(stdx.zeroed(prepare_padding));
+                }
             }
         }
     };
