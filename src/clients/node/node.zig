@@ -140,10 +140,6 @@ fn create(
         std.log.warn("Failed to release allocated thread-safe function on error.", .{});
     };
 
-    if (c.napi_acquire_threadsafe_function(completion_tsfn) != c.napi_ok) {
-        return translate.throw(env, "Failed to acquire reference to thread-safe function.");
-    }
-
     const client = tb_client.init(
         allocator,
         cluster_id,
@@ -176,7 +172,7 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
     const completion_ctx = tb_client.completion_context(client);
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
 
-    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
+    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
         return translate.throw(env, "Failed to release allocated thread-safe function on error.");
     }
 }
