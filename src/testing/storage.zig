@@ -519,11 +519,18 @@ pub const Storage = struct {
             }
 
             {
-                // Don't misdirect a WAL prepare if the corresponding WAL header doesn't match, to
-                // avoid a double-fault in which the journal tries to `fix` the old prepare.
+                // Don't misdirect a WAL prepare if the corresponding WAL header doesn't match or is
+                // corrupt, to avoid a double-fault in which the journal tries to `fix` the old
+                // prepare.
                 const wal_header = &storage.wal_headers()[header_slot];
                 const wal_prepare = &storage.wal_prepares()[header_slot];
                 if (wal_header.checksum != wal_prepare.header.checksum) {
+                    return .corrupt;
+                }
+
+                const wal_sector =
+                    @divFloor(vsr.Zone.wal_headers.start() + header_offset, constants.sector_size);
+                if (storage.faults.isSet(wal_sector)) {
                     return .corrupt;
                 }
             }
