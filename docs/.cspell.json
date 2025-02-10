@@ -192,6 +192,7 @@
         "SUIDSGID",
         "swcsc",
         "swsc",
+        "SYCL",
         "syscall",
         "syscalls",
         "systest",

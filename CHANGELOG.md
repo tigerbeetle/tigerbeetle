@@ -3,6 +3,64 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.27
+
+Released: 2025-02-10
+
+
+### Safety And Performance
+
+- [#2700](https://github.com/tigerbeetle/tigerbeetle/pull/2700)
+
+  Remove redundant calls to `IO.init()` and `IO.deinit()` during the `format` and `start` commands.
+
+  These redundant calls could lead to an assertion error in the Zig standard library when a failure
+  occurs after the second `IO.init()`.
+
+### Features
+
+- [#2701](https://github.com/tigerbeetle/tigerbeetle/pull/2701)
+
+  Enhance the docs search bar with arrow-key navigation over search results, and folder collapse
+  using the enter key.
+
+### Internals
+- [#2713](https://github.com/tigerbeetle/tigerbeetle/pull/2713)
+
+  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md) from
+  SystemsDistributed '23, P99 CONF '23, Money2020 '24, and SYCL '24.
+
+- [#2710](https://github.com/tigerbeetle/tigerbeetle/pull/2710)
+
+  Improve CPU utilization of the CFO by spawning fuzzers more frequently.
+
+  Motivated by the measurement that the cumulative CPU was (on average) 40-45% idle.
+
+- [#2709](https://github.com/tigerbeetle/tigerbeetle/pull/2709)
+
+  Assert zeroed padding for WAL prepares in the VOPR.
+
+- [#2703](https://github.com/tigerbeetle/tigerbeetle/pull/2703)
+
+  Remove the deprecated version of the start_view message.
+
+  As part of [#2600](https://github.com/tigerbeetle/tigerbeetle/pull/2600), we rolled out a new
+  on-disk format for the CheckpointState. To avoid bumping the VSR version, we made it so that
+  replicas temporarily send two versions of the start_view message, with both the old and new
+  CheckpointState formats.
+
+- [#2697](https://github.com/tigerbeetle/tigerbeetle/pull/2697)
+
+  Add fair scheduler to the CFO to avoid starvation of short running fuzzers.
+
+  Earlier, long running LSM fuzzers ended up spending more than their fair share of time on the CPU,
+  with only 1-10% of CFO time being spent on short running VOPR fuzzers.
+
+
+### TigerTracks 🎧
+
+- [Neon](https://open.spotify.com/track/7Kohy4v3KLWfUXlv9N3feB?si=a1bb8f16679a44d3)
+
 ## TigerBeetle 0.16.26
 
 Released: 2025-02-03
