@@ -155,9 +155,18 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         }
                     },
                     .ctrlc => {
-                        // Erase everything below the current cursor's position in case Ctrl-C was
-                        // pressed somewhere inside the buffer.
-                        try repl.terminal.print("^C\x1b[J\n", .{});
+                        // move to end of line, print "^C" and abort the command
+                        const position_end_diff = @as(
+                            isize,
+                            @intCast(repl.buffer.count() - buffer_index),
+                        );
+                        terminal_screen.update_cursor_position(position_end_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        try repl.terminal.print("^C\n", .{});
+                        repl.buffer.clear();
                         return &.{};
                     },
                     .newline => {
