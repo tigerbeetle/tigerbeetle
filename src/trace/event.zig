@@ -27,22 +27,21 @@ const TreeEnum = tree_enum: {
     } });
 };
 
+/// Returns the minimum length of an array which can be indexed by the values of every enum variant.
 fn enum_max(EnumOrUnion: type) u8 {
     const type_info = @typeInfo(EnumOrUnion);
     assert(type_info == .Enum or type_info == .Union);
 
-    const Enum_ = if (type_info == .Enum)
+    const Enum = if (type_info == .Enum)
         type_info.Enum
     else
         @typeInfo(type_info.Union.tag_type.?).Enum;
-    assert(Enum_.is_exhaustive);
+    assert(Enum.is_exhaustive);
 
-    var max: u8 = Enum_.fields[0].value;
-
-    for (Enum_.fields[1..]) |field| {
+    var max: u8 = Enum.fields[0].value;
+    for (Enum.fields[1..]) |field| {
         max = @max(max, field.value);
     }
-
     return max + 1;
 }
 
@@ -58,7 +57,7 @@ fn enum_max(EnumOrUnion: type) u8 {
 ///
 /// When timing, this is flipped on its head: the timing code doesn't need space for concurrency
 /// because it is called once, when an event has finished, and internally aggregates. The
-/// aggregiation is needed because there can be an unknown number of calls between flush intervals,
+/// aggregation is needed because there can be an unknown number of calls between flush intervals,
 /// compared to tracing which is emitted as it happens.
 ///
 /// Rather, it needs space for the cardinality of the tags you'd like to emit. In the case of
