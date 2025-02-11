@@ -17,9 +17,9 @@ cd /build
 # Validate dictionary is formatted correctly
 curl -L -o /tmp/jq https://github.com/stedolan/jq/releases/download/jq-1.6/jq-linux64
 chmod +x /tmp/jq
-cat docs/.cspell.json | /tmp/jq empty
+cat .github/ci/.cspell.json | /tmp/jq empty
 
 # Spellcheck
 files="$(git ls-files -s | grep -v ^16 | cut -f2- | grep \\.md)"
-npx cspell --config ./docs/.cspell.json $files
+npx cspell --config .github/ci/.cspell.json $files
 '
