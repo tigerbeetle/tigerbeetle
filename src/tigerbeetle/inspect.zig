@@ -24,6 +24,8 @@ const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
+const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
+const Grid = vsr.GridType(Storage);
 const allocate_block = vsr.grid.allocate_block;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
@@ -191,6 +193,31 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
             else => {},
         }
         try output.print("\n", .{});
+    }
+
+    // Memory usage is intentionally estimated from constants, rather than measured, to sanity
+    // check that our observed memory usage is reasonable.
+    try output.print("Memory (approximate):\n", .{});
+    const datafile_size = constants.storage_size_limit_max;
+    try print_header(output, 0, "datafile (on disk)");
+    try output.print("{}\n", .{
+        stdx.fmt_int_size_bin_exact(datafile_size),
+    });
+
+    {
+        try print_header(output, 0, "free_set");
+        const hashmap_entries = stdx.div_ceil(
+            100 * (StateMachine.Forest.compaction_blocks_released_per_pipeline_max() +
+                Grid.free_set_checkpoints_blocks_max(datafile_size) +
+                CheckpointTrailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size)),
+            std.hash_map.default_max_load_percentage,
+        );
+        try output.print("{:.2}\n", .{std.fmt.fmtIntSizeBin(
+            // HashMap of block addresses.
+            hashmap_entries * @sizeOf(u64) +
+                // Two bitsets with bit per block.
+                2 * stdx.div_ceil(vsr.block_count_max(datafile_size), 8),
+        )});
     }
 }
 
