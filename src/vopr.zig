@@ -749,7 +749,7 @@ pub const Simulator = struct {
 
                 if (replica.journal.find_latest_headers_break_between(
                     op_repair_min,
-                    commit_max,
+                    replica.op,
                 )) |range| {
                     // Check if replica's commit pipeline was stuck due to missing headers.
                     // Find latest missing header as we repair headers from high -> low ops.
