@@ -8,7 +8,7 @@ TigerBeetle should be used in the data plane, or hot path of transaction process
 general purpose database is used in the control plane and may be used for storing information or
 metadata that is updated less frequently.
 
-![TigerBeetle in Your System Architecture](https://github.com/tigerbeetle/tigerbeetle/assets/3262610/c145acd5-ec6e-49f4-9bd0-77cd242d2b8f)
+![TigerBeetle in Your System Architecture](https://github.com/user-attachments/assets/679ec8be-640d-4c7e-b082-076557baeac7)
 
 ## Division of Responsibilities
 
