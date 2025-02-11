@@ -136,12 +136,15 @@ pub const Storage = struct {
     /// See `Storage.overlays`.
     const overlays_count_max = 2;
 
+    const OverlayBuffers = [overlays_count_max][constants.message_size_max]u8;
+
     allocator: mem.Allocator,
 
     size: u64,
     options: Options,
     prng: std.rand.DefaultPrng,
 
+    /// `memory` always contains the pristine data as-written -- it does not include storage faults.
     memory: []align(constants.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
     memory_written: std.DynamicBitSetUnmanaged,
@@ -174,8 +177,9 @@ pub const Storage = struct {
     ///   Thanks to rigorous checksums, misdirections that break these rules just manifest as
     ///   corruptions, and corruption is already well-tested (see `faults`). The goal here is to
     ///   test how TigerBeetle handles well-formed but incorrectly-located data.
+    ///   TODO: Suppose cross-zone misdirects to help find cases where we don't check `command`.
     overlays: IOPSType(struct { zone: vsr.Zone, offset: u64, size: u32 }, overlays_count_max) = .{},
-    overlay_buffers: [overlays_count_max][]align(constants.sector_size) u8,
+    overlay_buffers: *align(constants.sector_size) OverlayBuffers,
 
     /// Whether to enable faults (when false, this supersedes `faulty_wal_areas` &c).
     /// This is used to disable faults during the replica's first startup.
@@ -209,15 +213,10 @@ pub const Storage = struct {
         var faults = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);
         errdefer faults.deinit(allocator);
 
-        var overlay_buffers_allocated: u32 = 0;
-        var overlay_buffers: [overlays_count_max][]align(constants.sector_size) u8 = undefined;
-        errdefer for (overlay_buffers) |b| allocator.free(b);
-
-        for (&overlay_buffers) |*overlay_buffer| {
-            overlay_buffer.* =
-                try allocator.alignedAlloc(u8, constants.sector_size, constants.message_size_max);
-            overlay_buffers_allocated += 1;
-        }
+        const overlay_buffers_alloc =
+            try allocator.alignedAlloc(u8, constants.sector_size, @sizeOf(OverlayBuffers));
+        const overlay_buffers = std.mem.bytesAsValue(OverlayBuffers, overlay_buffers_alloc);
+        errdefer allocator.destroy(overlay_buffers);
 
         var reads = PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
         errdefer reads.deinit();
@@ -243,12 +242,12 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
-        for (storage.overlay_buffers) |b| allocator.free(b);
-        allocator.free(storage.memory);
-        storage.memory_written.deinit(allocator);
-        storage.faults.deinit(allocator);
-        storage.reads.deinit();
         storage.writes.deinit();
+        storage.reads.deinit();
+        allocator.destroy(storage.overlay_buffers);
+        storage.faults.deinit(allocator);
+        storage.memory_written.deinit(allocator);
+        allocator.free(storage.memory);
     }
 
     /// Cancel any currently in-progress reads/writes.
@@ -486,7 +485,8 @@ pub const Storage = struct {
                         overlay.size,
                     });
 
-                    const overlay_buffer = storage.overlay_buffers[storage.overlays.index(overlay)];
+                    const overlay_index = storage.overlays.index(overlay);
+                    const overlay_buffer = &storage.overlay_buffers[overlay_index];
                     const overlay_target = overlay_buffer[0..@min(overlay.size, read.buffer.len)];
                     stdx.copy_disjoint(.inexact, u8, read.buffer, overlay_target);
                 }
@@ -510,6 +510,8 @@ pub const Storage = struct {
             {
                 // Don't fault a WAL prepare if the corresponding WAL header write was misdirected,
                 // to avoid a double-fault which the journal interprets as a torn prepare.
+                // TODO If in our fault tracking we distinguish between "torn writes" injected by
+                // reset() and simulated LSE's/bitrot, then we could allow the former in this case.
                 var overlays_iterator = storage.overlays.iterate_const();
                 while (overlays_iterator.next()) |overlay| {
                     if (overlay.zone == .wal_headers and overlay.offset == header_offset) {
@@ -615,22 +617,14 @@ pub const Storage = struct {
             overlay_intended.* =
                 .{ .zone = write.zone, .offset = write.offset, .size = overlay_size };
 
-            const overlay_mistaken_buffer = storage.overlay_buffers[overlay_mistaken_index];
-            const overlay_intended_buffer = storage.overlay_buffers[overlay_intended_index];
+            const overlay_mistaken_buffer = &storage.overlay_buffers[overlay_mistaken_index];
+            const overlay_intended_buffer = &storage.overlay_buffers[overlay_intended_index];
             const target_intended_buffer =
                 storage.memory[write.zone.offset(write.offset)..][0..write.buffer.len];
 
             stdx.copy_disjoint(.inexact, u8, overlay_mistaken_buffer, write.buffer);
             stdx.copy_disjoint(.inexact, u8, overlay_intended_buffer, target_intended_buffer);
         }
-
-        const offset_in_storage = write.zone.offset(write.offset);
-        stdx.copy_disjoint(
-            .exact,
-            u8,
-            storage.memory[offset_in_storage..][0..write.buffer.len],
-            write.buffer,
-        );
 
         var sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
         while (sectors.next()) |sector| {
@@ -643,6 +637,14 @@ pub const Storage = struct {
                 storage.fault_sector(write.zone, sector);
             }
         }
+
+        const offset_in_storage = write.zone.offset(write.offset);
+        stdx.copy_disjoint(
+            .exact,
+            u8,
+            storage.memory[offset_in_storage..][0..write.buffer.len],
+            write.buffer,
+        );
 
         write.callback(write);
     }
