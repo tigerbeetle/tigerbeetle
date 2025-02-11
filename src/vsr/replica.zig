@@ -10050,8 +10050,12 @@ pub fn ReplicaType(
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;
 
-            self.send_prepare_ok(message.header);
-            defer self.flush_loopback_queue();
+            {
+                // repair() may send prepare_ok's to ourself if we are the primary, so we must flush
+                // the loopback queue immediately.
+                self.send_prepare_ok(message.header);
+                defer self.flush_loopback_queue();
+            }
 
             switch (trigger) {
                 .append => {},
