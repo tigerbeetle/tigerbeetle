@@ -446,14 +446,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 const table_count_visible_max = table_count_max_for_level(growth_factor, level);
                 assert(manifest_level.table_count_visible <= table_count_visible_max);
 
-                manifest.tracer.metrics.gauge(
+                manifest.tracer.gauge(
                     .{ .table_count_visible = .{
                         .tree = @enumFromInt(manifest.config.id),
                         .level = level,
                     } },
                     manifest_level.table_count_visible,
                 );
-                manifest.tracer.metrics.gauge(
+                manifest.tracer.gauge(
                     .{ .table_count_visible_max = .{
                         .tree = @enumFromInt(manifest.config.id),
                         .level = level,

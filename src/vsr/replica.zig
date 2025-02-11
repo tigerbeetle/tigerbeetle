@@ -71,7 +71,7 @@ pub const ReplicaEvent = union(enum) {
 };
 
 pub const CommitStage = union(enum) {
-    pub const CommitStageTag = std.meta.Tag(CommitStage);
+    pub const Tag = std.meta.Tag(CommitStage);
 
     const CheckpointData = enum {
         aof,
@@ -648,7 +648,12 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
-            self.trace = try vsr.trace.Tracer.init(allocator, replica, options.tracer_options);
+            self.trace = try vsr.trace.Tracer.init(
+                allocator,
+                self.superblock.working.cluster,
+                replica,
+                options.tracer_options,
+            );
             errdefer if (!initialized) self.trace.deinit(allocator);
 
             // Initialize the replica:
@@ -856,9 +861,8 @@ pub fn ReplicaType(
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
             self.grid.open(grid_open_callback);
-            self.invariants();
-
             self.trace_emit_timeout.start();
+            self.invariants();
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {

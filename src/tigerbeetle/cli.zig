@@ -132,6 +132,7 @@ const CLIArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
+        statsd: ?[]const u8 = null,
         trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
@@ -485,6 +486,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         clients: u32,
+        statsd: ?[]const u8,
         trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
@@ -914,6 +916,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .print_batch_timings = benchmark.print_batch_timings,
         .clients = benchmark.clients,
         .id_order = benchmark.id_order,
+        .statsd = benchmark.statsd,
         .trace = benchmark.trace,
         .file = benchmark.file,
         .addresses = addresses,
@@ -964,9 +967,10 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
 fn parse_addresses(
     raw_addresses: []const u8,
     comptime flag: []const u8,
-    comptime Result: type,
-) Result {
-    var result: Result = .{};
+    comptime BoundedArray: type,
+) BoundedArray {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+    var result: BoundedArray = .{};
 
     const addresses_parsed = vsr.parse_addresses(
         raw_addresses,

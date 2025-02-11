@@ -18,30 +18,30 @@
 //!     // Trace a synchronous event.
 //!     // The second argument is a `anytype` struct, corresponding to the struct argument to
 //!     // `log.debug()`.
-//!     tree.grid.trace.start(.compact_mutable, .{ .tree = tree.config.name });
-//!     defer tree.grid.trace.stop(.compact_mutable, .{ .tree = tree.config.name });
+//!     tree.grid.trace.start(.{ .compact_mutable = .{ .tree = tree.config.name } });
+//!     defer tree.grid.trace.stop(.{ .compact_mutable = .{ .tree = tree.config.name } });
 //!
 //! Note that only one of each Event can be running at a time:
 //!
 //!     // good
-//!     trace.start(.foo, .{});
-//!     trace.stop(.foo, .{});
-//!     trace.start(.bar, .{});
-//!     trace.stop(.bar, .{});
+//!     trace.start(.{.foo = .{}});
+//!     trace.stop(.{ .foo = .{} });
+//!     trace.start(.{ .bar = .{} });
+//!     trace.stop(.{ .bar = .{} });
 //!
 //!     // good
-//!     trace.start(.foo, .{});
-//!     trace.start(.bar, .{});
-//!     trace.stop(.foo, .{});
-//!     trace.stop(.bar, .{});
+//!     trace.start(.{ .foo = .{} });
+//!     trace.start(.{ .bar = .{} });
+//!     trace.stop(.{ .foo = .{} });
+//!     trace.stop(.{ .bar = .{} });
 //!
 //!     // bad
-//!     trace.start(.foo, .{});
-//!     trace.start(.foo, .{});
+//!     trace.start(.{ .foo = .{} });
+//!     trace.start(.{ .foo = .{} });
 //!
 //!     // bad
-//!     trace.stop(.foo, .{});
-//!     trace.start(.foo, .{});
+//!     trace.stop(.{ .foo = .{} });
+//!     trace.start(.{ .foo = .{} });
 //!
 //! If an event is is cancelled rather than properly stopped, use .reset():
 //! - Reset is safe to call regardless of whether the event is currently started.
@@ -49,10 +49,10 @@
 //!   cancel all running traces of the same event.
 //!
 //!     // good
-//!     trace.start(.foo, .{});
+//!     trace.start(.{ .foo = .{} });
 //!     trace.reset(.foo);
-//!     trace.start(.foo, .{});
-//!     trace.stop(.foo, .{});
+//!     trace.start(.{ .foo = .{} });
+//!     trace.stop(.{ .foo = .{} });
 //!
 //! Notes:
 //! - When enabled, traces are written to stdout (as opposed to logs, which are written to stderr).
@@ -101,6 +101,7 @@ const log = std.log.scoped(.trace);
 
 const Metrics = @import("trace/metric.zig").Metrics;
 const Event = @import("trace/event.zig").Event;
+const EventMetric = @import("trace/event.zig").EventMetric;
 const EventTracing = @import("trace/event.zig").EventTracing;
 const EventTiming = @import("trace/event.zig").EventTiming;
 
@@ -123,7 +124,12 @@ pub const Tracer = struct {
         statsd_options: Metrics.StatsDOptions = null,
     };
 
-    pub fn init(allocator: std.mem.Allocator, replica_index: u8, options: Options) !Tracer {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        cluster: u128,
+        replica_index: u8,
+        options: Options,
+    ) !Tracer {
         if (options.writer) |writer| {
             try writer.writeAll("[\n");
         }
@@ -133,6 +139,8 @@ pub const Tracer = struct {
 
         const metrics = try Metrics.init(allocator, .{
             .statsd = options.statsd_options,
+            .cluster = cluster,
+            .replica = replica_index,
         });
         errdefer metrics.deinit(allocator);
 
@@ -152,6 +160,10 @@ pub const Tracer = struct {
         allocator.free(tracer.buffer);
         tracer.metrics.deinit(allocator);
         tracer.* = undefined;
+    }
+
+    pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
+        tracer.metrics.record_gauge(event, value);
     }
 
     pub fn start(tracer: *Tracer, event: Event) void {
@@ -228,12 +240,12 @@ pub const Tracer = struct {
             if (duration_ns < us_log_threshold_ns) "us" else "ms",
         });
 
-        tracer.metrics.timing(event_timing, duration_us);
+        tracer.metrics.record_timing(event_timing, duration_us);
 
         tracer.write_stop(stack);
     }
 
-    pub fn reset(tracer: *Tracer, event_tag: Event.EventTag) void {
+    pub fn reset(tracer: *Tracer, event_tag: Event.Tag) void {
         const stack_base = EventTracing.stack_bases.get(event_tag);
         const cardinality = EventTracing.stack_limits.get(event_tag);
         for (stack_base..stack_base + cardinality) |stack| {
@@ -290,7 +302,7 @@ test "trace json" {
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var trace = try Tracer.init(std.testing.allocator, 0, .{
+    var trace = try Tracer.init(std.testing.allocator, 0, 0, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);

@@ -3386,7 +3386,7 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

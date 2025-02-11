@@ -20,21 +20,31 @@ pub const Metrics = struct {
 
     statsd: StatsD,
 
-    pub fn init(allocator: std.mem.Allocator, options: struct { statsd: StatsDOptions }) !Metrics {
-        const events_metric = try allocator.alloc(?EventMetricAggregate, EventMetric.stack_count);
+    pub fn init(allocator: std.mem.Allocator, options: struct {
+        cluster: u128,
+        replica: u8,
+        statsd: StatsDOptions,
+    }) !Metrics {
+        const events_metric = try allocator.alloc(?EventMetricAggregate, EventMetric.slot_count);
         errdefer allocator.free(events_metric);
 
         @memset(events_metric, null);
 
-        const events_timing = try allocator.alloc(?EventTimingAggregate, EventTiming.stack_count);
+        const events_timing = try allocator.alloc(?EventTimingAggregate, EventTiming.slot_count);
         errdefer allocator.free(events_timing);
 
         @memset(events_timing, null);
 
         const statsd = if (options.statsd) |statsd_options|
-            try StatsD.init(allocator, statsd_options.io, statsd_options.address)
+            try StatsD.init_udp(
+                allocator,
+                options.cluster,
+                options.replica,
+                statsd_options.io,
+                statsd_options.address,
+            )
         else
-            try StatsD.init_log(allocator);
+            try StatsD.init_log(allocator, options.cluster, options.replica);
         errdefer statsd.deinit(allocator);
 
         return .{
@@ -52,11 +62,11 @@ pub const Metrics = struct {
         self.* = undefined;
     }
 
-    /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will result
-    /// in the last value being submitted.
-    pub fn gauge(self: *Metrics, event_metric: EventMetric, value: u64) void {
-        const timing_stack = event_metric.stack();
-        self.events_metric[timing_stack] = .{
+    /// Gauges work on a last-set wins. Multiple calls to .record_gauge() followed by an emit will
+    /// result in only the last value being submitted.
+    pub fn record_gauge(self: *Metrics, event_metric: EventMetric, value: u64) void {
+        const timing_slot = event_metric.slot();
+        self.events_metric[timing_slot] = .{
             .event = event_metric,
             .value = value,
         };
@@ -66,16 +76,16 @@ pub const Metrics = struct {
     // calculated from sum and count at emit time.
     //
     // When these are emitted upstream (via statsd, currently), upstream must apply different
-    // aggregiations:
+    // aggregations:
     // * min/max/avg are considered gauges for aggregation: last value wins.
     // * sum/count are considered counters for aggregation: they are added to the existing values.
     //
     // This matches the default behavior of the `g` and `c` statsd types respectively.
-    pub fn timing(self: *Metrics, event_timing: EventTiming, duration_us: u64) void {
-        const timing_stack = event_timing.stack();
+    pub fn record_timing(self: *Metrics, event_timing: EventTiming, duration_us: u64) void {
+        const timing_slot = event_timing.slot();
 
-        if (self.events_timing[timing_stack] == null) {
-            self.events_timing[timing_stack] = .{
+        if (self.events_timing[timing_slot] == null) {
+            self.events_timing[timing_slot] = .{
                 .event = event_timing,
                 .values = .{
                     .duration_min_us = duration_us,
@@ -85,11 +95,11 @@ pub const Metrics = struct {
                 },
             };
         } else {
-            const timing_existing = self.events_timing[timing_stack].?.values;
+            const timing_existing = self.events_timing[timing_slot].?.values;
             // Certain high cardinality data (eg, op) _can_ differ.
             // TODO: Maybe assert and gate on constants.verify
 
-            self.events_timing[timing_stack].?.values = .{
+            self.events_timing[timing_slot].?.values = .{
                 .duration_min_us = @min(timing_existing.duration_min_us, duration_us),
                 .duration_max_us = @max(timing_existing.duration_max_us, duration_us),
                 .duration_sum_us = timing_existing.duration_sum_us +| duration_us,
@@ -113,15 +123,19 @@ pub const Metrics = struct {
 };
 
 test "timing overflow" {
-    var metrics = try Metrics.init(std.testing.allocator, .{ .statsd = null });
+    var metrics = try Metrics.init(std.testing.allocator, .{
+        .statsd = null,
+        .cluster = 0,
+        .replica = 0,
+    });
     defer metrics.deinit(std.testing.allocator);
 
     const event: EventTiming = .replica_aof_write;
     const value = std.math.maxInt(u64) - 1;
-    metrics.timing(event, value);
-    metrics.timing(event, value);
+    metrics.record_timing(event, value);
+    metrics.record_timing(event, value);
 
-    const aggregate = metrics.events_timing[event.stack()].?;
+    const aggregate = metrics.events_timing[event.slot()].?;
 
     assert(aggregate.values.count == 2);
     assert(aggregate.values.duration_min_us == value);
