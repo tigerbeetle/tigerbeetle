@@ -800,6 +800,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .state_machine_opened => {
                     cluster.manifest_checker.forest_open(&replica.state_machine.forest);
                 },
+                .new_prepare => |prepare| {
+                    cluster.state_checker.on_new_prepare(prepare);
+                },
                 .committed => |data| {
                     assert(data.reply.header.client == data.prepare.header.client);
 

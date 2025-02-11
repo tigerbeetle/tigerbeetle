@@ -49,6 +49,8 @@ pub const Status = enum {
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     state_machine_opened,
+    /// Called immediately after a primary prepares a new request.
+    new_prepare: *const Message.Prepare,
     /// Called immediately after a prepare is committed by the state machine.
     committed: struct {
         prepare: *const Message.Prepare,
@@ -6545,6 +6547,7 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
+            if (self.event_callback) |hook| hook(self, .{ .new_prepare = message });
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -6655,7 +6658,6 @@ pub fn ReplicaType(
                 log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.replica});
                 return;
             }
-
             self.repair_timeout.reset();
             if (self.syncing == .updating_checkpoint) return;
             if (!self.state_machine_opened) return;

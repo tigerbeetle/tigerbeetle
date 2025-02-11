@@ -32,6 +32,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         commits: Commits,
         commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
 
+        uncommitted_headers: [constants.pipeline_prepare_queue_max]vsr.Header.Prepare,
         replicas: []const Replica,
         clients: []const Client,
         clients_exhaustive: bool = true,
@@ -65,6 +66,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
+            var uncommitted_headers: [constants.pipeline_prepare_queue_max]vsr.Header.Prepare = undefined;
+            for (0..constants.pipeline_prepare_queue_max) |slot| {
+                uncommitted_headers[slot] = vsr.Header.Prepare.reserved(options.cluster_id, slot);
+            }
+
             return StateChecker{
                 .node_count = @intCast(options.replicas.len),
                 .replica_count = options.replica_count,
@@ -72,6 +78,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = options.replicas,
                 .clients = options.clients,
                 .replica_head_max = replica_head_max,
+                .uncommitted_headers = uncommitted_headers,
             };
         }
 
@@ -91,6 +98,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     head.op = header.op;
                 }
             }
+        }
+
+        pub fn on_new_prepare(state_checker: *StateChecker, prepare: *const Message.Prepare) void {
+            assert(prepare.header.command == .prepare);
+            const slot = prepare.header.op % constants.pipeline_prepare_queue_max;
+            state_checker.uncommitted_headers[slot] = prepare.header.*;
         }
 
         /// Returns whether the replica's state changed since the last check_state().
@@ -255,10 +268,18 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
-            const commit = &state_checker.commits.items[op];
-            assert(commit.header.op == op);
-            assert(commit.replicas.count() > 0);
-            return commit.header;
+            const header = blk: {
+                if (op < state_checker.commits.items.len) {
+                    const commit = &state_checker.commits.items[op];
+                    assert(commit.replicas.count() > 0);
+                    break :blk commit.header;
+                } else {
+                    const slot = op % constants.pipeline_prepare_queue_max;
+                    break :blk state_checker.uncommitted_headers[slot];
+                }
+            };
+            assert(header.op == op);
+            return header;
         }
     };
 }
