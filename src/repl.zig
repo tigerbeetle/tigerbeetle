@@ -5,6 +5,7 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
+const StaticAllocator = @import("static_allocator.zig");
 const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
@@ -54,6 +55,8 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
         arguments: std.ArrayListUnmanaged(u8),
         message_pool: *MessagePool,
         io: *IO,
+
+        static_allocator: StaticAllocator,
 
         const Repl = @This();
 
@@ -506,7 +509,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
         }
 
         pub fn init(
-            allocator: std.mem.Allocator,
+            parent_allocator: std.mem.Allocator,
             time: Time,
             options: struct {
                 addresses: []const std.net.Address,
@@ -514,6 +517,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 verbose: bool,
             },
         ) !Repl {
+            var static_allocator = StaticAllocator.init(parent_allocator);
+            const allocator = static_allocator.allocator();
+
             var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
                 allocator,
                 constants.message_size_max,
@@ -549,6 +555,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             );
             errdefer client.deinit(allocator);
 
+            // Disable all dynamic allocation from this point onwards.
+            static_allocator.transition_from_init_to_static();
+
             return .{
                 .client = client,
                 .debug_logs = options.verbose,
@@ -563,10 +572,13 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 .arguments = arguments,
                 .message_pool = message_pool,
                 .io = io,
+                .static_allocator = static_allocator,
             };
         }
 
         pub fn deinit(repl: *Repl, allocator: std.mem.Allocator) void {
+            repl.static_allocator.transition_from_static_to_deinit();
+
             repl.client.deinit(allocator);
             repl.io.deinit();
             repl.message_pool.deinit(allocator);
