@@ -513,7 +513,7 @@ const Environment = struct {
         storage: *Storage,
         random: std.rand.Random,
     ) !void {
-        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer env.trace.deinit(allocator);
 
         env.* = .{
