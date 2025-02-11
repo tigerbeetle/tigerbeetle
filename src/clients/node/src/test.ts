@@ -1427,6 +1427,19 @@ test('accept zero-length lookup_transfers', async (): Promise<void> => {
   assert.deepStrictEqual(transfers, [])
 })
 
+test("destroy client in-flight", async (): Promise<void> => {
+  // Non-existing cluster.
+  const client = createClient({ cluster_id: 92n, replica_addresses: ["99"] });
+  setTimeout(() => client.destroy(), 30);
+  try {
+    await client.lookupAccounts([0n]);
+  } catch (error) {
+    assert.strictEqual(error.message, "Client was shutdown.");
+    return;
+  }
+  throw "expected an error";
+});
+
 async function main () {
   const start = new Date().getTime()
   try {

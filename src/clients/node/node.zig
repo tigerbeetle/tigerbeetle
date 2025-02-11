@@ -140,10 +140,6 @@ fn create(
         std.log.warn("Failed to release allocated thread-safe function on error.", .{});
     };
 
-    if (c.napi_acquire_threadsafe_function(completion_tsfn) != c.napi_ok) {
-        return translate.throw(env, "Failed to acquire reference to thread-safe function.");
-    }
-
     const client = tb_client.init(
         allocator,
         cluster_id,
@@ -176,7 +172,7 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
     const completion_ctx = tb_client.completion_context(client);
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
 
-    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
+    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
         return translate.throw(env, "Failed to release allocated thread-safe function on error.");
     }
 }
@@ -259,14 +255,15 @@ fn on_completion(
     _ = client;
     _ = timestamp;
 
-    switch (packet.status) {
-        .ok => {
-            switch (@as(Operation, @enumFromInt(packet.operation))) {
-                inline else => |op| {
-                    const event_count = @divExact(
-                        packet.data_size,
-                        @sizeOf(StateMachine.EventType(op)),
-                    );
+    const buffer_size: BufferSize = switch (@as(Operation, @enumFromInt(packet.operation))) {
+        inline else => |op| buffer_size: {
+            const event_count = @divExact(
+                packet.data_size,
+                @sizeOf(StateMachine.EventType(op)),
+            );
+
+            const result_count = switch (packet.status) {
+                .ok => result_count: {
                     const buffer: BufferType(op) = .{
                         .ptr = @ptrCast(packet),
                         .count = event_count,
@@ -278,24 +275,27 @@ fn on_completion(
                         result_ptr.?[0..result_len],
                     ));
                     @memcpy(buffer.results()[0..results.len], results);
-
-                    packet.data_size = @bitCast(BufferSize{
-                        .event_count = @intCast(event_count),
-                        .result_count = @intCast(results.len),
-                    });
+                    break :result_count results.len;
                 },
-                .pulse => unreachable,
-            }
+                .client_evicted,
+                .client_release_too_low,
+                .client_release_too_high,
+                .client_shutdown,
+                => 0,
+                .too_much_data => unreachable, // We limit packet data size during request().
+                .invalid_operation => unreachable, // We check the operation during request().
+                .invalid_data_size => unreachable, // We set correct data size during request().
+
+            };
+
+            break :buffer_size .{
+                .event_count = @intCast(event_count),
+                .result_count = @intCast(result_count),
+            };
         },
-        .client_evicted,
-        .client_release_too_low,
-        .client_release_too_high,
-        .client_shutdown,
-        => {}, // Handled on the JS side to throw exception.
-        .too_much_data => unreachable, // We limit packet data size during request().
-        .invalid_operation => unreachable, // We check the operation during request().
-        .invalid_data_size => unreachable, // We set correct data size during request().
-    }
+        .pulse => unreachable,
+    };
+    packet.data_size = @bitCast(buffer_size);
 
     // Queue the packet to be processed on the JS thread to invoke its JS callback.
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
