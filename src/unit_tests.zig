@@ -54,6 +54,7 @@ comptime {
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
+    _ = @import("testing/exhaustigen.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
     _ = @import("testing/snaptest.zig");

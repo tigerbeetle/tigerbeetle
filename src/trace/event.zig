@@ -494,3 +494,56 @@ pub const EventMetricAggregate = struct {
     event: EventMetric,
     value: ValueType,
 };
+
+test "EventTiming stack doesn't have collisions" {
+    const allocator = std.testing.allocator;
+    var stacks: std.ArrayListUnmanaged(u32) = .{};
+    defer stacks.deinit(allocator);
+
+    var g: @import("../testing/exhaustigen.zig") = .{};
+    while (!g.done()) {
+        const event: EventTiming = switch (g.enum_value(Event.EventTag)) {
+            .replica_commit => .{ .replica_commit = .{ .stage = g.enum_value(CommitStageTag) } },
+            .replica_aof_write => .replica_aof_write,
+            .replica_sync_table => .replica_sync_table,
+            .compact_beat => .{ .compact_beat = .{
+                .tree = g.enum_value(TreeEnum),
+                .level_b = g.int_inclusive(u6, constants.lsm_levels - 1),
+            } },
+            .compact_beat_merge => .{ .compact_beat_merge = .{
+                .tree = g.enum_value(TreeEnum),
+                .level_b = g.int_inclusive(u6, constants.lsm_levels - 1),
+            } },
+            .compact_manifest => .compact_manifest,
+            .compact_mutable => .{ .compact_mutable = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .compact_mutable_suffix => .{ .compact_mutable_suffix = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .lookup => .{ .lookup = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .lookup_worker => .{ .lookup_worker = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .scan_tree => .{ .scan_tree = .{
+                .tree = g.enum_value(TreeEnum),
+            } },
+            .scan_tree_level => .{ .scan_tree_level = .{
+                .tree = g.enum_value(TreeEnum),
+                .level = g.int_inclusive(u6, constants.lsm_levels - 1),
+            } },
+            .grid_read => .grid_read,
+            .grid_write => .grid_write,
+            .metrics_emit => .metrics_emit,
+        };
+        try stacks.append(allocator, event.stack());
+    }
+
+    for (0..stacks.items.len) |i| {
+        for (0..i) |j| {
+            assert(stacks.items[i] != stacks.items[j]);
+        }
+    }
+}
