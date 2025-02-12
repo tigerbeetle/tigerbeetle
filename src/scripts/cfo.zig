@@ -47,10 +47,6 @@
 //!
 //! The idea here is that we want to keep the set of failing seeds stable, while maintaining some
 //! measure of how much fuzzing work was done in total.
-//!
-//! TODO: Right now task weights directly determine which task to run next. Instead we could track
-//! cumulative runtime of each fuzzer and select tasks to balance runtime instead, to avoid
-//! disproportionately favoring long fuzzers.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -91,6 +87,28 @@ const Fuzzer = enum {
     vsr_superblock_quorums,
     vsr_superblock,
     signal,
+
+    const weights = std.enums.EnumArray(Fuzzer, u32).init(.{
+        .canary = 1,
+        .ewah = 1,
+        .lsm_cache_map = 2,
+        .lsm_forest = 4,
+        .lsm_manifest_level = 2,
+        .lsm_manifest_log = 2,
+        .lsm_scan = 2,
+        .lsm_segmented_array = 1,
+        .lsm_tree = 2,
+        .storage = 1,
+        .vopr_lite = 8,
+        .vopr_testing_lite = 8,
+        .vopr_testing = 8,
+        .vopr = 8,
+        .vsr_free_set = 1,
+        .vsr_journal_format = 1,
+        .vsr_superblock_quorums = 1,
+        .vsr_superblock = 1,
+        .signal = 1,
+    });
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
@@ -656,14 +674,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
 
     for (tasks.list.items) |*task| {
         if (task.generation == tasks.generation) {
-            const fuzzer = task.seed_template.fuzzer;
-            if (fuzzer == .vopr or fuzzer == .vopr_lite or
-                fuzzer == .vopr_testing or fuzzer == .vopr_testing_lite)
-            {
-                task.weight = 2; // Bump relative priority of VOPR runs.
-            } else {
-                task.weight = 1;
-            }
+            task.weight *= Fuzzer.weights.get(task.seed_template.fuzzer);
         }
     }
 }
