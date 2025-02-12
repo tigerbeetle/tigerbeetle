@@ -110,6 +110,8 @@ pub const Terminal = struct {
                             else => return .unhandled,
                         }
                     },
+                    'b' => return .altb,
+                    'f' => return .altf,
                     else => return .unhandled,
                 }
             },
@@ -307,6 +309,8 @@ const UserInput = union(enum) {
     right,
     up,
     down,
+    altf,
+    altb,
     unhandled,
 };
 

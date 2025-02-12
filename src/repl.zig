@@ -420,10 +420,54 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         repl.buffer.append_slice_assume_capacity(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
+                    .altf => {
+                        const forward = move_forward_by_word(repl.buffer.slice(), buffer_index);
+                        terminal_screen.update_cursor_position(
+                            @as(isize, @intCast(forward - buffer_index)),
+                        );
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index = forward;
+                    },
+                    .altb => {
+                        const backward = move_backward_by_word(repl.buffer.slice(), buffer_index);
+                        terminal_screen.update_cursor_position(
+                            -@as(isize, @intCast(buffer_index - backward)),
+                        );
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index = backward;
+                    },
                     .unhandled => {},
                 }
             }
             unreachable;
+        }
+
+        fn move_forward_by_word(buffer: []const u8, buffer_index: usize) usize {
+            var cur_pos = buffer_index;
+            while (cur_pos < buffer.len and !std.ascii.isWhitespace(buffer[cur_pos])) {
+                cur_pos += 1;
+            }
+            while (cur_pos < buffer.len and std.ascii.isWhitespace(buffer[cur_pos])) {
+                cur_pos += 1;
+            }
+            return cur_pos;
+        }
+
+        fn move_backward_by_word(buffer: []const u8, buffer_index: usize) usize {
+            var cur_pos = buffer_index;
+            while (cur_pos > 0 and std.ascii.isWhitespace(buffer[cur_pos - 1])) {
+                cur_pos -= 1;
+            }
+            while (cur_pos > 0 and !std.ascii.isWhitespace(buffer[cur_pos - 1])) {
+                cur_pos -= 1;
+            }
+            return cur_pos;
         }
 
         fn do_repl(
