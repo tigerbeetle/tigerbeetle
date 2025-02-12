@@ -139,6 +139,21 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 }
 
                 switch (user_input) {
+                    .ctrld => {
+                        if (repl.buffer.count() == 0 and buffer_index == 0) {
+                            return null;
+                        }
+                        if (buffer_index < repl.buffer.count()) {
+                            try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
+                                terminal_screen.cursor_row,
+                                terminal_screen.cursor_column,
+                                repl.buffer.const_slice()[buffer_index + 1 ..],
+                                terminal_screen.cursor_row,
+                                terminal_screen.cursor_column,
+                            });
+                            _ = repl.buffer.ordered_remove(buffer_index);
+                        }
+                    },
                     .ctrlc => {
                         // Erase everything below the current cursor's position in case Ctrl-C was
                         // pressed somewhere inside the buffer.
