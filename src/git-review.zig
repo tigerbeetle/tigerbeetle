@@ -22,11 +22,28 @@
 //! - Not a strong reason, but keeping review data in repository itself reduced vendor lock-in.
 
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const Shell = @import("./shell.zig");
 const flags = @import("./flags.zig");
 
 const Allocator = std.mem.Allocator;
 const log = std.log;
+const assert = std.debug.assert;
+
+pub const std_options: std.Options = .{
+    .logFn = log_fn,
+};
+
+fn log_fn(
+    comptime level: std.log.Level,
+    comptime scope: @TypeOf(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    assert(scope == .default);
+    const prefix = comptime if (level == .info) "" else level.asText() ++ ": ";
+    std.debug.print(prefix ++ format ++ "\n", args);
+}
 
 const CLIArgs = union(enum) {
     new,
@@ -78,8 +95,8 @@ pub fn main() !void {
     const cli_args = flags.parse(&args, CLIArgs);
 
     switch (cli_args) {
+        .status => try review_status(shell),
         .new => try review_new(shell),
-        .status => unreachable,
     }
 }
 
@@ -95,6 +112,117 @@ fn review_new(shell: *Shell) !void {
 
     try shell.exec("git add REVIEW.md", .{});
     try shell.exec("git commit -m review", .{});
+}
+
+fn review_status(shell: *Shell) !void {
+    if (!shell.file_exists("REVIEW.md")) {
+        log.info("no review", .{});
+        return error.NoReview;
+    }
+
+    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+    const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
+        .commit = commit,
+    });
+    if (!std.mem.eql(u8, commit_message, "review\n\n")) {
+        log.err("REVIEW.md file present, but the top commit is not a review:{s}", .{
+            commit_message,
+        });
+        return error.InvalidCommit;
+    }
+
+    defer {
+        shell.exec("git reset {commit}", .{ .commit = commit }) catch {};
+    }
+    try shell.exec("git add .", .{});
+    try shell.exec("git commit --amend --no-edit", .{});
+
+    const diff = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
+    const stats = try parse_diff(diff);
+    log.info("comments:   {}", .{stats.comments_total});
+    log.info("unresolved: {}", .{stats.comments_total - stats.comments_resolved});
+}
+
+fn files_with_review_comments(shell: *Shell) []const []const u8 {
+    const committed = shell.exec_stdout("git show --name-only --pretty=format:");
+    const pending = shell.exec("git status --short", .{});
+
+    var result: std.StringArrayHashMapUnmanaged(void) = .{};
+
+    for (.{ committed, pending }) |lines| {
+        var line_iterator = std.mem.tokenizeScalar(u8, lines, '\n');
+        while (line_iterator.next()) |line| {
+            try result.put(shell.arena.allocator(), line, {});
+        }
+    }
+
+    return result.keys();
+}
+
+const ParseDiffResult = struct {
+    comments_total: u32,
+    comments_resolved: u32,
+};
+
+fn parse_diff(diff: []const u8) !ParseDiffResult {
+    var result: ParseDiffResult = .{
+        .comments_total = 0,
+        .comments_resolved = 0,
+    };
+    var file_name: []const u8 = "";
+    var line_iterator = std.mem.tokenizeScalar(u8, diff, '\n');
+    var comment_start: ?u32 = null;
+    var line_index: u32 = 0;
+    while (line_iterator.next()) |line| {
+        defer line_index += 1;
+
+        if (stdx.cut_prefix(line, "diff --git a/")) |suffix| {
+            _, file_name = stdx.cut(suffix, " ").?.unpack();
+            continue;
+        }
+        assert(file_name.len > 0);
+        errdefer log.err("invalid review in '{s}':\n{s}", .{ file_name, line });
+
+        if (std.mem.startsWith(u8, line, "- ")) {
+            return error.InvalidDiff;
+        }
+
+        if (stdx.cut_prefix(line, "+ ")) |line_added| {
+            const indent, const comment_content =
+                (stdx.cut(line_added, "//") orelse return error.InvalidDiff).unpack();
+            if (!is_blank(indent)) return error.InvalidDiff;
+
+            const command = parse_command(comment_content);
+            if (comment_start == null) {
+                if (command == null or command.? != .author) return error.InvalidDiff;
+
+                comment_start = line_index;
+                result.comments_total += 1;
+            } else {
+                if (command != null and command.? == .resolved) {
+                    assert(comment_start != null);
+                    comment_start = null;
+                    result.comments_resolved += 1;
+                }
+            }
+        } else {
+            comment_start = null;
+        }
+    }
+    assert(result.comments_total >= result.comments_resolved);
+    return result;
+}
+
+fn parse_command(comment_content: []const u8) ?union(enum) { author: []const u8, resolved } {
+    const command_suffix = stdx.cut_prefix(comment_content, " r ") orelse return null;
+    if (std.mem.eql(u8, command_suffix, "resolved.")) return .resolved;
+    const author = stdx.cut_suffix(command_suffix, ":") orelse return null;
+    return .{ .author = author };
+}
+
+fn is_blank(text: []const u8) bool {
+    for (text) |c| if (c != ' ') return false;
+    return true;
 }
 
 fn git_has_changes(shell: *Shell) !bool {
