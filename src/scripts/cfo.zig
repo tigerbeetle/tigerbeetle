@@ -380,11 +380,15 @@ fn run_fuzzers(
     }
     assert(seeds.items.len == 0);
 
+    var runtime_total_ticks: u64 = 0;
+    for (tasks.list.items) |*task| runtime_total_ticks += task.runtime_ticks;
     for (tasks.list.items) |*task| {
-        log.info("commit={s} fuzzer={s:<24} runtime={}s (active={})", .{
+        log.info("commit={s} fuzzer={s:<24} runtime={}s {d:.2}% (active={})", .{
             task.seed_template.commit_sha[0..7],
             @tagName(task.seed_template.fuzzer),
             @divFloor(task.runtime_ticks, second_ticks),
+            @as(f64, @floatFromInt(task.runtime_ticks * 100)) /
+                @as(f64, @floatFromInt(runtime_total_ticks)),
             task.generation == tasks.generation,
         });
     }
