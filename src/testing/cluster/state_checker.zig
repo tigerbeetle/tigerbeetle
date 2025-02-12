@@ -41,6 +41,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         /// Tracks the latest op acked by a replica across restarts.
         replica_head_max: []ReplicaHead,
+
         pub fn init(allocator: mem.Allocator, options: struct {
             cluster_id: u128,
             replica_count: u8,
