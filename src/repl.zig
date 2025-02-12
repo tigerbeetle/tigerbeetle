@@ -495,9 +495,13 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             };
 
             if (input.len > 0) {
-                if (repl.history.empty() or
-                    !std.mem.eql(u8, repl.history.tail_ptr_const().?[0..input.len], input))
-                {
+                const add_to_history = brk: {
+                    const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
+                    const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
+                    break :brk !std.mem.eql(u8, last_entry_str, input);
+                };
+
+                if (add_to_history) {
                     // NB: Avoiding big stack allocations below.
 
                     assert(input.len < repl_history_entry_bytes_with_nul);
