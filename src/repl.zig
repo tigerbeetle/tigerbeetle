@@ -170,6 +170,16 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         return &.{};
                     },
                     .newline => {
+                        // move to end of buffer then return
+                        const position_end_diff = @as(
+                            isize,
+                            @intCast(repl.buffer.count() - buffer_index),
+                        );
+                        terminal_screen.update_cursor_position(position_end_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
                         try repl.terminal.print("\n", .{});
                         return repl.buffer.const_slice();
                     },
