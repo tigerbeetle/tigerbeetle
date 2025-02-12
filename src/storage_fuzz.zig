@@ -84,7 +84,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                     }
                 }.callback,
                 &write_completion,
-                storage_data_written[zone.start()..][0..zone.size().?],
+                storage_data_written[zone.start()..][0..zone.size()],
                 zone,
                 0,
             );
@@ -100,7 +100,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
             var read_details: [32]ReadDetail = undefined;
 
-            const zone_sector_count: u64 = @divExact(zone.size().?, sector_size);
+            const zone_sector_count: u64 = @divExact(zone.size(), sector_size);
             assert(zone_sector_count <= read_details.len);
 
             var index: u64 = 0;
@@ -148,7 +148,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
         for (zones) |zone| {
             const start = zone.start();
-            const end = start + zone.size().?;
+            const end = start + zone.size();
 
             try std.testing.expectEqualSlices(
                 u8,

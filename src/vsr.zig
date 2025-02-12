@@ -105,6 +105,7 @@ pub const Zone = enum {
         );
         break :size_grid_padding grid_start_aligned - grid_start_unaligned;
     };
+    const size_grid_max = block_count_max(constants.storage_size_limit_max) * constants.block_size;
 
     comptime {
         for (.{
@@ -113,6 +114,7 @@ pub const Zone = enum {
             size_wal_prepares,
             size_client_replies,
             size_grid_padding,
+            size_grid_max,
         }) |zone_size| {
             assert(zone_size % constants.sector_size == 0);
         }
@@ -124,10 +126,7 @@ pub const Zone = enum {
     }
 
     pub fn offset(zone: Zone, offset_logical: u64) u64 {
-        if (zone.size()) |zone_size| {
-            assert(offset_logical < zone_size);
-        }
-
+        assert(offset_logical < zone.size());
         return zone.start() + offset_logical;
     }
 
@@ -135,19 +134,19 @@ pub const Zone = enum {
         comptime var start_offset = 0;
         inline for (comptime std.enums.values(Zone)) |z| {
             if (z == zone) return start_offset;
-            start_offset += comptime size(z) orelse 0;
+            start_offset += comptime size(z);
         }
         unreachable;
     }
 
-    pub fn size(zone: Zone) ?u64 {
+    pub fn size(zone: Zone) u64 {
         return switch (zone) {
             .superblock => size_superblock,
             .wal_headers => size_wal_headers,
             .wal_prepares => size_wal_prepares,
             .client_replies => size_client_replies,
             .grid_padding => size_grid_padding,
-            .grid => null,
+            .grid => size_grid_max,
         };
     }
 
@@ -156,9 +155,8 @@ pub const Zone = enum {
     /// We check this only at the start of a read or write because the physical sector size may be
     /// less than our logical sector size so that partial IOs then leave us no longer aligned.
     pub fn verify_iop(zone: Zone, buffer: []const u8, offset_in_zone: u64) void {
-        if (zone.size()) |zone_size| {
-            assert(offset_in_zone + buffer.len <= zone_size);
-        }
+        assert(offset_in_zone + buffer.len <= zone.size());
+
         assert(@intFromPtr(buffer.ptr) % constants.sector_size == 0);
         assert(buffer.len % constants.sector_size == 0);
         assert(buffer.len > 0);

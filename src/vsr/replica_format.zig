@@ -170,7 +170,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         ) !void {
             assert(!self.formatting);
 
-            const padding_size = vsr.Zone.size(.grid_padding).?;
+            const padding_size = vsr.Zone.size(.grid_padding);
             assert(padding_size < constants.block_size);
 
             if (padding_size > 0) {
@@ -178,7 +178,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                 const padding_buffer = try allocator.alignedAlloc(
                     u8,
                     constants.sector_size,
-                    vsr.Zone.size(.grid_padding).?,
+                    vsr.Zone.size(.grid_padding),
                 );
                 defer allocator.free(padding_buffer);
                 @memset(padding_buffer, 0);
@@ -288,14 +288,14 @@ test "format" {
     // Verify client replies.
     try std.testing.expectEqual(storage.client_replies().len, constants.clients_max);
     try std.testing.expect(stdx.zeroed(
-        storage.memory[vsr.Zone.client_replies.offset(0)..][0..vsr.Zone.client_replies.size().?],
+        storage.memory[vsr.Zone.client_replies.offset(0)..][0..vsr.Zone.client_replies.size()],
     ));
 
     // Verify grid padding.
-    const padding_size = vsr.Zone.grid_padding.size().?;
+    const padding_size = vsr.Zone.grid_padding.size();
     if (padding_size > 0) {
         try std.testing.expect(stdx.zeroed(
-            storage.memory[vsr.Zone.grid_padding.offset(0)..][0..vsr.Zone.grid_padding.size().?],
+            storage.memory[vsr.Zone.grid_padding.offset(0)..][0..vsr.Zone.grid_padding.size()],
         ));
     }
 }

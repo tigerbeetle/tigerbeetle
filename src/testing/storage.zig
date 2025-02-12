@@ -770,7 +770,7 @@ pub const Storage = struct {
 
     pub fn wal_headers(storage: *const Storage) []const vsr.Header.Prepare {
         const offset = vsr.Zone.wal_headers.offset(0);
-        const size = vsr.Zone.wal_headers.size().?;
+        const size = vsr.Zone.wal_headers.size();
         return @alignCast(mem.bytesAsSlice(
             vsr.Header.Prepare,
             storage.memory[offset..][0..size],
@@ -792,7 +792,7 @@ pub const Storage = struct {
 
     pub fn wal_prepares(storage: *const Storage) []const MessageRawType(.prepare) {
         const offset = vsr.Zone.wal_prepares.offset(0);
-        const size = vsr.Zone.wal_prepares.size().?;
+        const size = vsr.Zone.wal_prepares.size();
         return @alignCast(mem.bytesAsSlice(
             MessageRawType(.prepare),
             storage.memory[offset..][0..size],
@@ -801,7 +801,7 @@ pub const Storage = struct {
 
     pub fn client_replies(storage: *const Storage) []const MessageRawType(.reply) {
         const offset = vsr.Zone.client_replies.offset(0);
-        const size = vsr.Zone.client_replies.size().?;
+        const size = vsr.Zone.client_replies.size();
         return @alignCast(mem.bytesAsSlice(
             MessageRawType(.reply),
             storage.memory[offset..][0..size],

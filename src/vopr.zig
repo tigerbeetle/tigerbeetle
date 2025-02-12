@@ -1299,7 +1299,7 @@ pub const Simulator = struct {
             // ensure a cluster cannot become stuck in status=recovering_head.
             // See recover_slots() for more detail.
             const headers_offset = vsr.Zone.wal_headers.offset(0);
-            const headers_size = vsr.Zone.wal_headers.size().?;
+            const headers_size = vsr.Zone.wal_headers.size();
             const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
             for (
                 mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
