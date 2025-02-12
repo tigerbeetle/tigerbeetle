@@ -25,9 +25,12 @@ const std = @import("std");
 const Shell = @import("./shell.zig");
 const flags = @import("./flags.zig");
 
+const Allocator = std.mem.Allocator;
 const log = std.log;
 
 const CLIArgs = union(enum) {
+    new,
+    status,
     pub const help =
         \\Usage:
         \\
@@ -74,5 +77,35 @@ pub fn main() !void {
 
     const cli_args = flags.parse(&args, CLIArgs);
 
-    switch (cli_args) {}
+    switch (cli_args) {
+        .new => try review_new(shell),
+        .status => unreachable,
+    }
+}
+
+fn review_new(shell: *Shell) !void {
+    if (try git_has_changes(shell)) {
+        log.err("working tree is dirty", .{});
+        return error.DirtyWorkingTree;
+    }
+    try shell.cwd.writeFile(.{ .sub_path = "REVIEW.md", .data =
+    \\# Review Summary
+    \\
+    });
+
+    try shell.exec("git add REVIEW.md", .{});
+    try shell.exec("git commit -m review", .{});
+}
+
+fn git_has_changes(shell: *Shell) !bool {
+    const output = try shell.exec_stdout("git status --short", .{});
+    return output.len > 0;
+}
+
+const dry_run = true;
+
+fn git_push(shell: *Shell) !void {
+    if (dry_run) return;
+
+    try shell.exec("git push --force-with-lease", .{});
 }
