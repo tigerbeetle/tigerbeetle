@@ -219,30 +219,16 @@ fn request(
     };
 
     packet.* = .{
-        .next = undefined,
         .user_data = callback_ref,
         .operation = @intFromEnum(operation),
-        .status = undefined,
-        .data_size = @intCast(packet_data.len),
         .data = packet_data.ptr,
-        .batch_next = undefined,
-        .batch_tail = undefined,
-        .batch_size = undefined,
-        .batch_allowed = undefined,
-        .reserved = undefined,
+        .data_size = @intCast(packet_data.len),
+        .tag = 0,
+        .status = undefined,
     };
 
     tb_client.submit(client, packet);
 }
-
-// Packet only has one size field which normally tracks `BufferType(op).events().len`.
-// However, completion of the packet can write results.len < `BufferType(op).results().len`.
-// Therefore, we stuff both `BufferType(op).count` and results.len into the packet's size field.
-// Storing both allows reconstruction of `BufferType(op)` while knowing how many results completed.
-const BufferSize = packed struct(u32) {
-    event_count: u16,
-    result_count: u16,
-};
 
 fn on_completion(
     completion_ctx: usize,
@@ -255,47 +241,43 @@ fn on_completion(
     _ = client;
     _ = timestamp;
 
-    const buffer_size: BufferSize = switch (@as(Operation, @enumFromInt(packet.operation))) {
-        inline else => |op| buffer_size: {
-            const event_count = @divExact(
-                packet.data_size,
-                @sizeOf(StateMachine.EventType(op)),
-            );
-
-            const result_count = switch (packet.status) {
-                .ok => result_count: {
-                    const buffer: BufferType(op) = .{
+    switch (packet.status) {
+        .ok => {
+            const operation: Operation = @enumFromInt(packet.operation);
+            switch (operation) {
+                inline else => |operation_comptime| {
+                    const event_count = @divExact(
+                        packet.data_size,
+                        @sizeOf(StateMachine.EventType(operation_comptime)),
+                    );
+                    const buffer: BufferType(operation_comptime) = .{
                         .ptr = @ptrCast(packet),
                         .count = event_count,
                     };
 
-                    const Result = StateMachine.ResultType(op);
+                    const Result = StateMachine.ResultType(operation_comptime);
                     const results: []const Result = @alignCast(std.mem.bytesAsSlice(
                         Result,
                         result_ptr.?[0..result_len],
                     ));
                     @memcpy(buffer.results()[0..results.len], results);
-                    break :result_count results.len;
+
+                    // Store the size of the results in the `tag` field, so we can access it back
+                    // during `on_completion_js`.
+                    packet.tag = @intCast(results.len);
                 },
-                .client_evicted,
-                .client_release_too_low,
-                .client_release_too_high,
-                .client_shutdown,
-                => 0,
-                .too_much_data => unreachable, // We limit packet data size during request().
-                .invalid_operation => unreachable, // We check the operation during request().
-                .invalid_data_size => unreachable, // We set correct data size during request().
-
-            };
-
-            break :buffer_size .{
-                .event_count = @intCast(event_count),
-                .result_count = @intCast(result_count),
-            };
+                .pulse => unreachable,
+            }
         },
-        .pulse => unreachable,
-    };
-    packet.data_size = @bitCast(buffer_size);
+        .client_evicted,
+        .client_release_too_low,
+        .client_release_too_high,
+        .client_shutdown,
+        => {}, // Handled on the JS side to throw exception.
+        .too_much_data => unreachable, // We limit packet data size during request().
+        .invalid_operation => unreachable, // We check the operation during request().
+        .invalid_data_size => unreachable, // We set correct data size during request().
+    }
 
     // Queue the packet to be processed on the JS thread to invoke its JS callback.
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
@@ -322,19 +304,28 @@ fn on_completion_js(
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
 
     // Decode the packet's Buffer results into an array then free the packet/Buffer.
-    const array_or_error = switch (@as(Operation, @enumFromInt(packet.operation))) {
-        inline else => |op| blk: {
-            const buffer_size: BufferSize = @bitCast(packet.data_size);
-            const buffer: BufferType(op) = .{
+    const operation: Operation = @enumFromInt(packet.operation);
+    const array_or_error = switch (operation) {
+        inline else => |operation_comptime| blk: {
+            const event_count = @divExact(
+                packet.data_size,
+                @sizeOf(StateMachine.EventType(operation_comptime)),
+            );
+            const buffer: BufferType(operation_comptime) = .{
                 .ptr = @ptrCast(packet),
-                .count = buffer_size.event_count,
+                .count = event_count,
             };
             defer buffer.free();
 
             switch (packet.status) {
                 .ok => {
-                    const results = buffer.results()[0..buffer_size.result_count];
-                    break :blk encode_array(StateMachine.ResultType(op), env, results);
+                    const result_count = packet.tag;
+                    const results = buffer.results()[0..result_count];
+                    break :blk encode_array(
+                        StateMachine.ResultType(operation_comptime),
+                        env,
+                        results,
+                    );
                 },
                 .client_shutdown => {
                     break :blk translate.throw(env, "Client was shutdown.");
