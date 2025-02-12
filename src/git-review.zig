@@ -47,6 +47,10 @@ fn log_fn(
 
 const CLIArgs = union(enum) {
     new,
+    find,
+    pull: struct {
+        positional: struct { pr: ?u32 = null },
+    },
     status,
     pub const help =
         \\Usage:
@@ -60,7 +64,7 @@ const CLIArgs = union(enum) {
         \\        Add and push an empty review commit.
         \\
         \\  git review find
-        \\        Find and checkout a PR for review.
+        \\        Find and then pull a PR for review.
         \\
         \\  git review pull [PR]
         \\        Synchronize review state with remote.
@@ -97,6 +101,8 @@ pub fn main() !void {
     switch (cli_args) {
         .status => try review_status(shell),
         .new => try review_new(shell),
+        .find => try review_find(shell),
+        .pull => |pull| try review_pull(shell, pull.positional.pr),
     }
 }
 
@@ -112,6 +118,46 @@ fn review_new(shell: *Shell) !void {
 
     try shell.exec("git add REVIEW.md", .{});
     try shell.exec("git commit -m review", .{});
+}
+
+fn review_find(shell: *Shell) !void {
+    if (try git_has_changes(shell)) {
+        log.err("working tree is dirty", .{});
+        return error.DirtyWorkingTree;
+    }
+
+    const pull_requsts = try shell.exec_stdout("gh pr list --assignee=@me", .{});
+    const selected = try shell.exec_stdout_options(.{
+        .stdin_slice = pull_requsts,
+    }, "fzf --info=inline --height=~100% --reverse", .{});
+    const pr_number_string, _ =
+        (stdx.cut(selected, "\t") orelse return error.NoSelection).unpack();
+    const pr_number = try std.fmt.parseInt(u32, pr_number_string, 10);
+
+    try review_pull(shell, pr_number);
+}
+
+fn review_pull(shell: *Shell, pull_request: ?u32) !void {
+    if (try git_has_changes(shell)) {
+        log.err("working tree is dirty", .{});
+        return error.DirtyWorkingTree;
+    }
+
+    if (pull_request) |number| {
+        try shell.exec("gh pr checkout --branch review-{number} {number}", .{
+            .number = number,
+        });
+        try review_status(shell);
+    } else {
+        // No `pull_request` means we want to sync our local state with remote state.
+        const branch_full = try shell.exec_stdout(
+            "git rev-parse --abbrev-ref --symbolic-full-name {ref}",
+            .{ .ref = "@{u}" },
+        );
+        const branch = stdx.cut_prefix(branch_full, "origin/").?;
+        try shell.exec("git fetch origin {branch}", .{ .branch = branch });
+        try shell.exec("git reset --hard origin/{branch}", .{ .branch = branch });
+    }
 }
 
 fn review_status(shell: *Shell) !void {
