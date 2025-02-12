@@ -91,13 +91,27 @@ pub const Terminal = struct {
         assert(self.mode_start != null);
         const stdin = self.stdin.reader();
 
+        // nb many control codes have names unrelated to their modern function
+        // cc https://en.wikipedia.org/wiki/C0_and_C1_control_codes
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return .ctrld,
             std.ascii.control_code.etx => return .ctrlc,
+            std.ascii.control_code.ff => return .ctrll,
+            std.ascii.control_code.soh => return .ctrla,
+            std.ascii.control_code.enq => return .ctrle,
+            std.ascii.control_code.stx => return .ctrlb,
+            std.ascii.control_code.ack => return .ctrlf,
+            std.ascii.control_code.dle => return .ctrlp,
+            std.ascii.control_code.so => return .ctrln,
+            std.ascii.control_code.vt => return .ctrlk,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
             std.ascii.control_code.ht => return .tab,
             std.ascii.control_code.esc => {
+                // todo: it would be nice fully parse unhandled escape codes,
+                // not just give up partway through and return `.unhandled`;
+                // but ansi escape codes are extremely complicated, so that
+                // may not be completely possible.
                 const second_byte = try stdin.readByte();
                 switch (second_byte) {
                     '[' => {
@@ -107,6 +121,17 @@ pub const Terminal = struct {
                             'B' => return .down,
                             'C' => return .right,
                             'D' => return .left,
+                            '3' => {
+                                const fourth_byte = try stdin.readByte();
+                                switch (fourth_byte) {
+                                    '~' => {
+                                        // this is just one of multiple non-standard
+                                        // escape codes for delete. wfm
+                                        return .delete;
+                                    },
+                                    else => return .unhandled,
+                                }
+                            },
                             else => return .unhandled,
                         }
                     },
@@ -302,8 +327,17 @@ const UserInput = union(enum) {
     printable: u8,
     ctrld,
     ctrlc,
+    ctrll,
+    ctrla,
+    ctrle,
+    ctrlb,
+    ctrlf,
+    ctrlp,
+    ctrln,
+    ctrlk,
     newline,
     backspace,
+    delete,
     tab,
     left,
     right,
