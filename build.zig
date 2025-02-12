@@ -91,6 +91,8 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
+        .git_review = b.step("git-review", "Run git-review"),
+        .git_review_build = b.step("git-review:build", "Build git-review"),
     };
 
     // Build options passed with `-D` flags.
@@ -314,6 +316,12 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
+    });
+
+    // zig build git-review
+    build_git_review(b, .{
+        .run = build_steps.git_review,
+        .install = build_steps.git_review_build,
     });
 
     // zig build docs
@@ -1399,6 +1407,30 @@ fn build_clients_c_sample(
 
     const install_step = b.addInstallArtifact(sample, .{});
     step_clients_c_sample.dependOn(&install_step.step);
+}
+
+fn build_git_review(
+    b: *std.Build,
+    steps: struct {
+        run: *std.Build.Step,
+        install: *std.Build.Step,
+    },
+) void {
+    const git_review = b.addExecutable(.{
+        .name = "git-review",
+        .target = b.graph.host,
+        .root_source_file = b.path("./src/git-review.zig"),
+        .optimize = .Debug,
+    });
+
+    steps.run.dependOn(blk: {
+        const run = b.addRunArtifact(git_review);
+        if (b.args) |args| run.addArgs(args);
+        break :blk &run.step;
+    });
+    steps.install.dependOn(
+        &b.addInstallArtifact(git_review, .{}).step,
+    );
 }
 
 /// Steps which unconditionally fails with a message.
