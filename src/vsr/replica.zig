@@ -3486,7 +3486,7 @@ pub fn ReplicaType(
             assert(self.trace_emit_timeout.ticking);
             self.trace_emit_timeout.reset();
 
-            self.trace.emit();
+            self.trace.emit_metrics();
         }
 
         fn on_pulse_timeout(self: *Replica) void {

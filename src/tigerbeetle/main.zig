@@ -404,10 +404,10 @@ const Command = struct {
             .grid_cache_blocks_count = args.cache_grid_blocks,
             .tracer_options = .{
                 .writer = if (trace_writer) |writer| writer.any() else null,
-                .statsd_options = if (args.statsd) |statsd_address| .{
+                .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
                     .io = &command.io,
                     .address = statsd_address,
-                } else null,
+                } } else .log,
             },
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
