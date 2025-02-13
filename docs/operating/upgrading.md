@@ -65,7 +65,7 @@ systemctl restart tigerbeetle # or, however you are managing TigerBeetle.
 ```
 
 ## Upgrading Docker-based installations
-If you're running TigerBeetle inside Kubernetes or Docker, update the tag that is pointed to to the
+If you're running TigerBeetle inside Kubernetes or Docker, update the tag that is pointed to the
 release you wish to upgrade to. Before beginning, it's strongly recommend to have a rolling deploy
 strategy set up.
 

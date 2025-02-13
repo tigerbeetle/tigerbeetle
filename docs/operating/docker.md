@@ -8,7 +8,7 @@ abstraction adds complexity while providing relatively little in this case.
 
 ## Image
 
-The Docker image is available from the Github Container Registry:
+The Docker image is available from the GitHub Container Registry:
 
 <https://github.com/tigerbeetle/tigerbeetle/pkgs/container/tigerbeetle>
 

@@ -8,7 +8,7 @@ hardware.
 Local NVMe drives are highly recommended for production deployments, and there's no requirement for
 RAID.
 
-In cloud or more complex deployments, remote block storage (eg, EBS, NVMe-oF) may be used but will
+In cloud or more complex deployments, remote block storage (e.g., EBS, NVMe-oF) may be used but will
 be slower and care must be taken to ensure
 [independent fault domains](./deploy.md#hardware-fault-tolerance) across replicas.
 

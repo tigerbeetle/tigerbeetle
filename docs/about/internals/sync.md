@@ -81,7 +81,7 @@ Scenarios requiring state sync:
    [reconfiguration](./vsr.md#protocol-reconfiguration)). The new replica is too far behind to catch
    up via WAL repair.
 
-Deciding between between WAL repair and state sync:
+Deciding between WAL repair and state sync:
 
 * If a replica lags by more than one checkpoint behind the primary, it must use state sync.
 * If a replica is on the same checkpoint as the primary, it can only repair WAL.

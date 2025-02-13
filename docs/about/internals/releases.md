@@ -10,7 +10,7 @@ The motivation for specific steps follows after.
 
 1. Open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
    - you are the release manager for the week
-   - that the vopr results look reasonable (no failures and a bunch of successful runs for recent
+   - that the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
 
 2. ```console
@@ -73,7 +73,7 @@ The motivation for specific steps follows after.
 If the release failed completely (nothing was published), it is safe to re-run the release GitHub
 Actions job.
 
-More likely, the release was partially successful: eg, the NodeJS package was uploaded, but
+More likely, the release was partially successful: e.g., the NodeJS package was uploaded, but
 uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
 this case. To retry the release, increment the version number of the latest changelog entry alongside
 any changes to fix the release process, and push the new commit to the release branch. The _old_
@@ -110,7 +110,7 @@ artifacts:
 
 - `tigerbeetle/` subdirectory with `.zip` archived `tigerbeetle` binaries built
   for all supported architectures.
-- `dotnet/` subdirectory with a Nuget package.
+- `dotnet/` subdirectory with a NuGet package.
 - `go/` subdirectory with the source code of the go client and precompiled
   native libraries for all supported platforms.
 - `java/` subdirectory with a `.jar` file.
@@ -122,7 +122,7 @@ Release artifacts are uploaded to appropriate package registries. GitHub release
 is used for synchronization:
 
 - a draft release is created at the start of the publishing process,
-- artifacts are uploaded to GitHub releases, npm, Maven Central, and Nuget. For Go, a new commit is
+- artifacts are uploaded to GitHub releases, npm, Maven Central, and NuGet. For Go, a new commit is
   pushed to <https://github.com/tigerbeetle/tigerbeetle-go>. Similarly, docs are uploaded to
   <https://github.com/tigerbeetle/docs>.
 - if publishing to all registries were successfully, the release is marked as
