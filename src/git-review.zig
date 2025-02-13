@@ -173,10 +173,11 @@ fn review_new(shell: *Shell) !void {
         log.err("working tree is dirty", .{});
         return error.DirtyWorkingTree;
     }
-    try shell.cwd.writeFile(.{ .sub_path = "REVIEW_SUMMARY.md", .data =
-    \\# Review Summary
-    \\
-    });
+    const summary =
+        \\# Review Summary
+        \\
+    ;
+    try shell.cwd.writeFile(.{ .sub_path = "REVIEW_SUMMARY.md", .data = summary });
 
     try shell.exec("git add REVIEW_SUMMARY.md", .{});
     try shell.exec("git commit -m review", .{});
