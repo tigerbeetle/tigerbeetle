@@ -20,6 +20,33 @@
 //! - We want to encourage deeper reviews, where you play with code locally, run the fuzzers to
 //!   gauge coverage, etc.
 //! - Not a strong reason, but keeping review data in repository itself reduced vendor lock-in.
+//!
+//! # Workflow for Author
+//!
+//! - Submit a PR normally through GitHub.
+//! - Run `git review new`.
+//! - Optionally:
+//!   - do a self-review by adding `// r yourname:` comments or editing REVIEW_SUMMARY.md
+//!   - submit self-review via `git review push`
+//! - To get new review comments, run `git review pull`
+//! - To address code changes, add or change commits below the review comment.
+//! - To respond to comments, add more `// r yourname:` lines.
+//! - Add `// r resolved.` if you consider a particular thread resolved. Both author and reviewer
+//!   can resolve threads and there's no preference to either.
+//! - To upload review, run `git review push`.
+//!
+//! # Workflow for Review
+//!
+//! - Ideally, switch to a dedicated review work-tree.
+//! - Run `git review find` to use fzf to checkout PR interactively.
+//! - Or run `git review pull $pr` if you already know the number of the pull request.
+//! - If there's no REVIEW_SUMMARY file, run `git review new`.
+//! - Add your review comments using `// r yourname:` syntax.
+//! - To upload review, run `git review push`.
+//! - To fetch response, run `git review pull` without an argument.
+//! - Once you are satisfied with review, run `git review resolve`.
+//! - Approve PR on GitHub (if the PR small&doesn't need any changes, you can skip the review dance
+//!   and approve directly on GitHub).
 
 const std = @import("std");
 const stdx = @import("./stdx.zig");
@@ -111,7 +138,7 @@ pub fn main() !void {
 }
 
 fn review_status(shell: *Shell) !enum { resolved, unresolved } {
-    if (!shell.file_exists("REVIEW.md")) {
+    if (!shell.file_exists("REVIEW_SUMMARY.md")) {
         log.info("no review", .{});
         return error.NoReview;
     }
@@ -121,7 +148,7 @@ fn review_status(shell: *Shell) !enum { resolved, unresolved } {
         .commit = commit,
     });
     if (!std.mem.eql(u8, commit_message, "review\n\n")) {
-        log.err("REVIEW.md file present, but the top commit is not a review:{s}", .{
+        log.err("REVIEW_SUMMARY.md file present, but the top commit is not a review:{s}", .{
             commit_message,
         });
         return error.InvalidCommit;
@@ -146,12 +173,12 @@ fn review_new(shell: *Shell) !void {
         log.err("working tree is dirty", .{});
         return error.DirtyWorkingTree;
     }
-    try shell.cwd.writeFile(.{ .sub_path = "REVIEW.md", .data =
+    try shell.cwd.writeFile(.{ .sub_path = "REVIEW_SUMMARY.md", .data =
     \\# Review Summary
     \\
     });
 
-    try shell.exec("git add REVIEW.md", .{});
+    try shell.exec("git add REVIEW_SUMMARY.md", .{});
     try shell.exec("git commit -m review", .{});
 }
 
