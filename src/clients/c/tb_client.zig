@@ -215,9 +215,10 @@ pub fn submit(
 
 pub fn deinit(
     client: tb_client_t,
-) callconv(.C) void {
+    allocator: std.mem.Allocator,
+) void {
     const context = client_to_context(client);
-    (context.deinit_fn)(context);
+    (context.deinit_fn)(context, allocator);
 }
 
 test {

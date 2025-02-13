@@ -154,7 +154,7 @@ fn create(
         error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
         error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
     };
-    errdefer tb_client.deinit(client);
+    errdefer tb_client.deinit(client, allocator);
 
     return try translate.create_external(env, client);
 }
@@ -167,7 +167,7 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
         "Failed to get client context pointer.",
     );
     const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
-    defer tb_client.deinit(client);
+    defer tb_client.deinit(client, allocator);
 
     const completion_ctx = tb_client.completion_context(client);
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);

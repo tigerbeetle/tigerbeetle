@@ -99,7 +99,7 @@ const NativeClient = struct {
     /// Native clientDeinit implementation.
     fn client_deinit(context: *Context) void {
         defer global_allocator.destroy(context);
-        tb.deinit(context.client);
+        tb.deinit(context.client, global_allocator);
     }
 
     /// Native submit implementation.

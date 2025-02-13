@@ -24,7 +24,7 @@ comptime {
     @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
     @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .strong });
     @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
-    @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
+    @export(deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
 }
 
 fn init(
@@ -88,4 +88,8 @@ fn init_echo(
 
     out_client.* = client;
     return .success;
+}
+
+fn deinit(client: tb.tb_client_t) callconv(.C) void {
+    return tb.deinit(client, std.heap.c_allocator);
 }

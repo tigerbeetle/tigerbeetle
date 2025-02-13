@@ -27,7 +27,7 @@ const tb_completion_t = api.tb_completion_t;
 pub const ContextImplementation = struct {
     completion_ctx: usize,
     submit_fn: *const fn (*ContextImplementation, *Packet) void,
-    deinit_fn: *const fn (*ContextImplementation) void,
+    deinit_fn: *const fn (*ContextImplementation, std.mem.Allocator) void,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -43,6 +43,10 @@ pub fn ContextType(
 ) type {
     return struct {
         const Context = @This();
+        const GPA = std.heap.GeneralPurposeAllocator(.{
+            // Clients currently run in a separate thread - thread safety is essential.
+            .thread_safe = true,
+        });
 
         const StateMachine = Client.StateMachine;
         const allowed_operations = [_]StateMachine.Operation{
@@ -93,7 +97,7 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
-        allocator: std.mem.Allocator,
+        gpa: GPA,
         client_id: u128,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
@@ -114,16 +118,24 @@ pub fn ContextType(
         thread: std.Thread,
 
         pub fn init(
-            allocator: std.mem.Allocator,
+            root_allocator: std.mem.Allocator,
             cluster_id: u128,
             addresses: []const u8,
             completion_ctx: usize,
             completion_fn: tb_completion_t,
         ) Error!*Context {
-            var context = try allocator.create(Context);
-            errdefer allocator.destroy(context);
+            var context = try root_allocator.create(Context);
+            errdefer root_allocator.destroy(context);
 
-            context.allocator = allocator;
+            // Wrap the root allocator - presumed to be heap.c_allocator - in a GPA to keep maximum
+            // compatibility while gaining the extra safety. As a library, libtbclient is running
+            // inside another process's address space.
+            context.gpa = GPA{
+                .backing_allocator = root_allocator,
+            };
+            const allocator = context.gpa.allocator();
+            errdefer assert(context.gpa.deinit() == .ok);
+
             context.client_id = stdx.unique_u128();
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
@@ -160,7 +172,7 @@ pub fn ContextType(
 
             log.debug("{}: init: initializing MessagePool", .{context.client_id});
             context.message_pool = try MessagePool.init(allocator, .client);
-            errdefer context.message_pool.deinit(context.allocator);
+            errdefer context.message_pool.deinit(allocator);
 
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
@@ -192,7 +204,7 @@ pub fn ContextType(
                     else => unreachable,
                 };
             };
-            errdefer context.client.deinit(context.allocator);
+            errdefer context.client.deinit(allocator);
 
             context.completion_fn = completion_fn;
             context.implementation = .{
@@ -237,17 +249,18 @@ pub fn ContextType(
 
         /// Only one thread calls `deinit()`.
         /// Since it frees the Context, any further interaction is undefined behavior.
-        pub fn deinit(self: *Context) void {
+        pub fn deinit(self: *Context, root_allocator: std.mem.Allocator) void {
             self.signal.stop();
             self.thread.join();
             self.io.cancel_all();
 
             self.signal.deinit();
-            self.client.deinit(self.allocator);
-            self.message_pool.deinit(self.allocator);
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
             self.io.deinit();
 
-            self.allocator.destroy(self);
+            assert(self.gpa.deinit() == .ok);
+            root_allocator.destroy(self);
         }
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
@@ -664,9 +677,9 @@ pub fn ContextType(
             self.signal.notify();
         }
 
-        fn on_deinit(implementation: *ContextImplementation) void {
+        fn on_deinit(implementation: *ContextImplementation, allocator: std.mem.Allocator) void {
             const self = get_context(implementation);
-            self.deinit();
+            self.deinit(allocator);
         }
 
         test "client_batch_linked_chain" {
