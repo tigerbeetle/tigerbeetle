@@ -330,7 +330,7 @@ fn git_has_changes(shell: *Shell) !bool {
     return output.len > 0;
 }
 
-const dry_run = true;
+const dry_run = false;
 
 fn git_push(shell: *Shell) !void {
     if (dry_run) return;
