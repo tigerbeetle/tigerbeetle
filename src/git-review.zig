@@ -80,7 +80,7 @@ const CLIArgs = union(enum) {
         positional: struct { pr: ?u32 = null },
     },
     push,
-    resolve,
+    lgtm,
     pub const help =
         \\Usage:
         \\
@@ -101,7 +101,7 @@ const CLIArgs = union(enum) {
         \\  git review push
         \\        Add new comments to the review.
         \\
-        \\  git review resolve
+        \\  git review lgtm
         \\        Assert that all comments are resolved and revert the review commit.
         \\
         \\  git review diff-in-place
@@ -133,7 +133,7 @@ pub fn main() !void {
         .find => try review_find(shell),
         .push => try review_push(shell),
         .pull => |pull| try review_pull(shell, pull.positional.pr),
-        .resolve => try review_resolve(shell),
+        .lgtm => try review_lgtm(shell),
     }
 }
 
@@ -229,7 +229,7 @@ fn review_push(shell: *Shell) !void {
     try git_push(shell);
 }
 
-fn review_resolve(shell: *Shell) !void {
+fn review_lgtm(shell: *Shell) !void {
     switch (try review_status(shell)) {
         .unresolved => {
             log.err("there are unresolved comments", .{});
