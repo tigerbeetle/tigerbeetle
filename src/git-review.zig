@@ -53,6 +53,7 @@ const CLIArgs = union(enum) {
         positional: struct { pr: ?u32 = null },
     },
     push,
+    resolve,
     pub const help =
         \\Usage:
         \\
@@ -100,14 +101,16 @@ pub fn main() !void {
     const cli_args = flags.parse(&args, CLIArgs);
 
     switch (cli_args) {
-        .status => try review_status(shell),
+        .status => _ = try review_status(shell),
         .new => try review_new(shell),
         .find => try review_find(shell),
+        .push => try review_push(shell),
         .pull => |pull| try review_pull(shell, pull.positional.pr),
+        .resolve => try review_resolve(shell),
     }
 }
 
-fn review_status(shell: *Shell) !void {
+fn review_status(shell: *Shell) !enum { resolved, unresolved } {
     if (!shell.file_exists("REVIEW.md")) {
         log.info("no review", .{});
         return error.NoReview;
@@ -132,8 +135,10 @@ fn review_status(shell: *Shell) !void {
 
     const diff = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
     const stats = try parse_diff(diff);
+    const unresolved = stats.comments_total - stats.comments_resolved;
     log.info("comments:   {}", .{stats.comments_total});
-    log.info("unresolved: {}", .{stats.comments_total - stats.comments_resolved});
+    log.info("unresolved: {}", .{unresolved});
+    return if (unresolved == 0) .resolved else .unresolved;
 }
 
 fn review_new(shell: *Shell) !void {
@@ -177,7 +182,7 @@ fn review_pull(shell: *Shell, pull_request: ?u32) !void {
         try shell.exec("gh pr checkout --branch review-{number} {number}", .{
             .number = number,
         });
-        try review_status(shell);
+        _ = try review_status(shell);
     } else {
         // No `pull_request` means we want to sync our local state with remote state.
         const branch_full = try shell.exec_stdout(
@@ -191,9 +196,23 @@ fn review_pull(shell: *Shell, pull_request: ?u32) !void {
 }
 
 fn review_push(shell: *Shell) !void {
-    try review_status(shell);
+    _ = try review_status(shell);
     try shell.exec("git add .", .{});
     try shell.exec("git commit --amend --no-edit", .{});
+    try git_push(shell);
+}
+
+fn review_resolve(shell: *Shell) !void {
+    switch (try review_status(shell)) {
+        .unresolved => {
+            log.err("there are unresolved comments", .{});
+            return error.ReviewUnresolved;
+        },
+        .resolved => {},
+    }
+    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+    try shell.exec("git revert --no-commit {commit}", .{ .commit = commit });
+    try shell.exec("git commit -m {message}", .{ .message = "review revert" });
     try git_push(shell);
 }
 
