@@ -80,6 +80,8 @@ const CLIArgs = union(enum) {
         positional: struct { pr: ?u32 = null },
     },
     push,
+    remove,
+    readd,
     lgtm,
     pub const help =
         \\Usage:
@@ -100,6 +102,12 @@ const CLIArgs = union(enum) {
         \\
         \\  git review push
         \\        Add new comments to the review.
+        \\
+        \\  git review remove
+        \\        Remove the review commit from the tip of the branch, to make it easy to edit code.
+        \\
+        \\  git review readd
+        \\        Re-apply the review commit on top of edited code.
         \\
         \\  git review lgtm
         \\        Assert that all comments are resolved and revert the review commit.
@@ -133,6 +141,8 @@ pub fn main() !void {
         .find => try review_find(shell),
         .push => try review_push(shell),
         .pull => |pull| try review_pull(shell, pull.positional.pr),
+        .remove => try review_remove(shell),
+        .readd => try review_readd(shell),
         .lgtm => try review_lgtm(shell),
     }
 }
@@ -228,6 +238,17 @@ fn review_push(shell: *Shell) !void {
     try shell.exec("git add .", .{});
     try shell.exec("git commit --amend --no-edit", .{});
     try git_push(shell);
+}
+
+fn review_remove(shell: *Shell) !void {
+    _ = try review_status(shell);
+
+    try shell.exec("git branch --force gr/removed HEAD", .{});
+    try shell.exec("git reset --hard HEAD~", .{});
+}
+
+fn review_readd(shell: *Shell) !void {
+    try shell.exec("git cherry-pick gr/removed", .{});
 }
 
 fn review_lgtm(shell: *Shell) !void {
