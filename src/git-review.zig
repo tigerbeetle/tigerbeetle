@@ -170,11 +170,18 @@ fn review_status(shell: *Shell) !enum { resolved, unresolved } {
     try shell.exec("git add .", .{});
     try shell.exec("git commit --amend --no-edit", .{});
 
-    const diff = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
-    const stats = try parse_diff(diff);
+    const diff_review = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
+    const stats = try parse_diff(diff_review);
     const unresolved = stats.comments_total - stats.comments_resolved;
     log.info("comments:   {}", .{stats.comments_total});
     log.info("unresolved: {}", .{unresolved});
+
+    const diff_pr = try shell.exec_stdout("git diff {merge_base} HEAD~", .{
+        .merge_base = try shell.exec_stdout("git merge-base origin/main HEAD~", .{}),
+    });
+    _ = try shell.file_ensure_content("./zig-out/review.diff", diff_pr, .{});
+    log.info("diff: ./zig-out/review.diff", .{});
+
     return if (unresolved == 0) .resolved else .unresolved;
 }
 
