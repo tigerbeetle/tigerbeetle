@@ -99,6 +99,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
+const stdx = @import("stdx.zig");
 const Metrics = @import("trace/metric.zig").Metrics;
 const Event = @import("trace/event.zig").Event;
 const EventMetric = @import("trace/event.zig").EventMetric;
@@ -112,16 +113,15 @@ pub const Tracer = struct {
     options: Options,
     buffer: []u8,
 
-    events_started: [EventTracing.stack_count]?u64 = .{null} ** EventTracing.stack_count,
+    events_started: [EventTracing.stack_count]?stdx.Instant = .{null} ** EventTracing.stack_count,
     metrics: Metrics,
 
-    time_start: std.time.Instant,
-    timer: std.time.Timer,
+    time_start: stdx.Instant,
 
     pub const Options = struct {
         /// The tracer still validates start/stop state even when writer=null.
         writer: ?std.io.AnyWriter = null,
-        statsd_options: Metrics.StatsDOptions = null,
+        statsd_options: Metrics.StatsDOptions = .log,
     };
 
     pub fn init(
@@ -151,8 +151,7 @@ pub const Tracer = struct {
 
             .metrics = metrics,
 
-            .time_start = std.time.Instant.now() catch @panic("std.time.Instant.now() unsupported"),
-            .timer = std.time.Timer.start() catch @panic("std.time.Timer.start() unsupported"),
+            .time_start = stdx.Instant.now(),
         };
     }
 
@@ -172,7 +171,7 @@ pub const Tracer = struct {
         const stack = event_tracing.stack();
 
         assert(tracer.events_started[stack] == null);
-        tracer.events_started[stack] = tracer.timer.read();
+        tracer.events_started[stack] = stdx.Instant.now();
 
         log.debug(
             "{}: {s}({}): start: {}",
@@ -180,9 +179,8 @@ pub const Tracer = struct {
         );
 
         const writer = tracer.options.writer orelse return;
-        const time_now = std.time.Instant.now() catch unreachable;
-        const time_elapsed_ns = time_now.since(tracer.time_start);
-        const time_elapsed_us = @divFloor(time_elapsed_ns, std.time.ns_per_us);
+        const time_now = stdx.Instant.now();
+        const time_elapsed = time_now.duration_since(tracer.time_start);
 
         var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
 
@@ -194,14 +192,14 @@ pub const Tracer = struct {
             "\"ph\":\"{[event]c}\"," ++
             "\"ts\":{[timestamp]}," ++
             "\"cat\":\"{[category]s}\"," ++
-            "\"name\":\"{[category]s} {[event_tracing]s} {[event_timing]}\"," ++
+            "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
             "\"args\":{[args]s}" ++
             "}},\n", .{
             .process_id = tracer.replica_index,
             .thread_id = event_tracing.stack(),
             .category = @tagName(event),
             .event = 'B',
-            .timestamp = time_elapsed_us,
+            .timestamp = time_elapsed.microseconds(),
             .event_tracing = event_tracing,
             .event_timing = event_timing,
             .args = std.json.Formatter(Event){ .value = event, .options = .{} },
@@ -219,10 +217,9 @@ pub const Tracer = struct {
         const event_timing = event.as(EventTiming);
         const stack = event_tracing.stack();
 
-        const event_start_ns = tracer.events_started[stack].?;
-        const event_end_ns = tracer.timer.read();
-        const duration_ns = event_end_ns - event_start_ns;
-        const duration_us = @divFloor(duration_ns, std.time.ns_per_us);
+        const event_start = tracer.events_started[stack].?;
+        const event_end = stdx.Instant.now();
+        const event_duration = event_end.duration_since(event_start);
 
         assert(tracer.events_started[stack] != null);
         tracer.events_started[stack] = null;
@@ -233,14 +230,14 @@ pub const Tracer = struct {
             @tagName(event),
             event_tracing,
             event_timing,
-            if (duration_ns < us_log_threshold_ns)
-                duration_us
+            if (event_duration.nanoseconds < us_log_threshold_ns)
+                event_duration.microseconds()
             else
-                @divFloor(duration_ns, std.time.ns_per_ms),
-            if (duration_ns < us_log_threshold_ns) "us" else "ms",
+                event_duration.milliseconds(),
+            if (event_duration.nanoseconds < us_log_threshold_ns) "us" else "ms",
         });
 
-        tracer.metrics.record_timing(event_timing, duration_us);
+        tracer.metrics.record_timing(event_timing, event_duration.microseconds());
 
         tracer.write_stop(stack);
     }
@@ -262,9 +259,8 @@ pub const Tracer = struct {
 
     fn write_stop(tracer: *Tracer, stack: u32) void {
         const writer = tracer.options.writer orelse return;
-        const time_now = std.time.Instant.now() catch unreachable;
-        const time_elapsed_ns = time_now.since(tracer.time_start);
-        const time_elapsed_us = @divFloor(time_elapsed_ns, std.time.ns_per_us);
+        const time_now = stdx.Instant.now();
+        const time_elapsed = time_now.duration_since(tracer.time_start);
 
         var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
 
@@ -279,7 +275,7 @@ pub const Tracer = struct {
                 .process_id = tracer.replica_index,
                 .thread_id = stack,
                 .event = 'E',
-                .timestamp = time_elapsed_us,
+                .timestamp = time_elapsed.microseconds(),
             },
         ) catch unreachable;
 
@@ -288,7 +284,7 @@ pub const Tracer = struct {
         };
     }
 
-    pub fn emit(tracer: *Tracer) void {
+    pub fn emit_metrics(tracer: *Tracer) void {
         tracer.start(.metrics_emit);
         tracer.metrics.emit();
         tracer.stop(.metrics_emit);

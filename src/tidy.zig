@@ -125,6 +125,14 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.BoundedArrayType instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
+        return "use stdx.Duration instead of std veresion";
+    }
+
+    if (std.mem.indexOf(u8, source, "std.time." ++ "Instant") != null) {
+        return "use stdx.Instant instead of std veresion";
+    }
+
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
         return "use stdx.has_unique_representation instead of std version";
     }

@@ -110,12 +110,17 @@ pub const Event = union(enum) {
                 const target_payload_info = @typeInfo(TargetPayload);
                 assert(target_payload_info == .Void or target_payload_info == .Struct);
 
-                var target_payload: TargetPayload = undefined;
-                if (target_payload_info == .Struct) {
-                    inline for (comptime std.meta.fieldNames(TargetPayload)) |field| {
-                        @field(target_payload, field) = @field(source_payload, field);
-                    }
-                }
+                const target_payload: TargetPayload = switch (@typeInfo(TargetPayload)) {
+                    .Void => {},
+                    .Struct => blk: {
+                        var target_payload: TargetPayload = undefined;
+                        inline for (comptime std.meta.fieldNames(TargetPayload)) |field| {
+                            @field(target_payload, field) = @field(source_payload, field);
+                        }
+                        break :blk target_payload;
+                    },
+                    else => unreachable,
+                };
 
                 return @unionInit(EventType, @tagName(tag), target_payload);
             },
@@ -248,7 +253,7 @@ pub const EventTiming = union(Event.Tag) {
 
         switch (event.*) {
             inline else => |data| {
-                try writer.print("{}", .{event_equals_format(data)});
+                try format_data(data, writer);
             },
         }
     }
@@ -364,7 +369,7 @@ pub const EventTracing = union(Event.Tag) {
 
         switch (event.*) {
             inline else => |data| {
-                try writer.print("{}", .{event_equals_format(data)});
+                try format_data(data, writer);
             },
         }
     }
@@ -414,65 +419,36 @@ pub const EventMetric = union(enum) {
     }
 };
 
-/// Format EventTiming and EventMetric's payload (ie, the tags) with a space separated k=v format.
-fn EventEqualsFormatterType(comptime Data: type) type {
-    assert(@typeInfo(Data) == .Struct or @typeInfo(Data) == .Void);
-
-    if (@typeInfo(Data) == .Void) {
-        return struct {
-            data: Data,
-            pub fn format(
-                _: *const @This(),
-                comptime _: []const u8,
-                _: std.fmt.FormatOptions,
-                _: anytype,
-            ) !void {}
-        };
-    }
-
-    return struct {
-        data: Data,
-
-        pub fn format(
-            formatter: *const @This(),
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
-
-            const fields = std.meta.fields(Data);
-            inline for (fields, 0..) |data_field, i| {
-                assert(data_field.type == bool or
-                    @typeInfo(data_field.type) == .Int or
-                    @typeInfo(data_field.type) == .Enum or
-                    @typeInfo(data_field.type) == .Union);
-
-                const data_field_value = @field(formatter.data, data_field.name);
-                try writer.writeAll(data_field.name);
-                try writer.writeByte('=');
-
-                if (@typeInfo(data_field.type) == .Enum or
-                    @typeInfo(data_field.type) == .Union)
-                {
-                    try writer.print("{s}", .{@tagName(data_field_value)});
-                } else {
-                    try writer.print("{}", .{data_field_value});
-                }
-
-                if (i != fields.len - 1) {
-                    try writer.writeByte(' ');
-                }
-            }
-        }
-    };
-}
-
-pub fn event_equals_format(
+pub fn format_data(
     data: anytype,
-) EventEqualsFormatterType(@TypeOf(data)) {
-    return EventEqualsFormatterType(@TypeOf(data)){ .data = data };
+    writer: anytype,
+) !void {
+    const Data = @TypeOf(data);
+    if (Data == void) return;
+
+    const fields = std.meta.fields(Data);
+    inline for (fields, 0..) |data_field, i| {
+        assert(data_field.type == bool or
+            @typeInfo(data_field.type) == .Int or
+            @typeInfo(data_field.type) == .Enum or
+            @typeInfo(data_field.type) == .Union);
+
+        const data_field_value = @field(data, data_field.name);
+        try writer.writeAll(data_field.name);
+        try writer.writeByte('=');
+
+        if (@typeInfo(data_field.type) == .Enum or
+            @typeInfo(data_field.type) == .Union)
+        {
+            try writer.print("{s}", .{@tagName(data_field_value)});
+        } else {
+            try writer.print("{}", .{data_field_value});
+        }
+
+        if (i != fields.len - 1) {
+            try writer.writeByte(' ');
+        }
+    }
 }
 
 pub const EventTimingAggregate = struct {
@@ -495,7 +471,7 @@ pub const EventMetricAggregate = struct {
     value: ValueType,
 };
 
-test "EventTiming stack doesn't have collisions" {
+test "EventTiming slot doesn't have collisions" {
     const allocator = std.testing.allocator;
     var stacks: std.ArrayListUnmanaged(u32) = .{};
     defer stacks.deinit(allocator);

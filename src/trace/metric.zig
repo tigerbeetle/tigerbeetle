@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const constants = @import("../constants.zig");
 const IO = @import("../io.zig").IO;
 const StatsD = @import("statsd.zig").StatsD;
 
@@ -10,9 +11,12 @@ const EventTimingAggregate = @import("event.zig").EventTimingAggregate;
 const EventMetricAggregate = @import("event.zig").EventMetricAggregate;
 
 pub const Metrics = struct {
-    pub const StatsDOptions = ?struct {
-        io: *IO,
-        address: std.net.Address,
+    pub const StatsDOptions = union(enum) {
+        log,
+        udp: struct {
+            io: *IO,
+            address: std.net.Address,
+        },
     };
 
     events_metric: []?EventMetricAggregate,
@@ -35,16 +39,16 @@ pub const Metrics = struct {
 
         @memset(events_timing, null);
 
-        const statsd = if (options.statsd) |statsd_options|
-            try StatsD.init_udp(
+        const statsd = try switch (options.statsd) {
+            .log => StatsD.init_log(allocator, options.cluster, options.replica),
+            .udp => |statsd_options| StatsD.init_udp(
                 allocator,
                 options.cluster,
                 options.replica,
                 statsd_options.io,
                 statsd_options.address,
-            )
-        else
-            try StatsD.init_log(allocator, options.cluster, options.replica);
+            ),
+        };
         errdefer statsd.deinit(allocator);
 
         return .{
@@ -84,7 +88,22 @@ pub const Metrics = struct {
     pub fn record_timing(self: *Metrics, event_timing: EventTiming, duration_us: u64) void {
         const timing_slot = event_timing.slot();
 
-        if (self.events_timing[timing_slot] == null) {
+        if (self.events_timing[timing_slot]) |*event_timing_existing| {
+            const timing_existing = event_timing_existing.values;
+            // Certain high cardinality data (eg, op) _can_ differ.
+            // TODO: Maybe assert and gate on constants.verify
+
+            if (constants.verify) {
+                assert(std.meta.eql(event_timing_existing.event, event_timing));
+            }
+
+            event_timing_existing.values = .{
+                .duration_min_us = @min(timing_existing.duration_min_us, duration_us),
+                .duration_max_us = @max(timing_existing.duration_max_us, duration_us),
+                .duration_sum_us = timing_existing.duration_sum_us +| duration_us,
+                .count = timing_existing.count +| 1,
+            };
+        } else {
             self.events_timing[timing_slot] = .{
                 .event = event_timing,
                 .values = .{
@@ -93,17 +112,6 @@ pub const Metrics = struct {
                     .duration_sum_us = duration_us,
                     .count = 1,
                 },
-            };
-        } else {
-            const timing_existing = self.events_timing[timing_slot].?.values;
-            // Certain high cardinality data (eg, op) _can_ differ.
-            // TODO: Maybe assert and gate on constants.verify
-
-            self.events_timing[timing_slot].?.values = .{
-                .duration_min_us = @min(timing_existing.duration_min_us, duration_us),
-                .duration_max_us = @max(timing_existing.duration_max_us, duration_us),
-                .duration_sum_us = timing_existing.duration_sum_us +| duration_us,
-                .count = timing_existing.count +| 1,
             };
         }
     }
