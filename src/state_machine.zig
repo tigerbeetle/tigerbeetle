@@ -79,8 +79,10 @@ pub const tree_ids = struct {
         .account_timestamp = 27,
         .dr_account_id_expired = 28,
         .cr_account_id_expired = 29,
-        .transfer_pending_id_expired = 30,
-        .transfer_expired_ledger = 31,
+        .transfer_pending_status = 30,
+        .transfer_pending_id_expired = 31,
+        .transfer_expired_ledger = 32,
+        .prunable = 33,
     };
 };
 
@@ -277,7 +279,13 @@ pub fn StateMachineType(
                 .ids = tree_ids.TransferPending,
                 .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
-                .optional = &[_][]const u8{"status"},
+                .optional = &[_][]const u8{
+                    // Index the current status of a pending transfer.
+                    // Examples:
+                    //   "Pending transfers that are still pending."
+                    //   "Pending transfers that were voided or expired."
+                    "status",
+                },
                 .derived = .{},
                 .orphaned_ids = false,
             },
@@ -320,7 +328,6 @@ pub fn StateMachineType(
                     "cr_account_flags",
                     "transfer_flags",
                     "transfer_pending_flags",
-                    "transfer_pending_status",
                     "reserved",
                 },
                 .optional = &[_][]const u8{},
@@ -387,6 +394,20 @@ pub fn StateMachineType(
                                 null;
                         }
                     }.transfer_expired_ledger,
+
+                    // Tracks events for accounts without the history flag,
+                    // enabling a cleanup job to delete them after CDC.
+                    .prunable = struct {
+                        fn prunable(object: *const AccountEvent) ?void {
+                            if (object.dr_account_flags.history or
+                                object.cr_account_flags.history)
+                            {
+                                return null;
+                            } else {
+                                return {};
+                            }
+                        }
+                    }.prunable,
                 },
                 .orphaned_ids = false,
             },
@@ -413,6 +434,12 @@ pub fn StateMachineType(
             transfer_flags: TransferFlags,
             transfer_pending_flags: TransferFlags,
 
+            /// Although similar to `TransferPending.status`, this index tracks the event,
+            /// not the original pending transfer.
+            /// Examples: (No such index exists in `Transfers.flags`)
+            ///   "All voided or expired events today."
+            ///   "All single-phase or posted events today."
+            ///
             ///  Value   | Description
             /// ---------|-----------------------------------------------------
             /// `none`   | This event is a regular transfer.
@@ -3211,10 +3238,12 @@ pub fn StateMachineType(
             account_events: struct {
                 timestamp: u32,
                 account_timestamp: u32,
+                transfer_pending_status: u32,
                 dr_account_id_expired: u32,
                 cr_account_id_expired: u32,
                 transfer_pending_id_expired: u32,
                 transfer_expired_ledger: u32,
+                prunable: u32,
             },
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
@@ -3262,11 +3291,13 @@ pub fn StateMachineType(
                 },
                 .account_events = .{
                     .timestamp = batch_create_transfers,
+                    .transfer_pending_status = batch_create_transfers,
                     .account_timestamp = 2 * batch_create_transfers, // dr and cr accounts.
                     .dr_account_id_expired = batch_create_transfers,
                     .cr_account_id_expired = batch_create_transfers,
                     .transfer_pending_id_expired = batch_create_transfers,
                     .transfer_expired_ledger = batch_create_transfers,
+                    .prunable = batch_create_transfers,
                 },
             };
         }
