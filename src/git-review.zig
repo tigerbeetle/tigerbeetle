@@ -46,13 +46,13 @@ fn log_fn(
 }
 
 const CLIArgs = union(enum) {
+    status,
     new,
     find,
     pull: struct {
         positional: struct { pr: ?u32 = null },
     },
     push,
-    status,
     pub const help =
         \\Usage:
         \\
@@ -105,6 +105,35 @@ pub fn main() !void {
         .find => try review_find(shell),
         .pull => |pull| try review_pull(shell, pull.positional.pr),
     }
+}
+
+fn review_status(shell: *Shell) !void {
+    if (!shell.file_exists("REVIEW.md")) {
+        log.info("no review", .{});
+        return error.NoReview;
+    }
+
+    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+    const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
+        .commit = commit,
+    });
+    if (!std.mem.eql(u8, commit_message, "review\n\n")) {
+        log.err("REVIEW.md file present, but the top commit is not a review:{s}", .{
+            commit_message,
+        });
+        return error.InvalidCommit;
+    }
+
+    defer {
+        shell.exec("git reset {commit}", .{ .commit = commit }) catch {};
+    }
+    try shell.exec("git add .", .{});
+    try shell.exec("git commit --amend --no-edit", .{});
+
+    const diff = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
+    const stats = try parse_diff(diff);
+    log.info("comments:   {}", .{stats.comments_total});
+    log.info("unresolved: {}", .{stats.comments_total - stats.comments_resolved});
 }
 
 fn review_new(shell: *Shell) !void {
@@ -166,35 +195,6 @@ fn review_push(shell: *Shell) !void {
     try shell.exec("git add .", .{});
     try shell.exec("git commit --amend --no-edit", .{});
     try git_push(shell);
-}
-
-fn review_status(shell: *Shell) !void {
-    if (!shell.file_exists("REVIEW.md")) {
-        log.info("no review", .{});
-        return error.NoReview;
-    }
-
-    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
-    const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
-        .commit = commit,
-    });
-    if (!std.mem.eql(u8, commit_message, "review\n\n")) {
-        log.err("REVIEW.md file present, but the top commit is not a review:{s}", .{
-            commit_message,
-        });
-        return error.InvalidCommit;
-    }
-
-    defer {
-        shell.exec("git reset {commit}", .{ .commit = commit }) catch {};
-    }
-    try shell.exec("git add .", .{});
-    try shell.exec("git commit --amend --no-edit", .{});
-
-    const diff = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
-    const stats = try parse_diff(diff);
-    log.info("comments:   {}", .{stats.comments_total});
-    log.info("unresolved: {}", .{stats.comments_total - stats.comments_resolved});
 }
 
 fn files_with_review_comments(shell: *Shell) []const []const u8 {
