@@ -572,6 +572,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.manifest.assert_no_invisible_tables(&.{});
             }
         }
+
+        // Returns the last segment of the tree's fully qualified value type name.
+        // Inline function, so it can be fully resolved at comptime.
+        pub inline fn tree_name() []const u8 {
+            const name_full = @typeName(Value);
+            if (comptime std.mem.lastIndexOfScalar(u8, name_full, '.')) |offset| {
+                return name_full[offset + 1 ..];
+            } else {
+                return name_full;
+            }
+        }
     };
 }
 
