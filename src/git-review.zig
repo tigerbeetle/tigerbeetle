@@ -51,6 +51,7 @@ const CLIArgs = union(enum) {
     pull: struct {
         positional: struct { pr: ?u32 = null },
     },
+    push,
     status,
     pub const help =
         \\Usage:
@@ -158,6 +159,13 @@ fn review_pull(shell: *Shell, pull_request: ?u32) !void {
         try shell.exec("git fetch origin {branch}", .{ .branch = branch });
         try shell.exec("git reset --hard origin/{branch}", .{ .branch = branch });
     }
+}
+
+fn review_push(shell: *Shell) !void {
+    try review_status(shell);
+    try shell.exec("git add .", .{});
+    try shell.exec("git commit --amend --no-edit", .{});
+    try git_push(shell);
 }
 
 fn review_status(shell: *Shell) !void {
