@@ -102,7 +102,7 @@ pub fn BoundedArrayType(comptime T: type, comptime capacity: usize) type {
             array.inner.len = 0;
         }
 
-        pub inline fn pop(array: *BoundedArray) T {
+        pub inline fn pop(array: *BoundedArray) ?T {
             return array.inner.pop();
         }
     };
