@@ -319,12 +319,13 @@ fn on_completion_js(
 
             switch (packet.status) {
                 .ok => {
+                    const result_buffer = buffer.results();
                     const result_count = packet.tag;
-                    const results = buffer.results()[0..result_count];
+                    assert(result_count <= result_buffer.len);
                     break :blk encode_array(
                         StateMachine.ResultType(operation_comptime),
                         env,
-                        results,
+                        result_buffer[0..result_count],
                     );
                 },
                 .client_shutdown => {

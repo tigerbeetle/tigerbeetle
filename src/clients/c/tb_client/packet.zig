@@ -134,14 +134,14 @@ pub const Packet = extern struct {
                 maybe(packet.batch_next != null);
             },
             .sent => {
+                assert(packet.next == null);
                 assert(packet.batch_size >= packet.data_size);
                 assert(packet.batch_size == packet.data_size or packet.batch_next != null);
                 assert((packet.batch_next == null) == (packet.batch_tail == null));
                 assert(packet.batch_next == null or packet.batch_allowed);
-                assert(packet.next == null);
             },
             .complete => {
-                // The packet pointer isn't available afer completed,
+                // The packet pointer isn't available after completed,
                 // it may be dealocated by the user;
                 unreachable;
             },
