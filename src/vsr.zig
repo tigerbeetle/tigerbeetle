@@ -215,6 +215,11 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
+    // Historical version of SV, with the CheckpointStateOld format. Currently, both
+    // `start_view_deprecated` and `start_view` are handled. Next release will ignore
+    // `start_view_deprecated`.
+    start_view_deprecated = 23,
+
     start_view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
@@ -222,7 +227,6 @@ pub const Command = enum(u8) {
         12, // start_view without checkpoint
         21, // request_sync_checkpoint
         22, // sync_checkpoint
-        23, // start_view with an older version of CheckpointState
     };
 
     comptime {
