@@ -217,7 +217,7 @@ fn review_pull(shell: *Shell, pull_request: ?u32) !void {
     }
 
     if (pull_request) |number| {
-        try shell.exec("gh pr checkout --branch review-{number} {number}", .{
+        try shell.exec("gh pr checkout --branch gr/{number} {number}", .{
             .number = number,
         });
         _ = try review_status(shell);
