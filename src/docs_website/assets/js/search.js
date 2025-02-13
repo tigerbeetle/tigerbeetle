@@ -9,6 +9,7 @@ const searchHotkey = document.querySelector(".search-box>.hotkey");
 const searchClearButton = document.querySelector(".search-box>.clear-button");
 
 let sidenavWasCollapsed = false;
+let searchPreviewUsed = false;
 document.addEventListener("keydown", event => {
   if (event.ctrlKey || event.altKey || event.metaKey) return;
   if (event.key === "/" && searchInput !== document.activeElement) {
@@ -21,6 +22,10 @@ document.addEventListener("keydown", event => {
   } else if (event.key === "Escape") {
     if (searchInput === document.activeElement || searchInput.value !== "") {
       closeSearch();
+      if (searchPreviewUsed) {
+        history.back();
+        searchPreviewUsed = false;
+      }
       event.preventDefault();
     }
   } else if (searchInput.value !== "") {
@@ -212,6 +217,7 @@ function selectResult(node) {
     history.replaceState(state, page.title, node.href);
   } else {
     history.pushState(state, page.title, node.href);
+    searchPreviewUsed = true;
   }
   statePathname = location.pathname;
   if (page.title === "TigerBeetle Docs") {
