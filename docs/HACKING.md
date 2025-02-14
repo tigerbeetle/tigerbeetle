@@ -143,7 +143,7 @@ Developer-oriented documentation is at
 
 ## Getting In Touch
 
-Say hello in our [Slack](https://slack.tigerbeetle.com/invite)!
+Say hello in our [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg)!
 
 ## Pull Requests
 

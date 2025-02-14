@@ -55,6 +55,6 @@ Learn more about TigerBeetle's [mission, history](./about/README.md),
 
 - [𝕏](https://twitter.com/tigerbeetledb)
 - [GitHub](https://github.com/tigerbeetle/tigerbeetle)
-- [Slack](https://slack.tigerbeetle.com/invite)
+- [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg)
 - [Monthly Newsletter](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle)
 - [YouTube](https://www.youtube.com/@tigerbeetledb)

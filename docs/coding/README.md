@@ -57,7 +57,7 @@ Depending on your use case, you may find these additional design patterns helpfu
 Have questions about TigerBeetle's data model, how to design your application on top of it, or
 anything else?
 
-Come join our [Community Slack](https://slack.tigerbeetle.com/invite) and ask any and all questions
+Come join our [Community Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg) and ask any and all questions
 you might have!
 
 ### Dedicated Consultation
