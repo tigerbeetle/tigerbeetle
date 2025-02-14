@@ -190,7 +190,7 @@ determines whether the given type of account is increased with a debit or a cred
 Have questions about debits and credits, TigerBeetle's data model, how to design your application on
 top of it, or anything else?
 
-Come join our [Community Slack](https://slack.tigerbeetle.com/invite) and ask any and all questions
+Come join our [Community Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg) and ask any and all questions
 you might have!
 
 ### Dedicated Consultation
