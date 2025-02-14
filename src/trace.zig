@@ -50,7 +50,7 @@
 //!
 //!     // good
 //!     trace.start(.{ .foo = .{} });
-//!     trace.reset(.foo);
+//!     trace.cancel(.foo);
 //!     trace.start(.{ .foo = .{} });
 //!     trace.stop(.{ .foo = .{} });
 //!
@@ -242,19 +242,17 @@ pub const Tracer = struct {
         tracer.write_stop(stack);
     }
 
-    pub fn reset(tracer: *Tracer, event_tag: Event.Tag) void {
+    pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
         const stack_base = EventTracing.stack_bases.get(event_tag);
         const cardinality = EventTracing.stack_limits.get(event_tag);
         for (stack_base..stack_base + cardinality) |stack| {
             if (tracer.events_started[stack]) |_| {
-                log.debug("{}: {s}: reset", .{ tracer.replica_index, @tagName(event_tag) });
+                log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
 
                 tracer.events_started[stack] = null;
                 tracer.write_stop(@intCast(stack));
             }
         }
-
-        tracer.metrics.reset_all();
     }
 
     fn write_stop(tracer: *Tracer, stack: u32) void {

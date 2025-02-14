@@ -121,10 +121,6 @@ pub const Metrics = struct {
 
         // For statsd, the right thing is to reset metrics between emitting. For something like
         // Prometheus, this would have to be removed.
-        self.reset_all();
-    }
-
-    pub fn reset_all(self: *Metrics) void {
         @memset(self.events_metric, null);
         @memset(self.events_timing, null);
     }
@@ -132,7 +128,7 @@ pub const Metrics = struct {
 
 test "timing overflow" {
     var metrics = try Metrics.init(std.testing.allocator, .{
-        .statsd = null,
+        .statsd = .log,
         .cluster = 0,
         .replica = 0,
     });

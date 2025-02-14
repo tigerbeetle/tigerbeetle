@@ -231,7 +231,7 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.log_block_checksums.count ==
                 manifest_log.log_block_addresses.count);
 
-            manifest_log.grid.trace.reset(.compact_manifest);
+            manifest_log.grid.trace.cancel(.compact_manifest);
 
             manifest_log.log_block_checksums.clear();
             manifest_log.log_block_addresses.clear();

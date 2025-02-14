@@ -484,8 +484,8 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
-            compaction.grid.trace.reset(.compact_beat);
-            compaction.grid.trace.reset(.compact_beat_merge);
+            compaction.grid.trace.cancel(.compact_beat);
+            compaction.grid.trace.cancel(.compact_beat_merge);
             compaction.* = .{
                 .grid = compaction.grid,
                 .tree = compaction.tree,

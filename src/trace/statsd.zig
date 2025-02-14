@@ -4,7 +4,7 @@ const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
 const IO = @import("../io.zig").IO;
-const RingBufferType = stdx.RingBufferType;
+const IOPSType = @import("../iops.zig").IOPSType;
 
 const EventMetric = @import("event.zig").EventMetric;
 const EventMetricAggregate = @import("event.zig").EventMetricAggregate;
@@ -26,7 +26,7 @@ const statsd_line_size_max = line_size_max: {
     // For each type of event, build a payload containing the maximum possible values for that
     // event. This is essentially maxInt for integer payloads, and the longest enum tag name for
     // enum payloads.
-    var events_metric: [std.meta.fieldNames(EventMetric).len]?EventMetricAggregate = undefined;
+    var events_metric: [std.meta.fieldNames(EventMetric).len]EventMetricAggregate = undefined;
     for (&events_metric, std.meta.fields(EventMetric)) |*event_metric, EventMetricInner| {
         event_metric.* = .{
             .event = @unionInit(
@@ -38,11 +38,7 @@ const statsd_line_size_max = line_size_max: {
         };
     }
 
-    var events_metric_emitted: [std.meta.fieldNames(EventMetric).len]?EventMetricAggregate =
-        undefined;
-    @memset(&events_metric_emitted, null);
-
-    var events_timing: [std.meta.fieldNames(EventTiming).len]?EventTimingAggregate = undefined;
+    var events_timing: [std.meta.fieldNames(EventTiming).len]EventTimingAggregate = undefined;
     for (&events_timing, std.meta.fields(EventTiming)) |*event_timing, EventTimingInner| {
         event_timing.* = .{
             .event = @unionInit(
@@ -59,30 +55,24 @@ const statsd_line_size_max = line_size_max: {
         };
     }
 
-    var iterator_buffer: [packet_size_max]u8 = undefined;
-    var iterator = Iterator{
-        .metrics = .{
-            .cluster = 0,
-            .replica = 0,
-            .events_metric = &events_metric,
-            .events_metric_emitted = &events_metric_emitted,
-            .buffer = &iterator_buffer,
-        },
-        .timings = .{
-            .cluster = 0,
-            .replica = 0,
-            .events_timing = &events_timing,
-            .buffer = &iterator_buffer,
-        },
-    };
+    var buffer: [packet_size_max]u8 = undefined;
 
     var line_size_max: u32 = 0;
-    while (iterator.next()) |value| {
-        // Getting a .none here means that either an Aggregate is null (impossible since they are
-        // set above) or, that the maximum buffer length of a single packet has been exceeded.
-        assert(value == .some);
-
-        line_size_max = @max(value.some.len, line_size_max);
+    for (events_metric) |event| {
+        line_size_max = @max(line_size_max, format_metric(
+            &buffer,
+            .{ .metric = .{ .aggregate = event } },
+            .{ .cluster = 0, .replica = 0 },
+        ) catch unreachable);
+    }
+    for (events_timing) |event| {
+        for (std.enums.values(TimingStat)) |stat| {
+            line_size_max = @max(line_size_max, format_metric(
+                &buffer,
+                .{ .timing = .{ .aggregate = event, .stat = stat } },
+                .{ .cluster = 0, .replica = 0 },
+            ) catch unreachable);
+        }
     }
     break :line_size_max line_size_max;
 };
@@ -109,8 +99,6 @@ const BufferCompletion = struct {
     completion: IO.Completion = undefined,
 };
 
-const BufferCompletionRing = RingBufferType(*BufferCompletion, .{ .array = packet_count_max });
-
 pub const StatsD = struct {
     cluster: u128,
     replica: u8,
@@ -123,8 +111,7 @@ pub const StatsD = struct {
         log,
     },
 
-    buffer_completions: BufferCompletionRing,
-    buffer_completions_buffer: []BufferCompletion,
+    buffer_completions: *IOPSType(BufferCompletion, packet_count_max),
 
     events_metric_emitted: []?EventMetricAggregate,
 
@@ -143,13 +130,10 @@ pub const StatsD = struct {
         );
         errdefer io.close_socket(socket);
 
-        const buffer_completions_buffer = try allocator.alloc(BufferCompletion, packet_count_max);
-        errdefer allocator.free(buffer_completions_buffer);
-
-        var buffer_completions = BufferCompletionRing.init();
-        for (buffer_completions_buffer) |*buffer_completion| {
-            buffer_completions.push_assume_capacity(buffer_completion);
-        }
+        const buffer_completions =
+            try allocator.create(IOPSType(BufferCompletion, packet_count_max));
+        errdefer allocator.destroy(buffer_completions);
+        buffer_completions.* = .{};
 
         const events_metric_emitted = try allocator.alloc(
             ?EventMetricAggregate,
@@ -174,7 +158,6 @@ pub const StatsD = struct {
                 },
             },
             .buffer_completions = buffer_completions,
-            .buffer_completions_buffer = buffer_completions_buffer,
             .events_metric_emitted = events_metric_emitted,
         };
     }
@@ -186,13 +169,10 @@ pub const StatsD = struct {
         cluster: u128,
         replica: u8,
     ) !StatsD {
-        const buffer_completions_buffer = try allocator.alloc(BufferCompletion, packet_count_max);
-        errdefer allocator.free(buffer_completions_buffer);
-
-        var buffer_completions = BufferCompletionRing.init();
-        for (buffer_completions_buffer) |*buffer_completion| {
-            buffer_completions.push_assume_capacity(buffer_completion);
-        }
+        const buffer_completions =
+            try allocator.create(IOPSType(BufferCompletion, packet_count_max));
+        errdefer allocator.destroy(buffer_completions);
+        buffer_completions.* = .{};
 
         const events_metric_emitted = try allocator.alloc(
             ?EventMetricAggregate,
@@ -207,7 +187,6 @@ pub const StatsD = struct {
             .replica = replica,
             .implementation = .log,
             .buffer_completions = buffer_completions,
-            .buffer_completions_buffer = buffer_completions_buffer,
             .events_metric_emitted = events_metric_emitted,
         };
     }
@@ -217,7 +196,7 @@ pub const StatsD = struct {
             self.implementation.udp.io.close_socket(self.implementation.udp.socket);
         }
         allocator.free(self.events_metric_emitted);
-        allocator.free(self.buffer_completions_buffer);
+        allocator.destroy(self.buffer_completions);
 
         self.* = undefined;
     }
@@ -235,9 +214,9 @@ pub const StatsD = struct {
         //
         // Keep it as a log, rather than assert, to avoid the common pitfall of metrics killing
         // the whole system.
-        if (self.buffer_completions.count != packet_count_max) {
+        if (self.buffer_completions.executing() != 0) {
             log.err("{} / {} packets still in flight; trying to continue", .{
-                packet_count_max - self.buffer_completions.count,
+                self.buffer_completions.executing(),
                 packet_count_max,
             });
         }
@@ -250,62 +229,65 @@ pub const StatsD = struct {
             self.implementation.udp.send_callback_error_count = 0;
         }
 
-        var buffer: [statsd_line_size_max]u8 = undefined;
-        var iterator = Iterator{
-            .metrics = .{
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .events_metric = events_metric,
-                .events_metric_emitted = self.events_metric_emitted,
-                .buffer = &buffer,
-            },
-            .timings = .{
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .events_timing = events_timing,
-                .buffer = &buffer,
-            },
-        };
-
-        var buffer_completion_written: usize = 0;
-        var buffer_completion = self.buffer_completions.pop() orelse {
+        var buffer_completion = self.buffer_completions.acquire() orelse {
             log.err("insufficient packets to emit any metrics", .{});
             assert(self.implementation == .udp);
             return;
         };
 
-        while (iterator.next()) |line| {
-            if (line == .none) continue;
+        var buffer_written: usize = 0;
+        inline for (.{ events_metric, events_timing }) |events| {
+            for (events, 0..) |event_new_maybe, i| {
+                const event_new = event_new_maybe orelse continue;
+                if (@TypeOf(event_new) == EventMetricAggregate) {
+                    const event_old = &self.events_metric_emitted[i];
+                    if (event_old.* != null and event_old.*.?.value == event_new.value) continue;
+                    event_old.* = event_new;
+                } else {
+                    comptime assert(@TypeOf(event_new) == EventTimingAggregate);
+                }
 
-            const statsd_line = line.some;
-
-            // Might need a new buffer, if this one is full.
-            if (statsd_line.len > buffer_completion.buffer[buffer_completion_written..].len) {
-                self.emit_buffer(buffer_completion, @intCast(buffer_completion_written));
-
-                buffer_completion_written = 0;
-                buffer_completion = self.buffer_completions.pop() orelse {
-                    log.err("insufficient packets to emit all metrics", .{});
-                    assert(self.implementation == .udp);
-                    return;
+                const stats = switch (@TypeOf(event_new)) {
+                    EventMetricAggregate => [_]Stat{.{ .metric = .{ .aggregate = event_new } }},
+                    EventTimingAggregate => [_]Stat{
+                        .{ .timing = .{ .aggregate = event_new, .stat = .min } },
+                        .{ .timing = .{ .aggregate = event_new, .stat = .max } },
+                        .{ .timing = .{ .aggregate = event_new, .stat = .avg } },
+                        .{ .timing = .{ .aggregate = event_new, .stat = .sum } },
+                        .{ .timing = .{ .aggregate = event_new, .stat = .count } },
+                    },
+                    else => unreachable,
                 };
-                assert(buffer_completion.buffer.len > statsd_line.len);
-            }
 
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                buffer_completion.buffer[buffer_completion_written..],
-                statsd_line,
-            );
-            buffer_completion_written += statsd_line.len;
+                for (stats) |stat| {
+                    buffer_written += format_metric(
+                        buffer_completion.buffer[buffer_written..],
+                        stat,
+                        .{ .cluster = self.cluster, .replica = self.replica },
+                    ) catch {
+                        self.emit_buffer(buffer_completion, @intCast(buffer_written));
+                        buffer_completion = self.buffer_completions.acquire() orelse {
+                            log.err("insufficient packets to emit all metrics", .{});
+                            assert(self.implementation == .udp);
+                            return;
+                        };
+                        buffer_written = 0;
+                        buffer_written += format_metric(
+                            buffer_completion.buffer[buffer_written..],
+                            stat,
+                            .{ .cluster = self.cluster, .replica = self.replica },
+                        ) catch unreachable;
+                        continue;
+                    };
+                }
+            }
         }
 
         // Send the final packet, if needed, or return the BufferCompletion to the queue.
-        if (buffer_completion_written > 0) {
-            self.emit_buffer(buffer_completion, @intCast(buffer_completion_written));
+        if (buffer_written > 0) {
+            self.emit_buffer(buffer_completion, @intCast(buffer_written));
         } else {
-            self.buffer_completions.push_assume_capacity(buffer_completion);
+            self.buffer_completions.release(buffer_completion);
         }
 
         stdx.copy_disjoint(
@@ -358,206 +340,88 @@ pub const StatsD = struct {
             self.implementation.udp.send_callback_error_count += 1;
         };
         const buffer_completion: *BufferCompletion = @fieldParentPtr("completion", completion);
-        self.buffer_completions.push_assume_capacity(buffer_completion);
+        self.buffer_completions.release(buffer_completion);
     }
 };
 
-const Iterator = struct {
-    const Output = ?union(enum) { none, some: []const u8 };
-    const MetricsIterator = struct {
-        const TagFormatter = EventStatsdTagFormatterType(EventMetric);
-
-        cluster: u128,
-        replica: u8,
-        events_metric: []const ?EventMetricAggregate,
-        events_metric_emitted: []const ?EventMetricAggregate,
-
-        buffer: []u8,
-        index: u32 = 0,
-
-        pub fn next(self: *MetricsIterator) Output {
-            assert(self.events_metric.len == self.events_metric_emitted.len);
-
-            defer self.index += 1;
-            if (self.index == self.events_metric.len) return null;
-            const event_metric = self.events_metric[self.index] orelse return .none;
-
-            // Skip metrics that have the same value as when they were last emitted.
-            const event_metric_previous = self.events_metric_emitted[self.index];
-            if (event_metric_previous != null and
-                event_metric.value == event_metric_previous.?.value)
-            {
-                return .none;
-            }
-
-            const value = event_metric.value;
-            const field_name = switch (event_metric.event) {
-                inline else => |_, tag| @tagName(tag),
-            };
-            const event_metric_tag_formatter = TagFormatter{
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .event = event_metric.event,
-            };
-
-            return .{
-                .some = std.fmt.bufPrint(
-                    self.buffer,
-                    // TODO: Support counters.
-                    "tb.{[name]s}:{[value]}|g|#{[tags]s}\n",
-                    .{ .name = field_name, .value = value, .tags = event_metric_tag_formatter },
-                ) catch {
-                    if (!@inComptime()) {
-                        log.err("metric line for {s} exceeds buffer size", .{field_name});
-                    }
-                    return .none;
-                },
-            };
-        }
-    };
-
-    const TimingsIterator = struct {
-        const Aggregation = enum { min, avg, max, sum, count };
-        const TagFormatter = EventStatsdTagFormatterType(EventTiming);
-
-        cluster: u128,
-        replica: u8,
-        events_timing: []const ?EventTimingAggregate,
-
-        buffer: []u8,
-        index: u32 = 0,
-
-        pub fn next(self: *TimingsIterator) Output {
-            const aggregations_max = std.enums.values(Aggregation).len;
-            const index_max = self.events_timing.len * aggregations_max;
-            assert(self.index <= index_max);
-            if (self.index == index_max) return null;
-
-            defer self.index += 1;
-            const event_index = @divFloor(self.index, aggregations_max);
-            const event_timing = self.events_timing[event_index] orelse return .none;
-            const event_aggregation = std.enums.values(Aggregation)[self.index % aggregations_max];
-
-            const value = switch (event_aggregation) {
-                .min => event_timing.values.duration_min_us,
-                .avg => @divFloor(event_timing.values.duration_sum_us, event_timing.values.count),
-                .max => event_timing.values.duration_max_us,
-                .sum => event_timing.values.duration_sum_us,
-                .count => event_timing.values.count,
-            };
-
-            // Emit count and sum as counter metrics, and the rest as gauges. This ensures that the
-            // upstream statsd server will aggregate count and sum by summing them together, while
-            // using last-value-wins for min/avg/max, which is not strictly accurate but the best
-            // that can be done.
-            // TODO: Or is it?
-            const statsd_type = if (event_aggregation == .count or
-                event_aggregation == .sum) "c" else "g";
-            return .{
-                .some = std.fmt.bufPrint(
-                    self.buffer,
-                    "tb.{[name]s}_us.{[aggregation]s}:{[value]d}|{[statsd_type]s}|#{[tags]s}\n",
-                    .{
-                        .name = @tagName(event_timing.event),
-                        .aggregation = @tagName(event_aggregation),
-                        .value = value,
-                        .statsd_type = statsd_type,
-                        .tags = TagFormatter{
-                            .cluster = self.cluster,
-                            .replica = self.replica,
-                            .event = event_timing.event,
-                        },
-                    },
-                ) catch {
-                    if (@inComptime()) {
-                        unreachable;
-                    } else {
-                        log.err(
-                            "metric line for {s} exceeds buffer size",
-                            .{@tagName(event_timing.event)},
-                        );
-                    }
-                    return .none;
-                },
-            };
-        }
-    };
-
-    metrics: MetricsIterator,
-    timings: TimingsIterator,
-
-    metrics_exhausted: bool = false,
-    timings_exhausted: bool = false,
-
-    pub fn next(self: *Iterator) Output {
-        if (!self.metrics_exhausted) {
-            const value = self.metrics.next();
-            if (value == null) self.metrics_exhausted = true else return value;
-        }
-        if (!self.timings_exhausted) {
-            const value = self.timings.next();
-            if (value == null) self.timings_exhausted = true else return value;
-        }
-        return null;
-    }
+const TimingStat = enum { min, max, avg, sum, count };
+const Stat = union(enum) {
+    metric: struct { aggregate: EventMetricAggregate },
+    timing: struct { aggregate: EventTimingAggregate, stat: TimingStat },
 };
 
-/// Format EventMetric and EventTiming's payload (ie, the tags) in a dogstatsd compatible way:
-/// Tags are comma separated, with a `:` between key:value pairs.
-fn EventStatsdTagFormatterType(EventType: type) type {
-    comptime assert(@typeInfo(EventType) == .Union and @typeInfo(EventType).Union.tag_type != null);
+fn format_metric(
+    buffer: []u8,
+    stat: Stat,
+    options: struct { cluster: u128, replica: u8 },
+) error{NoSpaceLeft}!usize {
+    const stat_name = switch (stat) {
+        inline else => |stat_data| @tagName(stat_data.aggregate.event),
+    };
 
-    return struct {
-        event: EventType,
-        cluster: u128,
-        replica: u8,
+    const stat_suffix, const stat_type, const stat_value = switch (stat) {
+        .metric => |data| .{ "", "g", data.aggregate.value },
+        .timing => |data| switch (data.stat) {
+            .count => .{ "_us.count", "c", data.aggregate.values.count },
+            .sum => .{ "_us.sum", "c", data.aggregate.values.duration_sum_us },
+            .min => .{ "_us.min", "g", data.aggregate.values.duration_min_us },
+            .max => .{ "_us.max", "g", data.aggregate.values.duration_max_us },
+            .avg => .{ "_us.avg", "g", @divFloor(
+                data.aggregate.values.duration_sum_us,
+                data.aggregate.values.count,
+            ) },
+        },
+    };
 
-        pub fn format(
-            formatter: *const @This(),
-            comptime fmt: []const u8,
-            options: std.fmt.FormatOptions,
-            writer: anytype,
-        ) !void {
-            _ = fmt;
-            _ = options;
+    var stream = std.io.fixedBufferStream(buffer);
+    var writer = stream.writer();
 
-            try writer.print("cluster:{x:0>32},replica:{d}", .{
-                formatter.cluster,
-                formatter.replica,
-            });
+    try writer.print("tb.{[name]s}{[name_suffix]s}:{[value]d}|{[statsd_type]s}" ++
+        "|cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
+        .name = stat_name,
+        .name_suffix = stat_suffix,
+        .statsd_type = stat_type,
+        .value = stat_value,
+        .cluster = options.cluster,
+        .replica = options.replica,
+    });
 
-            switch (formatter.event) {
+    switch (stat) {
+        inline else => |stat_data| {
+            switch (stat_data.aggregate.event) {
                 inline else => |data| {
-                    if (@TypeOf(data) == void) {
-                        return;
-                    }
+                    const Tags = @TypeOf(data);
+                    if (@typeInfo(Tags) == .Struct) {
+                        const fields = std.meta.fields(@TypeOf(data));
+                        inline for (fields) |data_field| {
+                            comptime assert(!std.mem.eql(u8, data_field.name, "cluster"));
+                            comptime assert(!std.mem.eql(u8, data_field.name, "replica"));
+                            comptime assert(@typeInfo(data_field.type) == .Int or
+                                @typeInfo(data_field.type) == .Enum or
+                                @typeInfo(data_field.type) == .Union);
 
-                    const fields = std.meta.fields(@TypeOf(data));
-                    inline for (fields) |data_field| {
-                        assert(@typeInfo(data_field.type) == .Int or
-                            @typeInfo(data_field.type) == .Enum or
-                            @typeInfo(data_field.type) == .Union);
+                            const data_field_value = @field(data, data_field.name);
+                            try writer.writeByte(',');
+                            try writer.writeAll(data_field.name);
+                            try writer.writeByte(':');
 
-                        comptime assert(!std.mem.eql(u8, data_field.name, "cluster"));
-                        comptime assert(!std.mem.eql(u8, data_field.name, "replica"));
-
-                        const data_field_value = @field(data, data_field.name);
-                        try writer.writeByte(',');
-                        try writer.writeAll(data_field.name);
-                        try writer.writeByte(':');
-
-                        if (@typeInfo(data_field.type) == .Enum or
-                            @typeInfo(data_field.type) == .Union)
-                        {
-                            try writer.print("{s}", .{@tagName(data_field_value)});
-                        } else {
-                            try writer.print("{}", .{data_field_value});
+                            if (@typeInfo(data_field.type) == .Enum or
+                                @typeInfo(data_field.type) == .Union)
+                            {
+                                try writer.print("{s}", .{@tagName(data_field_value)});
+                            } else {
+                                try writer.print("{}", .{data_field_value});
+                            }
                         }
+                    } else {
+                        assert(@TypeOf(data) == void);
                     }
                 },
             }
-        }
-    };
+        },
+    }
+    try writer.writeByte('\n');
+    return stream.getPos() catch unreachable;
 }
 
 /// Returns an instance of a Struct (or void) with all fields set to what would result in the
