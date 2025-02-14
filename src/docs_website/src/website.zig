@@ -8,13 +8,20 @@ pub const file_size_max = 1 << 20; // 1 MiB
 
 url_prefix: []const u8,
 pandoc_bin: LazyPath,
+vale_bin: LazyPath,
 
 page_writer_exe: *Compile,
 
-pub fn init(b: *std.Build, url_prefix: []const u8, pandoc_bin: LazyPath) Website {
+pub fn init(
+    b: *std.Build,
+    url_prefix: []const u8,
+    pandoc_bin: LazyPath,
+    vale_bin: LazyPath,
+) Website {
     return .{
         .url_prefix = url_prefix,
         .pandoc_bin = pandoc_bin,
+        .vale_bin = vale_bin,
         .page_writer_exe = b.addExecutable(.{
             .name = "page_writer",
             .root_source_file = b.path("src/page_writer.zig"),
