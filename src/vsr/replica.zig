@@ -810,6 +810,19 @@ pub fn ReplicaType(
                     self.superblock.working.vsr_state.sync_op_min,
                     self.superblock.working.vsr_state.sync_op_max,
                 });
+
+                // We state synced and upgraded to this version, transition to recovering_head as
+                // our CheckpointState is old. This is because the start_view_deprecated message we
+                // used for state sync only included the encoded `blocks_acquired` free set, not the
+                // `blocks_released` free set. We can only open the grid and start normal operation
+                // once we receive the new CheckpointState, otherwise we risk non-deterministic
+                // storage.
+                if (self.superblock.working.version == 1) {
+                    if (self.status != .recovering_head) {
+                        self.transition_to_recovering_head_from_recovering_status();
+                    }
+                    return;
+                }
             }
 
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
@@ -2280,6 +2293,15 @@ pub fn ReplicaType(
                 message.header.command == .start_view_deprecated);
             if (self.ignore_view_change_message(message.base_const())) return;
 
+            // Accept SV messages only from replicas that are on the new CheckpointState
+            if (message.header.command == .start_view_deprecated) {
+                log.warn("{}: on_start_view: ignoring {s}", .{
+                    self.replica,
+                    @tagName(message.header.command),
+                });
+                return;
+            }
+
             if (self.status == .recovering_head) {
                 if (message.header.view > self.view or
                     message.header.op >= self.op_prepare_max() or
@@ -2368,16 +2390,6 @@ pub fn ReplicaType(
         }
 
         fn on_start_view_set_checkpoint(self: *Replica, message: *Message.StartView) bool {
-            // Accept SV messages for state sync only from replicas that are on the new
-            // CheckpointState.
-            if (message.header.command == .start_view_deprecated) {
-                log.warn("{}: on_start_view_set_checkpoint: ignoring {s}", .{
-                    self.replica,
-                    @tagName(message.header.command),
-                });
-                return false;
-            }
-
             const view_checkpoint = start_view_message_checkpoint(message);
 
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
@@ -2394,33 +2406,40 @@ pub fn ReplicaType(
                 ).?,
             );
 
-            if (!vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max)) {
-                return false;
+            if (self.status == .recovering_head and self.superblock.working.version == 1) {
+                // Unconditionally start state sync, this replica needs the latest CheckpointState.
+                // Check out the end of the `open` function for more context.
+                assert(self.superblock.working.vsr_state.sync_op_max > 0);
+                assert(view_checkpoint.header.op > 0);
+            } else {
+                if (!vsr.Checkpoint.durable(self.op_checkpoint_next(), message.header.commit_max)) {
+                    return false;
+                }
+
+                // Cluster is at least two checkpoints ahead. Although SV's checkpoint is not
+                // guaranteed to be durable on a quorum of replicas, it is safe to sync to it,
+                // because prepares in this replica's WAL are no longer needed.
+                const far_behind = vsr.Checkpoint.durable(self.op_checkpoint_next() +
+                    constants.vsr_checkpoint_ops, message.header.commit_max);
+                // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
+                // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
+                // there's evidence that the repair can't be completed.
+                const likely_stuck = self.syncing == .idle and self.repair_stuck();
+
+                if (!far_behind and !likely_stuck) return false;
+
+                // State sync: at this point, we know we want to replace our checkpoint
+                // with the one from this SV.
+
+                assert(message.header.commit_max > self.op_checkpoint_next_trigger());
+                assert(view_checkpoint.header.op > self.op_checkpoint());
+
+                // If we are already checkpointing, let that finish first --- perhaps we won't
+                // need state sync after all.
+                if (self.commit_stage == .checkpoint_superblock) return true;
+                if (self.commit_stage == .checkpoint_data) return true;
+                if (self.syncing == .updating_checkpoint) return true;
             }
-
-            // Cluster is at least two checkpoints ahead. Although SV's checkpoint is not guaranteed
-            // be durable on a quorum of replicas, it is safe to sync to it, because prepares in
-            // this replica's WAL are no longer needed.
-            const far_behind = vsr.Checkpoint.durable(self.op_checkpoint_next() +
-                constants.vsr_checkpoint_ops, message.header.commit_max);
-            // Cluster is on the next checkpoint, and that checkpoint is durable and is safe to
-            // sync to. Try to optimistically avoid state sync and prefer WAL repair, unless
-            // there's evidence that the repair can't be completed.
-            const likely_stuck = self.syncing == .idle and self.repair_stuck();
-
-            if (!far_behind and !likely_stuck) return false;
-
-            // State sync: at this point, we know we want to replace our checkpoint
-            // with the one from this SV.
-
-            assert(message.header.commit_max > self.op_checkpoint_next_trigger());
-            assert(view_checkpoint.header.op > self.op_checkpoint());
-
-            // If we are already checkpointing, let that finish first --- perhaps we won't
-            // need state sync after all.
-            if (self.commit_stage == .checkpoint_superblock) return true;
-            if (self.commit_stage == .checkpoint_data) return true;
-            if (self.syncing == .updating_checkpoint) return true;
 
             // Otherwise, cancel in progress commit and prepare to sync.
             log.mark.debug(

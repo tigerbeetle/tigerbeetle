@@ -1109,7 +1109,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             vsr_state.log_view = update.log_view;
             vsr_state.view = update.view;
             if (update.sync_checkpoint) |*sync_checkpoint| {
-                assert(superblock.staging.vsr_state.checkpoint.header.op <
+                assert(superblock.staging.vsr_state.checkpoint.header.op <=
                     sync_checkpoint.checkpoint.header.op);
 
                 const checkpoint_next = vsr.Checkpoint.checkpoint_after(
@@ -1163,6 +1163,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
             context.vsr_state.?.assert_internally_consistent();
             assert(superblock.queue_head == context);
             assert(superblock.queue_tail == null);
+
+            // By this point, we are guaranteed to have updated to the new CheckpointState format
+            // via state sync (see `open` and `on_start_view_set_checkpoint` in replica.zig). We can
+            // now safely bump up our durable SuperBlock version.
+            if (superblock.working.version == 1) {
+                superblock.working.version = vsr.superblock.SuperBlockVersion;
+            }
 
             superblock.staging.* = superblock.working.*;
             superblock.staging.sequence = superblock.staging.sequence + 1;
@@ -1428,8 +1435,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
 
                     working_checkpoint.* = checkpoint_new;
                     staging_checkpoint.* = checkpoint_new;
-                    superblock.working.version = SuperBlockVersion;
-                    superblock.staging.version = SuperBlockVersion;
                 }
 
                 log.debug(
