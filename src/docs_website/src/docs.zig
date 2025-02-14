@@ -220,12 +220,7 @@ fn write_404_page(
 }
 
 const Menu = struct {
-    const Item = union(Type) {
-        const Type = enum {
-            menu,
-            page,
-        };
-
+    const Item = union(enum) {
         menu: Menu,
         page: Page,
     };
