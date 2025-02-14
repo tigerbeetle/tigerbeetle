@@ -311,21 +311,23 @@ pub fn StateMachineType(
                 .batch_value_count_max = batch_value_count_max.account_events,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
-                    "dr_account_timestamp",
                     "dr_debits_pending",
                     "dr_debits_posted",
                     "dr_credits_pending",
                     "dr_credits_posted",
                     "cr_account_id",
-                    "cr_account_timestamp",
                     "cr_debits_pending",
                     "cr_debits_posted",
                     "cr_credits_pending",
                     "cr_credits_posted",
-                    "transfer_pending_id",
+                    "amount_requested",
+                    "amount",
                     "ledger",
                     "dr_account_flags",
                     "cr_account_flags",
+                    "dr_account_timestamp",
+                    "cr_account_timestamp",
+                    "transfer_pending_id",
                     "transfer_flags",
                     "transfer_pending_flags",
                     "reserved",
@@ -424,6 +426,8 @@ pub fn StateMachineType(
             cr_debits_posted: u128,
             cr_credits_pending: u128,
             cr_credits_posted: u128,
+            amount_requested: u128,
+            amount: u128,
             timestamp: u64,
             ledger: u32,
             dr_account_flags: AccountFlags,
@@ -452,7 +456,7 @@ pub fn StateMachineType(
             /// See `transfer_pending_id` for tracking the pending transfer.
             /// It will be `zero` for `none` and `pending`.
             transfer_pending_status: TransferPendingStatus,
-            reserved: [43]u8 = [_]u8{0} ** 43,
+            reserved: [11]u8 = [_]u8{0} ** 11,
 
             comptime {
                 assert(stdx.no_padding(AccountEvent));
@@ -2482,6 +2486,8 @@ pub fn StateMachineType(
                 .transfer_flags = t2.flags,
                 .transfer_pending_status = if (t2.flags.pending) .pending else .none,
                 .transfer_pending = null,
+                .amount_requested = t.amount,
+                .amount = t2.amount,
             });
 
             if (t2.timeout > 0) {
@@ -2786,6 +2792,8 @@ pub fn StateMachineType(
                 .transfer_flags = t2.flags,
                 .transfer_pending_status = transfer_pending_status,
                 .transfer_pending = p,
+                .amount_requested = t.amount,
+                .amount = t2.amount,
             });
 
             self.commit_timestamp = t2.timestamp;
@@ -2891,6 +2899,12 @@ pub fn StateMachineType(
                 transfer_flags: ?TransferFlags,
                 transfer_pending_status: TransferPendingStatus,
                 transfer_pending: ?*const Transfer,
+                /// The amount from the user request.
+                /// It may differ from the recorded `amount` when posting transfers and balancing
+                /// accounts. Always zero for expiry events, as no user request is involved.
+                amount_requested: u128,
+                /// The actual amount recorded in the transfer.
+                amount: u128,
             },
         ) void {
             assert(args.event_timestamp > 0);
@@ -2929,6 +2943,8 @@ pub fn StateMachineType(
                 .cr_credits_posted = args.cr_account.credits_posted,
                 .cr_account_flags = args.cr_account.flags,
 
+                .amount_requested = args.amount_requested,
+                .amount = args.amount,
                 .ledger = ledger: {
                     assert(args.dr_account.ledger == args.cr_account.ledger);
                     break :ledger args.dr_account.ledger;
@@ -3094,6 +3110,8 @@ pub fn StateMachineType(
                     .transfer_flags = null,
                     .transfer_pending_status = .expired,
                     .transfer_pending = p,
+                    .amount_requested = 0,
+                    .amount = p.amount,
                 });
                 self.commit_timestamp = event_timestamp;
             }
