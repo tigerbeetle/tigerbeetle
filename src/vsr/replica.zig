@@ -4050,7 +4050,7 @@ pub fn ReplicaType(
             assert(self.commit_dispatch_entered);
 
             if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
-            self.trace.reset(.replica_commit);
+            self.trace.cancel(.replica_commit);
             self.commit_prepare = null;
             self.commit_stage = .idle;
             self.commit_dispatch_entered = false;
