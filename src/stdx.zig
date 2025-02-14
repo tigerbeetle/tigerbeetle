@@ -790,8 +790,8 @@ fn format_int_size_bin_exact(
         value_unit = @divExact(value_unit, 1024);
     }
 
-    const mags_iec = "BKMGTPEZY";
-    const suffix = mags_iec[magnitude];
+    const magnitudes_iec = "BKMGTPEZY";
+    const suffix = magnitudes_iec[magnitude];
 
     const length: usize = length: {
         const i = std.fmt.formatIntBuf(&buf, value_unit, 10, .lower, .{});
