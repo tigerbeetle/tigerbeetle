@@ -719,9 +719,9 @@ test "tidy extensions" {
         .{"table-wrapper.lua"},
         .{"code-block-buttons.lua"},
         .{"edit-link-footer.lua"},
+        .{"src/docs_website/.vale.ini"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
-        .{".github/ci/docs_check.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
     });
