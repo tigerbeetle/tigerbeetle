@@ -3042,6 +3042,7 @@ pub fn StateMachineType(
                 assert(event_timestamp >= TimestampRange.timestamp_min);
                 assert(event_timestamp <= TimestampRange.timestamp_max);
                 assert(self.commit_timestamp < event_timestamp);
+                defer self.commit_timestamp = event_timestamp;
 
                 const expires_at = p.timestamp + p.timeout_ns();
                 assert(expires_at <= event_timestamp);
@@ -3113,7 +3114,6 @@ pub fn StateMachineType(
                     .amount_requested = 0,
                     .amount = p.amount,
                 });
-                self.commit_timestamp = event_timestamp;
             }
 
             // This operation has no output.
