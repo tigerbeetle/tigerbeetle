@@ -170,7 +170,7 @@ test "c_client echo" {
             packet.user_data = request;
             packet.data = &request.sent_data;
             packet.data_size = request.sent_data_size;
-            packet.next = null;
+            packet.tag = 0;
             packet.status = c.TB_PACKET_OK;
 
             c.tb_client_submit(tb_client, packet);
@@ -285,7 +285,7 @@ test "c_client tb_packet_status" {
             packet.user_data = &request;
             packet.data = &request.sent_data;
             packet.data_size = request_size;
-            packet.next = null;
+            packet.tag = 0;
             packet.status = c.TB_PACKET_OK;
 
             c.tb_client_submit(client, packet);
