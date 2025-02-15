@@ -1,19 +1,16 @@
 use futures::executor::block_on;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
-use std::process::{Child, Command};
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::io::{BufRead as _, BufReader};
+use std::mem;
+use std::process::{Child, Command, Stdio};
 use tempfile::TempDir;
 
 use tigerbeetle as tb;
 
-const FIRST_PORT_NUMBER: u16 = 20_000;
-static NEXT_PORT_NUMBER: AtomicU16 = AtomicU16::new(FIRST_PORT_NUMBER);
-
 struct TestHarness {
     tigerbeetle_bin: String,
     temp_dir: TempDir,
-    port_number: u16,
     server: Option<Child>,
 }
 
@@ -26,14 +23,10 @@ impl TestHarness {
         let work_dir = env!("CARGO_TARGET_TMPDIR");
         let temp_dir = TempDir::with_prefix_in(name, &work_dir)?;
 
-        let port_number = NEXT_PORT_NUMBER.fetch_add(1, Ordering::SeqCst);
-        assert!(port_number != 0);
-
         Ok(TestHarness {
             tigerbeetle_bin,
             temp_dir,
             server: None,
-            port_number,
         })
     }
 
@@ -54,20 +47,27 @@ impl TestHarness {
         Ok(())
     }
 
-    fn serve(&mut self) -> anyhow::Result<()> {
+    fn serve(&mut self) -> anyhow::Result<u16> {
         assert!(self.server.is_none());
 
         let mut cmd = Command::new(&self.tigerbeetle_bin);
         cmd.current_dir(self.temp_dir.path());
         cmd.args([
             "start",
-            &format!("--addresses=127.0.0.1:{}", self.port_number),
+            "--addresses=0", // tell us the port to use
             "0_0.tigerbeetle",
-        ]);
-        let child = cmd.spawn()?;
+        ])
+        .stdout(Stdio::piped());
+        let mut child = cmd.spawn()?;
+        let child_stdout = mem::take(&mut child.stdout).unwrap();
+        let mut child_stdout = BufReader::new(child_stdout);
+        let mut first_line = String::new();
+        child_stdout.read_line(&mut first_line)?;
+        let port_number = first_line.trim().parse()?;
+
         self.server = Some(child);
 
-        Ok(())
+        Ok(port_number)
     }
 }
 
@@ -95,9 +95,9 @@ fn smoke() -> anyhow::Result<()> {
     block_on(async {
         let mut harness = TestHarness::new("smoke")?;
         harness.prepare_database()?;
-        harness.serve()?;
+        let port_number = harness.serve()?;
 
-        let address = &format!("127.0.0.1:{}", harness.port_number);
+        let address = &format!("127.0.0.1:{}", port_number);
         let client = tb::Client::new(0, address)?;
 
         {
