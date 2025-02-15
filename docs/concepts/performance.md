@@ -72,3 +72,10 @@ the transactions so the shards responsible for those accounts become bottlenecks
 For more details on when single-threaded implementations of algorithms outperform multi-threaded
 implementations, see ["Scalability! But at what
 COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf).
+
+## Next: Safety
+
+Performance can get you very far, but it is useless if the result is wrong. Transaction
+processing also requires strong safety guarantees to ensure that data cannot be lost, and high
+availability to ensure that money is not lost due to database downtime. Let's look at TigerBeetle
+[safety](./safety.md).

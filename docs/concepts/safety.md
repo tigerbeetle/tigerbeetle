@@ -15,7 +15,7 @@ as MySQL or an in-memory database such as Redis:
   and
   [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
   and **detects and repairs data tampering** (on a minority of the cluster, as if it were
-  non-Byzantine corruption) with hash-chained checksums.
+  non-Byzantine corruption) with hash-chained cryptographic checksums.
 
 - TigerBeetle **uses Direct I/O by design** to sidestep
   [cache coherency bugs in the kernel page cache](https://www.usenix.org/system/files/atc20-rebello.pdf)
@@ -45,7 +45,7 @@ as MySQL or an in-memory database such as Redis:
   quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within
   safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a
   fault-tolerant clock that we call
-  ["cluster time"](https://tigerbeetle.com/blog/2021-08-30-three-clocks-are-better-than-one).
+  ["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
 
 ## Fault Models
 
@@ -193,3 +193,13 @@ attack surface.
 We are confident that `io_uring` is the safest (and most performant) way for TigerBeetle to handle
 async I/O. It is significantly easier for the kernel to implement this correctly than for us to
 include a userspace multithreaded thread pool (for example, as libuv does).
+
+## Next: Coding
+
+This concludes the discussion of the concepts behind TigerBeetle --- an [OLTP](./oltp.md) database
+for recording business transactions in real time, using
+[double entry bookkeeping](./debit-credit.md) schema, which
+[runs at a million transfers per second](./performance.md) and
+[keeps the data safe](./safety.md) even when the underling hardware inevitably fails.
+
+We will now learn [how to build applications on top of TigerBeetle](../coding/).
