@@ -1,8 +1,8 @@
 use futures::executor::block_on;
+use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::{env, fs};
 use tempfile::TempDir;
 
 use tigerbeetle as tb;
@@ -23,8 +23,7 @@ impl TestHarness {
 
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
 
-        let work_dir = format!("{manifest_dir}/work");
-        fs::create_dir_all(&work_dir)?;
+        let work_dir = env!("CARGO_TARGET_TMPDIR");
         let temp_dir = TempDir::with_prefix_in(name, &work_dir)?;
 
         let port_number = NEXT_PORT_NUMBER.fetch_add(1, Ordering::SeqCst);
