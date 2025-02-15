@@ -1,8 +1,8 @@
-use anyhow::{Context as _, Result as AnyResult};
+use anyhow::Context as _;
 use ignore::Walk;
 use std::{env, fs, path::Path};
 
-fn main() -> AnyResult<()> {
+fn main() -> anyhow::Result<()> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
 
     prepare_dependencies(&cargo_manifest_dir)?;
@@ -62,7 +62,7 @@ fn main() -> AnyResult<()> {
     Ok(())
 }
 
-fn prepare_dependencies(manifest_dir: &str) -> AnyResult<()> {
+fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
     let build_in_tree = is_build_in_tree(manifest_dir)?;
     if build_in_tree {
         build_tigerbeetle(manifest_dir)?;
@@ -88,11 +88,11 @@ fn prepare_dependencies(manifest_dir: &str) -> AnyResult<()> {
     }
 }
 
-fn is_build_in_tree(manifest_dir: &str) -> AnyResult<bool> {
+fn is_build_in_tree(manifest_dir: &str) -> anyhow::Result<bool> {
     Ok(fs::exists(format!("{manifest_dir}/../../../build.zig"))?)
 }
 
-fn build_tigerbeetle(manifest_dir: &str) -> AnyResult<()> {
+fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
     assert!(is_build_in_tree(manifest_dir)?);
 
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
@@ -128,7 +128,7 @@ fn build_tigerbeetle(manifest_dir: &str) -> AnyResult<()> {
     Ok(())
 }
 
-fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> AnyResult<()> {
+fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
     for entry in Walk::new(&tigerbeetle_root) {
         let entry = entry?;
@@ -142,7 +142,7 @@ fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> AnyResult<()> {
     Ok(())
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> AnyResult<()> {
+fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
     for entry in Walk::new(src) {
         let entry = entry?;
         let relative_path = entry.path().strip_prefix(src)?;

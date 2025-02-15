@@ -1,4 +1,3 @@
-use anyhow::Result as AnyResult;
 use futures::executor::block_on;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU16, Ordering};
@@ -18,7 +17,7 @@ struct TestHarness {
 }
 
 impl TestHarness {
-    fn new(name: &str) -> AnyResult<TestHarness> {
+    fn new(name: &str) -> anyhow::Result<TestHarness> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
         let tigerbeetle_bin = if cfg!(unix) {
@@ -44,7 +43,7 @@ impl TestHarness {
         })
     }
 
-    fn prepare_database(&self) -> AnyResult<()> {
+    fn prepare_database(&self) -> anyhow::Result<()> {
         let mut cmd = Command::new(&self.tigerbeetle_bin);
         cmd.current_dir(self.temp_dir.path());
         cmd.args([
@@ -61,7 +60,7 @@ impl TestHarness {
         Ok(())
     }
 
-    fn serve(&mut self) -> AnyResult<()> {
+    fn serve(&mut self) -> anyhow::Result<()> {
         assert!(self.server.is_none());
 
         let mut cmd = Command::new(&self.tigerbeetle_bin);
@@ -88,7 +87,7 @@ impl Drop for TestHarness {
 }
 
 #[test]
-fn smoke() -> AnyResult<()> {
+fn smoke() -> anyhow::Result<()> {
     let ledger = 1;
     let code = 1;
 
