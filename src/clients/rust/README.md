@@ -1,7 +1,3 @@
----
-title: Rust
----
-
 # tigerbeetle-rust
 
 The TigerBeetle client for Rust.
