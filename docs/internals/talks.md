@@ -10,15 +10,15 @@ https://www.youtube.com/watch?v=tRgvaqpQPwE
 
 ## June 06, 2024: Money2020
 
-Joran Dirk Greef explains how the world is becoming more transactional, that general purpose 
-databases designed 20 to 30 years ago won't power the future of online transactions, and how 
+Joran Dirk Greef explains how the world is becoming more transactional, that general purpose
+databases designed 20 to 30 years ago won't power the future of online transactions, and how
 TigerBeetle is designed to help.
 
 https://youtu.be/wkHP30tCZmw
 
 ## May 14, 2024: Biodigital Jazz!
 
-Joran Dirk Greef presents at Software You Can Love on the the intersection of software, art 
+Joran Dirk Greef presents at Software You Can Love on the the intersection of software, art
 (and business) at TigerBeetle.
 
 https://www.youtube.com/watch?v=C98cyJ-wJuY
@@ -26,15 +26,15 @@ https://www.youtube.com/watch?v=C98cyJ-wJuY
 
 ## March 22, 2024: Redesigning OLTP for a New Order of Magnitude
 
-Joran Dirk Greef discusses TigerBeetle, a new database, and why OLTP has a growing impedance 
-mismatch, why the OLTP workload is becoming more contentious, why row locks, why storage 
+Joran Dirk Greef discusses TigerBeetle, a new database, and why OLTP has a growing impedance
+mismatch, why the OLTP workload is becoming more contentious, why row locks, why storage
 faults, write stalls, and why non-determinism is now a problem.
 
-https://www.youtube.com/watch?v=32LMicc0gRA 
+https://www.youtube.com/watch?v=32LMicc0gRA
 
 ## February 26, 2024: The FASTEST and SAFEST Database
 
-Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle 
+Joran Dirk Greef gives an entertaining and informative overview of the problems TigerBeetle
 solves, technical details about how it works, and shows a demo of the simulator at the end.
 ThePrimeagen was blown away.
 
@@ -48,12 +48,12 @@ https://www.youtube.com/watch?v=eFTQzhfO6nc
 
 ## October 23, 2023: P99 CONF 2023 | A Deterministic Walk Down TigerBeetle’s main() Street
 
-Learn how to use Zig to implement a fully deterministic distributed system which will never 
-fail with an out of memory error, for predictable performance and 700x faster tests, 
+Learn how to use Zig to implement a fully deterministic distributed system which will never
+fail with an out of memory error, for predictable performance and 700x faster tests,
 with matklad.
 
 
-https://www.youtube.com/watch?v=AGxAnkrhDGY 
+https://www.youtube.com/watch?v=AGxAnkrhDGY
 
 ## March 27, 2023: A New Era for Database Design with TigerBeetle at QCon London 2023
 

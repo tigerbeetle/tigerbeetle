@@ -169,7 +169,7 @@ If you get `error: SystemResources` when running TigerBeetle in Docker on macOS,
 the container may be blocking TigerBeetle from locking memory, which is necessary both for io_uring
 and to prevent the kernel's use of swap from bypassing TigerBeetle's storage fault tolerance.
 
-#### Allowing MEMLOCK 
+#### Allowing MEMLOCK
 
 To raise the memory lock limits under Docker, execute one of the following:
 

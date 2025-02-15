@@ -34,6 +34,7 @@ application to compute the balance from the cumulative debits/credits.
 From the database's perspective the distinction is arbitrary, but accounting conventions recommend
 using a certain balance type for certain types of accounts.
 
+// FIXME
 If you are new to thinking in terms of debits and credits, read the
 [deep dive on financial accounting](./financial-accounting.md) to get a better understanding of
 double-entry bookkeeping and the different types of accounts.
