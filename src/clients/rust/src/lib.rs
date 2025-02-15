@@ -51,7 +51,7 @@ impl Client {
         }
     }
 
-    pub fn submit_create_accounts<'s>(
+    pub fn create_accounts<'s>(
         &'s self,
         events: &[Account],
     ) -> impl Future<Output = Result<Vec<Result<(), CreateAccountResult>>, PacketStatus>> + use<'s>
@@ -80,7 +80,7 @@ impl Client {
         }
     }
 
-    pub fn submit_create_transfers<'s>(
+    pub fn create_transfers<'s>(
         &'s self,
         events: &[Transfer],
     ) -> impl Future<Output = Result<Vec<Result<(), CreateTransferResult>>, PacketStatus>> + use<'s>
@@ -109,7 +109,7 @@ impl Client {
         }
     }
 
-    pub fn submit_lookup_accounts<'s>(
+    pub fn lookup_accounts<'s>(
         &'s self,
         events: &[u128],
     ) -> impl Future<Output = Result<Vec<Result<Account, NotFound>>, PacketStatus>> + use<'s> {
@@ -134,7 +134,7 @@ impl Client {
         }
     }
 
-    pub fn submit_lookup_transfers<'s>(
+    pub fn lookup_transfers<'s>(
         &'s self,
         events: &[u128],
     ) -> impl Future<Output = Result<Vec<Result<Transfer, NotFound>>, PacketStatus>> + use<'s> {
@@ -160,7 +160,7 @@ impl Client {
         }
     }
 
-    pub fn submit_get_account_transfers<'s>(
+    pub fn get_account_transfers<'s>(
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
@@ -181,7 +181,7 @@ impl Client {
         }
     }
 
-    pub fn submit_get_account_balances<'s>(
+    pub fn get_account_balances<'s>(
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> + use<'s> {
@@ -202,7 +202,7 @@ impl Client {
         }
     }
 
-    pub fn submit_query_accounts<'s>(
+    pub fn query_accounts<'s>(
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
@@ -223,7 +223,7 @@ impl Client {
         }
     }
 
-    pub fn submit_query_transfers<'s>(
+    pub fn query_transfers<'s>(
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {

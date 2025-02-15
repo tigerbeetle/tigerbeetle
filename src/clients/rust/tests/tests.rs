@@ -102,7 +102,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_create_accounts(&[
+                .create_accounts(&[
                     tb::Account {
                         id: account_id1,
                         debits_pending: 0,
@@ -144,7 +144,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_create_transfers(&[tb::Transfer {
+                .create_transfers(&[tb::Transfer {
                     id: transfer_id1,
                     debit_account_id: account_id1,
                     credit_account_id: account_id2,
@@ -167,7 +167,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_lookup_accounts(&[account_id1, account_id2])
+                .lookup_accounts(&[account_id1, account_id2])
                 .await?;
 
             assert_eq!(res.len(), 2);
@@ -183,7 +183,7 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let res = client.submit_lookup_transfers(&[transfer_id1]).await?;
+            let res = client.lookup_transfers(&[transfer_id1]).await?;
 
             assert_eq!(res.len(), 1);
             let res_transfer1 = res[0].unwrap();
@@ -196,7 +196,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_get_account_transfers(tb::AccountFilter {
+                .get_account_transfers(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
                     user_data_64: 0,
@@ -222,7 +222,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_get_account_balances(tb::AccountFilter {
+                .get_account_balances(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
                     user_data_64: 0,
@@ -246,7 +246,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_query_accounts(tb::QueryFilter {
+                .query_accounts(tb::QueryFilter {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: account_id2_user_data_32,
@@ -269,7 +269,7 @@ fn smoke() -> anyhow::Result<()> {
 
         {
             let res = client
-                .submit_query_transfers(tb::QueryFilter {
+                .query_transfers(tb::QueryFilter {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: transfer_id1_user_data_32,
