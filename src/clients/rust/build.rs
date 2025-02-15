@@ -118,9 +118,9 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
     for build_target in build_targets {
         let mut cmd = std::process::Command::new(&zig_compiler);
         cmd.args(["build", build_target]);
-        let res = cmd.status()?;
+        let result = cmd.status()?;
 
-        if !res.success() {
+        if !result.success() {
             panic!("zig build failed");
         }
     }

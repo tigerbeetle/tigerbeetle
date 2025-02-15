@@ -101,7 +101,7 @@ fn smoke() -> anyhow::Result<()> {
         let client = tb::Client::new(0, address)?;
 
         {
-            let res = client
+            let result = client
                 .create_accounts(&[
                     tb::Account {
                         id: account_id1,
@@ -136,14 +136,14 @@ fn smoke() -> anyhow::Result<()> {
                 ])
                 .await?;
 
-            assert_eq!(res.len(), 2);
+            assert_eq!(result.len(), 2);
 
-            assert!(res[0].is_ok());
-            assert!(res[1].is_ok());
+            assert!(result[0].is_ok());
+            assert!(result[1].is_ok());
         }
 
         {
-            let res = client
+            let result = client
                 .create_transfers(&[tb::Transfer {
                     id: transfer_id1,
                     debit_account_id: account_id1,
@@ -161,18 +161,16 @@ fn smoke() -> anyhow::Result<()> {
                 }])
                 .await?;
 
-            assert_eq!(res.len(), 1);
-            assert!(res[0].is_ok());
+            assert_eq!(result.len(), 1);
+            assert!(result[0].is_ok());
         }
 
         {
-            let res = client
-                .lookup_accounts(&[account_id1, account_id2])
-                .await?;
+            let result = client.lookup_accounts(&[account_id1, account_id2]).await?;
 
-            assert_eq!(res.len(), 2);
-            let res_account1 = res[0].unwrap();
-            let res_account2 = res[1].unwrap();
+            assert_eq!(result.len(), 2);
+            let res_account1 = result[0].unwrap();
+            let res_account2 = result[1].unwrap();
 
             assert_eq!(res_account1.id, account_id1);
             assert_eq!(res_account1.debits_posted, 10);
@@ -183,10 +181,10 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let res = client.lookup_transfers(&[transfer_id1]).await?;
+            let result = client.lookup_transfers(&[transfer_id1]).await?;
 
-            assert_eq!(res.len(), 1);
-            let res_transfer1 = res[0].unwrap();
+            assert_eq!(result.len(), 1);
+            let res_transfer1 = result[0].unwrap();
 
             assert_eq!(res_transfer1.id, transfer_id1);
             assert_eq!(res_transfer1.debit_account_id, account_id1);
@@ -195,7 +193,7 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let res = client
+            let result = client
                 .get_account_transfers(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
@@ -210,9 +208,9 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(res.len(), 1);
+            assert_eq!(result.len(), 1);
 
-            let res_transfer = &res[0];
+            let res_transfer = &result[0];
 
             assert_eq!(res_transfer.id, transfer_id1);
             assert_eq!(res_transfer.debit_account_id, account_id1);
@@ -221,7 +219,7 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let res = client
+            let result = client
                 .get_account_balances(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
@@ -236,16 +234,16 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(res.len(), 1);
+            assert_eq!(result.len(), 1);
 
-            let res_balance_1 = &res[0];
+            let res_balance_1 = &result[0];
 
             assert_eq!(res_balance_1.debits_posted, 10);
             assert_eq!(res_balance_1.credits_posted, 0);
         }
 
         {
-            let res = client
+            let result = client
                 .query_accounts(tb::QueryFilter {
                     user_data_128: 0,
                     user_data_64: 0,
@@ -260,15 +258,15 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(res.len(), 1);
+            assert_eq!(result.len(), 1);
 
-            let res_account = &res[0];
+            let res_account = &result[0];
 
             assert_eq!(res_account.id, account_id2);
         }
 
         {
-            let res = client
+            let result = client
                 .query_transfers(tb::QueryFilter {
                     user_data_128: 0,
                     user_data_64: 0,
@@ -283,9 +281,9 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(res.len(), 1);
+            assert_eq!(result.len(), 1);
 
-            let res_transfer = &res[0];
+            let res_transfer = &result[0];
 
             assert_eq!(res_transfer.id, transfer_id1);
         }

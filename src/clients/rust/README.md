@@ -29,7 +29,7 @@ use tigerbeetle as tb;
 
 let client = tb::Client::new(0, address)?;
 
-let res = client.submit_create_accounts(&[
+let result = client.submit_create_accounts(&[
     tb::Account {
         id: 1,
         debits_pending: 0,
@@ -47,5 +47,5 @@ let res = client.submit_create_accounts(&[
     },
 ]).await?;
 
-println!("{res:?}");
+println!("{result:?}");
 ```
