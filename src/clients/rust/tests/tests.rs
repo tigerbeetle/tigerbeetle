@@ -1,4 +1,5 @@
 use futures::executor::block_on;
+use std::env::consts::EXE_SUFFIX;
 use std::process::{Child, Command};
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::{env, fs};
@@ -20,13 +21,7 @@ impl TestHarness {
     fn new(name: &str) -> anyhow::Result<TestHarness> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
-        let tigerbeetle_bin = if cfg!(unix) {
-            format!("{manifest_dir}/../../../tigerbeetle")
-        } else if cfg!(windows) {
-            format!("{manifest_dir}/../../../tigerbeetle.exe")
-        } else {
-            todo!()
-        };
+        let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
 
         let work_dir = format!("{manifest_dir}/work");
         fs::create_dir_all(&work_dir)?;
