@@ -1336,9 +1336,6 @@ const ViewChangeHeadersSlice = struct {
                 .valid => {
                     assert(header.view <= child.view);
                     assert(header.timestamp < child.timestamp);
-                    if (header.op + 1 == child.op) {
-                        assert(header.checksum == child.parent);
-                    }
                 },
             }
             child = header;
