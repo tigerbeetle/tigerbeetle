@@ -10,6 +10,7 @@
 use bitflags::bitflags;
 use futures::channel::oneshot::{channel, Receiver};
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::os::raw::{c_char, c_void};
 use std::{mem, ptr};
@@ -251,7 +252,7 @@ impl Client {
         let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
         let client = SendClient(client);
 
-        let (tx, rx) = channel::<()>();
+        let (tx, rx) = channel::<Infallible>();
 
         std::thread::spawn(move || {
             let client = client;
@@ -259,11 +260,12 @@ impl Client {
                 // This is a blocking function so we're calling it offthread.
                 tbc::tb_client_deinit(client.0);
             }
-            let _ = tx.send(());
+            drop(tx);
         });
 
         async {
-            rx.await.expect("destructor thread disappeared");
+            // wait for the channel to close
+            let _ = rx.await;
         }
     }
 }
