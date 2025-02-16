@@ -774,6 +774,7 @@ pub fn ReplicaType(
                 // completes.
                 self.log_view += 1;
                 self.view += 1;
+                self.commit_max = self.op;
                 self.primary_update_view_headers();
                 self.view_durable_update();
 
@@ -2012,18 +2013,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (self.status == .view_change and self.primary_index(self.view) != self.replica) {
-                log.debug("{}: on_repair: ignoring (view change, backup)", .{self.replica});
-                return;
-            }
-
-            if (self.status == .view_change and !self.do_view_change_quorum) {
-                log.debug("{}: on_repair: ignoring (view change, waiting for quorum)", .{
-                    self.replica,
-                });
-                return;
-            }
-
             if (message.header.op > self.op) {
                 assert(message.header.view < self.view);
                 log.debug("{}: on_repair: ignoring (would advance self.op)", .{self.replica});
@@ -2260,8 +2249,6 @@ pub fn ReplicaType(
                     self.journal.header_with_op(self.op).?.timestamp);
 
                 // Start repairs according to the CTRL protocol:
-                assert(!self.repair_timeout.ticking);
-                self.repair_timeout.start();
                 self.repair();
             }
         }
@@ -3772,8 +3759,6 @@ pub fn ReplicaType(
         }
 
         fn commit_journal(self: *Replica) void {
-            assert(self.status == .normal or self.status == .view_change or
-                (self.status == .recovering and self.solo()));
             assert(!(self.status == .normal and self.primary()));
             assert(self.commit_min <= self.commit_max);
             assert(self.commit_min <= self.op);
@@ -3785,6 +3770,21 @@ pub fn ReplicaType(
             if (!self.state_machine_opened) {
                 assert(self.commit_stage == .idle);
                 return;
+            }
+
+            // Only potential primaries are allowed to commit during view change, only after they
+            // they have received a DVC quorum. Committing while in view change is not guaranteed
+            // to be safe in any other circumstances, as it might be the case that our hash
+            // chain connects up to our head but our head is outdated and has been replaced.
+            if (self.status == .view_change and !self.do_view_change_quorum) return;
+            switch (self.status) {
+                .view_change => {
+                    assert(self.view == self.log_view);
+                    assert(self.primary_index(self.view) == self.replica);
+                },
+                .normal => assert(self.backup()),
+                .recovering => assert(self.solo()),
+                .recovering_head => unreachable,
             }
 
             if (self.syncing != .idle) return;
@@ -4002,7 +4002,7 @@ pub fn ReplicaType(
 
             if (self.commit_min == self.op) {
                 // This is an optimization to expedite the view change before the `repair_timeout`:
-                if (self.status == .view_change and self.repairs_allowed()) self.repair();
+                if (self.status == .view_change) self.repair();
 
                 if (self.status == .recovering) {
                     assert(self.solo());
@@ -4101,7 +4101,6 @@ pub fn ReplicaType(
                 const valid_hash_chain_or_same_view = self.valid_hash_chain(@src()) or
                     (self.status == .normal and
                     header.view == self.journal.header_with_op(self.op).?.view);
-
                 if (!valid_hash_chain_or_same_view) {
                     assert(!self.solo());
                     return .ready;
@@ -4148,7 +4147,9 @@ pub fn ReplicaType(
             switch (self.status) {
                 .normal => {},
                 .view_change => {
-                    if (self.primary_index(self.view) != self.replica) {
+                    if (self.primary_index(self.view) != self.replica or
+                        !self.do_view_change_quorum)
+                    {
                         log.debug("{}: commit_start_journal_callback: no longer primary view={}", .{
                             self.replica,
                             self.view,
@@ -5427,22 +5428,7 @@ pub fn ReplicaType(
                     log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
                     return true;
                 },
-                .headers => {
-                    if (self.primary_index(self.view) != self.replica) {
-                        log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    } else if (!self.do_view_change_quorum) {
-                        log.debug("{}: on_{s}: ignoring (view change, waiting for quorum)", .{
-                            self.replica,
-                            command,
-                        });
-                        return true;
-                    }
-                },
-                .request_headers, .request_prepare, .request_reply => {
+                .request_headers, .request_prepare, .request_reply, .headers => {
                     // on_headers, on_prepare, and on_reply have the appropriate logic to handle
                     // incorrect headers, prepares, and replies.
                     return false;
@@ -6649,11 +6635,10 @@ pub fn ReplicaType(
             // Request outstanding possibly committed headers to advance our op number:
             // This handles the case of an idle cluster, where a backup will not otherwise advance.
             // This is not required for correctness, but for durability.
-            if (self.op < self.op_repair_max() or
-                (self.status == .normal and self.op < self.view_headers.array.get(0).op))
+            if (self.replica != self.primary_index(self.view) and
+                (self.op < self.op_repair_max() or self.op < self.view_headers.array.get(0).op))
             {
                 assert(!self.solo());
-                assert(self.replica != self.primary_index(self.view));
 
                 log.debug(
                     "{}: repair: break: view={} break={}..{} " ++
@@ -6682,19 +6667,6 @@ pub fn ReplicaType(
                             .nonce = self.nonce,
                         }),
                     );
-                }
-            }
-
-            if (self.op < self.op_repair_max()) {
-                const op_header_view = self.journal.header_with_op(self.op).?.view;
-                assert(op_header_view <= self.view);
-                if (op_header_view < self.view) {
-                    // Wait for an SV from the primary to make sure the op indeed hash-chains
-                    // to the actual view state.
-                    return;
-                } else {
-                    // The op is from the current view, anything that hash chains to it is worth
-                    // repairing.
                 }
             }
 
@@ -6792,6 +6764,7 @@ pub fn ReplicaType(
             }
 
             if (self.status == .view_change and self.primary_index(self.view) == self.replica) {
+                if (!self.do_view_change_quorum) return;
                 if (!self.primary_journal_headers_repaired()) return;
 
                 // Sending start_view messages to backups and committing up to commit_max can be
@@ -7446,9 +7419,6 @@ pub fn ReplicaType(
             };
 
             if (self.status == .view_change and op > self.commit_max) {
-                // Only the primary is allowed to do repairs in a view change:
-                assert(self.primary_index(self.view) == self.replica);
-
                 const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
                 log.debug(
                     "{}: repair_prepare: op={} checksum={} (uncommitted, {s}, view_change)",
@@ -7486,15 +7456,7 @@ pub fn ReplicaType(
 
         fn repairs_allowed(self: *const Replica) bool {
             switch (self.status) {
-                .view_change => {
-                    if (self.do_view_change_quorum) {
-                        assert(self.primary_index(self.view) == self.replica);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                },
-                .normal => return true,
+                .view_change, .normal => return true,
                 else => return false,
             }
         }
@@ -7618,7 +7580,11 @@ pub fn ReplicaType(
             assert(next < self.node_count);
             if (self.standby()) assert(next >= self.replica_count);
 
-            log.debug("{}: replicate: replicating to replica {}", .{ self.replica, next });
+            log.debug("{}: replicate: replicating op={} to replica {}", .{
+                self.replica,
+                message.header.op,
+                next,
+            });
             self.send_message_to_replica(next, message);
         }
 
@@ -9186,7 +9152,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
             self.do_view_change_message_timeout.start();
-            self.repair_timeout.stop();
+            self.repair_timeout.start();
             self.repair_sync_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
@@ -9992,8 +9958,6 @@ pub fn ReplicaType(
             trigger: Journal.Write.Trigger,
         ) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(self.status == .normal or self.primary_index(self.view) == self.replica);
-            assert(self.status == .normal or self.do_view_change_quorum);
             assert(message.base().references > 0);
             assert(message.header.command == .prepare);
             assert(message.header.operation != .reserved);
