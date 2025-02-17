@@ -77,6 +77,9 @@ amount_max = (2 ** 128) - 1
 class InitError(Exception):
     pass
 
+class ClientClosedError(Exception):
+    pass
+
 class PacketError(Exception):
     pass
 
@@ -87,7 +90,7 @@ class Client:
 
     def __init__(self, cluster_id: int, replica_addresses: str):
         self._client_key = Client._counter.increment()
-        self._client = bindings.Client()
+        self._client = bindings.CClient()
 
         self._inflight_packets: dict[int, InflightPacket] = {}
 
@@ -104,7 +107,7 @@ class Client:
             self._client_key,
             self._c_on_completion
         )
-        if init_status != bindings.Status.SUCCESS:
+        if init_status != bindings.InitStatus.SUCCESS:
             raise InitError(init_status)
 
         Client._clients[self._client_key] = self
@@ -134,19 +137,18 @@ class Client:
             c_result_type=c_result_type)
 
     def close(self):
-        bindings.tb_client_deinit(self._client)
+        bindings.tb_client_deinit(ctypes.byref(self._client))
         tb_assert(self._client is not None)
         tb_assert(len(self._inflight_packets) == 0)
         del Client._clients[self._client_key]
 
     @staticmethod
     @bindings.OnCompletion
-    def _c_on_completion(completion_ctx, tb_client, packet, timestamp, bytes_ptr, len_):
+    def _c_on_completion(completion_ctx, packet, timestamp, bytes_ptr, len_):
         """
         Invoked in a separate thread
         """
         self: Client = Client._clients[completion_ctx]
-        tb_assert(self._client.value == tb_client)
 
         packet = ctypes.cast(packet, ctypes.POINTER(bindings.CPacket))
         inflight_packet = self._inflight_packets[packet[0].user_data]
@@ -193,10 +195,14 @@ class ClientSync(Client, bindings.StateMachineMixin):
         inflight_packet.on_completion = self._on_completion
         inflight_packet.on_completion_context = CompletionContextSync(event=threading.Event())
 
-        bindings.tb_client_submit(self._client, ctypes.byref(inflight_packet.packet))
-        inflight_packet.on_completion_context.event.wait()
+        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
+        if client_state == bindings.ClientStatus.OK:
+            inflight_packet.on_completion_context.event.wait()
 
         del self._inflight_packets[inflight_packet.packet.user_data]
+
+        if client_state == bindings.ClientStatus.INVALID:
+            raise ClientClosedError()
 
         if isinstance(inflight_packet.response, Exception):
             raise inflight_packet.response
@@ -230,10 +236,14 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
             event=asyncio.Event()
         )
 
-        bindings.tb_client_submit(self._client, ctypes.byref(inflight_packet.packet))
-        await inflight_packet.on_completion_context.event.wait()
+        client_state = bindings.tb_client_submit(ctypes.byref(self._client), ctypes.byref(inflight_packet.packet))
+        if client_state == bindings.ClientStatus.OK:
+            await inflight_packet.on_completion_context.event.wait()
 
         del self._inflight_packets[inflight_packet.packet.user_data]
+
+        if client_state == bindings.ClientStatus.INVALID:
+            raise ClientClosedError()
 
         if isinstance(inflight_packet.response, Exception):
             raise inflight_packet.response
@@ -244,10 +254,10 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
 @bindings.LogHandler
 def log_handler(level_zig, message_ptr, message_len):
     level_python = {
-        0: logging.ERROR,
-        1: logging.WARNING,
-        2: logging.INFO,
-        3: logging.DEBUG,
+        bindings.LogLevel.ERR: logging.ERROR,
+        bindings.LogLevel.WARN: logging.WARNING,
+        bindings.LogLevel.INFO: logging.INFO,
+        bindings.LogLevel.DEBUG: logging.DEBUG,
     }[level_zig]
     logger.log(level_python, ctypes.string_at(message_ptr, message_len).decode("utf-8"))
 

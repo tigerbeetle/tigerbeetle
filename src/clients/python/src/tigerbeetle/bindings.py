@@ -35,9 +35,7 @@ class PacketStatus(enum.IntEnum):
     INVALID_DATA_SIZE = 7
 
 
-Client = ctypes.c_void_p
-
-class Status(enum.IntEnum):
+class InitStatus(enum.IntEnum):
     SUCCESS = 0
     UNEXPECTED = 1
     OUT_OF_MEMORY = 2
@@ -45,6 +43,18 @@ class Status(enum.IntEnum):
     ADDRESS_LIMIT_EXCEEDED = 4
     SYSTEM_RESOURCES = 5
     NETWORK_SUBSYSTEM = 6
+
+
+class ClientStatus(enum.IntEnum):
+    OK = 0
+    INVALID = 1
+
+
+class LogLevel(enum.IntEnum):
+    ERR = 0
+    WARN = 1
+    INFO = 2
+    DEBUG = 3
 
 
 class RegisterLogCallbackStatus(enum.IntEnum):
@@ -293,6 +303,17 @@ CPacket._fields_ = [ # noqa: SLF001
     ("operation", ctypes.c_uint8),
     ("status", ctypes.c_uint8),
     ("reserved", ctypes.c_uint8 * 32),
+]
+
+
+class CClient(ctypes.Structure):
+    @classmethod
+    def from_param(cls, obj):
+        return cls(
+        )
+
+CClient._fields_ = [ # noqa: SLF001
+    ("reserved", ctypes.c_uint64 * 4),
 ]
 
 
@@ -608,22 +629,22 @@ CQueryFilter._fields_ = [ # noqa: SLF001
 
 
 # Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
-OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Client, ctypes.POINTER(CPacket),
+OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CPacket),
                                 ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
-LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint8, ctypes.c_void_p, ctypes.c_uint)
+LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
 
 # Initialize a new TigerBeetle client which connects to the addresses provided and
 # completes submitted packets by invoking the callback with the given context.
 tb_client_init = tbclient.tb_client_init
-tb_client_init.restype = Status
-tb_client_init.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+tb_client_init.restype = InitStatus
+tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
                            ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
                            OnCompletion]
 
 # Initialize a new TigerBeetle client which echos back any data submitted.
 tb_client_init_echo = tbclient.tb_client_init_echo
-tb_client_init_echo.restype = Status
-tb_client_init_echo.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+tb_client_init_echo.restype = InitStatus
+tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
                                 ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
                                 OnCompletion]
 
@@ -631,15 +652,15 @@ tb_client_init_echo.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_
 # `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
 # It is undefined behavior to use any functions on the client once deinit is called.
 tb_client_deinit = tbclient.tb_client_deinit
-tb_client_deinit.restype = None
-tb_client_deinit.argtypes = [Client]
+tb_client_deinit.restype = ClientStatus
+tb_client_deinit.argtypes = [ctypes.POINTER(CClient)]
 
 # Submit a packet with its operation, data, and data_size fields set.
 # Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
 # packet on the `tb_client` thread (separate from caller's thread).
 tb_client_submit = tbclient.tb_client_submit
-tb_client_submit.restype = None
-tb_client_submit.argtypes = [Client, ctypes.POINTER(CPacket)]
+tb_client_submit.restype = ClientStatus
+tb_client_submit.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(CPacket)]
 
 tb_client_register_log_callback = tbclient.tb_client_register_log_callback
 tb_client_register_log_callback.restype = RegisterLogCallbackStatus
