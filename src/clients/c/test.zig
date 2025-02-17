@@ -3,12 +3,8 @@ const assert = std.debug.assert;
 
 const testing = std.testing;
 
-const c = @cImport({
-    _ = @import("../../tb_client_exports.zig"); // Needed for the @export()'ed C ffi functions.
-    @cInclude("tb_client.h");
-});
-
-const stdx = @import("../../stdx.zig");
+const tb_client = @import("tb_client.zig");
+const stdx = tb_client.vsr.stdx;
 const constants = @import("../../constants.zig");
 
 const Mutex = std.Thread.Mutex;
@@ -19,13 +15,12 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
         const RequestContext = @This();
 
         completion: *Completion,
-        packet: c.tb_packet_t,
+        packet: tb_client.Packet,
         sent_data: [request_size_max]u8 = undefined,
         sent_data_size: u32,
         reply: ?struct {
             tb_context: usize,
-            tb_client: c.tb_client_t,
-            tb_packet: *c.tb_packet_t,
+            tb_packet: *tb_client.Packet,
             timestamp: u64,
             result: ?[request_size_max]u8,
             result_len: u32,
@@ -33,10 +28,9 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
 
         pub fn on_complete(
             tb_context: usize,
-            tb_client: c.tb_client_t,
-            tb_packet: [*c]c.tb_packet_t,
+            tb_packet: *tb_client.Packet,
             timestamp: u64,
-            result_ptr: [*c]const u8,
+            result_ptr: ?[*]const u8,
             result_len: u32,
         ) callconv(.C) void {
             var self: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
@@ -44,7 +38,6 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
 
             self.reply = .{
                 .tb_context = tb_context,
-                .tb_client = tb_client,
                 .tb_packet = tb_packet,
                 .timestamp = timestamp,
                 .result = if (result_ptr != null and result_len > 0) blk: {
@@ -116,30 +109,28 @@ test "u128 consistency test" {
 test "c_client echo" {
     // Using the create_accounts operation for this test.
     const RequestContext = RequestContextType(constants.message_body_size_max);
-    const create_accounts_operation: u8 = c.TB_OPERATION_CREATE_ACCOUNTS;
-    const event_size = @sizeOf(c.tb_account_t);
+    const create_accounts_operation: u8 = @intFromEnum(tb_client.Operation.create_accounts);
+    const event_size = @sizeOf(tb_client.exports.tb_account_t);
     const event_request_max = @divFloor(constants.message_body_size_max, event_size);
 
     // Initializing an echo client for testing purposes.
     // We ensure that the retry mechanism is being tested
     // by allowing more simultaneous packets than "client_request_queue_max".
-    var tb_client: c.tb_client_t = undefined;
+    var client: tb_client.ClientInterface = undefined;
     const cluster_id: u128 = 0;
     const address = "3000";
     const concurrency_max: u32 = constants.client_request_queue_max * 2;
     const tb_context: usize = 42;
-    const result = c.tb_client_init_echo(
-        &tb_client,
-        std.mem.asBytes(&cluster_id),
+    try tb_client.init_echo(
+        testing.allocator,
+        &client,
+        cluster_id,
         address,
-        @intCast(address.len),
         tb_context,
         RequestContext.on_complete,
     );
 
-    try testing.expectEqual(@as(c_uint, c.TB_STATUS_SUCCESS), result);
-    defer c.tb_client_deinit(tb_client);
-
+    defer client.deinit() catch unreachable;
     var prng = std.rand.DefaultPrng.init(tb_context);
 
     const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
@@ -171,9 +162,9 @@ test "c_client echo" {
             packet.data = &request.sent_data;
             packet.data_size = request.sent_data_size;
             packet.tag = 0;
-            packet.status = c.TB_PACKET_OK;
+            packet.status = .ok;
 
-            c.tb_client_submit(tb_client, packet);
+            try client.submit(packet);
         }
 
         // Waiting until the c_client thread has processed all submitted requests:
@@ -183,8 +174,7 @@ test "c_client echo" {
         for (requests) |*request| {
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
-            try testing.expectEqual(tb_client, request.reply.?.tb_client);
-            try testing.expectEqual(c.TB_PACKET_OK, request.packet.status);
+            try testing.expectEqual(tb_client.PacketStatus.ok, request.packet.status);
             try testing.expectEqual(
                 @intFromPtr(&request.packet),
                 @intFromPtr(request.reply.?.tb_packet),
@@ -199,79 +189,122 @@ test "c_client echo" {
     }
 }
 
-// Asserts the validation rules associated with the "TB_STATUS" enum.
-test "c_client tb_status" {
+// Asserts the validation rules associated with the `init*` functions.
+test "tb_client init" {
     const assert_status = struct {
         pub fn action(
             addresses: []const u8,
-            expected_status: c_uint,
+            expected: tb_client.InitError!void,
         ) !void {
-            var tb_client: c.tb_client_t = undefined;
+            var client_out: tb_client.ClientInterface = undefined;
             const cluster_id: u128 = 0;
             const tb_context: usize = 0;
-            const result = c.tb_client_init_echo(
-                &tb_client,
-                std.mem.asBytes(&cluster_id),
-                addresses.ptr,
-                @intCast(addresses.len),
+            const result = tb_client.init_echo(
+                testing.allocator,
+                &client_out,
+                cluster_id,
+                addresses,
                 tb_context,
                 RequestContextType(0).on_complete,
             );
-            defer if (result == c.TB_STATUS_SUCCESS) c.tb_client_deinit(tb_client);
-
-            try testing.expectEqual(expected_status, result);
+            defer if (!std.meta.isError(result)) client_out.deinit() catch unreachable;
+            try testing.expectEqual(expected, result);
         }
     }.action;
 
     // Valid addresses should return TB_STATUS_SUCCESS:
-    try assert_status("3000", c.TB_STATUS_SUCCESS);
-    try assert_status("127.0.0.1", c.TB_STATUS_SUCCESS);
-    try assert_status("127.0.0.1:3000", c.TB_STATUS_SUCCESS);
-    try assert_status("3000,3001,3002", c.TB_STATUS_SUCCESS);
-    try assert_status("127.0.0.1,127.0.0.2,172.0.0.3", c.TB_STATUS_SUCCESS);
-    try assert_status("127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", c.TB_STATUS_SUCCESS);
+    try assert_status("3000", {});
+    try assert_status("127.0.0.1", {});
+    try assert_status("127.0.0.1:3000", {});
+    try assert_status("3000,3001,3002", {});
+    try assert_status("127.0.0.1,127.0.0.2,172.0.0.3", {});
+    try assert_status("127.0.0.1:3000,127.0.0.1:3002,127.0.0.1:3003", {});
 
     // Invalid or empty address should return "TB_STATUS_ADDRESS_INVALID":
-    try assert_status("invalid", c.TB_STATUS_ADDRESS_INVALID);
-    try assert_status("", c.TB_STATUS_ADDRESS_INVALID);
+    try assert_status("invalid", error.AddressInvalid);
+    try assert_status("", error.AddressInvalid);
 
     // More addresses than "replicas_max" should return "TB_STATUS_ADDRESS_LIMIT_EXCEEDED":
     try assert_status(
         ("3000," ** constants.replicas_max) ++ "3001",
-        c.TB_STATUS_ADDRESS_LIMIT_EXCEEDED,
+        error.AddressLimitExceeded,
     );
 
     // All other status are not testable.
 }
 
-// Asserts the validation rules associated with the "TB_PACKET_STATUS" enum.
-test "c_client tb_packet_status" {
-    const RequestContext = RequestContextType(constants.message_body_size_max);
-
-    var tb_client: c.tb_client_t = undefined;
+// Asserts the validation rules associated with the client status.
+test "tb_client client status" {
+    const RequestContext = RequestContextType(0);
+    var client: tb_client.ClientInterface = undefined;
     const cluster_id: u128 = 0;
-    const address = "3000";
-    const tb_context: usize = 42;
-    const result = c.tb_client_init_echo(
-        &tb_client,
-        std.mem.asBytes(&cluster_id),
-        address,
-        @intCast(address.len),
+    const addresses = "3000";
+    const tb_context: usize = 0;
+    try tb_client.init_echo(
+        testing.allocator,
+        &client,
+        cluster_id,
+        addresses,
         tb_context,
         RequestContext.on_complete,
     );
+    errdefer client.deinit() catch unreachable;
 
-    try testing.expectEqual(@as(c_uint, c.TB_STATUS_SUCCESS), result);
-    defer c.tb_client_deinit(tb_client);
+    var completion = Completion{ .pending = 1 };
+    var request = RequestContext{
+        .packet = undefined,
+        .completion = &completion,
+        .sent_data_size = 0,
+    };
+
+    const packet = &request.packet;
+    packet.operation = @intFromEnum(tb_client.Operation.create_accounts);
+    packet.user_data = &request;
+    packet.data = null;
+    packet.data_size = 0;
+    packet.tag = 0;
+    packet.status = .ok;
+
+    // Sanity test to verify that the client is working.
+    try client.submit(packet);
+    completion.wait_pending();
+
+    // Deinit the client.
+    try client.deinit();
+
+    // Cannot submit after deinit.
+    try testing.expectError(error.ClientInvalid, client.submit(packet));
+
+    // Multiple deinit calls are safe.
+    try testing.expectError(error.ClientInvalid, client.deinit());
+}
+
+// Asserts the validation rules associated with the "PacketStatus" enum.
+test "tb_client PacketStatus" {
+    const RequestContext = RequestContextType(constants.message_body_size_max);
+
+    var client_out: tb_client.ClientInterface = undefined;
+    const cluster_id: u128 = 0;
+    const addresses = "3000";
+    const tb_context: usize = 42;
+    try tb_client.init_echo(
+        testing.allocator,
+        &client_out,
+        cluster_id,
+        addresses,
+        tb_context,
+        RequestContext.on_complete,
+    );
+    defer client_out.deinit() catch unreachable;
 
     const assert_result = struct {
         // Asserts if the packet's status matches the expected status
         // for a given operation and request_size.
         pub fn action(
-            client: c.tb_client_t,
+            client: *tb_client.ClientInterface,
             operation: u8,
             request_size: u32,
-            tb_packet_status_expected: c_int,
+            packet_status_expected: tb_client.PacketStatus,
         ) !void {
             var completion = Completion{ .pending = 1 };
             var request = RequestContext{
@@ -286,95 +319,94 @@ test "c_client tb_packet_status" {
             packet.data = &request.sent_data;
             packet.data_size = request_size;
             packet.tag = 0;
-            packet.status = c.TB_PACKET_OK;
+            packet.status = .ok;
 
-            c.tb_client_submit(client, packet);
+            try client.submit(packet);
 
             completion.wait_pending();
 
             try testing.expect(request.reply != null);
             try testing.expectEqual(tb_context, request.reply.?.tb_context);
-            try testing.expectEqual(client, request.reply.?.tb_client);
             try testing.expectEqual(
                 @intFromPtr(&request.packet),
                 @intFromPtr(request.reply.?.tb_packet),
             );
-            try testing.expectEqual(tb_packet_status_expected, request.packet.status);
+            try testing.expectEqual(packet_status_expected, request.packet.status);
         }
     }.action;
 
     // Messages larger than constants.message_body_size_max should return "too_much_data":
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_TRANSFERS,
-        constants.message_body_size_max + @sizeOf(c.tb_transfer_t),
-        c.TB_PACKET_TOO_MUCH_DATA,
+        &client_out,
+        @intFromEnum(tb_client.Operation.create_transfers),
+        constants.message_body_size_max + @sizeOf(tb_client.exports.tb_transfer_t),
+        .too_much_data,
     );
 
     // All reserved and unknown operations should return "invalid_operation":
     try assert_result(
-        tb_client,
+        &client_out,
         0,
         @sizeOf(u128),
-        c.TB_PACKET_INVALID_OPERATION,
+        .invalid_operation,
     );
     try assert_result(
-        tb_client,
+        &client_out,
         1,
         @sizeOf(u128),
-        c.TB_PACKET_INVALID_OPERATION,
+        .invalid_operation,
     );
     try assert_result(
-        tb_client,
-        2,
-        @sizeOf(u128),
-        c.TB_PACKET_INVALID_OPERATION,
-    );
-    try assert_result(
-        tb_client,
+        &client_out,
         99,
         @sizeOf(u128),
-        c.TB_PACKET_INVALID_OPERATION,
+        .invalid_operation,
+    );
+    try assert_result(
+        &client_out,
+        254,
+        @sizeOf(u128),
+        .invalid_operation,
     );
 
     // Messages not a multiple of the event size
     // should return "invalid_data_size":
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_TRANSFERS,
-        @sizeOf(c.tb_transfer_t) - 1,
-        c.TB_PACKET_INVALID_DATA_SIZE,
+        &client_out,
+        @intFromEnum(tb_client.Operation.create_transfers),
+        @sizeOf(tb_client.exports.tb_transfer_t) - 1,
+        .invalid_data_size,
     );
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_LOOKUP_TRANSFERS,
+        &client_out,
+        @intFromEnum(tb_client.Operation.lookup_transfers),
         @sizeOf(u128) + 1,
-        c.TB_PACKET_INVALID_DATA_SIZE,
+        .invalid_data_size,
     );
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_LOOKUP_ACCOUNTS,
+        &client_out,
+        @intFromEnum(tb_client.Operation.lookup_accounts),
         @sizeOf(u128) * 2.5,
-        c.TB_PACKET_INVALID_DATA_SIZE,
+        .invalid_data_size,
     );
 
     // Messages with zero length or multiple of the event size are valid.
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_ACCOUNTS,
+        &client_out,
+        @intFromEnum(tb_client.Operation.create_accounts),
         0,
-        c.TB_PACKET_OK,
+        .ok,
     );
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_ACCOUNTS,
-        @sizeOf(c.tb_account_t),
-        c.TB_PACKET_OK,
+        &client_out,
+        @intFromEnum(tb_client.Operation.create_accounts),
+        @sizeOf(tb_client.exports.tb_account_t),
+        .ok,
     );
     try assert_result(
-        tb_client,
-        c.TB_OPERATION_CREATE_ACCOUNTS,
-        @sizeOf(c.tb_account_t) * 2,
-        c.TB_PACKET_OK,
+        &client_out,
+        @intFromEnum(tb_client.Operation.create_accounts),
+        @sizeOf(tb_client.exports.tb_account_t) * 2,
+        .ok,
     );
 }
