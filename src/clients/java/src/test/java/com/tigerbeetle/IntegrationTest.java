@@ -1228,7 +1228,7 @@ public class IntegrationTest {
 
     /**
      * This test asserts that submit a request after the client was closed will fail with
-     * IllegalStateException.
+     * ClientClosedException.
      */
     @Test
     public void testClose() throws Throwable {
@@ -1264,7 +1264,7 @@ public class IntegrationTest {
             assert false;
 
         } catch (Throwable any) {
-            assertEquals(IllegalStateException.class, any.getClass());
+            assertEquals(ClientClosedException.class, any.getClass());
         }
     }
 
