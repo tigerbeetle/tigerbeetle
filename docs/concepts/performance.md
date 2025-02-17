@@ -1,65 +1,60 @@
 # Performance
 
-TigerBeetle provides more performance than a general-purpose relational database such as MySQL or an
-in-memory database such as Redis:
+How, exactly, TigerBeetle manages to be so fast?
 
-- TigerBeetle **uses small, simple fixed-size data structures** (accounts and transfers) and a
-  tightly scoped domain.
+## It's All About The Interface
 
-- TigerBeetle **uses multiple Log-Structured Merge (LSM) Trees** for storing objects and indices.
-  This data structure is highly optimized for write-heavy workloads like Online Transaction
-  Processing (OLTP). TigerBeetle squeezes even more performance out of LSM trees by using multiple
-  trees, each storing separate types of homogeneous data.
+The key is that TigerBeetle designed specifically for [OLTP](./oltp.md) workloads, as opposed to
+OLGP. The prevailing paradigm for OLGP is interactive transactions, where business-logic lives in
+the application, and the job of the database is to send the data to the application, holding the
+locks while the data is being processed. This works for mixed read-write workload with low
+contention, but fails for highly-contended OLTP workloads --- locks over the network are very
+expensive!
 
-- TigerBeetle **performs all balance tracking logic in the database**. This is a paradigm shift
-  where we move the code once to the data, not the data back and forth to the code in the critical
-  path. This eliminates the need for complex caching logic outside the database. The “Accounting”
-  business logic is built into TigerBeetle so that you can **keep your application layer simple and
-  completely stateless**.
+With TigerBeetle, **all the logic lives inside the database**, obviating the need for locking. Not
+only is this very fast, it is also more convenient --- the application can speak
+[Debit/Credit](./debit-credit.md) directly, it doesn't need to translate the language of business to
+SQL.
 
-- TigerBeetle **supports batching by design**. You can batch all the transfer prepares or commits
-  that you receive in a fixed 10ms window (or in a dynamic 1ms through 10ms window according to
-  load) and then send them all in a single network request to the database. This enables
-  low-overhead networking, large sequential disk write patterns and amortized fsync and consensus
-  across hundreds and thousands of transfers.
+## Batching, Batching, Batching
 
-> Everything is a batch. It's your choice whether a batch contains 100 transfers or 10,000 transfers
-> but our measurements show that **latency is _less_ where batch sizes are larger, thanks to
-> Little's Law** (e.g. 50ms for a batch of a hundred transfers vs 20ms for a batch of ten thousand
-> transfers). TigerBeetle is able to amortize the cost of I/O to achieve lower latency, even for
-> fairly large batch sizes, by eliminating the cost of queueing delay incurred by small batches.
+On a busy day in a busy city, taking subway is faster than using a car. On empty streets, a personal
+sports car gives you the best latency, but, when the load and contention increases, due to
+**Little's law**, both latency and throughput become abysmal.
 
-- If your system is not under load, TigerBeetle also **optimizes the latency of small batches**.
-  After copying from the kernel's TCP receive buffer (TigerBeetle does not do user-space TCP),
-  TigerBeetle **does zero-copy Direct I/O** from network protocol to disk, and then to state machine
-  and back, to reduce memory pressure and L1-L3 cache pollution.
+TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
+transactions, 8k apiece. Although TigerBeetle is a replicated database using consensus algorithm,
+the cost of replications is paid only once per batch, which means that TigerBeetle runs not much
+slower than an in-memory hashmap, all the while providing extreme durability and availability.
 
-- TigerBeetle **uses io_uring for zero-syscall networking and storage I/O**. The cost of a syscall
-  in terms of context switches adds up quickly for a few thousand transfers. (You can read about the
-  security of using io_uring [here](./safety.md#io_uring-security).)
+What's more, under lite load the batches automatically become smaller, trading unnecessary
+throughput for better latency.
 
-- TigerBeetle **does zero-deserialization** by using fixed-size data structures that are optimized
-  for cache line alignment to **minimize L1-L3 cache misses**.
+## Extreme Engineering
 
-- TigerBeetle **takes advantage of Heidi Howard's Flexible Quorums** to reduce the cost of
-  **synchronous replication to one (or two) remote replicas at most** (in addition to the leader)
-  with **asynchronous replication** between the remaining followers. This improves write
-  availability without sacrificing strict serializability or durability. This also reduces server
-  deployment cost by as much as 20% because a 4-node cluster with Flexible Quorums can now provide
-  the same `f=2` guarantee for the replication quorum as a 5-node cluster.
+Debit/Credit fixes inefficiency in the interface, pervasive batching amortizes costs, but, to really
+hit performance targets, solid engineering is required at every level of the stack.
 
-> ["The major availability breakdowns and performance anomalies we see in cloud environments tend to
-> be caused by subtle underlying faults, i.e. gray failure (slowly failing hardware) rather than
-> fail-stop
-> failure."](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
+TigerBeetle is built fully from scratch, without using any dependencies, to make sure that all the
+layers are co-designed for the purposes of OLTP.
 
-- TigerBeetle **routes around transient gray failure latency spikes**. For example, if a disk write
-  that typically takes 4ms starts taking 4 seconds because the disk is slowly failing, TigerBeetle
-  will use cluster redundancy to mask the gray failure automatically without the user seeing any
-  4-second latency spike. This is a relatively new performance technique in the literature known as
-  "tail tolerance".
+TigerBeetle is written in Zig --- a systems programming language which doesn't use garbage
+collection and is designed for writing fast code.
 
-## Single-Core By Design
+Every data structure is hand-crafted with the CPU in mind: a transfer object is 128 bytes in size,
+cache-line aligned. Executing a batch of transfers is just one tight CPU loop!
+
+TigerBeetle allocates all the memory statically: it never runs out of memory, it never stalls due to
+a GC pause or contention on allocator's mutex, and it never fragments the memory.
+
+TigerBeetle is designed for io_uring --- a new Linux kernel interface for zero syscall networking
+and storage I/O.
+
+These and other performance rules are captured in
+[TIGER_STYLE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md) --- the
+secret recipe that keeps TigerBeetle fast and safe.
+
+## Single Threaded By Design
 
 TigerBeetle uses a single core by design and uses a single leader node to process events. Adding
 more nodes can therefore increase reliability but not throughput.
@@ -73,9 +68,22 @@ For more details on when single-threaded implementations of algorithms outperfor
 implementations, see ["Scalability! But at what
 COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf).
 
+## Performance = Flexibility
+
+Is it _really_ necessary to go to such great lengths in the name of performance? It of course
+depends on a particular use-case, but it's worth keeping in mind that higher performance can unlock
+new use-cases. An OLGP database might be enough to do nightly settlement, but with OLTP real-time
+settlement is a no-brainer. If a transaction system just hits its throughput target, that means that
+every unexpected delay or an ops accident lead to missed transactions. If a system operates at one
+tenth of capacity, this gives a lot of headroom for operators to deal with unexpected.
+
+Finally, it is always helpful to think about the future. The future is hard to predict (even the
+_present_ is hard to wrap your head around!), but the _option_ to handle significantly more load on
+a short notice greatly expands your options.
+
 ## Next: Safety
 
-Performance can get you very far, but it is useless if the result is wrong. Transaction
-processing also requires strong safety guarantees to ensure that data cannot be lost, and high
-availability to ensure that money is not lost due to database downtime. Let's look at TigerBeetle
-[safety](./safety.md).
+Performance can get you very far very fast, but it is useless if the result is wrong. Business
+transaction processing also requires **strong safety guarantees**, to ensure that data cannot be
+lost, and **high availability** to ensure that money is not lost due to database downtime. Let's
+look at how TigerBeetle ensures [safety](./safety.md).
