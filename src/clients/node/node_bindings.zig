@@ -77,7 +77,7 @@ const type_mappings = .{
         .hidden_fields = &.{"reserved"},
         .docs_link = "reference/account-balances#",
     } },
-    .{ tb_client.tb_operation_t, TypeMapping{
+    .{ tb_client.Operation, TypeMapping{
         .name = "Operation",
         .hidden_fields = &.{ "reserved", "root", "register" },
     } },
