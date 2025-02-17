@@ -10,7 +10,10 @@ namespace TigerBeetle;
 
 internal sealed class NativeClient : IDisposable
 {
-    private readonly GCHandle clientHandle;
+    /// <summary>
+    /// Pinned single-element array, created with `GC.AllocateUninitializedArray`.
+    /// </summary>
+    private readonly TBClient[] tb_client;
 
     private unsafe delegate InitializationStatus InitFunction(
                 TBClient* out_client,
@@ -21,16 +24,10 @@ internal sealed class NativeClient : IDisposable
                 delegate* unmanaged[Cdecl]<IntPtr, TBPacket*, ulong, byte*, uint, void> completion_callback
             );
 
-    private NativeClient(GCHandle clientHandle)
+    private NativeClient(TBClient[] tb_client)
     {
-        this.clientHandle = clientHandle;
-    }
-
-    ~NativeClient()
-    {
-        Dispose();
-        // It must be released during GC.
-        clientHandle.Free();
+        AssertTrue(tb_client.Length == 1);
+        this.tb_client = tb_client;
     }
 
     private static byte[] GetBytes(string[] addresses)
@@ -60,11 +57,15 @@ internal sealed class NativeClient : IDisposable
         var addressesBytes = GetBytes(addresses);
         unsafe
         {
-            var clientHandle = GCHandle.Alloc(new TBClient(), GCHandleType.Pinned);
+            // Creating a pinned, single-item array to hold the client handle.
+            // Although pinned, this memory will still be freed by the GC when
+            // no longer referenced.
+            var tb_client = GC.AllocateUninitializedArray<TBClient>(1, pinned: true);
+            fixed (TBClient* client = &tb_client[0])
             fixed (byte* addressPtr = addressesBytes)
             {
                 var status = initFunction(
-                    (TBClient*)clientHandle.AddrOfPinnedObject(),
+                    client,
                     &clusterID,
                     addressPtr,
                     (uint)addressesBytes.Length - 1,
@@ -74,11 +75,10 @@ internal sealed class NativeClient : IDisposable
 
                 if (status != InitializationStatus.Success)
                 {
-                    clientHandle.Free();
                     throw new InitializationException(status);
                 }
 
-                return new NativeClient(clientHandle);
+                return new NativeClient(tb_client);
             }
         }
     }
@@ -119,18 +119,22 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            var status = tb_client_submit((TBClient*)clientHandle.AddrOfPinnedObject(), packet);
-            ObjectDisposedException.ThrowIf(status == ClientStatus.Invalid, this);
+            fixed (TBClient* client = &tb_client[0])
+            {
+                var status = tb_client_submit(client, packet);
+                ObjectDisposedException.ThrowIf(status == ClientStatus.Invalid, this);
+            }
         }
     }
 
     public void Dispose()
     {
-        // Do not call `GC.SuppressFinalize` during `Dispose`.
-        // The `client_handle` will be freed by the destructor.
         unsafe
         {
-            _ = tb_client_deinit((TBClient*)clientHandle.AddrOfPinnedObject());
+            fixed (TBClient* client = &tb_client[0])
+            {
+                _ = tb_client_deinit(client);
+            }
         }
     }
 
