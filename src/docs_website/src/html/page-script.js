@@ -38,38 +38,16 @@ collapseButton.addEventListener("click", () => document.body.classList.add("side
 const expandButton = document.querySelector(".expand-button");
 expandButton.addEventListener("click", () => document.body.classList.remove("sidenav-collapsed"));
 
-const navSide = document.querySelector("nav.side");
-const details = [...navSide.querySelectorAll("details")];
-
 const menuButton = document.querySelector(".menu-button");
 menuButton.addEventListener("click", () => {
   document.body.classList.toggle("mobile-expanded");
   if (leftPane.classList.contains("search-active")) closeSearch();
 });
 
-// Restore and save the state of the side navigation
-const navSideState = JSON.parse(localStorage.getItem("navSideState"));
-if (navSideState) {
-  leftPane.style.width = navSideState.width;
-  if (navSideState.collapsed) document.body.classList.add("sidenav-collapsed");
-  navSideState.expanded.forEach((expanded, i) => {
-    if (i < details.length) details[i].open = expanded
-  });
-  leftPane.scrollTop = navSideState.scrollTop;
-}
-window.addEventListener("beforeunload", () => {
-  const navSideState = {
-    width: leftPane.style.width,
-    collapsed: document.body.classList.contains("sidenav-collapsed"),
-    expanded: details.map(detail => detail.open),
-    scrollTop: leftPane.scrollTop,
-  };
-  localStorage.setItem("navSideState", JSON.stringify(navSideState));
-});
-
 function syncSideNavWithLocation() {
   const target = document.querySelector("nav.side .target");
   if (target) target.classList.remove("target");
+  document.querySelectorAll("nav.side details").forEach(details => details.open = false);
 
   const path = location.pathname;
   if (path.length > 1) {

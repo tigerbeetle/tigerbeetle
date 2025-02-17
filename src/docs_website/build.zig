@@ -41,6 +41,16 @@ pub fn build(b: *std.Build) !void {
     const website = Website.init(b, url_prefix, pandoc_bin);
     try docs.build(b, content, website);
 
+    const clean_zigout_step = b.addRemoveDirTree("zig-out");
+
+    const install_content_step = b.addInstallDirectory(.{
+        .source_dir = content.getDirectory(),
+        .install_dir = .prefix,
+        .install_subdir = ".",
+    });
+
+    install_content_step.step.dependOn(&clean_zigout_step.step);
+
     const service_worker_writer = b.addRunArtifact(b.addExecutable(.{
         .name = "service_worker_writer",
         .root_source_file = b.path("src/service_worker_writer.zig"),
@@ -58,11 +68,7 @@ pub fn build(b: *std.Build) !void {
     }));
     file_checker.addArg("zig-out");
 
-    file_checker.step.dependOn(&b.addInstallDirectory(.{
-        .source_dir = content.getDirectory(),
-        .install_dir = .prefix,
-        .install_subdir = ".",
-    }).step);
+    file_checker.step.dependOn(&install_content_step.step);
     file_checker.step.dependOn(&b.addInstallFile(service_worker, "service-worker.js").step);
 
     b.getInstallStep().dependOn(&file_checker.step);
