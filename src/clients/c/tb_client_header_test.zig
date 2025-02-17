@@ -1,8 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const tb_client = @import("tb_client.zig");
-const tb = tb_client.vsr.tigerbeetle;
+const exports = @import("tb_client.zig").exports;
 const c = @cImport(@cInclude("tb_client.h"));
 
 fn to_uppercase(comptime input: []const u8) []const u8 {
@@ -28,24 +27,27 @@ test "valid tb_client.h" {
     @setEvalBranchQuota(20_000);
 
     comptime for (.{
-        .{ tb.Account, "tb_account_t" },
-        .{ tb.Transfer, "tb_transfer_t" },
-        .{ tb.AccountFlags, "TB_ACCOUNT_FLAGS" },
-        .{ tb.TransferFlags, "TB_TRANSFER_FLAGS" },
-        .{ tb.CreateAccountResult, "TB_CREATE_ACCOUNT_RESULT" },
-        .{ tb.CreateTransferResult, "TB_CREATE_TRANSFER_RESULT" },
-        .{ tb.CreateAccountsResult, "tb_create_accounts_result_t" },
-        .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
-        .{ tb.AccountFilter, "tb_account_filter_t" },
-        .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
-        .{ tb.AccountBalance, "tb_account_balance_t" },
+        .{ exports.tb_account_t, "tb_account_t" },
+        .{ exports.tb_transfer_t, "tb_transfer_t" },
+        .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
+        .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
+        .{ exports.tb_create_account_result, "TB_CREATE_ACCOUNT_RESULT" },
+        .{ exports.tb_create_transfer_result, "TB_CREATE_TRANSFER_RESULT" },
+        .{ exports.tb_create_accounts_result_t, "tb_create_accounts_result_t" },
+        .{ exports.tb_create_transfers_result_t, "tb_create_transfers_result_t" },
+        .{ exports.tb_account_filter_t, "tb_account_filter_t" },
+        .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
+        .{ exports.tb_account_balance_t, "tb_account_balance_t" },
 
         .{ u128, "tb_uint128_t" },
-        .{ tb_client.tb_status_t, "TB_STATUS" },
-        .{ tb_client.tb_client_t, "tb_client_t" },
-        .{ tb_client.tb_packet_t, "tb_packet_t" },
-        .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-        .{ tb_client.tb_operation_t, "TB_OPERATION" },
+        .{ exports.tb_client_t, "tb_client_t" },
+        .{ exports.tb_packet_t, "tb_packet_t" },
+        .{ exports.tb_init_status, "TB_INIT_STATUS" },
+        .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
+        .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
+        .{ exports.tb_operation, "TB_OPERATION" },
+        .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
+        .{ exports.tb_log_level, "TB_LOG_LEVEL" },
     }) |c_export| {
         const ty: type = c_export[0];
         const c_type_name = @as([]const u8, c_export[1]);
@@ -98,6 +100,9 @@ test "valid tb_client.h" {
                 .@"extern" => {
                     // Ensure structs are effectively the same.
                     assert(@sizeOf(ty) == @sizeOf(c_type));
+                    if (@alignOf(ty) != @alignOf(c_type)) {
+                        @compileLog(ty, c_type);
+                    }
                     assert(@alignOf(ty) == @alignOf(c_type));
 
                     for (std.meta.fields(ty)) |field| {
