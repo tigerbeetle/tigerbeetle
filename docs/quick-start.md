@@ -99,15 +99,16 @@ transfers!
 
 ```console
 TigerBeetle CLI Client 0.0.1
-  Hit enter to run a command. Ctrl+D to exit.
+  Hit enter after a semicolon to run a command.
+  Ctrl+D to exit.
 
 Examples:
-  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700
-  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10
-  lookup_accounts id=1
-  lookup_accounts id=1, id=2
-  get_account_transfers account_id=1 flags=debits|credits
-  get_account_balances account_id=1 flags=debits|credits
+  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700;
+  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
+  lookup_accounts id=1;
+  lookup_accounts id=1, id=2;
+  get_account_transfers account_id=1 flags=debits|credits;
+  get_account_balances account_id=1 flags=debits|credits;
 ```
 
 ## 5. Create Accounts
@@ -115,7 +116,7 @@ Examples:
 In the REPL, create two accounts on the same ledger using the command:
 
 ```console
-create_accounts id=1 code=10 ledger=700, id=2 code=10 ledger=700
+create_accounts id=1 code=10 ledger=700, id=2 code=10 ledger=700;
 ```
 
 ## 6. Create a Transfer
@@ -123,7 +124,7 @@ create_accounts id=1 code=10 ledger=700, id=2 code=10 ledger=700
 Now create a transfer of `10` (of some amount/currency) between the two accounts.
 
 ```console
-create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10
+create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
 ```
 
 Now, the amount of `10` has been credited to account `2` and debited from account `1`.
@@ -133,7 +134,7 @@ Now, the amount of `10` has been credited to account `2` and debited from accoun
 Let's query TigerBeetle for these two accounts to verify the transfer we made!
 
 ```console
-lookup_accounts id=1, id=2
+lookup_accounts id=1, id=2;
 ```
 
 ```json

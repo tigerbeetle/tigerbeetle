@@ -492,15 +492,16 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         fn display_help(repl: *Repl) !void {
             try repl.terminal.print("TigerBeetle CLI Client {}\n" ++
-                \\  Hit enter to run a command. Ctrl+D to exit.
+                \\  Hit enter after a semicolon to run a command.
+                \\  Ctrl+D to exit.
                 \\
                 \\Examples:
-                \\  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700
-                \\  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10
-                \\  lookup_accounts id=1
-                \\  lookup_accounts id=1, id=2
-                \\  get_account_transfers account_id=1 flags=debits|credits
-                \\  get_account_balances account_id=1 flags=debits|credits
+                \\  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700;
+                \\  create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
+                \\  lookup_accounts id=1;
+                \\  lookup_accounts id=1, id=2;
+                \\  get_account_transfers account_id=1 flags=debits|credits;
+                \\  get_account_balances account_id=1 flags=debits|credits;
                 \\
                 \\
             , .{constants.semver});
