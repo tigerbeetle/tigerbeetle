@@ -21,7 +21,7 @@ const constants = vsr.constants;
 
 pub const std_options = .{
     .log_level = .debug,
-    .logFn = tb_client.Logging.application_logger,
+    .logFn = tb_client.exports.Logging.application_logger,
 };
 
 // Cached value for JS (null).
@@ -140,8 +140,14 @@ fn create(
         std.log.warn("Failed to release allocated thread-safe function on error.", .{});
     };
 
-    const client = tb_client.init(
+    const client = allocator.create(tb_client.ClientInterface) catch {
+        return translate.throw(env, "Failed to allocated the client interface.");
+    };
+    errdefer allocator.destroy(client);
+
+    tb_client.init(
         allocator,
+        client,
         cluster_id,
         addresses,
         @intFromPtr(completion_tsfn),
@@ -154,7 +160,7 @@ fn create(
         error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
         error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
     };
-    errdefer tb_client.deinit(client);
+    errdefer client.deinit() catch unreachable;
 
     return try translate.create_external(env, client);
 }
@@ -166,12 +172,17 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
-    defer tb_client.deinit(client);
+    const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
+    defer {
+        client.deinit() catch unreachable;
+        allocator.destroy(client);
+    }
 
-    const completion_ctx = tb_client.completion_context(client);
+    const completion_ctx = client.completion_context() catch |err| switch (err) {
+        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+    };
+
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
-
     if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
         return translate.throw(env, "Failed to release allocated thread-safe function on error.");
     }
@@ -189,7 +200,7 @@ fn request(
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
+    const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
 
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
@@ -227,18 +238,18 @@ fn request(
         .status = undefined,
     };
 
-    tb_client.submit(client, packet);
+    client.submit(packet) catch |err| switch (err) {
+        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+    };
 }
 
 fn on_completion(
     completion_ctx: usize,
-    client: tb_client.tb_client_t,
-    packet: *tb_client.tb_packet_t,
+    packet: *tb_client.Packet,
     timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
-    _ = client;
     _ = timestamp;
 
     switch (packet.status) {
@@ -300,7 +311,7 @@ fn on_completion_js(
     _ = unused_context;
 
     // Extract the remaining packet information from the packet before it's freed.
-    const packet: *tb_client.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
+    const packet: *tb_client.Packet = @ptrCast(@alignCast(packet_argument.?));
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
 
     // Decode the packet's Buffer results into an array then free the packet/Buffer.
@@ -489,7 +500,7 @@ fn BufferType(comptime op: Operation) type {
         const Result = StateMachine.ResultType(op);
 
         const body_align = @max(@alignOf(Event), @alignOf(Result));
-        const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.tb_packet_t), body_align);
+        const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.Packet), body_align);
 
         ptr: [*]u8,
         count: u32,
@@ -504,7 +515,7 @@ fn BufferType(comptime op: Operation) type {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
             }
 
-            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.Packet));
             const max_bytes = body_offset + body_size;
 
             const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
@@ -527,14 +538,14 @@ fn BufferType(comptime op: Operation) type {
                 @sizeOf(Result) * event_count(op, buffer.count),
             );
 
-            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.Packet));
             const max_bytes = body_offset + body_size;
 
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
         }
 
-        fn packet(buffer: Buffer) *tb_client.tb_packet_t {
+        fn packet(buffer: Buffer) *tb_client.Packet {
             return @alignCast(@ptrCast(buffer.ptr));
         }
 
