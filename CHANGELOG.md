@@ -2597,7 +2597,8 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1828](https://github.com/tigerbeetle/tigerbeetle/pull/1828)
 
-  Some of our comments had duplicate words - thanks @divdeploy for for noticing!
+  Some of our comments had duplicate words - thanks @divdeploy for
+  <!-- vale Vale.Repetition = NO -->for<!-- vale Vale.Repetition = YES --> noticing!
 
 ### TigerTracks 🎧
 
