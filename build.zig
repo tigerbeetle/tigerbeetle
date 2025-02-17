@@ -228,8 +228,6 @@ pub fn build(b: *std.Build) !void {
 
     // zig build test:jni
     try build_test_jni(b, build_steps.test_jni, .{
-        .vsr_module = vsr_module,
-        .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
     });
@@ -738,8 +736,6 @@ fn build_test_jni(
     b: *std.Build,
     step_test_jni: *std.Build.Step,
     options: struct {
-        vsr_module: *std.Build.Module,
-        vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
@@ -771,8 +767,6 @@ fn build_test_jni(
         .optimize = if (builtin.os.tag == .windows) .ReleaseFast else options.mode,
     });
     tests.linkLibC();
-    tests.root_module.addImport("vsr", options.vsr_module);
-    tests.root_module.addOptions("vsr_options", options.vsr_options);
 
     tests.linkSystemLibrary("jvm");
     tests.addLibraryPath(.{ .cwd_relative = libjvm_path });

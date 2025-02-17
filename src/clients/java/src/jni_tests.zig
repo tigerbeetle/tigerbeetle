@@ -8,8 +8,7 @@ const JavaVM = jni.JavaVM;
 const JNIEnv = jni.JNIEnv;
 
 test {
-    // Running the client tests.
-    _ = @import("client.zig");
+    _ = @import("jni_thread_cleaner.zig");
 }
 
 test "JNI: check jvm" {
