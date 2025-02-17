@@ -4,6 +4,7 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
+const exports = tb_client.exports;
 const assert = std.debug.assert;
 
 const TypeMapping = struct {
@@ -137,10 +138,14 @@ const type_mappings = .{
         .visibility = .internal,
         .private_fields = &.{"reserved"},
     } },
-    .{ tb_client.tb_status_t, TypeMapping{
+    .{ exports.tb_init_status, TypeMapping{
         .name = "InitializationStatus",
     } },
-    .{ tb_client.tb_packet_status_t, TypeMapping{
+    .{ exports.tb_client_status, TypeMapping{
+        .name = "ClientStatus",
+        .visibility = .internal,
+    } },
+    .{ exports.tb_packet_status, TypeMapping{
         .name = "PacketStatus",
     } },
 };
@@ -955,6 +960,26 @@ pub fn main() !void {
 
         try target_dir.writeFile(.{
             .sub_path = mapping.name ++ ".java",
+            .data = buffer.items,
+        });
+    }
+
+    {
+        var buffer = std.ArrayList(u8).init(allocator);
+        try buffer.writer().print(
+            \\package com.tigerbeetle;
+            \\
+            \\interface TBClient {{
+            \\    int SIZE = {};
+            \\    int ALIGNMENT = {};
+            \\}}
+            \\
+        , .{
+            @sizeOf(exports.tb_client_t),
+            @alignOf(exports.tb_client_t),
+        });
+        try target_dir.writeFile(.{
+            .sub_path = "TBClient.java",
             .data = buffer.items,
         });
     }

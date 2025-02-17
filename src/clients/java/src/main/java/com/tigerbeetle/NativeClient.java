@@ -3,43 +3,31 @@ package com.tigerbeetle;
 import static com.tigerbeetle.AssertionError.assertTrue;
 
 import java.lang.ref.Cleaner;
+import java.nio.ByteBuffer;
 
 final class NativeClient implements AutoCloseable {
     private final static Cleaner cleaner;
 
     /*
-     * Holds the `handle` in an object instance detached from `NativeClient` to provide state for
-     * the cleaner to dispose native memory when the `Client` instance is GCed. Also implements
-     * `Runnable` to be usable as the cleaner action.
+     * Holds the `tb_client` buffer in an object instance detached from `NativeClient` to provide
+     * state for the cleaner to dispose native memory when the `Client` instance is GCed. Also
+     * implements `Runnable` to be usable as the cleaner action.
      * https://docs.oracle.com/javase%2F9%2Fdocs%2Fapi%2F%2F/java/lang/ref/Cleaner.html
-     *
-     * Methods are synchronized to ensure tb_client functions aren't called on an invalid handle.
-     * Safe to synchronize on NativeHandle object as it's private to NativeClient and can't be
-     * arbitrarily/externally locked by the library user.
      */
-    private static final class NativeHandle implements Runnable {
-        private long handle;
+    private static final class CleanableState implements Runnable {
+        private ByteBuffer tb_client;
 
-        public NativeHandle(long handle) {
-            assert handle != 0;
-            this.handle = handle;
+        public CleanableState(ByteBuffer tb_client) {
+            assertTrue(tb_client.isDirect(), "Invalid client buffer");
+            this.tb_client = tb_client;
         }
 
-        public synchronized void submit(final Request<?> request) {
-            if (handle == 0) {
-                throw new IllegalStateException("Client is closed");
-            }
-
-            NativeClient.submit(handle, request);
+        public void submit(final Request<?> request) {
+            NativeClient.submit(tb_client, request);
         }
 
-        public synchronized void close() {
-            if (handle == 0) {
-                return;
-            }
-
-            clientDeinit(handle);
-            handle = 0;
+        public void close() {
+            clientDeinit(tb_client);
         }
 
         @Override
@@ -53,19 +41,21 @@ final class NativeClient implements AutoCloseable {
         cleaner = Cleaner.create();
     }
 
-    private final NativeHandle handle;
+    private final CleanableState state;
     private final Cleaner.Cleanable cleanable;
 
     public static NativeClient init(final byte[] clusterID, final String addresses) {
         assertArgs(clusterID, addresses);
-        final long contextHandle = clientInit(clusterID, addresses);
-        return new NativeClient(contextHandle);
+        final var tb_client = ByteBuffer.allocateDirect(TBClient.SIZE + TBClient.ALIGNMENT);
+        clientInit(tb_client, clusterID, addresses);
+        return new NativeClient(tb_client);
     }
 
     public static NativeClient initEcho(final byte[] clusterID, final String addresses) {
         assertArgs(clusterID, addresses);
-        final long contextHandle = clientInitEcho(clusterID, addresses);
-        return new NativeClient(contextHandle);
+        final var tb_client = ByteBuffer.allocateDirect(TBClient.SIZE + TBClient.ALIGNMENT);
+        clientInitEcho(tb_client, clusterID, addresses);
+        return new NativeClient(tb_client);
     }
 
     private static void assertArgs(final byte[] clusterID, final String addresses) {
@@ -73,18 +63,18 @@ final class NativeClient implements AutoCloseable {
         assertTrue(addresses != null, "Replica addresses cannot be null");
     }
 
-    private NativeClient(final long contextHandle) {
+    private NativeClient(final ByteBuffer tb_client) {
         try {
-            this.handle = new NativeHandle(contextHandle);
-            this.cleanable = cleaner.register(this, handle);
+            this.state = new CleanableState(tb_client);
+            this.cleanable = cleaner.register(this, state);
         } catch (Throwable forward) {
-            clientDeinit(contextHandle);
+            clientDeinit(tb_client);
             throw forward;
         }
     }
 
     public void submit(final Request<?> request) {
-        this.handle.submit(request);
+        this.state.submit(request);
     }
 
     @Override
@@ -93,17 +83,20 @@ final class NativeClient implements AutoCloseable {
         // we call `NativeHandle.close` to force it to run synchronously in the same thread.
         // Otherwise, if the user never disposes the client and `close` is never called,
         // the cleaner calls `NativeHandle.close` in another thread when the client is GCed.
-        this.handle.close();
+        this.state.close();
 
         // Unregistering the cleanable.
         cleanable.clean();
     }
 
-    private static native void submit(long contextHandle, Request<?> request);
+    private static native void submit(ByteBuffer tb_client, Request<?> request)
+            throws ClientClosedException;
 
-    private static native long clientInit(byte[] clusterID, String addresses);
+    private static native void clientInit(ByteBuffer tb_client, byte[] clusterID, String addresses)
+            throws InitializationException;
 
-    private static native long clientInitEcho(byte[] clusterID, String addresses);
+    private static native void clientInitEcho(ByteBuffer tb_client, byte[] clusterID,
+            String addresses) throws InitializationException;
 
-    private static native void clientDeinit(long contextHandle);
+    private static native void clientDeinit(ByteBuffer tb_client);
 }
