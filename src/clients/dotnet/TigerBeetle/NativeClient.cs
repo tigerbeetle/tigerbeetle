@@ -4,31 +4,33 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading.Tasks;
 using static TigerBeetle.AssertionException;
-using static TigerBeetle.TBClient;
+using static TigerBeetle.Native;
 
 namespace TigerBeetle;
 
 internal sealed class NativeClient : IDisposable
 {
-    // Once the client handle is set, all interactions with it are synchronized using `lock(this)`
-    // to prevent threads from accidentally using a deinitialized client handle. It's safe to
-    // synchronize on the NativeClient object as it's private to Client and can't be arbitrarily
-    // or externally locked by the library user.
-    private volatile IntPtr client;
+    private readonly GCHandle clientHandle;
 
     private unsafe delegate InitializationStatus InitFunction(
-                IntPtr* out_client,
+                TBClient* out_client,
                 UInt128Extensions.UnsafeU128* cluster_id,
                 byte* address_ptr,
                 uint address_len,
-                IntPtr on_completion_ctx,
-                delegate* unmanaged[Cdecl]<IntPtr, IntPtr, TBPacket*, ulong, byte*, uint, void> on_completion_fn
+                IntPtr completion_ctx,
+                delegate* unmanaged[Cdecl]<IntPtr, TBPacket*, ulong, byte*, uint, void> completion_callback
             );
 
-
-    private NativeClient(IntPtr client)
+    private NativeClient(GCHandle clientHandle)
     {
-        this.client = client;
+        this.clientHandle = clientHandle;
+    }
+
+    ~NativeClient()
+    {
+        Dispose();
+        // It must be released during GC.
+        clientHandle.Free();
     }
 
     private static byte[] GetBytes(string[] addresses)
@@ -55,24 +57,28 @@ internal sealed class NativeClient : IDisposable
 
     private static NativeClient CallInit(InitFunction initFunction, UInt128Extensions.UnsafeU128 clusterID, string[] addresses)
     {
-        var addresses_byte = GetBytes(addresses);
+        var addressesBytes = GetBytes(addresses);
         unsafe
         {
-            fixed (byte* addressPtr = addresses_byte)
+            var clientHandle = GCHandle.Alloc(new TBClient(), GCHandleType.Pinned);
+            fixed (byte* addressPtr = addressesBytes)
             {
-                IntPtr handle;
-
                 var status = initFunction(
-                    &handle,
+                    (TBClient*)clientHandle.AddrOfPinnedObject(),
                     &clusterID,
                     addressPtr,
-                    (uint)addresses_byte.Length - 1,
+                    (uint)addressesBytes.Length - 1,
                     IntPtr.Zero,
                     &OnCompletionCallback
                 );
 
-                if (status != InitializationStatus.Success) throw new InitializationException(status);
-                return new NativeClient(handle);
+                if (status != InitializationStatus.Success)
+                {
+                    clientHandle.Free();
+                    throw new InitializationException(status);
+                }
+
+                return new NativeClient(clientHandle);
             }
         }
     }
@@ -113,34 +119,23 @@ internal sealed class NativeClient : IDisposable
     {
         unsafe
         {
-            lock (this)
-            {
-                if (client != IntPtr.Zero)
-                {
-                    tb_client_submit(client, packet);
-                    return;
-                }
-            }
-
-            packet->status = PacketStatus.ClientShutdown;
-            OnComplete(packet, null, 0);
+            var status = tb_client_submit((TBClient*)clientHandle.AddrOfPinnedObject(), packet);
+            ObjectDisposedException.ThrowIf(status == ClientStatus.Invalid, this);
         }
     }
 
     public void Dispose()
     {
-        lock (this)
+        // Do not call `GC.SuppressFinalize` during `Dispose`.
+        // The `client_handle` will be freed by the destructor.
+        unsafe
         {
-            if (client != IntPtr.Zero)
-            {
-                tb_client_deinit(client);
-                this.client = IntPtr.Zero;
-            }
+            _ = tb_client_deinit((TBClient*)clientHandle.AddrOfPinnedObject());
         }
     }
 
     [UnmanagedCallersOnly(CallConvs = new[] { typeof(CallConvCdecl) })]
-    private unsafe static void OnCompletionCallback(IntPtr ctx, IntPtr client, TBPacket* packet, ulong timestamp, byte* result, uint resultLen)
+    private unsafe static void OnCompletionCallback(IntPtr ctx, TBPacket* packet, ulong timestamp, byte* result, uint resultLen)
     {
         _ = timestamp;
 
