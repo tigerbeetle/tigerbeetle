@@ -5,7 +5,7 @@ TigerBeetle, you don't need to read this and could head straight to our user-lev
 
 <https://docs.tigerbeetle.com>
 
-If you want to lear how TigerBeetle works inside, here's what we got:
+If you want to learn how TigerBeetle works inside, here's what we got:
 
 - [TIGER_STYLE](../TIGER_STYLE.md) is _the_ style guide, and more. This is the philosophy underlining
   all the code here!
@@ -16,7 +16,7 @@ If you want to lear how TigerBeetle works inside, here's what we got:
   data is stored where and why.
 - [VSR](./vsr.md) explains the upper consensus half of TigerBeetle.
   - [Sync](./sync.md) covers state synchronization for lagging replicas,
-  - [Upgrades](./upgrades.md) are just sooo cool, you must read this!
+  - [Upgrades](./upgrades.md) are just so cool, you must read this!
 - [LSM](./lsm.md) covers the lower storage half.
 - [Releases](./releases.md) is our release process.
 - [Talks](./talks.md) is the list of talks about TigerBeetle so far!

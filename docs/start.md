@@ -152,7 +152,7 @@ system.
 
 ## Conclusion
 
-This is the end of the quick start! You now know how to format a datafile, run a single-replica
+This is the end of the quick start! You now know how to format a data file, run a single-replica
 TigerBeetle cluster, and run transactions through it. Here's where to go from here:
 
 * [Concepts](./concepts/) explains the "why?" of TigerBeetle, read this to decide if you need to use

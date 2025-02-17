@@ -25,7 +25,7 @@ sports car gives you the best latency, but, when the load and contention increas
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
 transactions, 8k apiece. Although TigerBeetle is a replicated database using consensus algorithm,
 the cost of replications is paid only once per batch, which means that TigerBeetle runs not much
-slower than an in-memory hashmap, all the while providing extreme durability and availability.
+slower than an in-memory hash map, all the while providing extreme durability and availability.
 
 What's more, under lite load the batches automatically become smaller, trading unnecessary
 throughput for better latency.
@@ -45,7 +45,7 @@ Every data structure is hand-crafted with the CPU in mind: a transfer object is 
 cache-line aligned. Executing a batch of transfers is just one tight CPU loop!
 
 TigerBeetle allocates all the memory statically: it never runs out of memory, it never stalls due to
-a GC pause or contention on allocator's mutex, and it never fragments the memory.
+a GC pause or mutex contention, and it never fragments the memory.
 
 TigerBeetle is designed for io_uring --- a new Linux kernel interface for zero syscall networking
 and storage I/O.

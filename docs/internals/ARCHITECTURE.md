@@ -49,7 +49,7 @@ When a backup receives a prepare, it writes it to the WAL section of the data fi
 the prepare is considered committed, meaning that it can no longer be removed from or reordered in
 the log.
 
-Replicas execute committed prepares in sequence number order, by applying prepare's transfers to
+Replicas execute committed prepares in sequence number order, by applying a batch of transfers to
 local state. Because all replicas start with the same (empty) state, and because the state
 transition function is deterministic, the replicas arrive at the same state.
 
@@ -104,7 +104,7 @@ any other solution wouldn't be significantly faster.
 
 TigerBeetle improves on the in-memory hash-table across two axis:
 
-**Persistance and High Availability:** an in-memory hash table is good until you need to reboot the
+**Persistence and High Availability:** an in-memory hash table is good until you need to reboot the
 computer. Data in TigerBeetle is stored on disk, so power cycles are safe. What's more, the data is
 replicated across six replicas, so, even if some of them are down, the cluster as a whole remains
 available.
@@ -339,7 +339,7 @@ object is two cache lines.
 CPU can both sprint and parkour, but it is so much better at sprinting! CPU is very fast at straight
 line code, and can sweep several lanes at once with SIMD, but `if`s (especially unpredictable ones)
 make it stagger. When processing events, where each event is either a new account or a new transfer,
-TigerBeetle lifts the branching up. Events come in in batches, and each batch is homogeneous ---
+TigerBeetle lifts the branching up. Events come in batches, and each batch is homogeneous ---
 either all transfers, or all accounts. So the event-kind branching is moved out of the inner loop.
 
 ### Batching
@@ -411,7 +411,7 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
   Ahead Log (WAL).
 
 - A similar pipelining structure works in LSM compaction. Compaction is a batched two-way merge
-  operation. It merges two sorted sequencies of values, where values come from blocks on disk. The
+  operation. It merges two sorted sequences of values, where values come from blocks on disk. The
   resulting sequence of values is likewise split into blocks which are written to disk. Although the
   merge needs to be sequential, it is possible to fetch several blocks from disk at the same time.
   With some more legwork, it is possible to structure compaction such that reading blocks of values

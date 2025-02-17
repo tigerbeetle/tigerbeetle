@@ -6,7 +6,7 @@ deployment procedure is simple:
 - Get the `tigerbeetle` binary onto each of the cluster's machines (see
   [Installing](../installing.md)).
 - Format the data files, specifying cluster id, replica count, and replica index.
-- Start replicas, specifying path to the datafile and addresses of all replicas in the cluster.
+- Start replicas, specifying path to the data file and addresses of all replicas in the cluster.
 
 Here's how to deploy a three replica cluster running on a single machine:
 
