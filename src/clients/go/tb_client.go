@@ -20,7 +20,6 @@ typedef const uint8_t* tb_result_bytes_t;
 
 extern __declspec(dllexport) void onGoPacketCompletion(
 	uintptr_t ctx,
-	tb_client_t client,
 	tb_packet_t* packet,
 	uint64_t timestamp,
 	tb_result_bytes_t result_ptr,
@@ -32,7 +31,6 @@ import (
 	e "errors"
 	"runtime"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
@@ -65,8 +63,7 @@ type request struct {
 }
 
 type c_client struct {
-	tb_client C.tb_client_t
-	mutex     sync.Mutex
+	tb_client *C.tb_client_t
 }
 
 func NewClient(
@@ -78,12 +75,12 @@ func NewClient(
 	c_addresses := C.CString(addresses_raw)
 	defer C.free(unsafe.Pointer(c_addresses))
 
-	var tb_client C.tb_client_t
+	tb_client := new(C.tb_client_t)
 	var cluster_id = C.tb_uint128_t(clusterID)
 
 	// Create the tb_client.
-	status := C.tb_client_init(
-		&tb_client,
+	init_status := C.tb_client_init(
+		tb_client,
 		(*C.uint8_t)(unsafe.Pointer(&cluster_id)),
 		c_addresses,
 		C.uint32_t(len(addresses_raw)),
@@ -91,19 +88,19 @@ func NewClient(
 		(*[0]byte)(C.onGoPacketCompletion),
 	)
 
-	if status != C.TB_STATUS_SUCCESS {
-		switch status {
-		case C.TB_STATUS_UNEXPECTED:
+	if init_status != C.TB_INIT_SUCCESS {
+		switch init_status {
+		case C.TB_INIT_UNEXPECTED:
 			return nil, errors.ErrUnexpected{}
-		case C.TB_STATUS_OUT_OF_MEMORY:
+		case C.TB_INIT_OUT_OF_MEMORY:
 			return nil, errors.ErrOutOfMemory{}
-		case C.TB_STATUS_ADDRESS_INVALID:
+		case C.TB_INIT_ADDRESS_INVALID:
 			return nil, errors.ErrInvalidAddress{}
-		case C.TB_STATUS_ADDRESS_LIMIT_EXCEEDED:
+		case C.TB_INIT_ADDRESS_LIMIT_EXCEEDED:
 			return nil, errors.ErrAddressLimitExceeded{}
-		case C.TB_STATUS_SYSTEM_RESOURCES:
+		case C.TB_INIT_SYSTEM_RESOURCES:
 			return nil, errors.ErrSystemResources{}
-		case C.TB_STATUS_NETWORK_SUBSYSTEM:
+		case C.TB_INIT_NETWORK_SUBSYSTEM:
 			return nil, errors.ErrNetworkSubsystem{}
 		default:
 			panic("tb_client_init(): invalid error code")
@@ -118,13 +115,7 @@ func NewClient(
 }
 
 func (c *c_client) Close() {
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
-
-	if c.tb_client != nil {
-		C.tb_client_deinit(c.tb_client)
-		c.tb_client = nil
-	}
+	_ = C.tb_client_deinit(c.tb_client)
 }
 
 func getEventSize(op C.TB_OPERATION) uintptr {
@@ -198,23 +189,18 @@ func (c *c_client) doRequest(
 		pinner.Pin(data)
 	}
 
-	// Lock the mutex when accessing the `c.tb_client` handle.
-	c.mutex.Lock()
-	if c.tb_client != nil {
-		C.tb_client_submit(c.tb_client, packet)
-		c.mutex.Unlock()
-	} else {
-		c.mutex.Unlock()
+	client_status := C.tb_client_submit(c.tb_client, packet)
+	if client_status == C.TB_CLIENT_INVALID {
 		return nil, errors.ErrClientClosed{}
 	}
 
 	// Wait for the request to complete.
 	reply := <-req.ready
-	status := C.TB_PACKET_STATUS(packet.status)
+	packet_status := C.TB_PACKET_STATUS(packet.status)
 
 	// Handle packet error
-	if status != C.TB_PACKET_OK {
-		switch status {
+	if packet_status != C.TB_PACKET_OK {
+		switch packet_status {
 		case C.TB_PACKET_TOO_MUCH_DATA:
 			return nil, errors.ErrMaximumBatchSizeExceeded{}
 		case C.TB_PACKET_CLIENT_EVICTED:
@@ -242,14 +228,12 @@ func (c *c_client) doRequest(
 //export onGoPacketCompletion
 func onGoPacketCompletion(
 	_context C.uintptr_t,
-	client C.tb_client_t,
 	packet *C.tb_packet_t,
 	timestamp C.uint64_t,
 	result_ptr C.tb_result_bytes_t,
 	result_len C.uint32_t,
 ) {
 	_ = _context
-	_ = client
 	_ = timestamp
 
 	// Get the request from the packet user data.
