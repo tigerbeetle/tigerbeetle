@@ -371,12 +371,7 @@ const Page = struct {
         docs: *std.Build.Step.WriteFile,
         search_index: *SearchIndex,
     ) !void {
-        const vale_step = std.Build.Step.Run.create(b, "run vale");
-        vale_step.addFileArg(website.vale_bin);
-        vale_step.addFileArg(b.path(self.path_source));
-
         const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
-        pandoc_step.step.dependOn(&vale_step.step);
         pandoc_step.addFileArg(website.pandoc_bin);
         pandoc_step.addArgs(&.{ "--from", "gfm+smart", "--to", "html5" });
         pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/markdown-links.lua"));

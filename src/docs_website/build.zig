@@ -22,6 +22,10 @@ pub fn build(b: *std.Build) !void {
     const pandoc_bin = get_pandoc_bin(b) orelse return;
     const vale_bin = get_vale_bin(b) orelse return;
 
+    const check_spelling = std.Build.Step.Run.create(b, "run vale");
+    check_spelling.addFileArg(vale_bin);
+    check_spelling.addArg("../.."); // Check all Markdown files in the repository.
+
     const content = b.addWriteFiles();
     { //TODO(Zig 0.14.0): https://github.com/ziglang/zig/issues/20571
         var dir = try b.build_root.handle.openDir("assets", .{ .iterate = true });
@@ -39,7 +43,9 @@ pub fn build(b: *std.Build) !void {
         }
     }
 
-    const website = Website.init(b, url_prefix, pandoc_bin, vale_bin);
+    content.step.dependOn(&check_spelling.step);
+
+    const website = Website.init(b, url_prefix, pandoc_bin);
     try docs.build(b, content, website);
 
     const clean_zigout_step = b.addRemoveDirTree("zig-out");
