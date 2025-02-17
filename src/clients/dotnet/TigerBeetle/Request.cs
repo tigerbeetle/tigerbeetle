@@ -27,7 +27,15 @@ internal abstract class NativeRequest
             dataSize = (uint)len,
         }, GCHandleType.Pinned);
 
-        nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
+        try
+        {
+            nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
+        }
+        catch (ObjectDisposedException)
+        {
+            packetHandle.Value.Free();
+            throw;
+        }
     }
 
     public static unsafe void OnComplete(TBPacket* packet, ReadOnlySpan<byte> result)
