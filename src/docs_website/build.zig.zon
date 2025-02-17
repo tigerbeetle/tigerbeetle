@@ -12,6 +12,16 @@
             .hash = "1220139a44886509d8a61b44d8b8a79d03bad29ea95493dc97cd921d3f2eb208562c",
             .lazy = true,
         },
+        .vale_macos_arm64 = .{
+            .url = "https://github.com/errata-ai/vale/releases/download/v3.9.5/vale_3.9.5_macOS_arm64.tar.gz",
+            .hash = "1220418afe2846224487326841b0228b1c44e77bb8440c96190fcc3189a2df1688eb",
+            .lazy = true,
+        },
+        .vale_linux_amd64 = .{
+            .url = "https://github.com/errata-ai/vale/releases/download/v3.9.5/vale_3.9.5_Linux_64-bit.tar.gz",
+            .hash = "1220b6041f1354d29a1b8ad5be5f8a98300142ae992ac147ab70f98e4df94b470917",
+            .lazy = true,
+        },
     },
     .paths = .{"."},
 }

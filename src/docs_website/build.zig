@@ -20,6 +20,11 @@ pub fn build(b: *std.Build) !void {
     ) orelse std.mem.trimRight(u8, b.run(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n");
 
     const pandoc_bin = get_pandoc_bin(b) orelse return;
+    const vale_bin = get_vale_bin(b) orelse return;
+
+    const check_spelling = std.Build.Step.Run.create(b, "run vale");
+    check_spelling.addFileArg(vale_bin);
+    check_spelling.addArg("../.."); // Check all Markdown files in the repository.
 
     const content = b.addWriteFiles();
     { //TODO(Zig 0.14.0): https://github.com/ziglang/zig/issues/20571
@@ -37,6 +42,8 @@ pub fn build(b: *std.Build) !void {
             }
         }
     }
+
+    content.step.dependOn(&check_spelling.step);
 
     const website = Website.init(b, url_prefix, pandoc_bin);
     try docs.build(b, content, website);
@@ -89,6 +96,26 @@ fn get_pandoc_bin(b: *std.Build) ?std.Build.LazyPath {
     };
     if (b.lazyDependency(name, .{})) |dep| {
         return dep.path("bin/pandoc");
+    } else {
+        return null;
+    }
+}
+
+fn get_vale_bin(b: *std.Build) ?std.Build.LazyPath {
+    const host = b.graph.host.result;
+    const name = switch (host.os.tag) {
+        .linux => switch (host.cpu.arch) {
+            .x86_64 => "vale_linux_amd64",
+            else => @panic("unsupported cpu arch"),
+        },
+        .macos => switch (host.cpu.arch) {
+            .aarch64 => "vale_macos_arm64",
+            else => @panic("unsupported cpu arch"),
+        },
+        else => @panic("unsupported os"),
+    };
+    if (b.lazyDependency(name, .{})) |dep| {
+        return dep.path("vale");
     } else {
         return null;
     }

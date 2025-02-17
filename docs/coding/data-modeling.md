@@ -59,7 +59,7 @@ To keep an account's balance between an upper and lower bound, see the
 
 By convention, credit balances are used to represent:
 
-- Operators's Liabilities
+- Operator's Liabilities
 - Equity in the Operator's Business
 - Operator's Income
 

@@ -733,7 +733,7 @@ Released: 2024-11-25
   since directly outputting to stderr is considered rude for a library, logging was disabled.
 
   This PR adds in scaffolding for sending these logs to the client language to be handled there,
-  tying in with native log libraries (eg, Log4j). No languages use it yet, however.
+  tying in with native log libraries (e.g., Log4j). No languages use it yet, however.
 
   Additionally, log `warn` and `err` directly to stderr, if there's no handler.
 
@@ -1506,7 +1506,7 @@ See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2
 
   [WAL repair](https://docs.tigerbeetle.com/about/internals/vsr#protocol-repair-wal) is used when
   the lagging replica's log still intersects with the cluster's current log, while
-  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when when the logs no
+  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when the logs no
   longer intersect.
 
 - [#2244](https://github.com/tigerbeetle/tigerbeetle/pull/2244)
@@ -1527,7 +1527,7 @@ See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2
 - [#2259](https://github.com/tigerbeetle/tigerbeetle/pull/2259),
   [#2246](https://github.com/tigerbeetle/tigerbeetle/pull/2246)
 
-  A few `sysctl`s and security frameworks (eg, seccomp) might block io_uring. Print out a more
+  A few `sysctl`s and security frameworks (e.g., seccomp) might block io_uring. Print out a more
   helpful error message, rather than a generic "permission denied" or "system outdated".
 
 
@@ -2597,7 +2597,8 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1828](https://github.com/tigerbeetle/tigerbeetle/pull/1828)
 
-  Some of our comments had duplicate words - thanks @divdeploy for for noticing!
+  Some of our comments had duplicate words - thanks @divdeploy for
+  <!-- vale Vale.Repetition = NO -->for<!-- vale Vale.Repetition = YES --> noticing!
 
 ### TigerTracks 🎧
 

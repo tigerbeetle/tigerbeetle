@@ -18,7 +18,7 @@ https://youtu.be/wkHP30tCZmw
 
 ## May 14, 2024: Biodigital Jazz!
 
-Joran Dirk Greef presents at Software You Can Love on the the intersection of software, art 
+Joran Dirk Greef presents at Software You Can Love on the intersection of software, art 
 (and business) at TigerBeetle.
 
 https://www.youtube.com/watch?v=C98cyJ-wJuY
