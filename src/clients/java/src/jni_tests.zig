@@ -7,6 +7,11 @@ const testing = std.testing;
 const JavaVM = jni.JavaVM;
 const JNIEnv = jni.JNIEnv;
 
+test {
+    // Running the client tests.
+    _ = @import("client.zig");
+}
+
 test "JNI: check jvm" {
     const env: *JNIEnv = get_testing_env();
 
