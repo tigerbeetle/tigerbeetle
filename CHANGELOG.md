@@ -3,6 +3,64 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.28
+
+Released: 2025-02-17
+
+### Safety And Performance
+
+- [#2677](https://github.com/tigerbeetle/tigerbeetle/pull/2677)
+
+  Test misdirected writes in the VOPR.
+
+- [#2711](https://github.com/tigerbeetle/tigerbeetle/pull/2711)
+
+  Fix a recovery correctness bug caused by a misdirected write in the WAL
+  (discovered by the VOPR in #2677).
+
+- [#2728](https://github.com/tigerbeetle/tigerbeetle/pull/2728)
+
+  Refactor the tb_client packet interface, hiding private members in an opaque field.
+  Add assertions to enforce expectations for each packet field.
+
+- [#2717](https://github.com/tigerbeetle/tigerbeetle/pull/2717)
+
+  Fix a Node client crash when it was closed with outstanding requests.
+
+- [#2720](https://github.com/tigerbeetle/tigerbeetle/pull/2720)
+
+  Flush loopback queue before queueing another prepare_ok.
+
+- [#2730](https://github.com/tigerbeetle/tigerbeetle/pull/2730)
+
+  Fuzzer weights are now configurable.
+
+- [#2702](https://github.com/tigerbeetle/tigerbeetle/pull/2702)
+
+  The REPL now uses `StaticAllocator` on init and deinit.
+
+### Features
+
+- [#2716](https://github.com/tigerbeetle/tigerbeetle/pull/2716)
+
+  `tigerbeetle inspect constants` now prints a napkin math estimate for the memory usage.
+
+### Internals
+
+- [#2719](https://github.com/tigerbeetle/tigerbeetle/pull/2719),
+  [#2718](https://github.com/tigerbeetle/tigerbeetle/pull/2718),
+  [#2736](https://github.com/tigerbeetle/tigerbeetle/pull/2736)
+
+  Update docs with new talks, an updated illustration, and a new Slack invite link.
+
+- [#2724](https://github.com/tigerbeetle/tigerbeetle/pull/2724)
+
+  Don't expose VSR module to dependents in build.zig.
+
+### TigerTracks 🎧
+
+- [Formula 06](https://open.spotify.com/track/7rzRbj2WnmxcE5iQfGbhKN)
+
 ## TigerBeetle 0.16.27
 
 Released: 2025-02-10
