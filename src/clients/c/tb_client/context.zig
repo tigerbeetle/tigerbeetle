@@ -26,6 +26,10 @@ pub const ContextImplementation = struct {
     completion_ctx: usize,
     submit_fn: *const fn (*ContextImplementation, *Packet.Extern) void,
     deinit_fn: *const fn (*ContextImplementation) void,
+
+    cluster_id: u128,
+    client_id: u128,
+    addresses: []const u8,
 };
 
 pub const Error = std.mem.Allocator.Error || error{
@@ -173,11 +177,18 @@ pub fn ContextType(
             };
             errdefer context.client.deinit(context.allocator);
 
+            const addresses_copy = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(addresses_copy);
+
             context.completion_fn = completion_fn;
             context.implementation = .{
                 .completion_ctx = completion_ctx,
                 .submit_fn = Context.on_submit,
                 .deinit_fn = Context.on_deinit,
+
+                .cluster_id = cluster_id,
+                .client_id = context.client_id,
+                .addresses = addresses_copy,
             };
 
             context.submitted = .{};
@@ -225,6 +236,7 @@ pub fn ContextType(
             self.io.cancel_all();
 
             self.signal.deinit();
+            self.allocator.free(self.implementation.addresses);
             self.client.deinit(self.allocator);
             self.message_pool.deinit(self.allocator);
             self.io.deinit();

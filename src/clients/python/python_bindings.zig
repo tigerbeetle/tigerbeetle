@@ -488,6 +488,16 @@ pub fn main() !void {
         \\                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
         \\                                OnCompletion]
         \\
+        \\# Returns the cluster_id and addresses passed in to either tb_client_init or
+        \\# tb_client_init_echo.
+        \\tb_client_init_parameters = tbclient.tb_client_init_parameters
+        \\tb_client_init_parameters.restype = None
+        \\tb_client_init_parameters.argtypes = [Client,
+        \\                                      ctypes.POINTER(ctypes.c_uint8 * 16),
+        \\                                      ctypes.POINTER(ctypes.c_uint8 * 16),
+        \\                                      ctypes.POINTER(ctypes.c_char_p),
+        \\                                      ctypes.POINTER(ctypes.c_uint64)]
+        \\
         \\# Closes the client, causing any previously submitted packets to be completed with
         \\# `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
         \\# It is undefined behavior to use any functions on the client once deinit is called.

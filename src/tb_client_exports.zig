@@ -22,6 +22,7 @@ comptime {
     );
     @export(init, .{ .name = "tb_client_init", .linkage = .strong });
     @export(init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
+    @export(tb.init_parameters, .{ .name = "tb_client_init_parameters", .linkage = .strong });
     @export(tb.completion_context, .{ .name = "tb_client_completion_context", .linkage = .strong });
     @export(tb.submit, .{ .name = "tb_client_submit", .linkage = .strong });
     @export(tb.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
