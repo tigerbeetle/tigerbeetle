@@ -7,6 +7,19 @@ to receive notifications about breaking changes!
 
 Released: 2025-02-17
 
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
 ### Safety And Performance
 
 - [#2677](https://github.com/tigerbeetle/tigerbeetle/pull/2677)
@@ -65,6 +78,18 @@ Released: 2025-02-17
 
 Released: 2025-02-10
 
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
 
 ### Safety And Performance
 
@@ -122,6 +147,19 @@ Released: 2025-02-10
 ## TigerBeetle 0.16.26
 
 Released: 2025-02-03
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
 
 ### Safety And Performance
 
