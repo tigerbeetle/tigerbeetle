@@ -56,22 +56,28 @@ const statsd_line_size_max = line_size_max: {
     }
 
     var buffer: [packet_size_max]u8 = undefined;
+    var buffer_stream = std.io.fixedBufferStream(&buffer);
+    const buffer_writer = buffer_stream.writer();
 
     var line_size_max: u32 = 0;
     for (events_metric) |event| {
-        line_size_max = @max(line_size_max, format_metric(
-            &buffer,
+        buffer_stream.reset();
+        format_metric(
+            buffer_writer,
             .{ .metric = .{ .aggregate = event } },
             .{ .cluster = 0, .replica = 0 },
-        ) catch unreachable);
+        ) catch unreachable;
+        line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
     }
     for (events_timing) |event| {
         for (std.enums.values(TimingStat)) |stat| {
-            line_size_max = @max(line_size_max, format_metric(
-                &buffer,
+            buffer_stream.reset();
+            format_metric(
+                buffer_writer,
                 .{ .timing = .{ .aggregate = event, .stat = stat } },
                 .{ .cluster = 0, .replica = 0 },
-            ) catch unreachable);
+            ) catch unreachable;
+            line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
         }
     }
     break :line_size_max line_size_max;
@@ -100,11 +106,6 @@ comptime {
     assert(packet_count_max < 256);
 }
 
-const BufferCompletion = struct {
-    buffer: [packet_size_max]u8,
-    completion: IO.Completion = undefined,
-};
-
 pub const StatsD = struct {
     cluster: u128,
     replica: u8,
@@ -117,7 +118,8 @@ pub const StatsD = struct {
         log,
     },
 
-    buffer_completions: *IOPSType(BufferCompletion, packet_count_max),
+    send_buffer: *[packet_count_max * packet_size_max]u8,
+    send_completions: IOPSType(IO.Completion, packet_count_max) = .{},
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
@@ -134,10 +136,8 @@ pub const StatsD = struct {
         );
         errdefer io.close_socket(socket);
 
-        const buffer_completions =
-            try allocator.create(IOPSType(BufferCompletion, packet_count_max));
-        errdefer allocator.destroy(buffer_completions);
-        buffer_completions.* = .{};
+        const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
+        errdefer allocator.destroy(send_buffer);
 
         // 'Connect' the UDP socket, so we can just send() to it normally.
         try std.posix.connect(socket, &address.any, address.getOsSockLen());
@@ -153,7 +153,7 @@ pub const StatsD = struct {
                     .io = io,
                 },
             },
-            .buffer_completions = buffer_completions,
+            .send_buffer = send_buffer,
         };
     }
 
@@ -164,16 +164,14 @@ pub const StatsD = struct {
         cluster: u128,
         replica: u8,
     ) !StatsD {
-        const buffer_completions =
-            try allocator.create(IOPSType(BufferCompletion, packet_count_max));
-        errdefer allocator.destroy(buffer_completions);
-        buffer_completions.* = .{};
+        const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
+        errdefer allocator.destroy(send_buffer);
 
         return .{
             .cluster = cluster,
             .replica = replica,
             .implementation = .log,
-            .buffer_completions = buffer_completions,
+            .send_buffer = send_buffer,
         };
     }
 
@@ -181,7 +179,7 @@ pub const StatsD = struct {
         if (self.implementation == .udp) {
             self.implementation.udp.io.close_socket(self.implementation.udp.socket);
         }
-        allocator.destroy(self.buffer_completions);
+        allocator.destroy(self.send_buffer);
 
         self.* = undefined;
     }
@@ -190,18 +188,19 @@ pub const StatsD = struct {
         self: *StatsD,
         events_metric: []const ?EventMetricAggregate,
         events_timing: []const ?EventTimingAggregate,
-    ) void {
+    ) error{Busy}!void {
         // This really should not happen; it means we're emitting so many packets, on a short
         // enough emit timeout, that the kernel hasn't been able to process them all (UDP doesn't
         // block or provide back-pressure like a TCP socket).
         //
         // Keep it as a log, rather than assert, to avoid the common pitfall of metrics killing
         // the whole system.
-        if (self.buffer_completions.executing() != 0) {
-            log.err("{} / {} packets still in flight; trying to continue", .{
-                self.buffer_completions.executing(),
+        if (self.send_completions.executing() != 0) {
+            log.err("{} / {} packets still in flight; skipping emit", .{
+                self.send_completions.executing(),
                 packet_count_max,
             });
+            return error.Busy;
         }
 
         if (self.implementation == .udp and self.implementation.udp.send_callback_error_count > 0) {
@@ -212,13 +211,10 @@ pub const StatsD = struct {
             self.implementation.udp.send_callback_error_count = 0;
         }
 
-        var buffer_completion = self.buffer_completions.acquire() orelse {
-            log.err("insufficient packets to emit any metrics", .{});
-            assert(self.implementation == .udp);
-            return;
-        };
-
-        var buffer_written: usize = 0;
+        var send_ready: u32 = 0;
+        var send_sizes = stdx.BoundedArrayType(u32, packet_count_max){};
+        var send_stream = std.io.fixedBufferStream(self.send_buffer);
+        const send_writer = send_stream.writer();
         inline for (.{ events_metric, events_timing }) |events| {
             for (events) |event_new_maybe| {
                 const event_new = event_new_maybe orelse continue;
@@ -235,80 +231,71 @@ pub const StatsD = struct {
                 };
 
                 for (stats) |stat| {
-                    buffer_written += format_metric(
-                        buffer_completion.buffer[buffer_written..],
-                        stat,
-                        .{ .cluster = self.cluster, .replica = self.replica },
-                    ) catch {
-                        self.emit_buffer(buffer_completion, @intCast(buffer_written));
-                        buffer_completion = self.buffer_completions.acquire() orelse {
-                            log.err("insufficient packets to emit all metrics", .{});
-                            assert(self.implementation == .udp);
-                            return;
-                        };
-                        buffer_written = 0;
-                        buffer_written += format_metric(
-                            buffer_completion.buffer[buffer_written..],
-                            stat,
-                            .{ .cluster = self.cluster, .replica = self.replica },
-                        ) catch unreachable;
-                        continue;
+                    const send_position_before = send_stream.getPos() catch unreachable;
+                    format_metric(send_writer, stat, .{
+                        .cluster = self.cluster,
+                        .replica = self.replica,
+                    }) catch |err| {
+                        // This shouldn't ever happen, but don't allow metrics to kill the system.
+                        assert(err == error.NoSpaceLeft);
+                        log.err("insufficient buffer space", .{});
+                        break;
                     };
+
+                    const send_position_after = send_stream.getPos() catch unreachable;
+                    const send_size: u32 = @intCast(send_position_after - send_position_before);
+                    assert(send_size > 0);
+                    if (send_ready + send_size > packet_size_max) {
+                        assert(send_ready > 0);
+
+                        send_sizes.append_assume_capacity(send_ready);
+                        send_ready = send_size;
+                    } else {
+                        send_ready += send_size;
+                    }
                 }
             }
         }
 
-        // Send the final packet, if needed, or return the BufferCompletion to the queue.
-        if (buffer_written > 0) {
-            self.emit_buffer(buffer_completion, @intCast(buffer_written));
-        } else {
-            self.buffer_completions.release(buffer_completion);
+        var send_offset: u32 = 0;
+        for (send_sizes.const_slice()) |send_size| {
+            const completion = self.send_completions.acquire() orelse {
+                // This shouldn't ever happen, but don't allow metrics to kill the system.
+                log.err("insufficient packets to emit any metrics", .{});
+                return;
+            };
+            self.emit_buffer(completion, self.send_buffer[send_offset..][0..send_size]);
+            send_offset += send_size;
         }
     }
 
-    fn emit_buffer(
-        self: *StatsD,
-        buffer_completion: *BufferCompletion,
-        buffer_completion_written: u32,
-    ) void {
+    fn emit_buffer(self: *StatsD, send_completion: *IO.Completion, send_buffer: []const u8) void {
         switch (self.implementation) {
             .udp => |udp| {
                 udp.io.send(
                     *StatsD,
                     self,
                     StatsD.send_callback,
-                    &buffer_completion.completion,
+                    send_completion,
                     udp.socket,
-                    buffer_completion.buffer[0..buffer_completion_written],
+                    send_buffer,
                 );
             },
             .log => {
-                log.debug(
-                    "statsd packet: {s}",
-                    .{buffer_completion.buffer[0..buffer_completion_written]},
-                );
-                StatsD.send_callback(
-                    self,
-                    &buffer_completion.completion,
-                    buffer_completion_written,
-                );
+                log.debug("statsd packet: {s}", .{send_buffer});
+                StatsD.send_callback(self, send_completion, send_buffer.len);
             },
         }
     }
 
     /// The UDP packets containing the metrics are sent in a fire-and-forget manner.
-    fn send_callback(
-        self: *StatsD,
-        completion: *IO.Completion,
-        result: IO.SendError!usize,
-    ) void {
-        _ = result catch |err| {
+    fn send_callback(self: *StatsD, completion: *IO.Completion, result: IO.SendError!usize) void {
+        _ = result catch {
             // Errors are only supported when using UDP; not if calling this loopback.
             assert(self.implementation == .udp);
             self.implementation.udp.send_callback_error_count += 1;
         };
-        const buffer_completion: *BufferCompletion = @fieldParentPtr("completion", completion);
-        self.buffer_completions.release(buffer_completion);
+        self.send_completions.release(completion);
     }
 };
 
@@ -319,10 +306,10 @@ const Stat = union(enum) {
 };
 
 fn format_metric(
-    buffer: []u8,
+    writer: anytype,
     stat: Stat,
     options: struct { cluster: u128, replica: u8 },
-) error{NoSpaceLeft}!usize {
+) error{NoSpaceLeft}!void {
     const stat_name = switch (stat) {
         inline else => |stat_data| @tagName(stat_data.aggregate.event),
     };
@@ -340,9 +327,6 @@ fn format_metric(
             ) },
         },
     };
-
-    var stream = std.io.fixedBufferStream(buffer);
-    var writer = stream.writer();
 
     try writer.print("tb.{[name]s}{[name_suffix]s}:{[value]d}|{[statsd_type]s}" ++
         "|#cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
@@ -389,7 +373,6 @@ fn format_metric(
         },
     }
     try writer.writeByte('\n');
-    return stream.getPos() catch unreachable;
 }
 
 /// Returns an instance of a Struct (or void) with all fields set to what would result in the
