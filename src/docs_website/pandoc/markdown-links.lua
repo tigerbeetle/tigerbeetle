@@ -20,7 +20,7 @@ function Link (link)
     local _, target_level = link.target:gsub("/", "")
     local is_client_readme = link.target:find("README.md") and target_level == 4
     if is_client_readme then
-      link.target = link.target:sub(5) -- Cut "/src"
+      link.target = "/coding" .. link.target:sub(5) -- Cut "/src"
     else
       -- Make GitHub link
       link.target = "https://github.com/tigerbeetle/tigerbeetle/blob/main" .. link.target
@@ -28,8 +28,8 @@ function Link (link)
   end
 
   if not is_external then
-    link.target = link.target:gsub("README.md", "")
-    link.target = link.target:gsub(".md", "")
+    link.target = link.target:gsub("README%.md", "")
+    link.target = link.target:gsub("%.md", "")
   end
 
   return link

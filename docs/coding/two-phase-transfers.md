@@ -172,20 +172,3 @@ The following examples show the state of two accounts in three steps:
 |   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
 |         `w` |        `x` |         `y` |        `z` | `A`                  | `B`                   |        123 | `void_pending_transfer` |
 
-## Client Documentation
-
-Read more about how two-phase transfers work with each client.
-
-- [.NET](/src/clients/dotnet/README.md#two-phase-transfers)
-- [Go](/src/clients/go/README.md#two-phase-transfers)
-- [Java](/src/clients/java/README.md#two-phase-transfers)
-- [Node](/src/clients/node/README.md#two-phase-transfers)
-
-## Client Samples
-
-Or take a look at how it works with real code.
-
-- [.NET](/src/clients/dotnet/samples/two-phase/README.md)
-- [Go](/src/clients/go/samples/two-phase/README.md)
-- [Java](/src/clients/java/samples/two-phase/README.md)
-- [Node](/src/clients/node/samples/two-phase/README.md)

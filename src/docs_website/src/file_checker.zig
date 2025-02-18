@@ -187,6 +187,13 @@ fn check_link(context: FileValidationContext, link: Link) !void {
         }
     }
 
+    if (std.mem.indexOf(u8, link.base, "//") != null or
+        std.mem.indexOf(u8, link.base, "/./") != null)
+    {
+        log.err("redundant slash: '{s}'", .{link.base});
+        return error.RedundantSlash;
+    }
+
     // Locate local link target.
     var target = link.base;
     const is_absolute = target.len > 0 and target[0] == '/';
