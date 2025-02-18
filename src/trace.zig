@@ -327,15 +327,17 @@ pub const Tracer = struct {
 
     pub fn emit_metrics(tracer: *Tracer) void {
         tracer.start(.metrics_emit);
+        defer tracer.stop(.metrics_emit);
 
-        tracer.statsd.emit(tracer.events_metric, tracer.events_timing);
+        tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| {
+            assert(err == error.Busy);
+            return;
+        };
 
         // For statsd, the right thing is to reset metrics between emitting. For something like
         // Prometheus, this would have to be removed.
         @memset(tracer.events_metric, null);
         @memset(tracer.events_timing, null);
-
-        tracer.stop(.metrics_emit);
     }
 
     // Timing works by storing the min, max, sum and count of each value provided. The avg is
