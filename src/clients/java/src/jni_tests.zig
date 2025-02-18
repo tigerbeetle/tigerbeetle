@@ -7,6 +7,10 @@ const testing = std.testing;
 const JavaVM = jni.JavaVM;
 const JNIEnv = jni.JNIEnv;
 
+test {
+    _ = @import("jni_thread_cleaner.zig");
+}
+
 test "JNI: check jvm" {
     const env: *JNIEnv = get_testing_env();
 

@@ -1,11 +1,8 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-// When referenced from unit_test.zig, there is no vsr import module so use path.
-const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
-const stdx = vsr.stdx;
-const FIFOType = vsr.fifo.FIFOType;
+const tb_client = @import("../tb_client.zig");
+const stdx = tb_client.vsr.stdx;
 const maybe = stdx.maybe;
 
 pub const Packet = extern struct {
@@ -32,33 +29,6 @@ pub const Packet = extern struct {
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
-        }
-    };
-
-    pub const SubmissionQueue = struct {
-        fifo: FIFOType(Packet) = .{
-            .name = null,
-            .verify_push = builtin.is_test,
-        },
-        mutex: std.Thread.Mutex = .{},
-
-        pub fn push(self: *SubmissionQueue, packet: *Packet) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            self.fifo.push(packet);
-        }
-
-        pub fn pop(self: *SubmissionQueue) ?*Packet {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            return self.fifo.pop();
-        }
-
-        /// Not thread safe, should be called only by the consumer thread.
-        pub fn empty(self: *const SubmissionQueue) bool {
-            return self.fifo.count == 0;
         }
     };
 

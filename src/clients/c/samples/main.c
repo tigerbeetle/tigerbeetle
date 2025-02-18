@@ -38,8 +38,8 @@ void completion_context_init(completion_context_t *ctx);
 void completion_context_destroy(completion_context_t *ctx);
 
 // Sends and blocks the current thread until the reply arrives.
-void send_request(
-    tb_client_t client,
+TB_CLIENT_STATUS send_request(
+    tb_client_t *client,
     tb_packet_t *packet,
     completion_context_t *ctx
 );
@@ -50,7 +50,6 @@ long long get_time_ms(void);
 // Completion function, called by tb_client no notify that a request as completed.
 void on_completion(
     uintptr_t context,
-    tb_client_t client,
     tb_packet_t *packet,
     uint64_t timestamp,
     const uint8_t *data,
@@ -65,16 +64,19 @@ int main(int argc, char **argv) {
     const char *address = getenv("TB_ADDRESS");
     if (address == NULL) address = "3000";
 
-    TB_STATUS status = tb_client_init(
+    uint8_t cluster_id[16];
+    memset(&cluster_id, 0, 16);
+
+    TB_INIT_STATUS init_status = tb_client_init(
         &client,              // Output client.
-        0,                    // Cluster ID.
+        cluster_id,           // Cluster ID.
         address,              // Cluster addresses.
         strlen(address),      //
         (uintptr_t)NULL,      // No need for a global context.
         &on_completion        // Completion callback.
     );
 
-    if (status != TB_STATUS_SUCCESS) {
+    if (init_status != TB_INIT_SUCCESS) {
         printf("Failed to initialize tb_client\n");
         exit(-1);
     }
@@ -111,7 +113,11 @@ int main(int argc, char **argv) {
 
     printf("Creating accounts...\n");
 
-    send_request(client, &packet, &ctx);
+    TB_CLIENT_STATUS client_status = send_request(&client, &packet, &ctx);
+    if (client_status != TB_CLIENT_OK) {
+        printf("Failed to send the request\n");
+        exit(-1);
+    }
 
     if (packet.status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -165,7 +171,12 @@ int main(int argc, char **argv) {
 
         long long now = get_time_ms();
 
-        send_request(client, &packet, &ctx);
+        client_status = send_request(&client, &packet, &ctx);
+        if (client_status != TB_CLIENT_OK) {
+            printf("Failed to send the request\n");
+            exit(-1);
+        }
+
 
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
@@ -210,7 +221,12 @@ int main(int argc, char **argv) {
     packet.user_data = &ctx;
     packet.status = TB_PACKET_OK;
 
-    send_request(client, &packet, &ctx);
+    client_status = send_request(&client, &packet, &ctx);
+    if (client_status != TB_CLIENT_OK) {
+        printf("Failed to send the request\n");
+        exit(-1);
+    }
+
 
     if (packet.status != TB_PACKET_OK) {
         // Checking if the request failed:
@@ -238,14 +254,17 @@ int main(int argc, char **argv) {
 
     // Cleanup:
     completion_context_destroy(&ctx);
-    tb_client_deinit(client);
+    client_status = tb_client_deinit(&client);
+    if (client_status != TB_CLIENT_OK) {
+        printf("Failed to deinit the client\n");
+        exit(-1);
+    }
 }
 
 #if IS_POSIX
 
 void on_completion(
     uintptr_t context,
-    tb_client_t client,
     tb_packet_t *packet,
     uint64_t timestamp,
     const uint8_t *data,
@@ -254,7 +273,7 @@ void on_completion(
     (void)timestamp; // Not used.
 
     // The user_data gives context to a request:
-    completion_context_t* ctx = (completion_context_t*)packet->user_data;
+    completion_context_t *ctx = (completion_context_t*)packet->user_data;
 
     // Signaling the main thread we received the reply:
     pthread_mutex_lock(&ctx->lock);
@@ -267,8 +286,8 @@ void on_completion(
     pthread_mutex_unlock(&ctx->lock);
 }
 
-void send_request(
-    tb_client_t client,
+TB_CLIENT_STATUS send_request(
+    tb_client_t *client,
     tb_packet_t *packet,
     completion_context_t *ctx
 ) {
@@ -280,13 +299,14 @@ void send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    tb_client_submit(client, packet);
-
-    // Uses a condvar to sync this thread with the callback:
-    while (!ctx->completed) {
-        if (pthread_cond_wait(&ctx->cv, &ctx->lock) != 0) {
-            printf("Failed to wait condvar\n");
-            exit(-1);
+    TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
+    if (client_status == TB_CLIENT_OK) {
+        // Uses a condvar to sync this thread with the callback:
+        while (!ctx->completed) {
+            if (pthread_cond_wait(&ctx->cv, &ctx->lock) != 0) {
+                printf("Failed to wait condvar\n");
+                exit(-1);
+            }
         }
     }
 
@@ -294,6 +314,8 @@ void send_request(
         printf("Failed to unlock mutex\n");
         exit(-1);
     }
+
+    return client_status;
 }
 
 void completion_context_init(completion_context_t *ctx) {
@@ -326,7 +348,6 @@ long long get_time_ms(void) {
 
 void on_completion(
     uintptr_t context,
-    tb_client_t client,
     tb_packet_t *packet,
     uint64_t timestamp,
     const uint8_t *data,
@@ -334,7 +355,7 @@ void on_completion(
 ) {
     (void)timestamp; // Not used.
     // The user_data gives context to a request:
-    completion_context_t* ctx = (completion_context_t*)packet->user_data;
+    completion_context_t *ctx = (completion_context_t*)packet->user_data;
 
     // Signaling the main thread we received the reply:
     EnterCriticalSection(&ctx->lock);
@@ -347,8 +368,8 @@ void on_completion(
     LeaveCriticalSection(&ctx->lock);
 }
 
-void send_request(
-    tb_client_t client,
+TB_CLIENT_STATUS send_request(
+    tb_client_t *client,
     tb_packet_t *packet,
     completion_context_t *ctx
 ) {
@@ -357,14 +378,16 @@ void send_request(
 
     // Submits the request asynchronously:
     ctx->completed = false;
-    tb_client_submit(client, packet);
-
-    // Uses a condvar to sync this thread with the callback:
-    while (!ctx->completed) {
-        SleepConditionVariableCS (&ctx->cv, &ctx->lock, INFINITE);
+    TB_CLIENT_STATUS client_status = tb_client_submit(client, packet);
+    if (client_status == TB_CLIENT_OK) {
+        // Uses a condvar to sync this thread with the callback:
+        while (!ctx->completed) {
+            SleepConditionVariableCS (&ctx->cv, &ctx->lock, INFINITE);
+        }
     }
 
     LeaveCriticalSection(&ctx->lock);
+    return client_status;
 }
 
 void completion_context_init(completion_context_t *ctx) {

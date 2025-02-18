@@ -861,7 +861,7 @@ pub const JNIEnv = opaque {
     pub inline fn throw_new(
         env: *JNIEnv,
         clazz: JClass,
-        message: [*:0]const u8,
+        message: ?[*:0]const u8,
     ) JNIResultType {
         return JNIEnv.interface_call(
             env,

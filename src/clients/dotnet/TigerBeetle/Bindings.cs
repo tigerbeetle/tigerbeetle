@@ -856,32 +856,35 @@ public struct AccountFilter
     public const int SIZE = 128;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
     private unsafe struct ReservedData
     {
         public const int SIZE = 58;
+        private const int LENGTH = 58;
 
-        private fixed byte raw[SIZE];
+        private fixed byte raw[LENGTH];
 
         public byte[] GetData()
         {
             fixed (void* ptr = raw)
             {
-                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
             }
         }
 
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE)
+            if (value.Length != LENGTH)
             {
-                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
             }
 
             fixed (void* ptr = raw)
             {
-                value.CopyTo(new Span<byte>(ptr, SIZE));
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
             }
         }
     }
@@ -964,32 +967,35 @@ public struct AccountBalance
     public const int SIZE = 128;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
     private unsafe struct ReservedData
     {
         public const int SIZE = 56;
+        private const int LENGTH = 56;
 
-        private fixed byte raw[SIZE];
+        private fixed byte raw[LENGTH];
 
         public byte[] GetData()
         {
             fixed (void* ptr = raw)
             {
-                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
             }
         }
 
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE)
+            if (value.Length != LENGTH)
             {
-                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
             }
 
             fixed (void* ptr = raw)
             {
-                value.CopyTo(new Span<byte>(ptr, SIZE));
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
             }
         }
     }
@@ -1044,32 +1050,35 @@ public struct QueryFilter
     public const int SIZE = 64;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
     private unsafe struct ReservedData
     {
         public const int SIZE = 6;
+        private const int LENGTH = 6;
 
-        private fixed byte raw[SIZE];
+        private fixed byte raw[LENGTH];
 
         public byte[] GetData()
         {
             fixed (void* ptr = raw)
             {
-                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
             }
         }
 
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE)
+            if (value.Length != LENGTH)
             {
-                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
             }
 
             fixed (void* ptr = raw)
             {
-                value.CopyTo(new Span<byte>(ptr, SIZE));
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
             }
         }
     }
@@ -1164,6 +1173,14 @@ public enum InitializationStatus : uint
 
 }
 
+internal enum ClientStatus : uint
+{
+    Ok = 0,
+
+    Invalid = 1,
+
+}
+
 public enum PacketStatus : byte
 {
     Ok = 0,
@@ -1207,37 +1224,83 @@ internal enum TBOperation : byte
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+internal unsafe struct TBClient
+{
+    public const int SIZE = 32;
+
+
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 32;
+        private const int LENGTH = 4;
+
+        private fixed ulong raw[LENGTH];
+
+        public ulong[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<ulong>(ptr, LENGTH).ToArray();
+            }
+        }
+
+        public void SetData(ulong[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != LENGTH)
+            {
+                throw new ArgumentException(
+                    "Expected a ulong[" + LENGTH + "] array",
+                    nameof(value));
+            }
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<ulong>(ptr, LENGTH));
+            }
+        }
+    }
+
+    private ReservedData reserved;
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
 internal unsafe struct TBPacket
 {
     public const int SIZE = 56;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
     private unsafe struct ReservedData
     {
         public const int SIZE = 32;
+        private const int LENGTH = 32;
 
-        private fixed byte raw[SIZE];
+        private fixed byte raw[LENGTH];
 
         public byte[] GetData()
         {
             fixed (void* ptr = raw)
             {
-                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
             }
         }
 
         public void SetData(byte[] value)
         {
             if (value == null) throw new ArgumentNullException(nameof(value));
-            if (value.Length != SIZE)
+            if (value.Length != LENGTH)
             {
-                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
             }
 
             fixed (void* ptr = raw)
             {
-                value.CopyTo(new Span<byte>(ptr, SIZE));
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
             }
         }
     }
@@ -1258,43 +1321,43 @@ internal unsafe struct TBPacket
 
 }
 
-internal static class TBClient
+internal static class Native
 {
     private const string LIB_NAME = "tb_client";
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern InitializationStatus tb_client_init(
-        IntPtr* out_client,
+        TBClient* client_out,
         UInt128Extensions.UnsafeU128* cluster_id,
         byte* address_ptr,
         uint address_len,
-        IntPtr on_completion_ctx,
-        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        IntPtr completion_ctx,
+        delegate* unmanaged[Cdecl]<IntPtr,
                                    TBPacket*, ulong,
-                                   byte*, uint, void> on_completion_fn
+                                   byte*, uint, void> completion_callback
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
     public static unsafe extern InitializationStatus tb_client_init_echo(
-        IntPtr* out_client,
+        TBClient* out_client,
         UInt128Extensions.UnsafeU128* cluster_id,
         byte* address_ptr,
         uint address_len,
-        IntPtr on_completion_ctx,
-        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        IntPtr completion_ctx,
+        delegate* unmanaged[Cdecl]<IntPtr,
                                    TBPacket*, ulong,
-                                   byte*, uint, void> on_completion_fn
+                                   byte*, uint, void> completion_callback
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern void tb_client_submit(
-        IntPtr client,
+    public static unsafe extern ClientStatus tb_client_submit(
+        TBClient* client,
         TBPacket* packet
     );
 
     [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-    public static unsafe extern void tb_client_deinit(
-        IntPtr client
+    public static unsafe extern ClientStatus tb_client_deinit(
+        TBClient* client
     );
 }
 
