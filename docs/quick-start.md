@@ -98,15 +98,17 @@ transfers!
 ```
 
 ```console
-TigerBeetle Client
+TigerBeetle CLI Client 0.0.1
   Hit enter after a semicolon to run a command.
+  Ctrl+D to exit.
 
 Examples:
-  create_accounts id=1 code=10 ledger=700 flags=linked | history,
-                  id=2 code=10 ledger=700;
+  create_accounts id=1 code=10 ledger=700 flags=linked|history, id=2 code=10 ledger=700;
   create_transfers id=1 debit_account_id=1 credit_account_id=2 amount=10 ledger=700 code=10;
   lookup_accounts id=1;
   lookup_accounts id=1, id=2;
+  get_account_transfers account_id=1 flags=debits|credits;
+  get_account_balances account_id=1 flags=debits|credits;
 ```
 
 ## 5. Create Accounts
@@ -114,12 +116,7 @@ Examples:
 In the REPL, create two accounts on the same ledger using the command:
 
 ```console
-create_accounts id=1 code=10 ledger=700,
-                id=2 code=10 ledger=700;
-```
-
-```console
-info(message_bus): connected to replica 0
+create_accounts id=1 code=10 ledger=700, id=2 code=10 ledger=700;
 ```
 
 ## 6. Create a Transfer
@@ -143,25 +140,31 @@ lookup_accounts id=1, id=2;
 ```json
 {
   "id": "1",
-  "user_data": "0",
-  "ledger": "700",
-  "code": "10",
-  "flags": [],
   "debits_pending": "0",
   "debits_posted": "10",
   "credits_pending": "0",
-  "credits_posted": "0"
+  "credits_posted": "0",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "timestamp": "1739309210662583677"
 }
 {
   "id": "2",
-  "user_data": "0",
-  "ledger": "700",
-  "code": "10",
-  "flags": "",
   "debits_pending": "0",
   "debits_posted": "0",
   "credits_pending": "0",
-  "credits_posted": "10"
+  "credits_posted": "10",
+  "user_data_128": "0",
+  "user_data_64": "0",
+  "user_data_32": "0",
+  "ledger": "700",
+  "code": "10",
+  "flags": [],
+  "timestamp": "1739309210662583678"
 }
 ```
 
