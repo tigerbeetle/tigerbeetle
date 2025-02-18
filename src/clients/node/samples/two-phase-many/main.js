@@ -1,4 +1,5 @@
 const assert = require("assert");
+const process = require("process");
 
 const {
     createClient,
@@ -49,7 +50,7 @@ async function main() {
   for (const error of accountErrors) {
     console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
   }
-  assert.equal(accountErrors.length, 0);
+  assert.strictEqual(accountErrors.length, 0);
 
   // Start five pending transfer.
   let transfers = [
@@ -133,23 +134,23 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate accounts pending and posted debits/credits before
   // finishing the two-phase transfer.
   let accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 1500);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 1500n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 1500);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 1500n);
     } else {
       assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
     }
@@ -176,22 +177,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate account balances after posting 1st pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 100);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 1400);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 100n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 1400n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 100);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 1400);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 100n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 1400n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }
@@ -218,22 +219,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate account balances after voiding 2nd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 100);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 1200);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 100n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 1200n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 100);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 1200);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 100n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 1200n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }
@@ -260,22 +261,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate account balances after posting 3rd pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 400);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 900);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 400n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 900n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 400);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 900);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 400n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 900n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }
@@ -302,22 +303,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate account balances after voiding 4th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 400);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 500);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 400n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 500n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 400);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 500);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 400n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 500n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }
@@ -344,22 +345,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate account balances after posting 5th pending transfer.
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 900);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 900n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 900);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 900n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }
