@@ -450,10 +450,10 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         fn move_forward_by_word(buffer: []const u8, buffer_index: usize) usize {
             var cur_pos = buffer_index;
-            while (cur_pos < buffer.len and !std.ascii.isWhitespace(buffer[cur_pos])) {
+            while (cur_pos < buffer.len and std.ascii.isWhitespace(buffer[cur_pos])) {
                 cur_pos += 1;
             }
-            while (cur_pos < buffer.len and std.ascii.isWhitespace(buffer[cur_pos])) {
+            while (cur_pos < buffer.len and !std.ascii.isWhitespace(buffer[cur_pos])) {
                 cur_pos += 1;
             }
             return cur_pos;
