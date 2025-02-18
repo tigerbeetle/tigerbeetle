@@ -1,4 +1,5 @@
 const assert = require("assert");
+const process = require("process");
 
 const {
     createClient,
@@ -47,7 +48,7 @@ async function main() {
   for (const error of accountErrors) {
     console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
   }
-  assert.equal(accountErrors.length, 0);
+  assert.strictEqual(accountErrors.length, 0);
 
   let transferErrors = await client.createTransfers([
     {
@@ -69,17 +70,17 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   let accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 10n);
-      assert.equal(account.credits_posted, 0);
+      assert.strictEqual(account.debits_posted, 10n);
+      assert.strictEqual(account.credits_posted, 0);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 10n);
+      assert.strictEqual(account.debits_posted, 0);
+      assert.strictEqual(account.credits_posted, 10n);
     } else {
       assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
     }
