@@ -63,7 +63,7 @@ const Table = @import("table.zig").TableType(
 );
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = std.Random.DefaultPrng.init(args.seed);
     const random = prng.random();
 
     const fuzz_op_count = @min(
@@ -96,7 +96,7 @@ const FuzzOp = union(enum) {
 const max_tables_per_insert = 10;
 
 fn generate_fuzz_ops(
-    random: std.rand.Random,
+    random: std.Random,
     table_count_max_tree: usize,
     fuzz_op_count: usize,
 ) ![]const FuzzOp {
@@ -129,7 +129,7 @@ const GenerateContext = struct {
     updated: usize = 0,
     invisible: usize = 0,
     max_inserted: usize,
-    random: std.rand.Random,
+    random: std.Random,
 
     fn next(ctx: *GenerateContext, fuzz_op_tag: FuzzOpTag) FuzzOp {
         switch (fuzz_op_tag) {
@@ -234,10 +234,10 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         level: ManifestLevel,
         buffer: TableBuffer,
         tables: TableBuffer,
-        random: std.rand.Random,
+        random: std.Random,
         snapshot: u64,
 
-        pub fn init(random: std.rand.Random) !Environment {
+        pub fn init(random: std.Random) !Environment {
             var env: Environment = undefined;
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +

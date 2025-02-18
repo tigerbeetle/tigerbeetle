@@ -866,7 +866,7 @@ pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) 
     try Environment.run(&storage, fuzz_ops);
 }
 
-fn random_id(random: std.rand.Random, comptime Int: type) Int {
+fn random_id(random: std.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
@@ -877,7 +877,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(random: std.Random, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
@@ -1061,7 +1061,7 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
 }
 
 fn generate_put_account(
-    random: std.rand.Random,
+    random: std.Random,
     id_to_account: *const std.AutoHashMap(u128, Account),
     options: struct { op: u64, timestamp: u64 },
 ) FuzzOpAction {
@@ -1102,7 +1102,7 @@ fn generate_put_account(
 const io_latency_mean = 20;
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    var rng = std.Random.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
     const fuzz_op_count = @min(

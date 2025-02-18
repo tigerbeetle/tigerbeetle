@@ -258,7 +258,7 @@ pub const Tracer = struct {
     }
 
     pub fn start(tracer: *Tracer, event: Event, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
+        comptime assert(@typeInfo(@TypeOf(data)) == .@"struct");
 
         const stack = event.stack();
         assert(tracer.events_started[stack] == null);
@@ -306,7 +306,7 @@ pub const Tracer = struct {
     }
 
     pub fn stop(tracer: *Tracer, event: Event, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
+        comptime assert(@typeInfo(@TypeOf(data)) == .@"struct");
 
         const stack = event.stack();
         const event_start_ns = tracer.events_started[stack].?;
@@ -339,7 +339,7 @@ pub const Tracer = struct {
     }
 
     fn write_stop(tracer: *Tracer, stack: u32, data: anytype) void {
-        comptime assert(@typeInfo(@TypeOf(data)) == .Struct);
+        comptime assert(@typeInfo(@TypeOf(data)) == .@"struct");
 
         const writer = tracer.options.writer orelse return;
         const time_now = std.time.Instant.now() catch unreachable;
@@ -372,7 +372,7 @@ pub const Tracer = struct {
 const DataFormatterCardinality = enum { dense, sparse };
 
 fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterCardinality) type {
-    assert(@typeInfo(Data) == .Struct);
+    assert(@typeInfo(Data) == .@"struct");
 
     return struct {
         data: Data,
@@ -392,8 +392,8 @@ fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterC
                         data_field.type != u8 and
                         data_field.type != []const u8 and
                         data_field.type != [:0]const u8 and
-                        @typeInfo(data_field.type) != .Enum and
-                        @typeInfo(data_field.type) != .Union)
+                        @typeInfo(data_field.type) != .@"enum" and
+                        @typeInfo(data_field.type) != .@"union")
                     {
                         continue;
                     }
@@ -424,8 +424,8 @@ fn StructFormatterType(comptime Data: type, comptime cardinality: DataFormatterC
                     }
 
                     try writer.print("{s}", .{data_field_value});
-                } else if (@typeInfo(data_field.type) == .Enum or
-                    @typeInfo(data_field.type) == .Union)
+                } else if (@typeInfo(data_field.type) == .@"enum" or
+                    @typeInfo(data_field.type) == .@"union")
                 {
                     try writer.print("{s}", .{@tagName(data_field_value)});
                 } else {

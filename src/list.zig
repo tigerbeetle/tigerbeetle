@@ -11,7 +11,7 @@ pub fn DoublyLinkedListType(
     comptime field_back_enum: std.meta.FieldEnum(Node),
     comptime field_next_enum: std.meta.FieldEnum(Node),
 ) type {
-    assert(@typeInfo(Node) == .Struct);
+    assert(@typeInfo(Node) == .@"struct");
     assert(field_back_enum != field_next_enum);
     assert(std.meta.FieldType(Node, field_back_enum) == ?*Node);
     assert(std.meta.FieldType(Node, field_next_enum) == ?*Node);

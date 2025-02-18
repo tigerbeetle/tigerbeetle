@@ -309,7 +309,7 @@ test "in-place upgrade" {
         shell: *Shell,
         tmp: []const u8,
 
-        rng: std.rand.DefaultPrng,
+        rng: std.Random.DefaultPrng,
         replicas: [replica_count]?std.process.Child = .{null} ** replica_count,
         replica_exe: [replica_count][]const u8,
         replica_datafile: [replica_count][]const u8,
@@ -340,7 +340,7 @@ test "in-place upgrade" {
                 });
             }
 
-            const rng = std.rand.DefaultPrng.init(options.seed);
+            const rng = std.Random.DefaultPrng.init(options.seed);
             return .{
                 .shell = shell,
                 .tmp = tmp,

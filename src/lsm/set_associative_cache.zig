@@ -599,9 +599,9 @@ fn PackedUnsignedIntegerArrayType(comptime UInt: type) type {
     const Word = u64;
 
     assert(builtin.target.cpu.arch.endian() == .little);
-    assert(@typeInfo(UInt).Int.signedness == .unsigned);
-    assert(@typeInfo(UInt).Int.bits < @bitSizeOf(u8));
-    assert(math.isPowerOfTwo(@typeInfo(UInt).Int.bits));
+    assert(@typeInfo(UInt).int.signedness == .unsigned);
+    assert(@typeInfo(UInt).int.bits < @bitSizeOf(u8));
+    assert(math.isPowerOfTwo(@typeInfo(UInt).int.bits));
 
     const word_bits = @bitSizeOf(Word);
     const uint_bits = @bitSizeOf(UInt);
@@ -706,12 +706,12 @@ fn ContextType(comptime UInt: type) type {
         const Context = @This();
 
         const Array = PackedUnsignedIntegerArrayType(UInt);
-        random: std.rand.Random,
+        random: std.Random,
 
         array: Array,
         reference: []UInt,
 
-        fn init(random: std.rand.Random, len: usize) !Context {
+        fn init(random: std.Random, len: usize) !Context {
             const words = try testing.allocator.alloc(u64, @divExact(len * @bitSizeOf(UInt), 64));
             errdefer testing.allocator.free(words);
 
@@ -757,7 +757,7 @@ fn ContextType(comptime UInt: type) type {
 test "PackedUnsignedIntegerArray: fuzz" {
     const seed = 42;
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     inline for (.{ u1, u2, u4 }) |UInt| {
@@ -843,7 +843,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
     };
 
     return struct {
-        fn run(random: std.rand.Random) !void {
+        fn run(random: std.Random) !void {
             if (log) SAC.inspect();
 
             var iterations: usize = 0;
@@ -880,7 +880,7 @@ test "SetAssociativeCache: search_tags()" {
     const Key = u64;
     const Value = u64;
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     inline for ([_]u64{ 2, 4, 16 }) |ways| {

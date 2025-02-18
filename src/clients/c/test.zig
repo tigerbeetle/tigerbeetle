@@ -140,7 +140,7 @@ test "c_client echo" {
     try testing.expectEqual(@as(c_uint, c.TB_STATUS_SUCCESS), result);
     defer c.tb_client_deinit(tb_client);
 
-    var prng = std.rand.DefaultPrng.init(tb_context);
+    var prng = std.Random.DefaultPrng.init(tb_context);
 
     const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
     defer testing.allocator.free(requests);

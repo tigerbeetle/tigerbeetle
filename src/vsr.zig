@@ -306,7 +306,7 @@ pub const Operation = enum(u8) {
     pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
         assert(self.valid(StateMachine));
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
-            inline for (@typeInfo(Enum).Enum.fields) |field| {
+            inline for (@typeInfo(Enum).@"enum".fields) |field| {
                 const op = @field(Enum, field.name);
                 if (@intFromEnum(self) == @intFromEnum(op)) {
                     return field.name;
@@ -318,16 +318,16 @@ pub const Operation = enum(u8) {
 
     fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
-            assert(@typeInfo(StateMachine.Operation).Enum.is_exhaustive);
-            assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
-                @typeInfo(Operation).Enum.tag_type);
-            for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
+            assert(@typeInfo(StateMachine.Operation).@"enum".is_exhaustive);
+            assert(@typeInfo(StateMachine.Operation).@"enum".tag_type ==
+                @typeInfo(Operation).@"enum".tag_type);
+            for (@typeInfo(StateMachine.Operation).@"enum".fields) |field| {
                 const operation = @field(StateMachine.Operation, field.name);
                 if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
             }
-            for (@typeInfo(Operation).Enum.fields) |field| {
+            for (@typeInfo(Operation).@"enum".fields) |field| {
                 const vsr_operation = @field(Operation, field.name);
                 switch (vsr_operation) {
                     // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
@@ -685,7 +685,7 @@ pub const Timeout = struct {
     /// Allows the attempts counter to wrap from time to time.
     /// The overflow period is kept short to surface any related bugs sooner rather than later.
     /// We do not saturate the counter as this would cause round-robin retries to get stuck.
-    pub fn backoff(self: *Timeout, random: std.rand.Random) void {
+    pub fn backoff(self: *Timeout, random: std.Random) void {
         assert(self.ticking);
 
         self.ticks = 0;
@@ -721,7 +721,7 @@ pub const Timeout = struct {
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
-    fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
+    fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.Random) void {
         // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
         assert(self.ticks == 0);
         assert(self.rtt > 0);
@@ -793,7 +793,7 @@ pub const Timeout = struct {
 
 /// Calculates exponential backoff with jitter to prevent cascading failure due to thundering herds.
 pub fn exponential_backoff_with_jitter(
-    random: std.rand.Random,
+    random: std.Random,
     min: u64,
     max: u64,
     attempt: u64,
@@ -827,7 +827,7 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const attempts = 1000;
@@ -857,7 +857,7 @@ pub fn parse_addresses(
     if (address_count > out_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
-    var comma_iterator = std.mem.split(u8, raw, ",");
+    var comma_iterator = std.mem.splitScalar(u8, raw, ',');
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
@@ -1040,7 +1040,7 @@ test "parse_addresses: fuzz" {
 
     const seed = std.crypto.random.int(u64);
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     var input_max: [len_max]u8 = .{0} ** len_max;

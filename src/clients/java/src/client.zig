@@ -28,7 +28,7 @@ const global_allocator = if (builtin.link_libc)
 else
     @compileError("tb_client must be built with libc");
 
-pub const std_options = .{
+pub const std_options = std.Options{
     .log_level = .debug,
     .logFn = tb.Logging.application_logger,
 };
@@ -275,13 +275,13 @@ comptime {
         }
     };
 
-    @export(Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .strong });
-    @export(Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .strong });
+    @export(&Exports.on_load, .{ .name = "JNI_OnLoad", .linkage = .strong });
+    @export(&Exports.on_unload, .{ .name = "JNI_OnUnload", .linkage = .strong });
 
-    @export(Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .strong });
-    @export(Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .strong });
-    @export(Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .strong });
-    @export(Exports.submit, .{ .name = prefix ++ "submit", .linkage = .strong });
+    @export(&Exports.client_init, .{ .name = prefix ++ "clientInit", .linkage = .strong });
+    @export(&Exports.client_init_echo, .{ .name = prefix ++ "clientInitEcho", .linkage = .strong });
+    @export(&Exports.client_deinit, .{ .name = prefix ++ "clientDeinit", .linkage = .strong });
+    @export(&Exports.submit, .{ .name = prefix ++ "submit", .linkage = .strong });
 }
 
 /// Reflection helper and metadata cache.

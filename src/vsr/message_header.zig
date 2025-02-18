@@ -686,7 +686,7 @@ pub const Header = extern struct {
             return null;
         }
 
-        pub fn reserved(cluster: u128, slot: u64) Prepare {
+        pub fn reserved_operation(cluster: u128, slot: u64) Prepare {
             assert(slot < constants.journal_slot_count);
 
             var header = Prepare{
@@ -1356,8 +1356,8 @@ comptime {
         const CommandHeader = Header.Type(command);
         assert(@sizeOf(CommandHeader) == @sizeOf(Header));
         assert(@alignOf(CommandHeader) == @alignOf(Header));
-        assert(@typeInfo(CommandHeader) == .Struct);
-        assert(@typeInfo(CommandHeader).Struct.layout == .@"extern");
+        assert(@typeInfo(CommandHeader) == .@"struct");
+        assert(@typeInfo(CommandHeader).@"struct".layout == .@"extern");
         assert(stdx.no_padding(CommandHeader));
 
         // Verify that the command's header's frame is identical to Header's.

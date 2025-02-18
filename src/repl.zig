@@ -484,6 +484,8 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     error.SystemResources,
                     error.Unexpected,
                     error.WouldBlock,
+                    error.NoDevice,
+                    error.ProcessNotFound,
                     => return err,
                 }
             };
@@ -604,7 +606,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             }
 
             var statements_iterator = if (statements.len > 0)
-                std.mem.split(u8, statements, ";")
+                std.mem.splitScalar(u8, statements, ';')
             else
                 null;
 
@@ -656,6 +658,8 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                                 error.SystemResources,
                                 error.Unexpected,
                                 error.WouldBlock,
+                                error.NoDevice,
+                                error.ProcessNotFound,
                                 => return err,
                             }
                         };
@@ -726,7 +730,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 @TypeOf(object.*) == tb.AccountBalance);
 
             try repl.terminal.print("{{\n", .{});
-            inline for (@typeInfo(@TypeOf(object.*)).Struct.fields, 0..) |object_field, i| {
+            inline for (@typeInfo(@TypeOf(object.*)).@"struct".fields, 0..) |object_field, i| {
                 if (comptime std.mem.eql(u8, object_field.name, "reserved")) {
                     continue;
                     // No need to print out reserved.
@@ -740,7 +744,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     try repl.terminal.print("  \"" ++ object_field.name ++ "\": [", .{});
                     var needs_comma = false;
 
-                    inline for (@typeInfo(object_field.type).Struct.fields) |flag_field| {
+                    inline for (@typeInfo(object_field.type).@"struct".fields) |flag_field| {
                         if (comptime !std.mem.eql(u8, flag_field.name, "padding")) {
                             if (@field(@field(object, "flags"), flag_field.name)) {
                                 if (needs_comma) {

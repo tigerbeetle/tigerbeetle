@@ -26,7 +26,7 @@ pub const Time = struct {
     offset_coefficient_B: i64,
     offset_coefficient_C: u32 = 0,
 
-    prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(0),
+    prng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0),
 
     /// The number of ticks elapsed since initialization.
     ticks: u64 = 0,

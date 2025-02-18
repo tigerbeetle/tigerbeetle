@@ -3211,8 +3211,8 @@ fn JniInterfaceType(comptime T: type) type {
             const Fn = @TypeOf(@field(T, @tagName(function)));
             var fn_info = @typeInfo(Fn);
             switch (fn_info) {
-                .Fn => {
-                    fn_info.Fn.calling_convention = JNICALL;
+                .@"fn" => {
+                    fn_info.@"fn".calling_convention = JNICALL;
                     return @Type(fn_info);
                 },
                 else => @compileError("Expected " ++ @tagName(function) ++ " to be a function"),
@@ -3225,7 +3225,7 @@ fn JniInterfaceType(comptime T: type) type {
             args: anytype,
         ) return_type: {
             const type_info = @typeInfo(JniFnType(function));
-            break :return_type type_info.Fn.return_type.?;
+            break :return_type type_info.@"fn".return_type.?;
         } {
             const Fn = JniFnType(function);
             const VTable = extern struct {

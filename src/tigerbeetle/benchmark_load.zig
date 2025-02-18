@@ -144,7 +144,7 @@ pub fn main(
 
     log.info("Benchmark seed = {}", .{seed});
 
-    var rng = std.rand.DefaultPrng.init(seed);
+    var rng = std.Random.DefaultPrng.init(seed);
     const random = rng.random();
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
         .sequential => .{ .identity = {} },
@@ -256,7 +256,7 @@ const Generator = union(enum) {
 const Benchmark = struct {
     io: *IO,
     statsd: ?*StatsD,
-    random: std.rand.Random,
+    random: std.Random,
     timer: std.time.Timer,
     output: std.io.AnyWriter,
     clients: []Client,

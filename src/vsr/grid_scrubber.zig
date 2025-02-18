@@ -158,7 +158,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.* = undefined;
         }
 
-        pub fn open(scrubber: *GridScrubber, random: std.rand.Random) void {
+        pub fn open(scrubber: *GridScrubber, random: std.Random) void {
             // Compute the tour origin exactly once.
             if (scrubber.tour_tables_origin != null) {
                 return;

@@ -321,14 +321,14 @@ fn WorkloadType(comptime StateMachine: type) type {
         const Workload = @This();
         const constants = StateMachine.constants;
 
-        random: std.rand.Random,
+        random: std.Random,
         options: Options,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            random: std.Random,
             options: Options,
         ) !Workload {
             _ = allocator;
@@ -404,7 +404,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub const Options = struct {
             batch_size_limit: u32,
 
-            pub fn generate(random: std.rand.Random, options: struct {
+            pub fn generate(random: std.Random, options: struct {
                 batch_size_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,

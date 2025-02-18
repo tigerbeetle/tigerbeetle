@@ -13,7 +13,7 @@ const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    var prng = std.Random.DefaultPrng.init(fuzz_args.seed);
 
     // TODO When there is a top-level fuzz.zig main(), split these fuzzers into two different
     // commands.
@@ -25,7 +25,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     // try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 8 });
 }
 
-pub fn fuzz_quorums_working(random: std.rand.Random) !void {
+pub fn fuzz_quorums_working(random: std.Random) !void {
     const r = random;
     const t = test_quorums_working;
     const o = CopyTemplate.make_valid;
@@ -99,7 +99,7 @@ pub fn fuzz_quorums_working(random: std.rand.Random) !void {
 }
 
 fn test_quorums_working(
-    random: std.rand.Random,
+    random: std.Random,
     threshold_count: u8,
     initial_copies: *const [4]CopyTemplate,
     result: QuorumsType(.{ .superblock_copies = 4 }).Error!u64,
@@ -261,7 +261,7 @@ pub const CopyTemplate = struct {
 
 // Verify that a torn header write during repair never compromises the existing quorum.
 pub fn fuzz_quorum_repairs(
-    random: std.rand.Random,
+    random: std.Random,
     comptime options: superblock_quorums.Options,
 ) !void {
     const superblock_copies = options.superblock_copies;

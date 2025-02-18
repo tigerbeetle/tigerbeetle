@@ -596,7 +596,7 @@ pub const FreeSet = struct {
 
         // Block releases from the current checkpoint that were temporarily recorded in
         // blocks_released_prior_checkpoint_durability can now be moved to blocks_released.
-        while (set.blocks_released_prior_checkpoint_durability.popOrNull()) |block_entry| {
+        while (set.blocks_released_prior_checkpoint_durability.pop()) |block_entry| {
             const block = block_entry.key;
             set.blocks_released.set(block);
         }
@@ -1007,7 +1007,7 @@ test "FreeSet encode, decode, encode" {
 
     // Random.
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
@@ -1036,7 +1036,7 @@ const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
 fn test_encode(patterns: []const TestPattern) !void {
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     var blocks_count: usize = 0;
@@ -1231,7 +1231,7 @@ fn find_bit(
 }
 
 test "find_bit" {
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = std.Random.DefaultPrng.init(123);
     const random = prng.random();
 
     var bit_length: usize = 1;
@@ -1250,7 +1250,7 @@ test "find_bit" {
 }
 
 fn test_find_bit(
-    random: std.rand.Random,
+    random: std.Random,
     bit_set: DynamicBitSetUnmanaged,
     comptime bit_kind: std.bit_set.IteratorOptions.Type,
 ) !void {
