@@ -195,6 +195,10 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
         try output.print("\n", .{});
     }
 
+    // Print the size required to store each object + indexes.
+    try output.print("StateMachine:\n", .{});
+    try print_objects(output);
+
     // Memory usage is intentionally estimated from constants, rather than measured, to sanity
     // check that our observed memory usage is reasonable.
     try output.print("Memory (approximate):\n", .{});
@@ -222,7 +226,7 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
 }
 
 fn print_header(output: std.io.AnyWriter, comptime level: u8, comptime header: []const u8) !void {
-    const width_total = 20;
+    const width_total = 32;
     const pad_left = "  " ** level;
     const pad_right = " " ** (width_total -| level * 2 -| header.len);
     try output.print(pad_left ++ header ++ pad_right, .{});
@@ -237,6 +241,49 @@ fn print_size_count(output: std.io.AnyWriter, comptime size: u64, comptime count
         else
             std.fmt.comptimePrint("{}", .{stdx.fmt_int_size_bin_exact(size)});
         try output.print("{s<8} x{}\n", .{ size_formatted, count });
+    }
+}
+
+fn print_objects(output: std.io.AnyWriter) !void {
+    const Grooves = StateMachine.Forest.Grooves;
+    inline for (std.meta.fields(Grooves)) |groove_field| {
+        const Groove = groove_field.type;
+        const ObjectTree = Groove.ObjectTree;
+
+        comptime var size_total: usize = 0;
+
+        const object_size = @sizeOf(ObjectTree.Table.Value);
+        size_total += object_size;
+
+        const id_size = if (Groove.IdTree == void) 0 else @sizeOf(Groove.IdTree.Table.Value);
+        size_total += id_size;
+
+        comptime {
+            for (std.meta.fields(Groove.IndexTrees)) |index_field| {
+                const IndexTree = index_field.type;
+                const index_size = @sizeOf(IndexTree.Table.Value);
+                size_total += index_size;
+            }
+        }
+
+        try print_header(output, 0, ObjectTree.tree_name());
+        try print_size_count(output, size_total, 1);
+
+        try print_header(output, 1, "object");
+        try print_size_count(output, object_size, 1);
+
+        try print_header(output, 1, "id");
+        try print_size_count(output, id_size, 1);
+
+        inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
+            const IndexTree = index_field.type;
+            const index_size = @sizeOf(IndexTree.Table.Value);
+
+            try print_header(output, 1, index_field.name);
+            try print_size_count(output, index_size, 1);
+        }
+
+        try output.print("\n", .{});
     }
 }
 
