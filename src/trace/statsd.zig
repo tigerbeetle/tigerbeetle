@@ -142,7 +142,7 @@ pub const StatsD = struct {
         // 'Connect' the UDP socket, so we can just send() to it normally.
         try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
-        log.info("sending statsd metrics to {}", .{address});
+        log.info("{}: sending statsd metrics to {}", .{ replica, address });
 
         return .{
             .cluster = cluster,
@@ -196,7 +196,8 @@ pub const StatsD = struct {
         // Keep it as a log, rather than assert, to avoid the common pitfall of metrics killing
         // the whole system.
         if (self.send_completions.executing() != 0) {
-            log.err("{} / {} packets still in flight; skipping emit", .{
+            log.err("{}: {} / {} packets still in flight; skipping emit", .{
+                self.replica,
                 self.send_completions.executing(),
                 packet_count_max,
             });
@@ -205,8 +206,8 @@ pub const StatsD = struct {
 
         if (self.implementation == .udp and self.implementation.udp.send_callback_error_count > 0) {
             log.warn(
-                "failed to send {} packets",
-                .{self.implementation.udp.send_callback_error_count},
+                "{}: failed to send {} packets",
+                .{ self.replica, self.implementation.udp.send_callback_error_count },
             );
             self.implementation.udp.send_callback_error_count = 0;
         }
@@ -238,7 +239,7 @@ pub const StatsD = struct {
                     }) catch |err| {
                         // This shouldn't ever happen, but don't allow metrics to kill the system.
                         assert(err == error.NoSpaceLeft);
-                        log.err("insufficient buffer space", .{});
+                        log.err("{}: insufficient buffer space", .{self.replica});
                         break;
                     };
 
@@ -261,7 +262,7 @@ pub const StatsD = struct {
         for (send_sizes.const_slice()) |send_size| {
             const completion = self.send_completions.acquire() orelse {
                 // This shouldn't ever happen, but don't allow metrics to kill the system.
-                log.err("insufficient packets to emit any metrics", .{});
+                log.err("{}: insufficient packets to emit any metrics", .{self.replica});
                 return;
             };
             self.emit_buffer(completion, self.send_buffer[send_offset..][0..send_size]);
@@ -282,7 +283,7 @@ pub const StatsD = struct {
                 );
             },
             .log => {
-                log.debug("statsd packet: {s}", .{send_buffer});
+                log.debug("{}: statsd packet: {s}", .{ self.replica, send_buffer });
                 StatsD.send_callback(self, send_completion, send_buffer.len);
             },
         }
