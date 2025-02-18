@@ -57,7 +57,7 @@ shard well.
 
 Horizontal scaling works poorly for OLTP because most accounts cannot be neatly partitioned between
 shards. Transactions between accounts on different shards become even more complex and slow. Row
-locks on hot accounts even worse when the transactions must execute across shards.
+locks on hot accounts are even worse when the transactions must execute across shards.
 
 Another approach to scaling OLTP systems is to use
 [MapReduce](https://en.wikipedia.org/wiki/MapReduce) for billing. Unfortunately, this makes it

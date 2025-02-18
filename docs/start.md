@@ -6,9 +6,9 @@ a million transactions per second and guaranteeing durability even in the face o
 and storage faults. You will learn more about why this is an important and hard problem to solve in
 the [Concepts](./concepts/) section, but let's make some real transactions first!
 
-## Instal
+## Install
 
-TigerBeetle is a single, small, statically liked binary.
+TigerBeetle is a single, small, statically linked binary.
 
 You can download a pre-built binary from `tigerbeetle.com`:
 
