@@ -94,6 +94,12 @@ const packet_count_max = stdx.div_ceil(
     packet_messages_max,
 );
 
+comptime {
+    // Sanity-check:
+    assert(packet_count_max > 0);
+    assert(packet_count_max < 256);
+}
+
 const BufferCompletion = struct {
     buffer: [packet_size_max]u8,
     completion: IO.Completion = undefined,
@@ -112,8 +118,6 @@ pub const StatsD = struct {
     },
 
     buffer_completions: *IOPSType(BufferCompletion, packet_count_max),
-
-    events_metric_emitted: []?EventMetricAggregate,
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
@@ -135,14 +139,6 @@ pub const StatsD = struct {
         errdefer allocator.destroy(buffer_completions);
         buffer_completions.* = .{};
 
-        const events_metric_emitted = try allocator.alloc(
-            ?EventMetricAggregate,
-            EventMetric.slot_count,
-        );
-        errdefer allocator.free(events_metric_emitted);
-
-        @memset(events_metric_emitted, null);
-
         // 'Connect' the UDP socket, so we can just send() to it normally.
         try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
@@ -158,7 +154,6 @@ pub const StatsD = struct {
                 },
             },
             .buffer_completions = buffer_completions,
-            .events_metric_emitted = events_metric_emitted,
         };
     }
 
@@ -174,20 +169,11 @@ pub const StatsD = struct {
         errdefer allocator.destroy(buffer_completions);
         buffer_completions.* = .{};
 
-        const events_metric_emitted = try allocator.alloc(
-            ?EventMetricAggregate,
-            EventMetric.slot_count,
-        );
-        errdefer allocator.free(events_metric_emitted);
-
-        @memset(events_metric_emitted, null);
-
         return .{
             .cluster = cluster,
             .replica = replica,
             .implementation = .log,
             .buffer_completions = buffer_completions,
-            .events_metric_emitted = events_metric_emitted,
         };
     }
 
@@ -195,7 +181,6 @@ pub const StatsD = struct {
         if (self.implementation == .udp) {
             self.implementation.udp.io.close_socket(self.implementation.udp.socket);
         }
-        allocator.free(self.events_metric_emitted);
         allocator.destroy(self.buffer_completions);
 
         self.* = undefined;
@@ -206,8 +191,6 @@ pub const StatsD = struct {
         events_metric: []const ?EventMetricAggregate,
         events_timing: []const ?EventTimingAggregate,
     ) void {
-        assert(events_metric.len == self.events_metric_emitted.len);
-
         // This really should not happen; it means we're emitting so many packets, on a short
         // enough emit timeout, that the kernel hasn't been able to process them all (UDP doesn't
         // block or provide back-pressure like a TCP socket).
@@ -237,16 +220,8 @@ pub const StatsD = struct {
 
         var buffer_written: usize = 0;
         inline for (.{ events_metric, events_timing }) |events| {
-            for (events, 0..) |event_new_maybe, i| {
+            for (events) |event_new_maybe| {
                 const event_new = event_new_maybe orelse continue;
-                if (@TypeOf(event_new) == EventMetricAggregate) {
-                    const event_old = &self.events_metric_emitted[i];
-                    if (event_old.* != null and event_old.*.?.value == event_new.value) continue;
-                    event_old.* = event_new;
-                } else {
-                    comptime assert(@TypeOf(event_new) == EventTimingAggregate);
-                }
-
                 const stats = switch (@TypeOf(event_new)) {
                     EventMetricAggregate => [_]Stat{.{ .metric = .{ .aggregate = event_new } }},
                     EventTimingAggregate => [_]Stat{
@@ -289,13 +264,6 @@ pub const StatsD = struct {
         } else {
             self.buffer_completions.release(buffer_completion);
         }
-
-        stdx.copy_disjoint(
-            .exact,
-            ?EventMetricAggregate,
-            self.events_metric_emitted,
-            events_metric,
-        );
     }
 
     fn emit_buffer(
@@ -334,7 +302,7 @@ pub const StatsD = struct {
         completion: *IO.Completion,
         result: IO.SendError!usize,
     ) void {
-        _ = result catch {
+        _ = result catch |err| {
             // Errors are only supported when using UDP; not if calling this loopback.
             assert(self.implementation == .udp);
             self.implementation.udp.send_callback_error_count += 1;
@@ -377,7 +345,7 @@ fn format_metric(
     var writer = stream.writer();
 
     try writer.print("tb.{[name]s}{[name_suffix]s}:{[value]d}|{[statsd_type]s}" ++
-        "|cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
+        "|#cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
         .name = stat_name,
         .name_suffix = stat_suffix,
         .statsd_type = stat_type,

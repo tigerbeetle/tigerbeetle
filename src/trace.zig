@@ -238,7 +238,15 @@ pub const Tracer = struct {
             .event_tracing = event_tracing,
             .event_timing = event_timing,
             .args = std.json.Formatter(Event){ .value = event, .options = .{} },
-        }) catch unreachable;
+        }) catch {
+            log.err("{}: {s}({}): event too large: {}", .{
+                tracer.replica_index,
+                @tagName(event),
+                event_tracing,
+                event_timing,
+            });
+            return;
+        };
 
         writer.writeAll(buffer_stream.getWritten()) catch |err| {
             std.debug.panic("Tracer.start: {}\n", .{err});
@@ -274,27 +282,27 @@ pub const Tracer = struct {
 
         tracer.timing(event_timing, event_duration.microseconds());
 
-        tracer.write_stop(stack);
+        tracer.write_stop(stack, event_duration);
     }
 
     pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
         const stack_base = EventTracing.stack_bases.get(event_tag);
         const cardinality = EventTracing.stack_limits.get(event_tag);
         for (stack_base..stack_base + cardinality) |stack| {
-            if (tracer.events_started[stack]) |_| {
+            if (tracer.events_started[stack]) |event_start| {
                 log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
 
+                const event_end = stdx.Instant.now();
+                const event_duration = event_end.duration_since(event_start);
+
                 tracer.events_started[stack] = null;
-                tracer.write_stop(@intCast(stack));
+                tracer.write_stop(@intCast(stack), event_duration);
             }
         }
     }
 
-    fn write_stop(tracer: *Tracer, stack: u32) void {
+    fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
         const writer = tracer.options.writer orelse return;
-        const time_now = stdx.Instant.now();
-        const time_elapsed = time_now.duration_since(tracer.time_start);
-
         var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
 
         buffer_stream.writer().print(
@@ -343,14 +351,11 @@ pub const Tracer = struct {
         const timing_slot = event_timing.slot();
 
         if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
-            const timing_existing = event_timing_existing.values;
-            // Certain high cardinality data (eg, op) _can_ differ.
-            // TODO: Maybe assert and gate on constants.verify
-
             if (constants.verify) {
                 assert(std.meta.eql(event_timing_existing.event, event_timing));
             }
 
+            const timing_existing = event_timing_existing.values;
             event_timing_existing.values = .{
                 .duration_min_us = @min(timing_existing.duration_min_us, duration_us),
                 .duration_max_us = @max(timing_existing.duration_max_us, duration_us),
