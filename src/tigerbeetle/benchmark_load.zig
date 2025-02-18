@@ -27,7 +27,6 @@ const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 const tb = vsr.tigerbeetle;
-const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
 const ZipfianShuffled = stdx.ZipfianShuffled;
@@ -125,17 +124,6 @@ pub fn main(
     );
     defer allocator.free(client_replies);
 
-    var statsd_opt: ?StatsD = null;
-    defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
-
-    if (cli_args.statsd) {
-        statsd_opt = try StatsD.init(
-            allocator,
-            &io,
-            std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
-        );
-    }
-
     // If no seed was given, use a default seed for reproducibility.
     const seed = seed_from_arg: {
         const seed_argument = cli_args.seed orelse break :seed_from_arg 42;
@@ -170,7 +158,6 @@ pub fn main(
 
     var benchmark = Benchmark{
         .io = &io,
-        .statsd = if (statsd_opt) |*statsd| statsd else null,
         .random = random,
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),
@@ -255,7 +242,6 @@ const Generator = union(enum) {
 
 const Benchmark = struct {
     io: *IO,
-    statsd: ?*StatsD,
     random: std.rand.Random,
     timer: std.time.Timer,
     output: std.io.AnyWriter,
@@ -426,13 +412,6 @@ const Benchmark = struct {
         const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
         const transfers_created = @min(b.transfer_count, b.transfer_batch_size);
         b.transfers_created += transfers_created;
-
-        if (b.statsd) |statsd| {
-            statsd.gauge("benchmark.txns", transfers_created) catch {};
-            statsd.timing("benchmark.timings", request_duration_ns) catch {};
-            statsd.gauge("benchmark.batch", requests_complete) catch {};
-            statsd.gauge("benchmark.completed", b.transfers_created) catch {};
-        }
 
         if (b.print_batch_timings) {
             log.info("batch {}: {} tx in {} ms", .{

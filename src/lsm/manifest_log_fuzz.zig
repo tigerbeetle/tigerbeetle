@@ -292,11 +292,11 @@ const Environment = struct {
         errdefer env.storage_verify.deinit(allocator);
 
         fields_initialized += 1;
-        env.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer env.trace.deinit(allocator);
 
         fields_initialized += 1;
-        env.trace_verify = try vsr.trace.Tracer.init(allocator, 0, .{});
+        env.trace_verify = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer env.trace_verify.deinit(allocator);
 
         fields_initialized += 1;
@@ -557,7 +557,7 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.allocator);
-            test_trace.* = try vsr.trace.Tracer.init(env.allocator, 0, .{});
+            test_trace.* = try vsr.trace.Tracer.init(env.allocator, 0, 0, .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().

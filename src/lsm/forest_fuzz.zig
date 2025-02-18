@@ -125,7 +125,7 @@ const Environment = struct {
     fn init(env: *Environment, storage: *Storage) !void {
         env.storage = storage;
 
-        env.trace = try vsr.trace.Tracer.init(allocator, replica, .{});
+        env.trace = try vsr.trace.Tracer.init(allocator, 0, replica, .{});
 
         env.superblock = try SuperBlock.init(allocator, .{
             .storage = env.storage,

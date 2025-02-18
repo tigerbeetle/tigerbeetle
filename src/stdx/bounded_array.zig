@@ -7,8 +7,9 @@ const assert = std.debug.assert;
 /// See <https://github.com/tigerbeetle/tigerbeetle/pull/1121> for the original reason for
 /// wrapping --- we need an `fn count` which returns an `usize`, instead of potentially much smaller
 /// type which stores the length internally.
-pub fn BoundedArrayType(comptime T: type, comptime capacity: usize) type {
-    const Inner = @import("std").BoundedArray(T, capacity); // smuggle the std version past tidy
+pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type {
+    // Smuggle the std version past tidy.
+    const Inner = @import("std").BoundedArray(T, buffer_capacity);
 
     return struct {
         inner: Inner = Inner{},
@@ -30,7 +31,7 @@ pub fn BoundedArrayType(comptime T: type, comptime capacity: usize) type {
         }
 
         pub inline fn full(self: BoundedArray) bool {
-            return self.count() == capacity;
+            return self.count() == buffer_capacity;
         }
 
         pub inline fn empty(self: BoundedArray) bool {
@@ -62,7 +63,7 @@ pub fn BoundedArrayType(comptime T: type, comptime capacity: usize) type {
         }
 
         pub fn insert_assume_capacity(self: *BoundedArray, index: usize, item: T) void {
-            assert(self.inner.len < capacity);
+            assert(self.inner.len < buffer_capacity);
             assert(index <= self.inner.len);
 
             self.inner.len += 1;
@@ -103,6 +104,10 @@ pub fn BoundedArrayType(comptime T: type, comptime capacity: usize) type {
 
         pub inline fn pop(array: *BoundedArray) T {
             return array.inner.pop();
+        }
+
+        pub inline fn capacity(array: *BoundedArray) usize {
+            return array.inner.capacity();
         }
     };
 }
