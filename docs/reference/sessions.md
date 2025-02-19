@@ -11,7 +11,7 @@ a reply.
 
 Similar to other databases, TigerBeetle has a [hard limit](#eviction) on the number of concurrent
 client sessions. To maximize throughput, users are encouraged to minimize the number of concurrent
-clients and [batch](../coding/requests/README.md#batching-events) as many events as possible per request.
+clients and [batch](../coding/requests.md#batching-events) as many events as possible per request.
 
 ## Lifecycle
 

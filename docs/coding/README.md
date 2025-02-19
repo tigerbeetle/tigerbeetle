@@ -8,11 +8,13 @@ a series of loosely connected guides which can be read in any order.
   provided by TigerBeetle.
 - [Financial Accounting](./financial-accounting.md), a deep dive into double-entry bookkeeping.
 - [Requests](./requests.md) outlines the database interface.
-- [Reliable Transfer Submission](./reliable-transaction-submission.md) explains the end-to-end
+- [Reliable Transaction Submission](./reliable-transaction-submission.md) explains the end-to-end
   principle and how it helps to avoid double spending.
-- [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Two-Phase Transfers](./two-phase-transfers.md) introduces pending transfers, one of the most
   powerful primitives built into TigerBeetle.
+- [Linked Events](./linked-events.md) shows how several transfers can be chained together into a
+  larger transaction, which success or fails atomically.
+- [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
 - [Clients](./clients/) shows how to use TigerBeetle from the comfort of .Net, Go, Java, Node.js, or

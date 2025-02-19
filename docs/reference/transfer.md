@@ -351,7 +351,7 @@ that they will either succeed or fail together.
 
 The last transfer in a chain of linked transfers does **not** have this flag set.
 
-You can read more about [linked events](./requests/README.md#linked-events).
+You can read more about [linked events](../coding/linked-events.md).
 
 ##### Examples
 

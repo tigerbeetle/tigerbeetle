@@ -186,7 +186,7 @@ such that they will either succeed or fail together.
 
 The last account in a chain of linked accounts does **not** have this flag set.
 
-You can read more about [linked events](./requests/README.md#linked-events).
+You can read more about [linked events](../coding/linked-events.md).
 
 #### `flags.debits_must_not_exceed_credits`
 
