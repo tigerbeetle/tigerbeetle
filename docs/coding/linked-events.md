@@ -1,7 +1,7 @@
 # Linked Events
 
 Events within a request [succeed or fail](../reference/requests/create_transfers.md#result)
-independently unless they are explicitly linked using the `flags.linked`
+independently unless they are explicitly linked using `flags.linked`
 ([`Account.flags.linked`](../reference/account.md#flagslinked) or
 [`Transfer.flags.linked`](../reference/transfer.md#flagslinked)).
 

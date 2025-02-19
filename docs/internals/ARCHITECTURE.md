@@ -30,7 +30,7 @@ contention.
 ## Overview
 
 TigerBeetle is a distributed system. It is a cluster of six replicas. The state of each replica is
-just a single file on disk, called data file. Replicas use consensus protocol to ensure that their
+just a single file on disk, called the data file. Replicas use a consensus protocol to ensure that their
 respective data files store identical data.
 
 Specifically, TigerBeetle is a replicated state machine. The ground state of the system is an
@@ -58,7 +58,7 @@ primary, and that the new primary correctly reconstructs the latest state of the
 
 The derived state of the system is the append-only log of immutable transfers (past transfers are
 stored for idempotence) and the current balances of all accounts. Physically on disk, the state is
-stored as a collection (a forest) of LSM trees. Each LSM tree is a sorted  collection of objects.
+stored as a collection (a forest) of LSM trees. Each LSM tree is a sorted collection of objects.
 For example, transfer objects are stored in a tree sorted by a unique transfer's timestamp. This
 tree allow efficiently finding the transfer given a timestamp. Auxiliary index trees are used to
 speed up other kinds of lookups. For example, there's a tree which stores, for each transfer, a
@@ -153,7 +153,7 @@ financial transaction processing is an infinite-COST problem, using the terminol
 McSherry's paper](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf).
 
 The positive reason for using a single thread is that CPUs are quite fast actually, and the reports
-of Moore's Law demise are somewhat overstated. A single core can easily to 1mil TPS if:
+of Moore's Law demise are somewhat overstated. A single core can easily scale to 1mil TPS if:
 
 - you keep that core busy with the useful work and move everything else off the hot path,
 - you use the core efficiently and do your home work with cache line aligned data structures, memory
@@ -268,7 +268,7 @@ consistently simplify and improve the system. In general everything in TigerBeet
 but here are some of the places where that determinism leads to big advantages:
 
 - Determinism greatly simplifies the implementation of a replicated state machine, as it reduces the
-  problem of synchronizing mutable state to a much simpler problem of synchronizing immutable,
+  problem of synchronizing mutable state to a much simpler problem of synchronizing an immutable,
   append-only, hash-chained log.
 - Determinism allows for physical repair, as opposed to logical repair. Consider the case where a
   single byte of the storage of a particular LSM tree got corrupted. If the replicas only guarantee
@@ -295,7 +295,7 @@ TigerBeetle uses a variety of techniques to ensure that the code is correct, fro
 example-based tests to strict style guide which emphasizes simplicity and directness. The most
 important technique deployed is simulation testing, as seen on <https://sim.tigerbeetle.com>.
 
-TigerBeetle simulator, VOPR, can run an entire cluster on a single thread, injecting various storage
+TigerBeetle's simulator, the VOPR, can run an entire cluster on a single thread, injecting various storage
 faults and infinitely speeding up time. Combined with a smart workload generator, swarm testing, and
 a thousand CPU cores, VOPR makes is easy to exercise all the possible behaviors of the system.
 
@@ -327,7 +327,7 @@ the prepare to every other replica, and instead sends it to just one other repli
 replica to forward the prepare farther.
 
 Storage is typically capable of sustaining several parallel IO operations, so TigerBeetle tries to
-keep it utilized. For example, when compaction needs to read a table from disk, it enqueues writes
+keep it saturated. For example, when compaction needs to read a table from disk, it enqueues writes
 for several of the table's blocks at a time. At the same time, care is taken to not oversubscribe
 the storage --- there's a limit on the maximum number of concurrent IO operations.
 
@@ -360,7 +360,7 @@ TigerBeetle uses batching at many different levels:
 ### LSM
 
 TigerBeetle organizes data on disk as a collection of
-[Log Structured Merge Trees](https://www.youtube.com/watch?v=hkMkBZn2mGs). In context of
+[Log Structured Merge Trees](https://www.youtube.com/watch?v=hkMkBZn2mGs). In the context of
 TigerBeetle, LSM has several attractive properties:
 
 - It is particularly good at writes, and TigerBeetle's workload is write-heavy.
@@ -397,7 +397,7 @@ time to verify O(1) operation.
 
 StateMachine's `commit` function, the one that actually implements double-entry accounting, is
 synchronous. It takes a slice of transfers as input, and, in a single tight CPU loop, decides, for
-each transfers, whether it is applicable, computes the desired balance change if it is, and records
+each transfer, whether it is applicable, computes the desired balance change if it is, and records
 a result in the output slice. Crucially, the `commit` function itself doesn't do any reading from
 storage. This is the key to performance.
 

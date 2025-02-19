@@ -74,6 +74,7 @@ instances between multiple threads or tasks to have events batched transparently
 - [Go](/src/clients/go/README.md#batching)
 - [Java](/src/clients/java/README.md#batching)
 - [.NET](/src/clients/dotnet/README.md#batching)
+- [Python](/src/clients/python/README.md#batching)
 
 ## Guarantees
 
