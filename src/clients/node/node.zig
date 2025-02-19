@@ -234,7 +234,7 @@ fn request(
         .operation = @intFromEnum(operation),
         .data = packet_data.ptr,
         .data_size = @intCast(packet_data.len),
-        .tag = 0,
+        .user_tag = 0,
         .status = undefined,
     };
 
@@ -275,7 +275,7 @@ fn on_completion(
 
                     // Store the size of the results in the `tag` field, so we can access it back
                     // during `on_completion_js`.
-                    packet.tag = @intCast(results.len);
+                    packet.user_tag = @intCast(results.len);
                 },
                 .pulse => unreachable,
             }
@@ -331,7 +331,7 @@ fn on_completion_js(
             switch (packet.status) {
                 .ok => {
                     const result_buffer = buffer.results();
-                    const result_count = packet.tag;
+                    const result_count = packet.user_tag;
                     assert(result_count <= result_buffer.len);
                     break :blk encode_array(
                         StateMachine.ResultType(operation_comptime),

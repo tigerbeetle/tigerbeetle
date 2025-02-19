@@ -176,6 +176,7 @@ func (c *c_client) doRequest(
 	// correctly track it (panic: runtime error: cgo argument has Go pointer to unpinned Go pointer)
 	packet := new(C.tb_packet_t)
 	packet.user_data = unsafe.Pointer(&req)
+	packet.user_tag = 0
 	packet.operation = C.uint8_t(op)
 	packet.data_size = C.uint32_t(count * int(getEventSize(op)))
 	packet.data = data

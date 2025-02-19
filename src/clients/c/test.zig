@@ -161,7 +161,7 @@ test "c_client echo" {
             packet.user_data = request;
             packet.data = &request.sent_data;
             packet.data_size = request.sent_data_size;
-            packet.tag = 0;
+            packet.user_tag = 0;
             packet.status = .ok;
 
             try client.submit(packet);
@@ -262,7 +262,7 @@ test "tb_client client status" {
     packet.user_data = &request;
     packet.data = null;
     packet.data_size = 0;
-    packet.tag = 0;
+    packet.user_tag = 0;
     packet.status = .ok;
 
     // Sanity test to verify that the client is working.
@@ -318,7 +318,7 @@ test "tb_client PacketStatus" {
             packet.user_data = &request;
             packet.data = &request.sent_data;
             packet.data_size = request_size;
-            packet.tag = 0;
+            packet.user_tag = 0;
             packet.status = .ok;
 
             try client.submit(packet);

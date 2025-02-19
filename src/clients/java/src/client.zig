@@ -118,7 +118,7 @@ const NativeClient = struct {
             .operation = operation,
             .data_size = @intCast(send_buffer.len),
             .data = send_buffer.ptr,
-            .tag = 0,
+            .user_tag = 0,
             .status = undefined,
         };
 

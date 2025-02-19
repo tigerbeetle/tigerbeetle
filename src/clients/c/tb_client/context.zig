@@ -731,7 +731,7 @@ pub fn ContextType(
                         .operation = packet_extern.operation,
                         .data_size = packet_extern.data_size,
                         .data = packet_extern.data,
-                        .tag = packet_extern.tag,
+                        .user_tag = packet_extern.user_tag,
                         .status = .ok,
                         .next = null,
                         .batch_next = null,

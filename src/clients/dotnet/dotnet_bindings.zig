@@ -137,7 +137,7 @@ const type_mappings = .{
     .{ exports.tb_client_t, TypeMapping{
         .name = "TBClient",
         .visibility = .internal,
-        .private_fields = &.{"reserved"},
+        .private_fields = &.{"opaque"},
     } },
     .{ exports.tb_packet_t, TypeMapping{
         .name = "TBPacket",

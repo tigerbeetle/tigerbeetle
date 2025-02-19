@@ -22,6 +22,7 @@ internal abstract class NativeRequest
         packetHandle = GCHandle.Alloc(new TBPacket
         {
             userData = GCHandle.ToIntPtr(requestHandle),
+            userTag = 0,
             operation = (byte)operation,
             data = (IntPtr)data,
             dataSize = (uint)len,

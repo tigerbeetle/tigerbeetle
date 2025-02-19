@@ -22,7 +22,7 @@ pub const Packet = extern struct {
         user_data: ?*anyopaque,
         data: ?*anyopaque,
         data_size: u32,
-        tag: u16,
+        user_tag: u16,
         operation: u8,
         status: Status,
         reserved: [32]u8 = [_]u8{0} ** 32,
@@ -43,7 +43,7 @@ pub const Packet = extern struct {
     user_data: ?*anyopaque,
     data: ?*anyopaque,
     data_size: u32,
-    tag: u16,
+    user_tag: u16,
     operation: u8,
     status: Status,
 
@@ -79,7 +79,7 @@ pub const Packet = extern struct {
         assert(packet.data_size == 0 or packet.data != null);
         assert(stdx.zeroed(&packet.reserved));
         maybe(packet.user_data == null);
-        maybe(packet.tag == 0);
+        maybe(packet.user_tag == 0);
 
         switch (expected) {
             .submitted => {

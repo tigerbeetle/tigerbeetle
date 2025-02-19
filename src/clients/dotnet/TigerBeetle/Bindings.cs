@@ -1229,8 +1229,8 @@ internal unsafe struct TBClient
     public const int SIZE = 32;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
-    private unsafe struct ReservedData
+    [StructLayout(LayoutKind.Sequential, Size = OpaqueData.SIZE)]
+    private unsafe struct OpaqueData
     {
         public const int SIZE = 32;
         private const int LENGTH = 4;
@@ -1262,7 +1262,7 @@ internal unsafe struct TBClient
         }
     }
 
-    private ReservedData reserved;
+    private OpaqueData opaque;
 
 }
 
@@ -1311,7 +1311,7 @@ internal unsafe struct TBPacket
 
     public uint dataSize;
 
-    public ushort tag;
+    public ushort userTag;
 
     public byte operation;
 

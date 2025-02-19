@@ -226,15 +226,21 @@ typedef enum TB_QUERY_FILTER_FLAGS {
     TB_QUERY_FILTER_REVERSED = 1 << 0,
 } TB_QUERY_FILTER_FLAGS;
 
+// Opaque struct serving as a handle for the client instance.
+// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+// throughout the lifetime of the client instance.
 typedef struct tb_client_t {
-    uint64_t reserved[4];
+    uint64_t opaque[4];
 } tb_client_t;
 
+// Struct containing the state of a request submitted through the client.
+// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+// throughout the lifetime of the request.
 typedef struct tb_packet_t {
     void* user_data;
     void* data;
     uint32_t data_size;
-    uint16_t tag;
+    uint16_t user_tag;
     uint8_t operation;
     uint8_t status;
     uint8_t reserved[32];
@@ -295,6 +301,7 @@ typedef enum TB_LOG_LEVEL {
 // completes submitted packets by invoking the callback with the given context.
 TB_INIT_STATUS tb_client_init(
     tb_client_t *client_out,
+    // 128-bit unsigned integer represented as a 16-byte little-endian array.
     const uint8_t cluster_id[16],
     const char *address_ptr,
     uint32_t address_len,
@@ -305,6 +312,7 @@ TB_INIT_STATUS tb_client_init(
 // Initialize a new TigerBeetle client that echoes back any submitted data.
 TB_INIT_STATUS tb_client_init_echo(
     tb_client_t *client_out,
+    // 128-bit unsigned integer represented as a 16-byte little-endian array.
     const uint8_t cluster_id[16],
     const char *address_ptr,
     uint32_t address_len,

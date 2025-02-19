@@ -16,9 +16,18 @@ const type_mappings = .{
     .{ exports.tb_account_balance_t, "tb_account_balance_t" },
     .{ exports.tb_query_filter_t, "tb_query_filter_t" },
     .{ exports.tb_query_filter_flags, "TB_QUERY_FILTER_FLAGS" },
-
-    .{ exports.tb_client_t, "tb_client_t" },
-    .{ exports.tb_packet_t, "tb_packet_t" },
+    .{
+        exports.tb_client_t, "tb_client_t",
+        \\// Opaque struct serving as a handle for the client instance.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the client instance.
+    },
+    .{
+        exports.tb_packet_t, "tb_packet_t",
+        \\// Struct containing the state of a request submitted through the client.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the request.
+    },
     .{ exports.tb_operation, "TB_OPERATION" },
     .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
     .{ exports.tb_init_status, "TB_INIT_STATUS" },
@@ -176,6 +185,11 @@ pub fn main() !void {
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const c_name = type_mapping[1];
+        if (type_mapping.len == 3) {
+            const comments: []const u8 = type_mapping[2];
+            try buffer.writer().print(comments, .{});
+            try buffer.writer().print("\n", .{});
+        }
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
@@ -206,6 +220,7 @@ pub fn main() !void {
         \\// completes submitted packets by invoking the callback with the given context.
         \\TB_INIT_STATUS tb_client_init(
         \\    tb_client_t *client_out,
+        \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
         \\    const uint8_t cluster_id[16],
         \\    const char *address_ptr,
         \\    uint32_t address_len,
@@ -216,6 +231,7 @@ pub fn main() !void {
         \\// Initialize a new TigerBeetle client that echoes back any submitted data.
         \\TB_INIT_STATUS tb_client_init_echo(
         \\    tb_client_t *client_out,
+        \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
         \\    const uint8_t cluster_id[16],
         \\    const char *address_ptr,
         \\    uint32_t address_len,

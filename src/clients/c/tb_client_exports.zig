@@ -8,9 +8,8 @@ const stdx = vsr.stdx;
 pub const tb_packet_t = tb.Packet;
 pub const tb_packet_status = tb.PacketStatus;
 
-/// Opaque struct serving as a handle for the `ClientInterface`.
 pub const tb_client_t = extern struct {
-    reserved: [4]u64,
+    @"opaque": [4]u64,
 
     pub inline fn cast(self: *tb_client_t) *tb.ClientInterface {
         return @ptrCast(self);

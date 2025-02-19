@@ -284,13 +284,13 @@ class CPacket(ctypes.Structure):
     @classmethod
     def from_param(cls, obj):
         validate_uint(bits=32, name="data_size", number=obj.data_size)
-        validate_uint(bits=16, name="tag", number=obj.tag)
+        validate_uint(bits=16, name="user_tag", number=obj.user_tag)
         validate_uint(bits=8, name="operation", number=obj.operation)
         return cls(
             user_data=obj.user_data,
             data=obj.data,
             data_size=obj.data_size,
-            tag=obj.tag,
+            user_tag=obj.user_tag,
             operation=obj.operation,
             status=obj.status,
         )
@@ -299,7 +299,7 @@ CPacket._fields_ = [ # noqa: SLF001
     ("user_data", ctypes.c_void_p),
     ("data", ctypes.c_void_p),
     ("data_size", ctypes.c_uint32),
-    ("tag", ctypes.c_uint16),
+    ("user_tag", ctypes.c_uint16),
     ("operation", ctypes.c_uint8),
     ("status", ctypes.c_uint8),
     ("reserved", ctypes.c_uint8 * 32),
@@ -310,10 +310,11 @@ class CClient(ctypes.Structure):
     @classmethod
     def from_param(cls, obj):
         return cls(
+            opaque=obj.opaque,
         )
 
 CClient._fields_ = [ # noqa: SLF001
-    ("reserved", ctypes.c_uint64 * 4),
+    ("opaque", ctypes.c_uint64 * 4),
 ]
 
 

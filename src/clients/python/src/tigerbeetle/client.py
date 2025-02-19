@@ -118,6 +118,7 @@ class Client:
         packet = bindings.CPacket()
         packet.next = None
         packet.user_data = Client._counter.increment()
+        packet.user_tag = 0
         packet.operation = operation
         packet.status = bindings.PacketStatus.OK
 

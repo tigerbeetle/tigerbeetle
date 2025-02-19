@@ -73,7 +73,7 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
             packet.user_data = @constCast(@ptrCast(&context));
             packet.data = @constCast(events.ptr);
             packet.data_size = @intCast(events.len);
-            packet.tag = 0;
+            packet.user_tag = 0;
             packet.status = c.TB_PACKET_OK;
 
             const client_status = c.tb_client_submit(&tb_client, &packet);
