@@ -8,6 +8,6 @@ typical SQL database from the outside _and_ from the inside.
   transactions.
 - [Debit-Credit](./debit-credit.md) argues that double-entry bookkeeping is the right schema for
   this domain.
-- [Performance](./performance.md) explains how TigerBeetle can do a million transfers per second.
+- [Performance](./performance.md) explains how TigerBeetle achieves state-of-the-art performance.
 - [Safety](./safety.md) shows that safety and performance are not add odds with each other and that,
   on the contrary, an unprecedented level of safety can be achieved for OLTP.

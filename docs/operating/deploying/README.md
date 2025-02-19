@@ -24,7 +24,7 @@ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip 
 Here what the arguments mean:
 
 * `--cluster` specifies a globally unique 128 bit cluster ID. It is recommended to use a random
-  number for a cluster id.
+  number for a cluster id, cluster ID `0` is reserved for testing.
 * `--replica-count` specifies the size of the cluster. In the current version of TigerBeetle,
   cluster size can not be changed after creation, but this limitation will be lifted in the future.
 * `--replica` is a zero-based index of the current replica. While `--cluster` and `--replica-count`
@@ -33,7 +33,8 @@ Here what the arguments mean:
   suggested naming schema is `${CLUSTER_ID}_${REPLICA_INDEX}.tigerbeetle`.
 * `--addresses` specify IP addresses of all the replicas in the cluster. **The order of addresses
   must correspond to the order of replicas**. In particular,  the `--addresses` argument must be the
-  same for all replicas and all clients.
+  same for all replicas and all clients, and the address at the replica index must correspond to
+  replica's own address. 
 
 Production deployment differs in three aspects (see [Cluster Recommendations](../cluster.md)):
 

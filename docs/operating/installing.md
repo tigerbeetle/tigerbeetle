@@ -46,19 +46,11 @@ TigerBeetle can be upgraded without downtime, this is documented in [Upgrading](
 ## Building from Source
 
 Building from source is easy, but is not recommended for production deployments, as extra care is
-needed to ensure compatibility with clients and upgradability.
-
-To build TigerBeetle from source, clone the repo, install the required version Zig using the
-provided script, and run `zig build`:
-
-```console
-git clone https://github.com/tigerbeetle/tigerbeetle && cd tigerbeetle
-./zig/download.sh # .bat if you're on Windows.
-./zig/zig build
-./tigerbeetle version
-```
+needed to ensure compatibility with clients and upgradability. Refer to the
+[internal documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internal) for
+compilation instructions.
 
 ## Client Libraries
 
 Client libraries for .Net, Go, Java, Node, and Python are published to the respective package
-repositories, see [Clients](../coding/clients/). 
+repositories, see [Clients](../coding/clients/).

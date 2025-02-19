@@ -1,10 +1,10 @@
 # Start
 
-TigerBeetle is a distributed, reliable, and fast database for financial accounting. It tracks
-financial transactions or anything else that can be expressed as double-entry bookkeeping, accepting
-a million transactions per second and guaranteeing durability even in the face of network, machine,
-and storage faults. You will learn more about why this is an important and hard problem to solve in
-the [Concepts](./concepts/) section, but let's make some real transactions first!
+TigerBeetle is a reliable, fast, and highly available database for financial accounting. It tracks
+financial transactions or anything else that can be expressed as double-entry bookkeeping, providing
+three orders of magnitude more performance and guaranteeing durability even in the face of network,
+machine, and storage faults. You will learn more about why this is an important and hard problem to
+solve in the [Concepts](./concepts/) section, but let's make some real transactions first!
 
 ## Install
 
