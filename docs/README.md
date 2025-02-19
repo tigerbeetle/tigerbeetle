@@ -13,4 +13,4 @@ This is how the entire documentation is organized:
   detail.
 
 Note that this documentation is aimed at the users of TigerBeetle. If you want to understand how it
-works under the hood, checkout the [internals docs](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internals).
+works under the hood, check out the [internals docs](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internals).

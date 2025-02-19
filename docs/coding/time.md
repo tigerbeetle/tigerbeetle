@@ -11,12 +11,12 @@ Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)) to guarantee [s
 serializability](http://www.bailis.org/blog/linearizability-versus-serializability/) for all
 operations.
 
-In other words, for an external observer, TigerBeetle cluster behaves as if it is just a single
-machine which processes the incoming requests in-order. If an application submits a batch of
+In other words, to an external observer, TigerBeetle cluster behaves as if it is just a single
+machine which processes the incoming requests in order. If an application submits a batch of
 transfers with transfer `T1`, receives a reply, and then submits a batch with another transfer `T2`,
 it is guaranteed that `T2` will observe the effects of `T1`. Note, however, that there could be
 concurrent requests from multiple applications, so, unless `T1` and `T2` are in the same batch of
-transfers, some other transfer could happen in-between them. See the
+transfers, some other transfer could happen in between them. See the
 [reference](../reference/sessions.md) for precise guarantees.
 
 ## Physical Time
@@ -38,11 +38,11 @@ monotonic, for end user's convenience.
 
 ## Why TigerBeetle Manages Timestamps
 
-An important invariant is that TigerBeetle cluster assign all timestamps. In particular, Timestamps
-on [`Transfer`s](../reference/transfer.md#timestamp) and
+An important invariant is that the TigerBeetle cluster assigns all timestamps. In particular,
+timestamps on [`Transfer`s](../reference/transfer.md#timestamp) and
 [`Account`s](../reference/account.md#timestamp) are set by the cluster when the corresponding event
 arrives at the primary. This is why the `timestamp` field must be set to `0` when operations are
-submitted.
+submitted by the client.
 
 Similarly, the [`Transfer.timeout`](../reference/transfer.md#timeout) is given as an interval
 in seconds, rather than as an absolute timestamp, because it is also managed by the primary. The

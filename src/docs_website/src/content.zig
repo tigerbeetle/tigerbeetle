@@ -1,5 +1,5 @@
-//! Walk the `/docs` directory to build table of content by parsing links to child pages from
-//! README.
+//! Walk the `/docs` directory to build table of contents by parsing links to child pages from
+//! the READMEs.
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;

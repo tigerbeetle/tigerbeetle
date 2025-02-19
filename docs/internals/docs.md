@@ -45,7 +45,7 @@ into the `./internals` folder: it will get properly reorganized&compacted with t
 
 - Because docs are viewable on GitHub, GitHub Flavored Markdown is used for all the content.
 - Hard wrap long lines to keep them readable as source.
-- Hard warp at 100 because that's what TIGER_STYLE says.
+- Hard wrap at 100 because that's what TIGER_STYLE says.
 - Use Oxford comma (A, B, and C), for consistency.
 - Use Standard American English for consistency.
 - Cool URIs don't change! Think hard about file and section names, as they form parts of URLs

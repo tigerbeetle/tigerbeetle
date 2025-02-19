@@ -197,8 +197,8 @@ include a userspace multithreaded thread pool (for example, as libuv does).
 ## Next: Coding
 
 This concludes the discussion of the concepts behind TigerBeetle --- an [OLTP](./oltp.md) database
-for recording business transactions in real time, using
-[double entry bookkeeping](./debit-credit.md) schema, which
+for recording business transactions in real time, using a
+[double-entry bookkeeping](./debit-credit.md) schema, which
 [runs at a million transfers per second](./performance.md) and
 [keeps the data safe](./safety.md) even when the underling hardware inevitably fails.
 

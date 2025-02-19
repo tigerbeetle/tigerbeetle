@@ -1,7 +1,7 @@
 # Reference
 
 Like the [Coding](../coding/) section, the reference is aimed at programmers building applications
-on top of TigerBeetle. While coding provides a series of topical guide, the reference exhaustively
+on top of TigerBeetle. While Coding provides a series of topical guide, the Reference exhaustively
 documents every single aspect of TigerBeetle. Any answer can be found here, but it might take some
 digging!
 

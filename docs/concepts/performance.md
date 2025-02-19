@@ -1,6 +1,6 @@
 # Performance
 
-How, exactly, TigerBeetle manages to be so fast?
+How, exactly, is TigerBeetle so fast?
 
 ## It's All About The Interface
 
@@ -23,11 +23,11 @@ sports car gives you the best latency, but, when the load and contention increas
 **Little's law**, both latency and throughput become abysmal.
 
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
-transactions, 8k apiece. Although TigerBeetle is a replicated database using consensus algorithm,
+transactions, 8k apiece. Although TigerBeetle is a replicated database using a consensus algorithm,
 the cost of replications is paid only once per batch, which means that TigerBeetle runs not much
 slower than an in-memory hash map, all the while providing extreme durability and availability.
 
-What's more, under lite load the batches automatically become smaller, trading unnecessary
+What's more, under light load the batches automatically become smaller, trading unnecessary
 throughput for better latency.
 
 ## Extreme Engineering
@@ -75,7 +75,7 @@ depends on a particular use-case, but it's worth keeping in mind that higher per
 new use-cases. An OLGP database might be enough to do nightly settlement, but with OLTP real-time
 settlement is a no-brainer. If a transaction system just hits its throughput target, that means that
 every unexpected delay or an ops accident lead to missed transactions. If a system operates at one
-tenth of capacity, this gives a lot of headroom for operators to deal with unexpected.
+tenth of capacity, this gives a lot of headroom for operators to deal with the unexpected.
 
 Finally, it is always helpful to think about the future. The future is hard to predict (even the
 _present_ is hard to wrap your head around!), but the _option_ to handle significantly more load on

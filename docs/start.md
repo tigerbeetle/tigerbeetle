@@ -10,7 +10,7 @@ the [Concepts](./concepts/) section, but let's make some real transactions first
 
 TigerBeetle is a single, small, statically linked binary.
 
-You can download a pre-built binary from `tigerbeetle.com`:
+You can download a pre-built Linux binary from `tigerbeetle.com`:
 
 ```console
 curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
@@ -45,7 +45,7 @@ First, format a data file:
 ```
 
 A TigerBeetle replica stores everything in a single file (`./0_0.tigerbeetle` in this case).
-The `--cluster`, `--replica` and `--replica-count` arguments set the topology of the cluster (a
+The `--cluster`, `--replica`, and `--replica-count` arguments set the topology of the cluster (a
 single replica for this tutorial).
 
 Now, start a replica:
@@ -63,7 +63,7 @@ the storage misbehaves.
 
 Now that the cluster is running, we can connect to it using a client. TigerBeetle already has
 clients for several popular programming languages, including Go, NodeJS, Java, and Python, and more
-are coming, see the [Coding](./coding) section for details. For this tutorial, we'll keep it simple
+are coming; see the [Coding](./coding) section for details. For this tutorial, we'll keep it simple
 and connect to the cluster using the built-in CLI client. In a separate terminal, start a REPL with
 
 ```console
@@ -76,8 +76,8 @@ necessary, it helps prevent operator errors.
 
 ## Issuing Transactions
 
-TigerBeetle comes with a pre-defined database schema --- double-entry bookkeeping. The [Concept]()
-section explains why this particular schema, and the [Reference]() documents all the bells and
+TigerBeetle comes with a pre-defined database schema --- double-entry bookkeeping. The [Concept](./concepts)
+section explains why this particular schema, and the [Reference](./reference) documents all the bells and
 whistles, but, for the purposes of this tutorial, it is enough to understand that there are accounts
 holding `credits` and `debits` balances, and that each transfer moves value between two accounts by
 incrementing `credits` on one side and `debits` on the other.
