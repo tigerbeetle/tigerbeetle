@@ -7,6 +7,7 @@ a series of loosely connected guides which can be read in any order.
 - [Data Modeling](./data-modeling.md) shows how to map business-level entities to the primitives
   provided by TigerBeetle.
 - [Financial Accounting](./financial-accounting.md), a deep dive into double-entry bookkeeping.
+- [Requests](./requests.md) outlines the database interface.
 - [Reliable Transfer Submission](./reliable-transaction-submission.md) explains the end-to-end
   principle and how it helps to avoid double spending.
 - [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.

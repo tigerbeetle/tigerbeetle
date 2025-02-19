@@ -109,9 +109,6 @@ fn parse_page_content(arena: Allocator, text: []const u8, options: struct {
 
     if (options.parse_children) {
         while (line_iterator.next()) |line| {
-            // Hack, special case reference/requests/README.md.
-            if (std.mem.eql(u8, line, "## Events and Results")) break;
-
             if (try parse_page_child(line)) |child| {
                 try children.append(arena, .{
                     .title = try arena.dupe(u8, child.title),
