@@ -96,7 +96,7 @@ comptime {
 /// The emit interval needs to be large enough that the kernel will have finished processing them
 /// before emitting again. If not, an error will be logged.
 const packet_count_max = stdx.div_ceil(
-    EventMetric.slot_count + EventTiming.slot_count,
+    EventMetric.slot_count + (EventTiming.slot_count * std.enums.values(TimingStat).len),
     packet_messages_max,
 );
 
@@ -257,6 +257,9 @@ pub const StatsD = struct {
                 }
             }
         }
+        if (send_ready > 0) {
+            send_sizes.append_assume_capacity(send_ready);
+        }
 
         var send_offset: u32 = 0;
         for (send_sizes.const_slice()) |send_size| {
@@ -407,7 +410,7 @@ fn struct_size_max(StructOrVoid: type) StructOrVoid {
 fn enum_size_max(Enum: type) []const u8 {
     var tag_longest: []const u8 = "";
     for (std.meta.fieldNames(Enum)) |field_name| {
-        if (field_name.len > tag_longest.len) {
+        if (tag_longest.len < field_name.len) {
             tag_longest = field_name;
         }
     }
