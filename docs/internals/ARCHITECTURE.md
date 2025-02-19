@@ -63,20 +63,21 @@ For example, transfer objects are stored in a tree sorted by a unique transfer's
 tree allow efficiently finding the transfer given a timestamp. Auxiliary index trees are used to
 speed up other kinds of lookups. For example, there's a tree which stores, for each transfer, a
 tuple of transfer's debit account id and transfer's timestamp, sorted by account id. This tree
-allows looking up all the timestamps for transfers from/to a specific account. Knowing the
-timestamp, it is then possible to retrieve the transfer itself.
+allows looking up all the timestamps for transfers from a specific account. Knowing the timestamp,
+it is then possible to retrieve the transfer object itself.
 
 The forest of LSM trees is implemented as an on-disk functional data structure. That is, the data is
 organized as a tree of on-disk blocks (a block is 0.5 MiB in size). Blocks refer to other blocks by
 their on-disk address and checksum of their content. There's a root block, called the superblock,
 from which the rest of the state is reachable.
 
-When applying prepares to local state, replica doesn't overwrite anything in the data file, and
-instead writes new blocks to it, maintaining the state of the superblock in memory. Once in a while,
-the superblock is atomically flushed to storage, forming a new checkpoint. When a replica crashes
-and restarts, it of course looses access to its previous in-memory superblock. Instead, it reads the
-previous checkpoint/superblock from storage, and reconstructs the lost state by replaying the suffix
-of the log of prepares after that checkpoint.
+When applying prepares to local state, replica doesn't overwrite any existing blocks in the data
+file, and instead writes new blocks only, maintaining the state of the superblock in memory. Once in
+a while, the superblock is atomically flushed to storage, forming a new checkpoint. When a replica
+crashes and restarts, it of course looses access to its previous in-memory superblock. Instead, it
+reads the previous checkpoint/superblock from storage, and reconstructs the lost state by replaying
+the suffix of the log of prepares after that checkpoint. Determinism guarantees that the replica
+ends up in the exact same state.
 
 TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
 block of an LSM trees and the corresponding `fsync` returns `0`, it still could be the case that,
@@ -148,8 +149,8 @@ The primarily negative reason is that the underlying workload is inherently cont
 accounts are just way more popular than owners, and transfers between hot accounts inherently
 sequentialize the system. Trying to make transactions parallel not only doesn't make it faster, in
 fact, the overhead of synchronization tends to dominate useful work. Formally, our claim is that
-financial transaction processing is an infinite-COST problem, using the terminology from Frank
-McSherry's paper.
+financial transaction processing is an infinite-COST problem, using the terminology from [Frank
+McSherry's paper](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf).
 
 The positive reason for using a single thread is that CPUs are quite fast actually, and the reports
 of Moore's Law demise are somewhat overstated. A single core can easily to 1mil TPS if:
@@ -356,6 +357,25 @@ TigerBeetle uses batching at many different levels:
 - The LSM tree operates mostly in terms of tables and value blocks, each aggregating many individual
   records.
 
+### LSM
+
+TigerBeetle organizes data on disk as a collection of
+[Log Structured Merge Trees](https://www.youtube.com/watch?v=hkMkBZn2mGs). In context of
+TigerBeetle, LSM has several attractive properties:
+
+- It is particularly good at writes, and TigerBeetle's workload is write-heavy.
+- LSM is organized around batches of data, just like the rest of TigerBeetle.
+- LSM naturally keeps hot data near the root, while the colder data sink down to the lower level,
+  which also matches Pareto-distributed workload.
+
+Often, a database is just a single LSM tree, and individual "tables" are constructed logically, by
+using key prefixes. This is not the case for TigerBeetle and instead many individual trees are used
+(the LSM forest). These trees store fixed-sized values. For example in the Transfer object tree the
+value is 128 bytes, for id tree the size of value is 32 bytes (`u128` id, `u64` timestamp, `u64`
+padding). Each tree can then be specialized for that specific value size, which improves performance
+and storage efficiency. Zig's `comptime` makes is particularly easy configure the LSM Forest through
+meta programming.
+
 ### Control Plane / Data Plane Separation
 
 Batching is a special case of the more general principle of separating control plane and data plane.
@@ -488,6 +508,8 @@ The collection of papers behind TigerBeetle:
 
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
   Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
+
+- [Scalability! But at what COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf)
 
 - [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill
   Moore)](https://www.youtube.com/watch?v=NRoUC9P1PmA) - On disk failure and corruption, the need
