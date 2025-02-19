@@ -9,7 +9,7 @@ pub const tb_packet_t = tb.Packet;
 pub const tb_packet_status = tb.PacketStatus;
 
 pub const tb_client_t = extern struct {
-    @"opaque": [3]u64,
+    @"opaque": [4]u64,
 
     pub inline fn cast(self: *tb_client_t) *tb.ClientInterface {
         return @ptrCast(self);
@@ -147,25 +147,28 @@ pub fn init_echo(
     return .success;
 }
 
-pub fn submit(tb_client: *tb_client_t, packet: *tb_packet_t) callconv(.C) tb_client_status {
-    tb_client.cast().submit(packet) catch |err| switch (err) {
+pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.C) tb_client_status {
+    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
+    client.submit(packet) catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
     };
     return .ok;
 }
 
-pub fn deinit(tb_client: *tb_client_t) callconv(.C) tb_client_status {
-    tb_client.cast().deinit() catch |err| switch (err) {
+pub fn deinit(tb_client: ?*tb_client_t) callconv(.C) tb_client_status {
+    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
+    client.deinit() catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
     };
     return .ok;
 }
 
 pub fn completion_context(
-    client: *tb_client_t,
+    tb_client: ?*tb_client_t,
     completion_ctx_out: *usize,
 ) callconv(.C) tb_client_status {
-    completion_ctx_out.* = client.cast().completion_context() catch |err| switch (err) {
+    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
+    completion_ctx_out.* = client.completion_context() catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
     };
     return .ok;

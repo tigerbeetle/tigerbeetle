@@ -1226,14 +1226,14 @@ internal enum TBOperation : byte
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 internal unsafe struct TBClient
 {
-    public const int SIZE = 24;
+    public const int SIZE = 32;
 
 
     [StructLayout(LayoutKind.Sequential, Size = OpaqueData.SIZE)]
     private unsafe struct OpaqueData
     {
-        public const int SIZE = 24;
-        private const int LENGTH = 3;
+        public const int SIZE = 32;
+        private const int LENGTH = 4;
 
         private fixed ulong raw[LENGTH];
 
@@ -1272,8 +1272,8 @@ internal unsafe struct TBPacket
     public const int SIZE = 56;
 
 
-    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
-    private unsafe struct ReservedData
+    [StructLayout(LayoutKind.Sequential, Size = OpaqueData.SIZE)]
+    private unsafe struct OpaqueData
     {
         public const int SIZE = 32;
         private const int LENGTH = 32;
@@ -1317,7 +1317,7 @@ internal unsafe struct TBPacket
 
     public PacketStatus status;
 
-    private ReservedData reserved;
+    private OpaqueData opaque;
 
 }
 

@@ -25,7 +25,7 @@ pub const Packet = extern struct {
         user_tag: u16,
         operation: u8,
         status: Status,
-        reserved: [32]u8 = [_]u8{0} ** 32,
+        @"opaque": [32]u8 = [_]u8{0} ** 32,
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
@@ -127,7 +127,7 @@ pub const Packet = extern struct {
 
         // Asseting the fields are identical.
         for (std.meta.fields(Extern)) |field_extern| {
-            if (std.mem.eql(u8, field_extern.name, "reserved")) continue;
+            if (std.mem.eql(u8, field_extern.name, "opaque")) continue;
             const field_packet = std.meta.fields(Packet)[
                 std.meta.fieldIndex(
                     Packet,

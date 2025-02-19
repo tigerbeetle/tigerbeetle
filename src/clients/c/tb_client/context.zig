@@ -32,6 +32,9 @@ pub const ClientInterface = extern struct {
         deinit_fn: *const fn (*anyopaque) void,
     };
 
+    /// Magic number used as a tag, preventing the use of uninitialized pointers.
+    const beetle: u64 = 0xBEE71E;
+
     // Since the client interface is an intrusive struct allocated by the user,
     // it is exported as an opaque `[_]u64` array.
     // An `extern union` is used to ensure a platform-independent size for pointer fields,
@@ -47,6 +50,7 @@ pub const ClientInterface = extern struct {
     },
     locker: Locker,
     reserved: u32,
+    magic_number: u64,
 
     pub fn init(self: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
         self.* = .{
@@ -54,26 +58,34 @@ pub const ClientInterface = extern struct {
             .vtable = .{ .ptr = vtable },
             .locker = .{},
             .reserved = 0,
+            .magic_number = 0,
         };
     }
 
     pub fn submit(client: *ClientInterface, packet: *Packet.Extern) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
         client.locker.lock();
         defer client.locker.unlock();
-
         const context = client.context.ptr orelse return Error.ClientInvalid;
         client.vtable.ptr.submit_fn(context, packet);
     }
 
     pub fn completion_context(client: *ClientInterface) Error!usize {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
         client.locker.lock();
         defer client.locker.unlock();
-
         const context = client.context.ptr orelse return Error.ClientInvalid;
         return client.vtable.ptr.completion_context_fn(context);
     }
 
     pub fn deinit(client: *ClientInterface) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
         const context: *anyopaque = context: {
             client.locker.lock();
             defer client.locker.unlock();
@@ -86,7 +98,7 @@ pub const ClientInterface = extern struct {
     }
 
     comptime {
-        assert(@sizeOf(ClientInterface) == 24);
+        assert(@sizeOf(ClientInterface) == 32);
         assert(@alignOf(ClientInterface) == 8);
     }
 };
@@ -290,6 +302,11 @@ pub fn ContextType(
                     => error.SystemResources,
                 };
             };
+
+            // Setting `magic_number` tags the interface as initialized.
+            // Writing it at the end so that if `init` fails part-way through and the
+            // user doesn’t handle the error before using it, we'll still be able to validate.
+            client_out.magic_number = ClientInterface.beetle;
         }
 
         fn tick(self: *Context) void {

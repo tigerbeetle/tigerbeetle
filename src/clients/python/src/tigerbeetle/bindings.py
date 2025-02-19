@@ -293,6 +293,7 @@ class CPacket(ctypes.Structure):
             user_tag=obj.user_tag,
             operation=obj.operation,
             status=obj.status,
+            opaque=obj.opaque,
         )
 
 CPacket._fields_ = [ # noqa: SLF001
@@ -302,7 +303,7 @@ CPacket._fields_ = [ # noqa: SLF001
     ("user_tag", ctypes.c_uint16),
     ("operation", ctypes.c_uint8),
     ("status", ctypes.c_uint8),
-    ("reserved", ctypes.c_uint8 * 32),
+    ("opaque", ctypes.c_uint8 * 32),
 ]
 
 
@@ -314,7 +315,7 @@ class CClient(ctypes.Structure):
         )
 
 CClient._fields_ = [ # noqa: SLF001
-    ("opaque", ctypes.c_uint64 * 3),
+    ("opaque", ctypes.c_uint64 * 4),
 ]
 
 

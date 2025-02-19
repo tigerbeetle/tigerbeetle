@@ -240,8 +240,8 @@ pub fn main() !void {
         \\);
         \\
         \\// Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.
-        \\// Return value: `TB_CLIENT_OK` on success or `TB_CLIENT_INVALID` if the client has already
-        \\// been closed by `tb_client_deinit`.
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
         \\TB_CLIENT_STATUS tb_client_completion_context(
         \\    tb_client_t* client,
         \\    uintptr_t* completion_ctx_out
@@ -250,8 +250,8 @@ pub fn main() !void {
         \\// Submit a packet with its `operation`, `data`, and `data_size` fields set.
         \\// Once completed, `completion_callback` will be invoked with `completion_ctx`
         \\// and the given packet on the `tb_client` thread (separate from the caller's thread).
-        \\// Return value: `TB_CLIENT_OK` on success or `TB_CLIENT_INVALID` if the client has already
-        \\// been closed by `tb_client_deinit`.
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
         \\TB_CLIENT_STATUS tb_client_submit(
         \\    tb_client_t *client,
         \\    tb_packet_t *packet
@@ -259,8 +259,8 @@ pub fn main() !void {
         \\
         \\// Closes the client, causing any previously submitted packets to be completed with
         \\// `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
-        \\// Return value: `TB_CLIENT_OK` on success or `TB_CLIENT_INVALID` if the client has already
-        \\// been closed by `tb_client_deinit`.
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
         \\TB_CLIENT_STATUS tb_client_deinit(
         \\    tb_client_t *client
         \\);
