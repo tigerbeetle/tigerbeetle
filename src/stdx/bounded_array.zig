@@ -73,6 +73,10 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             slice_[index] = item;
         }
 
+        pub fn append(array: *BoundedArray, item: T) error{Overflow}!void {
+            return array.inner.append(item);
+        }
+
         pub inline fn append_assume_capacity(array: *BoundedArray, item: T) void {
             array.inner.appendAssumeCapacity(item);
         }
