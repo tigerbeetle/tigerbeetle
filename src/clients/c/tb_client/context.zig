@@ -4,9 +4,7 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.tb_client_context);
 
-const api = @import("../tb_client.zig");
-const tb_completion_t = api.tb_completion_t;
-const vsr = api.vsr;
+const vsr = @import("../tb_client.zig").vsr;
 
 const constants = vsr.constants;
 const stdx = vsr.stdx;
@@ -22,13 +20,101 @@ const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
 
-pub const ContextImplementation = struct {
-    completion_ctx: usize,
-    submit_fn: *const fn (*ContextImplementation, *Packet.Extern) void,
-    deinit_fn: *const fn (*ContextImplementation) void,
+/// Thread-safe client interface allocated by the user.
+/// Contains the `VTable` with function pointers to the StateMachine-specific implementation
+/// and the synchronization status.
+/// Safe to call from multiple threads, even after `deinit` is called.
+pub const ClientInterface = extern struct {
+    pub const Error = error{ClientInvalid};
+    pub const VTable = struct {
+        submit_fn: *const fn (*anyopaque, *Packet.Extern) void,
+        completion_context_fn: *const fn (*anyopaque) usize,
+        deinit_fn: *const fn (*anyopaque) void,
+    };
+
+    /// Magic number used as a tag, preventing the use of uninitialized pointers.
+    const beetle: u64 = 0xBEE71E;
+
+    // Since the client interface is an intrusive struct allocated by the user,
+    // it is exported as an opaque `[_]u64` array.
+    // An `extern union` is used to ensure a platform-independent size for pointer fields,
+    // avoiding the need for different versions of `tb_client.h` on 32-bit targets.
+
+    context: extern union {
+        ptr: ?*anyopaque,
+        int_ptr: u64,
+    },
+    vtable: extern union {
+        ptr: *const VTable,
+        int_ptr: u64,
+    },
+    locker: Locker,
+    reserved: u32,
+    magic_number: u64,
+
+    pub fn init(self: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
+        self.* = .{
+            .context = .{ .ptr = context },
+            .vtable = .{ .ptr = vtable },
+            .locker = .{},
+            .reserved = 0,
+            .magic_number = 0,
+        };
+    }
+
+    pub fn submit(client: *ClientInterface, packet: *Packet.Extern) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
+        client.locker.lock();
+        defer client.locker.unlock();
+        const context = client.context.ptr orelse return Error.ClientInvalid;
+        client.vtable.ptr.submit_fn(context, packet);
+    }
+
+    pub fn completion_context(client: *ClientInterface) Error!usize {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
+        client.locker.lock();
+        defer client.locker.unlock();
+        const context = client.context.ptr orelse return Error.ClientInvalid;
+        return client.vtable.ptr.completion_context_fn(context);
+    }
+
+    pub fn deinit(client: *ClientInterface) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
+        const context: *anyopaque = context: {
+            client.locker.lock();
+            defer client.locker.unlock();
+            if (client.context.ptr == null) return Error.ClientInvalid;
+
+            defer client.context.ptr = null;
+            break :context client.context.ptr.?;
+        };
+        client.vtable.ptr.deinit_fn(context);
+    }
+
+    comptime {
+        assert(@sizeOf(ClientInterface) == 32);
+        assert(@alignOf(ClientInterface) == 8);
+    }
 };
 
-pub const Error = std.mem.Allocator.Error || error{
+/// The function pointer called by the IO thread when a request is completed or fails.
+/// The memory referenced by `result_ptr` is only valid for the duration of this callback.
+/// `result_ptr` is `null` for unsuccessful requests. See `packet.status` for more details.
+pub const CompletionCallback = *const fn (
+    context: usize,
+    packet: *Packet.Extern,
+    timestamp: u64,
+    result_ptr: ?[*]const u8,
+    result_len: u32,
+) callconv(.C) void;
+
+pub const InitError = std.mem.Allocator.Error || error{
     Unexpected,
     AddressInvalid,
     AddressLimitExceeded,
@@ -36,6 +122,7 @@ pub const Error = std.mem.Allocator.Error || error{
     NetworkSubsystemFailed,
 };
 
+/// Implements a `ClientInterface` with specialized `vsr.Client` and `StateMachine` types.
 pub fn ContextType(
     comptime Client: type,
 ) type {
@@ -57,11 +144,11 @@ pub fn ContextType(
         const UserData = extern struct {
             self: *Context,
             packet: *Packet,
-        };
 
-        comptime {
-            assert(@sizeOf(UserData) == @sizeOf(u128));
-        }
+            comptime {
+                assert(@sizeOf(UserData) == @sizeOf(u128));
+            }
+        };
 
         const PacketError = error{
             TooMuchData,
@@ -82,10 +169,11 @@ pub fn ContextType(
         client: Client,
         batch_size_limit: ?u32,
 
-        completion_fn: tb_completion_t,
-        implementation: ContextImplementation,
+        completion_callback: CompletionCallback,
+        completion_context: usize,
 
-        submitted: Packet.SubmissionQueue,
+        interface: *ClientInterface,
+        submitted: FIFOType(Packet),
         pending: FIFOType(Packet),
 
         signal: Signal,
@@ -94,11 +182,12 @@ pub fn ContextType(
 
         pub fn init(
             allocator: std.mem.Allocator,
+            client_out: *ClientInterface,
             cluster_id: u128,
             addresses: []const u8,
             completion_ctx: usize,
-            completion_fn: tb_completion_t,
-        ) Error!*Context {
+            completion_callback: CompletionCallback,
+        ) InitError!void {
             var context = try allocator.create(Context);
             errdefer allocator.destroy(context);
 
@@ -173,18 +262,22 @@ pub fn ContextType(
             };
             errdefer context.client.deinit(context.allocator);
 
-            context.completion_fn = completion_fn;
-            context.implementation = .{
-                .completion_ctx = completion_ctx,
-                .submit_fn = Context.on_submit,
-                .deinit_fn = Context.on_deinit,
+            ClientInterface.init(client_out, context, comptime &.{
+                .submit_fn = &vtable_submit_fn,
+                .completion_context_fn = &vtable_completion_context_fn,
+                .deinit_fn = &vtable_deinit_fn,
+            });
+            context.interface = client_out;
+            context.submitted = .{
+                .name = null,
+                .verify_push = builtin.is_test,
             };
-
-            context.submitted = .{};
             context.pending = .{
                 .name = null,
                 .verify_push = builtin.is_test,
             };
+            context.completion_context = completion_ctx;
+            context.completion_callback = completion_callback;
             context.eviction_reason = null;
 
             log.debug("{}: init: initializing signal", .{context.client_id});
@@ -210,26 +303,10 @@ pub fn ContextType(
                 };
             };
 
-            return context;
-        }
-
-        /// Only one thread calls `deinit()`.
-        /// Since it frees the Context, any further interaction is undefined behavior.
-        pub fn deinit(self: *Context) void {
-            self.signal.stop();
-            self.thread.join();
-
-            assert(self.submitted.pop() == null);
-            assert(self.pending.pop() == null);
-
-            self.io.cancel_all();
-
-            self.signal.deinit();
-            self.client.deinit(self.allocator);
-            self.message_pool.deinit(self.allocator);
-            self.io.deinit();
-
-            self.allocator.destroy(self);
+            // Setting `magic_number` tags the interface as initialized.
+            // Writing it at the end so that if `init` fails part-way through and the
+            // user doesn’t handle the error before using it, we'll still be able to validate.
+            client_out.magic_number = ClientInterface.beetle;
         }
 
         fn tick(self: *Context) void {
@@ -254,16 +331,14 @@ pub fn ContextType(
             if (self.eviction_reason == null) {
                 self.cancel_request_inflight();
             }
-            self.cancel_queued_packets();
-        }
 
-        /// Cancels all submitted/pending packets.
-        fn cancel_queued_packets(self: *Context) void {
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
                 self.packet_cancel(packet);
             }
 
+            // The submitted queue is no longer accessible to user threads,
+            // so synchronization is not required here.
             while (self.submitted.pop()) |packet| {
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
@@ -470,6 +545,7 @@ pub fn ContextType(
 
         fn signal_notify_callback(signal: *Signal) void {
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
+            assert(self.signal.status() != .stopped);
 
             // Don't send any requests until registration completes.
             if (self.batch_size_limit == null) {
@@ -483,7 +559,11 @@ pub fn ContextType(
             const enqueued_count = self.pending.count;
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
             for (0..safety_limit) |_| {
-                const packet = self.submitted.pop() orelse return;
+                const packet: *Packet = pop: {
+                    self.interface.locker.lock();
+                    defer self.interface.locker.unlock();
+                    break :pop self.submitted.pop() orelse return;
+                };
                 self.packet_enqueue(packet);
 
                 // Packets can be processed without increasing `pending.count`:
@@ -496,7 +576,12 @@ pub fn ContextType(
 
             // Defer this work to later,
             // allowing the IO thread to remain free for processing completions.
-            if (!self.submitted.empty()) {
+            const empty: bool = empty: {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
+                break :empty self.submitted.empty();
+            };
+            if (!empty) {
                 self.signal.notify();
             }
         }
@@ -528,7 +613,9 @@ pub fn ContextType(
             self.eviction_reason = eviction.header.reason;
 
             self.cancel_request_inflight();
-            self.cancel_queued_packets();
+            while (self.pending.pop()) |packet| {
+                self.packet_cancel(packet);
+            }
         }
 
         fn client_result_callback(
@@ -593,44 +680,6 @@ pub fn ContextType(
             }
         }
 
-        /// Called by the user thread when a packet is submitted.
-        /// This function is thread-safe.
-        fn on_submit(implementation: *ContextImplementation, packet_extern: *Packet.Extern) void {
-            const self = get_context(implementation);
-            assert(self.signal.status() == .running);
-
-            // Packet is caller-allocated to enable elastic intrusive-link-list-based memory
-            // management. However, some of Packet's fields are essentially private. Initialize
-            // them here to avoid threading default fields through FFI boundary.
-            const packet: *Packet = packet_extern.cast();
-            packet.* = .{
-                .user_data = packet_extern.user_data,
-                .operation = packet_extern.operation,
-                .data_size = packet_extern.data_size,
-                .data = packet_extern.data,
-                .tag = packet_extern.tag,
-                .status = .ok,
-                .next = null,
-                .batch_next = null,
-                .batch_tail = null,
-                .batch_size = 0,
-                .batch_allowed = false,
-                .phase = .submitted,
-            };
-
-            // Enqueue the packet and notify the IO thread to process it asynchronously.
-            self.submitted.push(packet);
-            self.signal.notify();
-        }
-
-        /// Called by the user thread when the client is deinited.
-        /// This function is thread-safe.
-        fn on_deinit(implementation: *ContextImplementation) void {
-            const self = get_context(implementation);
-            self.deinit();
-        }
-
-        /// Calls the user callback when a packet is completed.
         fn notify_completion(
             self: *Context,
             packet: *Packet,
@@ -639,8 +688,6 @@ pub fn ContextType(
                 reply: []const u8,
             },
         ) void {
-            const completion_ctx = self.implementation.completion_ctx;
-            const tb_client = api.context_to_client(&self.implementation);
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
@@ -655,9 +702,8 @@ pub fn ContextType(
                 packet.phase = .complete;
 
                 // The packet completed with an error.
-                (self.completion_fn)(
-                    completion_ctx,
-                    tb_client,
+                (self.completion_callback)(
+                    self.completion_context,
                     packet.cast(),
                     0,
                     null,
@@ -669,9 +715,8 @@ pub fn ContextType(
             // The packet completed normally.
             assert(packet.status == .ok);
             packet.phase = .complete;
-            (self.completion_fn)(
-                completion_ctx,
-                tb_client,
+            (self.completion_callback)(
+                self.completion_context,
                 packet.cast(),
                 result.timestamp,
                 result.reply.ptr,
@@ -679,8 +724,59 @@ pub fn ContextType(
             );
         }
 
-        fn get_context(implementation: *ContextImplementation) *Context {
-            return @alignCast(@fieldParentPtr("implementation", implementation));
+        // VTable functions called by `ClientInterface`, which are thread-safe.
+
+        fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
+
+            // Packet is caller-allocated to enable elastic intrusive-link-list-based
+            // memory management. However, some of Packet's fields are essentially private.
+            // Initialize them here to avoid threading default fields through FFI boundary.
+            const packet: *Packet = packet_extern.cast();
+            packet.* = .{
+                .user_data = packet_extern.user_data,
+                .operation = packet_extern.operation,
+                .data_size = packet_extern.data_size,
+                .data = packet_extern.data,
+                .user_tag = packet_extern.user_tag,
+                .status = .ok,
+                .next = null,
+                .batch_next = null,
+                .batch_tail = null,
+                .batch_size = 0,
+                .batch_allowed = false,
+                .phase = .submitted,
+            };
+
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            self.submitted.push(packet);
+            self.signal.notify();
+        }
+
+        fn vtable_completion_context_fn(context: *anyopaque) usize {
+            const self: *Context = @ptrCast(@alignCast(context));
+            return self.completion_context;
+        }
+
+        fn vtable_deinit_fn(context: *anyopaque) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
+
+            self.signal.stop();
+            self.thread.join();
+
+            assert(self.submitted.pop() == null);
+            assert(self.pending.pop() == null);
+
+            self.io.cancel_all();
+
+            self.signal.deinit();
+            self.client.deinit(self.allocator);
+            self.message_pool.deinit(self.allocator);
+            self.io.deinit();
+
+            self.allocator.destroy(self);
         }
 
         fn operation_from_int(op: u8) ?StateMachine.Operation {
@@ -765,4 +861,126 @@ pub fn ContextType(
             }
         }
     };
+}
+
+/// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
+/// Vendored from `std.Thread.Mutex.FutexImpl`.
+const Locker = extern struct {
+    const Futex = std.Thread.Futex;
+    const unlocked: u32 = 0b00;
+    const locked: u32 = 0b01;
+    const contended: u32 = 0b11; // Must contain the `locked` bit for x86 optimization below.
+
+    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(unlocked),
+
+    fn lock(self: *Locker) void {
+        if (!self.try_lock()) {
+            self.lock_slow();
+        }
+    }
+
+    fn try_lock(self: *Locker) bool {
+        // On x86, use `lock bts` instead of `lock cmpxchg` as:
+        // - they both seem to mark the cache-line as modified regardless: https://stackoverflow.com/a/63350048.
+        // - `lock bts` is smaller instruction-wise which makes it better for inlining.
+        if (comptime builtin.target.cpu.arch.isX86()) {
+            const locked_bit = @ctz(locked);
+            return self.state.bitSet(locked_bit, .acquire) == 0;
+        }
+
+        // Acquire barrier ensures grabbing the lock happens before the critical section
+        // and that the previous lock holder's critical section happens before we grab the lock.
+        return self.state.cmpxchgWeak(unlocked, locked, .acquire, .monotonic) == null;
+    }
+
+    fn lock_slow(self: *Locker) void {
+        @setCold(true);
+
+        // Avoid doing an atomic swap below if we already know the state is contended.
+        // An atomic swap unconditionally stores which marks the cache-line as modified
+        // unnecessarily.
+        if (self.state.load(.monotonic) == contended) {
+            Futex.wait(&self.state, contended);
+        }
+
+        // Try to acquire the lock while also telling the existing lock holder that there are
+        // threads waiting.
+        //
+        // Once we sleep on the Futex, we must acquire the mutex using `contended` rather than
+        // `locked`.
+        // If not, threads sleeping on the Futex wouldn't see the state change in unlock and
+        // potentially deadlock.
+        // The downside is that the last mutex unlocker will see `contended` and do an unnecessary
+        // Futex wake but this is better than having to wake all waiting threads on mutex unlock.
+        //
+        // Acquire barrier ensures grabbing the lock happens before the critical section
+        // and that the previous lock holder's critical section happens before we grab the lock.
+        while (self.state.swap(contended, .acquire) != unlocked) {
+            Futex.wait(&self.state, contended);
+        }
+    }
+
+    fn unlock(self: *Locker) void {
+        // Unlock the mutex and wake up a waiting thread if any.
+        //
+        // A waiting thread will acquire with `contended` instead of `locked`
+        // which ensures that it wakes up another thread on the next unlock().
+        //
+        // Release barrier ensures the critical section happens before we let go of the lock
+        // and that our critical section happens before the next lock holder grabs the lock.
+        const state = self.state.swap(unlocked, .release);
+        assert(state != unlocked);
+
+        if (state == contended) {
+            Futex.wake(&self.state, 1);
+        }
+    }
+};
+
+const testing = std.testing;
+test "Locker: smoke test" {
+    var locker = Locker{};
+
+    try testing.expect(locker.try_lock());
+    try testing.expect(!locker.try_lock());
+    locker.unlock();
+
+    locker.lock();
+    try testing.expect(!locker.try_lock());
+    locker.unlock();
+}
+
+test "Locker: contended" {
+    const threads_count = 4;
+    const increments = 1000;
+
+    const State = struct {
+        locker: Locker = .{},
+        counter: u32 = 0,
+    };
+
+    const Runner = struct {
+        thread: std.Thread = undefined,
+        state: *State,
+        fn run(self: *@This()) void {
+            while (true) {
+                self.state.locker.lock();
+                defer self.state.locker.unlock();
+                if (self.state.counter == increments) break;
+                self.state.counter += 1;
+            }
+        }
+    };
+
+    var state = State{};
+    var runners: [threads_count]Runner = undefined;
+    for (&runners) |*runner| {
+        runner.* = .{ .state = &state };
+        runner.thread = try std.Thread.spawn(.{}, Runner.run, .{runner});
+    }
+    for (&runners) |*runner| {
+        runner.thread.join();
+    }
+
+    try testing.expectEqual(state.counter, increments);
 }

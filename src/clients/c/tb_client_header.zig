@@ -1,28 +1,39 @@
 const std = @import("std");
 const vsr = @import("vsr");
-const tb = vsr.tigerbeetle;
-const tb_client = vsr.tb_client;
+const exports = vsr.tb_client.exports;
 
 const type_mappings = .{
-    .{ tb.AccountFlags, "TB_ACCOUNT_FLAGS" },
-    .{ tb.Account, "tb_account_t" },
-    .{ tb.TransferFlags, "TB_TRANSFER_FLAGS" },
-    .{ tb.Transfer, "tb_transfer_t" },
-    .{ tb.CreateAccountResult, "TB_CREATE_ACCOUNT_RESULT" },
-    .{ tb.CreateTransferResult, "TB_CREATE_TRANSFER_RESULT" },
-    .{ tb.CreateAccountsResult, "tb_create_accounts_result_t" },
-    .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
-    .{ tb.AccountFilter, "tb_account_filter_t" },
-    .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
-    .{ tb.AccountBalance, "tb_account_balance_t" },
-    .{ tb.QueryFilter, "tb_query_filter_t" },
-    .{ tb.QueryFilterFlags, "TB_QUERY_FILTER_FLAGS" },
-
-    .{ tb_client.tb_operation_t, "TB_OPERATION" },
-    .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-    .{ tb_client.tb_packet_t, "tb_packet_t" },
-    .{ tb_client.tb_client_t, "tb_client_t" },
-    .{ tb_client.tb_status_t, "TB_STATUS" },
+    .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
+    .{ exports.tb_account_t, "tb_account_t" },
+    .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
+    .{ exports.tb_transfer_t, "tb_transfer_t" },
+    .{ exports.tb_create_account_result, "TB_CREATE_ACCOUNT_RESULT" },
+    .{ exports.tb_create_transfer_result, "TB_CREATE_TRANSFER_RESULT" },
+    .{ exports.tb_create_accounts_result_t, "tb_create_accounts_result_t" },
+    .{ exports.tb_create_transfers_result_t, "tb_create_transfers_result_t" },
+    .{ exports.tb_account_filter_t, "tb_account_filter_t" },
+    .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
+    .{ exports.tb_account_balance_t, "tb_account_balance_t" },
+    .{ exports.tb_query_filter_t, "tb_query_filter_t" },
+    .{ exports.tb_query_filter_flags, "TB_QUERY_FILTER_FLAGS" },
+    .{
+        exports.tb_client_t, "tb_client_t",
+        \\// Opaque struct serving as a handle for the client instance.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the client instance.
+    },
+    .{
+        exports.tb_packet_t, "tb_packet_t",
+        \\// Struct containing the state of a request submitted through the client.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the request.
+    },
+    .{ exports.tb_operation, "TB_OPERATION" },
+    .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
+    .{ exports.tb_init_status, "TB_INIT_STATUS" },
+    .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
+    .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
+    .{ exports.tb_log_level, "TB_LOG_LEVEL" },
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
@@ -174,6 +185,11 @@ pub fn main() !void {
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const c_name = type_mapping[1];
+        if (type_mapping.len == 3) {
+            const comments: []const u8 = type_mapping[2];
+            try buffer.writer().print(comments, .{});
+            try buffer.writer().print("\n", .{});
+        }
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
@@ -183,7 +199,7 @@ pub fn main() !void {
             },
             .Enum => |info| {
                 comptime var skip: []const []const u8 = &.{};
-                if (ZigType == tb_client.tb_operation_t) {
+                if (ZigType == exports.tb_operation) {
                     skip = &.{ "reserved", "root", "register" };
                 }
 
@@ -202,44 +218,57 @@ pub fn main() !void {
     try buffer.writer().print(
         \\// Initialize a new TigerBeetle client which connects to the addresses provided and
         \\// completes submitted packets by invoking the callback with the given context.
-        \\TB_STATUS tb_client_init(
-        \\    tb_client_t* out_client,
+        \\TB_INIT_STATUS tb_client_init(
+        \\    tb_client_t *client_out,
+        \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
         \\    const uint8_t cluster_id[16],
-        \\    const char* address_ptr,
+        \\    const char *address_ptr,
         \\    uint32_t address_len,
-        \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+        \\    uintptr_t completion_ctx,
+        \\    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
         \\);
         \\
-        \\// Initialize a new TigerBeetle client which echos back any data submitted.
-        \\TB_STATUS tb_client_init_echo(
-        \\    tb_client_t* out_client,
+        \\// Initialize a new TigerBeetle client that echoes back any submitted data.
+        \\TB_INIT_STATUS tb_client_init_echo(
+        \\    tb_client_t *client_out,
+        \\    // 128-bit unsigned integer represented as a 16-byte little-endian array.
         \\    const uint8_t cluster_id[16],
-        \\    const char* address_ptr,
+        \\    const char *address_ptr,
         \\    uint32_t address_len,
-        \\    uintptr_t on_completion_ctx,
-        \\    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+        \\    uintptr_t completion_ctx,
+        \\    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
         \\);
         \\
-        \\// Retrieve the callback context initially passed into `tb_client_init` or
-        \\// `tb_client_init_echo`.
-        \\uintptr_t tb_client_completion_context(
-        \\    tb_client_t client
+        \\// Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
+        \\TB_CLIENT_STATUS tb_client_completion_context(
+        \\    tb_client_t* client,
+        \\    uintptr_t* completion_ctx_out
         \\);
         \\
-        \\// Submit a packet with its operation, data, and data_size fields set.
-        \\// Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
-        \\// packet on the `tb_client` thread (separate from caller's thread).
-        \\void tb_client_submit(
-        \\    tb_client_t client,
-        \\    tb_packet_t* packet
+        \\// Submit a packet with its `operation`, `data`, and `data_size` fields set.
+        \\// Once completed, `completion_callback` will be invoked with `completion_ctx`
+        \\// and the given packet on the `tb_client` thread (separate from the caller's thread).
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
+        \\TB_CLIENT_STATUS tb_client_submit(
+        \\    tb_client_t *client,
+        \\    tb_packet_t *packet
         \\);
         \\
         \\// Closes the client, causing any previously submitted packets to be completed with
         \\// `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
-        \\// It is undefined behavior to use any functions on the client once deinit is called.
-        \\void tb_client_deinit(
-        \\    tb_client_t client
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
+        \\TB_CLIENT_STATUS tb_client_deinit(
+        \\    tb_client_t *client
+        \\);
+        \\
+        \\// Registers or unregisters the application log callback.
+        \\TB_REGISTER_LOG_CALLBACK_STATUS register_log_callback(
+        \\    void (*callback)(TB_LOG_LEVEL, const uint8_t*, uint32_t),
+        \\    bool debug
         \\);
         \\
         \\

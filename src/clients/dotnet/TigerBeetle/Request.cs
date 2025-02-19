@@ -22,12 +22,21 @@ internal abstract class NativeRequest
         packetHandle = GCHandle.Alloc(new TBPacket
         {
             userData = GCHandle.ToIntPtr(requestHandle),
+            userTag = 0,
             operation = (byte)operation,
             data = (IntPtr)data,
             dataSize = (uint)len,
         }, GCHandleType.Pinned);
 
-        nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
+        try
+        {
+            nativeClient.Submit((TBPacket*)packetHandle.Value.AddrOfPinnedObject());
+        }
+        catch (ObjectDisposedException)
+        {
+            packetHandle.Value.Free();
+            throw;
+        }
     }
 
     public static unsafe void OnComplete(TBPacket* packet, ReadOnlySpan<byte> result)

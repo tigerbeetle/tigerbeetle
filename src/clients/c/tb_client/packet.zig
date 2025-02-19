@@ -1,11 +1,8 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-// When referenced from unit_test.zig, there is no vsr import module so use path.
-const vsr = if (@import("root") == @This()) @import("vsr") else @import("../../../vsr.zig");
-const stdx = vsr.stdx;
-const FIFOType = vsr.fifo.FIFOType;
+const tb_client = @import("../tb_client.zig");
+const stdx = tb_client.vsr.stdx;
 const maybe = stdx.maybe;
 
 pub const Packet = extern struct {
@@ -25,40 +22,13 @@ pub const Packet = extern struct {
         user_data: ?*anyopaque,
         data: ?*anyopaque,
         data_size: u32,
-        tag: u16,
+        user_tag: u16,
         operation: u8,
         status: Status,
-        reserved: [32]u8 = [_]u8{0} ** 32,
+        @"opaque": [32]u8 = [_]u8{0} ** 32,
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
-        }
-    };
-
-    pub const SubmissionQueue = struct {
-        fifo: FIFOType(Packet) = .{
-            .name = null,
-            .verify_push = builtin.is_test,
-        },
-        mutex: std.Thread.Mutex = .{},
-
-        pub fn push(self: *SubmissionQueue, packet: *Packet) void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            self.fifo.push(packet);
-        }
-
-        pub fn pop(self: *SubmissionQueue) ?*Packet {
-            self.mutex.lock();
-            defer self.mutex.unlock();
-
-            return self.fifo.pop();
-        }
-
-        /// Not thread safe, should be called only by the consumer thread.
-        pub fn empty(self: *const SubmissionQueue) bool {
-            return self.fifo.count == 0;
         }
     };
 
@@ -73,7 +43,7 @@ pub const Packet = extern struct {
     user_data: ?*anyopaque,
     data: ?*anyopaque,
     data_size: u32,
-    tag: u16,
+    user_tag: u16,
     operation: u8,
     status: Status,
 
@@ -109,7 +79,7 @@ pub const Packet = extern struct {
         assert(packet.data_size == 0 or packet.data != null);
         assert(stdx.zeroed(&packet.reserved));
         maybe(packet.user_data == null);
-        maybe(packet.tag == 0);
+        maybe(packet.user_tag == 0);
 
         switch (expected) {
             .submitted => {
@@ -157,7 +127,7 @@ pub const Packet = extern struct {
 
         // Asseting the fields are identical.
         for (std.meta.fields(Extern)) |field_extern| {
-            if (std.mem.eql(u8, field_extern.name, "reserved")) continue;
+            if (std.mem.eql(u8, field_extern.name, "opaque")) continue;
             const field_packet = std.meta.fields(Packet)[
                 std.meta.fieldIndex(
                     Packet,

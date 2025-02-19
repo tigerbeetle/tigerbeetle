@@ -4,7 +4,7 @@ const vsr = @import("vsr");
 const assert = std.debug.assert;
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
-const tb_client = vsr.tb_client;
+const exports = vsr.tb_client.exports;
 
 const TypeMapping = struct {
     name: []const u8,
@@ -117,23 +117,32 @@ const type_mappings = .{
         .private_fields = &.{"reserved"},
         .docs_link = "reference/query-filter#",
     } },
-    .{ tb_client.tb_status_t, TypeMapping{
+    .{ exports.tb_init_status, TypeMapping{
         .name = "InitializationStatus",
         .visibility = .public,
     } },
-    .{ tb_client.tb_packet_status_t, TypeMapping{
+    .{ exports.tb_client_status, TypeMapping{
+        .name = "ClientStatus",
+        .visibility = .internal,
+    } },
+    .{ exports.tb_packet_status, TypeMapping{
         .name = "PacketStatus",
         .visibility = .public,
     } },
-    .{ tb_client.tb_operation_t, TypeMapping{
+    .{ exports.tb_operation, TypeMapping{
         .name = "TBOperation",
         .visibility = .internal,
         .private_fields = &.{ "reserved", "root", "register" },
     } },
-    .{ tb_client.tb_packet_t, TypeMapping{
+    .{ exports.tb_client_t, TypeMapping{
+        .name = "TBClient",
+        .visibility = .internal,
+        .private_fields = &.{"opaque"},
+    } },
+    .{ exports.tb_packet_t, TypeMapping{
         .name = "TBPacket",
         .visibility = .internal,
-        .private_fields = &.{"reserved"},
+        .private_fields = &.{"opaque"},
     } },
 };
 
@@ -287,40 +296,45 @@ fn emit_struct(
         switch (@typeInfo(field.type)) {
             .Array => |array| {
                 try buffer.writer().print(
-                    \\    [StructLayout(LayoutKind.Sequential, Size = SIZE)]
-                    \\    private unsafe struct {s}Data
+                    \\    [StructLayout(LayoutKind.Sequential, Size = {[name]s}Data.SIZE)]
+                    \\    private unsafe struct {[name]s}Data
                     \\    {{
-                    \\        public const int SIZE = {};
+                    \\        public const int SIZE = {[size]};
+                    \\        private const int LENGTH = {[len]};
                     \\
-                    \\        private fixed byte raw[SIZE];
+                    \\        private fixed {[child_type]s} raw[LENGTH];
                     \\
-                    \\        public byte[] GetData()
+                    \\        public {[child_type]s}[] GetData()
                     \\        {{
                     \\            fixed (void* ptr = raw)
                     \\            {{
-                    \\                return new ReadOnlySpan<byte>(ptr, SIZE).ToArray();
+                    \\                return new ReadOnlySpan<{[child_type]s}>(ptr, LENGTH).ToArray();
                     \\            }}
                     \\        }}
                     \\
-                    \\        public void SetData(byte[] value)
+                    \\        public void SetData({[child_type]s}[] value)
                     \\        {{
                     \\            if (value == null) throw new ArgumentNullException(nameof(value));
-                    \\            if (value.Length != SIZE)
+                    \\            if (value.Length != LENGTH)
                     \\            {{
-                    \\                throw new ArgumentException("Expected a byte[" + SIZE + "] array", nameof(value));
+                    \\                throw new ArgumentException(
+                    \\                    "Expected a {[child_type]s}[" + LENGTH + "] array",
+                    \\                    nameof(value));
                     \\            }}
                     \\
                     \\            fixed (void* ptr = raw)
                     \\            {{
-                    \\                value.CopyTo(new Span<byte>(ptr, SIZE));
+                    \\                value.CopyTo(new Span<{[child_type]s}>(ptr, LENGTH));
                     \\            }}
                     \\        }}
                     \\    }}
                     \\
                     \\
                 , .{
-                    to_case(field.name, .pascal),
-                    array.len * @sizeOf(array.child),
+                    .name = to_case(field.name, .pascal),
+                    .size = array.len * @sizeOf(array.child),
+                    .len = array.len,
+                    .child_type = dotnet_type(array.child),
                 });
             },
             else => {},
@@ -473,43 +487,43 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     // Zig 0.9.1 has `decl.data.Fn.arg_names` but it's currently/incorrectly a zero-sized slice.
     try buffer.writer().print(
-        \\internal static class TBClient
+        \\internal static class Native
         \\{{
         \\    private const string LIB_NAME = "tb_client";
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\    public static unsafe extern InitializationStatus tb_client_init(
-        \\        IntPtr* out_client,
+        \\        TBClient* client_out,
         \\        UInt128Extensions.UnsafeU128* cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        IntPtr on_completion_ctx,
-        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        \\        IntPtr completion_ctx,
+        \\        delegate* unmanaged[Cdecl]<IntPtr,
         \\                                   TBPacket*, ulong,
-        \\                                   byte*, uint, void> on_completion_fn
+        \\                                   byte*, uint, void> completion_callback
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
         \\    public static unsafe extern InitializationStatus tb_client_init_echo(
-        \\        IntPtr* out_client,
+        \\        TBClient* out_client,
         \\        UInt128Extensions.UnsafeU128* cluster_id,
         \\        byte* address_ptr,
         \\        uint address_len,
-        \\        IntPtr on_completion_ctx,
-        \\        delegate* unmanaged[Cdecl]<IntPtr, IntPtr,
+        \\        IntPtr completion_ctx,
+        \\        delegate* unmanaged[Cdecl]<IntPtr,
         \\                                   TBPacket*, ulong,
-        \\                                   byte*, uint, void> on_completion_fn
+        \\                                   byte*, uint, void> completion_callback
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern void tb_client_submit(
-        \\        IntPtr client,
+        \\    public static unsafe extern ClientStatus tb_client_submit(
+        \\        TBClient* client,
         \\        TBPacket* packet
         \\    );
         \\
         \\    [DllImport(LIB_NAME, CallingConvention = CallingConvention.Cdecl)]
-        \\    public static unsafe extern void tb_client_deinit(
-        \\        IntPtr client
+        \\    public static unsafe extern ClientStatus tb_client_deinit(
+        \\        TBClient* client
         \\    );
         \\}}
         \\
