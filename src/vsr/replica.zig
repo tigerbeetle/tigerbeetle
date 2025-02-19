@@ -1294,7 +1294,7 @@ pub fn ReplicaType(
                 .trace_emit_timeout = Timeout{
                     .name = "trace_emit_timeout",
                     .id = replica_index,
-                    .after = 100,
+                    .after = 1000,
                 },
                 .prng = std.rand.DefaultPrng.init(replica_index),
 
