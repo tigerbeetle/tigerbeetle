@@ -924,5 +924,6 @@ export enum Operation {
   get_account_balances = 134,
   query_accounts = 135,
   query_transfers = 136,
+  get_events = 137,
 }
 

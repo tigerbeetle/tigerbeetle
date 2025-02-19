@@ -346,7 +346,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 440; // fn check in state_machine.zig
+const function_line_count_max = 459; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,

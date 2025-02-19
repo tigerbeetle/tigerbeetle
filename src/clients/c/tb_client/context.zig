@@ -398,7 +398,7 @@ pub fn ContextType(
             // Make sure the packet.data wouldn't overflow a request, and that the corresponding
             // results won't overflow a reply.
             const event_size: usize, const events_batch_max: u32 = switch (operation) {
-                .pulse => unreachable,
+                .pulse, .get_events => unreachable,
                 inline else => |operation_comptime| .{
                     @sizeOf(StateMachine.EventType(operation_comptime)),
                     StateMachine.operation_batch_max(
@@ -639,7 +639,7 @@ pub fn ContextType(
             }
 
             switch (operation) {
-                .pulse => unreachable,
+                .pulse, .get_events => unreachable,
                 inline else => |operation_comptime| {
                     // on_result should never be called with an operation not green-lit by request()
                     // This also guards from passing an unsupported operation into DemuxerType.
