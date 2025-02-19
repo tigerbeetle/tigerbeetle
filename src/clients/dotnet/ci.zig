@@ -21,11 +21,14 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // <https://github.com/coverlet-coverage/coverlet/issues/865>
     try shell.exec(
         \\dotnet test --no-restore
+        \\    --logger:{logger}
         \\    /p:CollectCoverage=false
         \\    /p:Threshold={threshold}
         \\    /p:ThresholdType={threshold_type}
     , .{
-        .threshold = "\"95,85,95\"", // sic, coverlet wants quotes inside the argument
+        // Dotnet wants quotes inside the argument.
+        .logger = "\"console;verbosity=detailed\"",
+        .threshold = "\"95,85,95\"",
         .threshold_type = "\"line,branch,method\"",
     });
 
