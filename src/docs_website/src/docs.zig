@@ -1,6 +1,5 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
 const LazyPath = std.Build.LazyPath;
 const log = std.log.scoped(.docs);
 const Website = @import("website.zig").Website;
