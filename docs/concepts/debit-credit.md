@@ -63,7 +63,13 @@ The schema of OLTP is built in to TigerBeetle's data model, and is ready for you
 - **How Much**: the [`amount`](../reference/transfer.md#amount) indicates how much of the asset or
   item is being transferred.
 
-Furthermore, accounting invariants such as balance limits are enforced within the database to avoid
+TigerBeetle also supports [two-phase transfers](../coding/two-phase-transfers.md) out of the box,
+and can express complex atomic chains of transfers using
+[liked events](../coding/linked-events.md). These powerful built-in primitives allow for a large
+vocabulary of [patterns and recipes](../coding/recipes/) for
+[data modeling](../coding/data-modeling.md).
+
+Crucially, accounting invariants such as balance limits are enforced within the database, avoiding
 round-trips between your database and application logic.
 
 ## Immutability is Essential
