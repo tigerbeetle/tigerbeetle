@@ -16,3 +16,6 @@ a series of loosely connected guides which can be read in any order.
   as a currency exchange.
 - [Clients](./clients/) shows how to use TigerBeetle from the comfort of .Net, Go, Java, Node.js, or
   Python.
+
+Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes!
