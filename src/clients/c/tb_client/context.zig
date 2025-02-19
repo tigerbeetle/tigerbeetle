@@ -250,7 +250,11 @@ pub fn ContextType(
             };
             errdefer context.client.deinit(context.allocator);
 
-            ClientInterface.init(client_out, context, &Context.vtable);
+            ClientInterface.init(client_out, context, comptime &.{
+                .submit_fn = &vtable_submit_fn,
+                .completion_context_fn = &vtable_completion_context_fn,
+                .deinit_fn = &vtable_deinit_fn,
+            });
             context.interface = client_out;
             context.submitted = .{
                 .name = null,
@@ -703,65 +707,60 @@ pub fn ContextType(
             );
         }
 
-        /// Functions called by `ClientInterface`, which is thread-safe.
-        const vtable = ClientInterface.VTable{
-            .submit_fn = struct {
-                fn submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
-                    const self: *Context = @ptrCast(@alignCast(context));
-                    assert(self.signal.status() == .running);
+        // VTable functions called by `ClientInterface`, which are thread-safe.
 
-                    // Packet is caller-allocated to enable elastic intrusive-link-list-based
-                    // memory management. However, some of Packet's fields are essentially private.
-                    // Initialize them here to avoid threading default fields through FFI boundary.
-                    const packet: *Packet = packet_extern.cast();
-                    packet.* = .{
-                        .user_data = packet_extern.user_data,
-                        .operation = packet_extern.operation,
-                        .data_size = packet_extern.data_size,
-                        .data = packet_extern.data,
-                        .user_tag = packet_extern.user_tag,
-                        .status = .ok,
-                        .next = null,
-                        .batch_next = null,
-                        .batch_tail = null,
-                        .batch_size = 0,
-                        .batch_allowed = false,
-                        .phase = .submitted,
-                    };
+        fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
 
-                    // Enqueue the packet and notify the IO thread to process it asynchronously.
-                    self.submitted.push(packet);
-                    self.signal.notify();
-                }
-            }.submit_fn,
-            .completion_context_fn = struct {
-                fn completion_context_fn(context: *anyopaque) usize {
-                    const self: *Context = @ptrCast(@alignCast(context));
-                    return self.completion_context;
-                }
-            }.completion_context_fn,
-            .deinit_fn = struct {
-                fn deinit_fn(context: *anyopaque) void {
-                    const self: *Context = @ptrCast(@alignCast(context));
-                    assert(self.signal.status() == .running);
+            // Packet is caller-allocated to enable elastic intrusive-link-list-based
+            // memory management. However, some of Packet's fields are essentially private.
+            // Initialize them here to avoid threading default fields through FFI boundary.
+            const packet: *Packet = packet_extern.cast();
+            packet.* = .{
+                .user_data = packet_extern.user_data,
+                .operation = packet_extern.operation,
+                .data_size = packet_extern.data_size,
+                .data = packet_extern.data,
+                .user_tag = packet_extern.user_tag,
+                .status = .ok,
+                .next = null,
+                .batch_next = null,
+                .batch_tail = null,
+                .batch_size = 0,
+                .batch_allowed = false,
+                .phase = .submitted,
+            };
 
-                    self.signal.stop();
-                    self.thread.join();
+            // Enqueue the packet and notify the IO thread to process it asynchronously.
+            self.submitted.push(packet);
+            self.signal.notify();
+        }
 
-                    assert(self.submitted.pop() == null);
-                    assert(self.pending.pop() == null);
+        fn vtable_completion_context_fn(context: *anyopaque) usize {
+            const self: *Context = @ptrCast(@alignCast(context));
+            return self.completion_context;
+        }
 
-                    self.io.cancel_all();
+        fn vtable_deinit_fn(context: *anyopaque) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
 
-                    self.signal.deinit();
-                    self.client.deinit(self.allocator);
-                    self.message_pool.deinit(self.allocator);
-                    self.io.deinit();
+            self.signal.stop();
+            self.thread.join();
 
-                    self.allocator.destroy(self);
-                }
-            }.deinit_fn,
-        };
+            assert(self.submitted.pop() == null);
+            assert(self.pending.pop() == null);
+
+            self.io.cancel_all();
+
+            self.signal.deinit();
+            self.client.deinit(self.allocator);
+            self.message_pool.deinit(self.allocator);
+            self.io.deinit();
+
+            self.allocator.destroy(self);
+        }
 
         fn operation_from_int(op: u8) ?StateMachine.Operation {
             inline for (allowed_operations) |operation| {
