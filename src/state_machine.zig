@@ -4056,6 +4056,9 @@ const TestEventResult = struct {
             const transfer_pending = transfers.get(transfer_pending_id).?;
             if (@as(u16, @bitCast(transfer_pending.flags)) !=
                 @as(u16, @bitCast(event.transfer_pending_flags))) return false;
+            if (event.transfer_pending_status == .expired) {
+                assert(transfer_pending.timeout_ns() <= event.timestamp);
+            }
         }
 
         for (&[_]TestEventAccountBalanceResult{ self.account_1, self.account_2 }) |account_event| {
