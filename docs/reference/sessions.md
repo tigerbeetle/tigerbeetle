@@ -1,6 +1,6 @@
 # Client Sessions
 
-A _client session_ is a sequence of [requests](./requests/README.md) and replies sent between a
+A _client session_ is a sequence of [requests](../coding/requests/README.md) and replies sent between a
 client and a cluster.
 
 A client session may have **at most one in-flight request** — i.e. at most one unique request on the
@@ -11,7 +11,7 @@ a reply.
 
 Similar to other databases, TigerBeetle has a [hard limit](#eviction) on the number of concurrent
 client sessions. To maximize throughput, users are encouraged to minimize the number of concurrent
-clients and [batch](./requests/README.md#batching-events) as many events as possible per request.
+clients and [batch](../coding/requests.md#batching-events) as many events as possible per request.
 
 ## Lifecycle
 
@@ -49,7 +49,7 @@ to self-terminate, bubbling up to the application as an `session evicted` error.
 
 If active clients are terminating with `session evicted` errors, it most likely indicates that the
 application is trying to run too many concurrent clients. For performance reasons, it is recommended
-to [batch](./requests/README.md#batching-events) as many events as possible into each request sent
+to [batch](../coding/requests/README.md#batching-events) as many events as possible into each request sent
 by each client.
 
 ## Retries
@@ -73,7 +73,7 @@ would be misleading. An error would imply that a request did not execute, when t
 
 ## Guarantees
 
-- A client session may have at most one in-flight [request](./requests/README.md).
+- A client session may have at most one in-flight [request](../coding/requests/README.md).
 - A client session [reads its own writes](https://jepsen.io/consistency/models/read-your-writes),
   meaning that read operations that happen after a given write operation will observe the effects of
   the write.

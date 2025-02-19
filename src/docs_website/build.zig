@@ -1,6 +1,7 @@
 const std = @import("std");
 const Website = @import("src/website.zig").Website;
 const docs = @import("src/docs.zig");
+const redirects = @import("src/redirects.zig");
 
 pub const exclude_extensions: []const []const u8 = &.{
     ".DS_Store",
@@ -47,6 +48,7 @@ pub fn build(b: *std.Build) !void {
 
     const website = Website.init(b, url_prefix, pandoc_bin);
     try docs.build(b, content, website);
+    try redirects.build(b, content, website);
 
     const clean_zigout_step = b.addRemoveDirTree("zig-out");
 
