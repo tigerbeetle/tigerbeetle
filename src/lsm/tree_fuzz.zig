@@ -156,7 +156,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.trace = try vsr.trace.Tracer.init(allocator, replica, .{});
+            env.trace = try vsr.trace.Tracer.init(allocator, 0, replica, .{});
             defer env.trace.deinit(allocator);
 
             env.superblock = try SuperBlock.init(allocator, .{

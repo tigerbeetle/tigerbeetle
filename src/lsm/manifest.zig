@@ -191,17 +191,21 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
+        tracer: *vsr.trace.Tracer,
+
         pub fn init(
             manifest: *Manifest,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             config: TreeConfig,
+            tracer: *vsr.trace.Tracer,
         ) !void {
             manifest.* = .{
                 .node_pool = node_pool,
                 .config = config,
 
                 .levels = undefined,
+                .tracer = tracer,
             };
 
             for (&manifest.levels, 0..) |*level, i| {
@@ -222,6 +226,7 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                 .node_pool = manifest.node_pool,
                 .config = manifest.config,
                 .levels = manifest.levels,
+                .tracer = manifest.tracer,
             };
         }
 
@@ -436,12 +441,26 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         };
 
         pub fn assert_level_table_counts(manifest: *const Manifest) void {
+            var table_count_visible: u32 = 0;
+            var table_count_visible_max: u32 = 0;
             for (&manifest.levels, 0..) |*manifest_level, index| {
                 const level: u8 = @intCast(index);
-                const table_count_visible_max = table_count_max_for_level(growth_factor, level);
-                assert(manifest_level.table_count_visible <= table_count_visible_max);
-                // TODO(metric): This is a great metric to add.
+                const level_table_count_visible_max =
+                    table_count_max_for_level(growth_factor, level);
+                assert(manifest_level.table_count_visible <= level_table_count_visible_max);
+
+                table_count_visible += manifest_level.table_count_visible;
+                table_count_visible_max += level_table_count_visible_max;
             }
+
+            manifest.tracer.gauge(
+                .{ .table_count_visible = .{ .tree = @enumFromInt(manifest.config.id) } },
+                table_count_visible,
+            );
+            manifest.tracer.gauge(
+                .{ .table_count_visible_max = .{ .tree = @enumFromInt(manifest.config.id) } },
+                table_count_visible_max,
+            );
         }
 
         pub fn assert_no_invisible_tables(manifest: *const Manifest, snapshots: []const u64) void {

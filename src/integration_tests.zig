@@ -238,13 +238,25 @@ test "benchmark/inspect smoke" {
     };
     defer std.fs.cwd().deleteFile(data_file) catch {};
 
+    const trace_file = data_file ++ ".json";
+    defer std.fs.cwd().deleteFile(trace_file) catch {};
+
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
     try shell.exec(
-        "{tigerbeetle} benchmark --transfer-count=10_000 --transfer-batch-size=10 --validate " ++
-            "--file={file}",
-        .{ .tigerbeetle = tigerbeetle, .file = data_file },
+        "{tigerbeetle} benchmark" ++
+            " --transfer-count=10_000" ++
+            " --transfer-batch-size=10" ++
+            " --validate" ++
+            " --trace={trace_file}" ++
+            " --statsd=127.0.0.1:65535" ++
+            " --file={data_file}",
+        .{
+            .tigerbeetle = tigerbeetle,
+            .trace_file = trace_file,
+            .data_file = data_file,
+        },
     );
 
     inline for (.{

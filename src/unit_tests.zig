@@ -16,6 +16,8 @@ comptime {
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("trace.zig");
+    _ = @import("trace/event.zig");
+    _ = @import("trace/statsd.zig");
 
     _ = @import("clients/c/test.zig");
     _ = @import("clients/c/tb_client/context.zig");
@@ -51,6 +53,7 @@ comptime {
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
+    _ = @import("testing/exhaustigen.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
     _ = @import("testing/snaptest.zig");

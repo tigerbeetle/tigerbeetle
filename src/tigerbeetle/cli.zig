@@ -77,6 +77,8 @@ const CLIArgs = union(enum) {
         replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
+        statsd: ?[:0]const u8 = null,
+
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
@@ -130,7 +132,7 @@ const CLIArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
-        statsd: bool = false,
+        statsd: ?[]const u8 = null,
         trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
@@ -430,6 +432,7 @@ pub const Command = union(enum) {
         aof: bool,
         path: [:0]const u8,
         log_debug: bool,
+        statsd: ?std.net.Address,
     };
 
     pub const Version = struct {
@@ -483,7 +486,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         clients: u32,
-        statsd: bool,
+        statsd: ?[]const u8,
         trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
@@ -657,7 +660,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
     const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
-    const addresses = parse_addresses(start.addresses);
+    const addresses = parse_addresses(start.addresses, "--addresses", Command.Addresses);
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
@@ -849,6 +852,14 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .aof = start.aof,
         .path = start.positional.path,
         .log_debug = start.log_debug,
+        .statsd = if (start.statsd) |statsd_address|
+            parse_addresses(
+                statsd_address,
+                "--statsd",
+                stdx.BoundedArrayType(std.net.Address, 1),
+            ).get(0)
+        else
+            null,
     };
 }
 
@@ -859,7 +870,7 @@ fn parse_args_version(version: CLIArgs.Version) Command.Version {
 }
 
 fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
-    const addresses = parse_addresses(repl.addresses);
+    const addresses = parse_addresses(repl.addresses, "--addresses", Command.Addresses);
 
     return .{
         .addresses = addresses,
@@ -872,7 +883,7 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
 
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
-        parse_addresses(addresses)
+        parse_addresses(addresses, "--addresses", Command.Addresses)
     else
         null;
 
@@ -953,30 +964,35 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
 }
 
 /// Parse and allocate the addresses returning a slice into that array.
-fn parse_addresses(raw_addresses: []const u8) Command.Addresses {
-    var result: Command.Addresses = .{};
+fn parse_addresses(
+    raw_addresses: []const u8,
+    comptime flag: []const u8,
+    comptime BoundedArray: type,
+) BoundedArray {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+    var result: BoundedArray = .{};
 
     const addresses_parsed = vsr.parse_addresses(
         raw_addresses,
         result.unused_capacity_slice(),
     ) catch |err| switch (err) {
         error.AddressHasTrailingComma => {
-            vsr.fatal(.cli, "--addresses: invalid trailing comma", .{});
+            vsr.fatal(.cli, flag ++ ": invalid trailing comma", .{});
         },
         error.AddressLimitExceeded => {
-            vsr.fatal(.cli, "--addresses: too many addresses, at most {d} are allowed", .{
-                constants.members_max,
+            vsr.fatal(.cli, flag ++ ": too many addresses, at most {d} are allowed", .{
+                result.capacity(),
             });
         },
         error.AddressHasMoreThanOneColon => {
-            vsr.fatal(.cli, "--addresses: invalid address with more than one colon", .{});
+            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
         },
-        error.PortOverflow => vsr.fatal(.cli, "--addresses: port exceeds 65535", .{}),
-        error.PortInvalid => vsr.fatal(.cli, "--addresses: invalid port", .{}),
-        error.AddressInvalid => vsr.fatal(.cli, "--addresses: invalid IPv4 or IPv6 address", .{}),
+        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
     };
     assert(addresses_parsed.len > 0);
-    assert(addresses_parsed.len <= constants.members_max);
+    assert(addresses_parsed.len <= result.capacity());
     result.resize(addresses_parsed.len) catch unreachable;
     return result;
 }

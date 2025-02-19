@@ -839,6 +839,46 @@ pub fn array_print(
     };
 }
 
+pub const Instant = struct {
+    // Sneak the std version of Instant past tidy.
+    const time = std.time;
+
+    base: time.Instant,
+
+    pub fn now() Instant {
+        const instant = time.Instant.now() catch @panic("std.time." ++ "Instant.now() unsupported");
+        return .{ .base = instant };
+    }
+
+    pub fn duration_since(now_: Instant, earlier: Instant) Duration {
+        if (now_.base.order(earlier.base) == .lt) {
+            return .{ .nanoseconds = 0 };
+        } else {
+            const elapsed_ns = now_.base.since(earlier.base);
+            return .{ .nanoseconds = elapsed_ns };
+        }
+    }
+};
+
+pub const Duration = struct {
+    nanoseconds: u64,
+
+    pub fn microseconds(duration: Duration) u64 {
+        return @divFloor(duration.nanoseconds, std.time.ns_per_us);
+    }
+
+    pub fn milliseconds(duration: Duration) u64 {
+        return @divFloor(duration.nanoseconds, std.time.ns_per_ms);
+    }
+};
+
+test "Instant/Duration" {
+    const instant_1 = Instant.now();
+    const instant_2 = Instant.now();
+    assert(instant_1.duration_since(instant_2).nanoseconds == 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds > 0);
+}
+
 // DateTime in UTC, intended primarily for logging.
 //
 // NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
