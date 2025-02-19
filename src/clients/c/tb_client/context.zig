@@ -45,33 +45,29 @@ pub const ClientInterface = extern struct {
         ptr: *const VTable,
         int_ptr: u64,
     },
-    /// According to `std`'s documentation, a `Mutex` is at most `@sizeOf(u64)` large.
-    /// However, the debug implementation requires additional space due to the deadlock detector.
-    /// Reserving 16 bytes to ensure compatibility with debug builds while maintaining an unchanged
-    /// ABI for language clients.
-    mutex_state: [2]u64,
+    locker: Locker,
+    reserved: u32,
 
-    pub fn init(context: *anyopaque, vtable: *const VTable) ClientInterface {
-        var self: ClientInterface = .{
+    pub fn init(self: *ClientInterface, context: *anyopaque, vtable: *const VTable) void {
+        self.* = .{
             .context = .{ .ptr = context },
             .vtable = .{ .ptr = vtable },
-            .mutex_state = [_]u64{0} ** 2,
+            .locker = .{},
+            .reserved = 0,
         };
-        self.mutex().* = .{};
-        return self;
     }
 
     pub fn submit(client: *ClientInterface, packet: *Packet.Extern) Error!void {
-        client.mutex().lock();
-        defer client.mutex().unlock();
+        client.locker.lock();
+        defer client.locker.unlock();
 
         const context = client.context.ptr orelse return Error.ClientInvalid;
         client.vtable.ptr.submit_fn(context, packet);
     }
 
     pub fn completion_context(client: *ClientInterface) Error!usize {
-        client.mutex().lock();
-        defer client.mutex().unlock();
+        client.locker.lock();
+        defer client.locker.unlock();
 
         const context = client.context.ptr orelse return Error.ClientInvalid;
         return client.vtable.ptr.completion_context_fn(context);
@@ -79,8 +75,8 @@ pub const ClientInterface = extern struct {
 
     pub fn deinit(client: *ClientInterface) Error!void {
         const context: *anyopaque = context: {
-            client.mutex().lock();
-            defer client.mutex().unlock();
+            client.locker.lock();
+            defer client.locker.unlock();
             if (client.context.ptr == null) return Error.ClientInvalid;
 
             defer client.context.ptr = null;
@@ -89,17 +85,9 @@ pub const ClientInterface = extern struct {
         client.vtable.ptr.deinit_fn(context);
     }
 
-    inline fn mutex(client: *ClientInterface) *std.Thread.Mutex {
-        return @ptrCast(&client.mutex_state);
-    }
-
     comptime {
-        assert(@sizeOf(ClientInterface) == 32);
+        assert(@sizeOf(ClientInterface) == 24);
         assert(@alignOf(ClientInterface) == 8);
-        assert(@sizeOf(std.Thread.Mutex) <=
-            @sizeOf(std.meta.FieldType(ClientInterface, .mutex_state)));
-        assert(@alignOf(std.Thread.Mutex) <=
-            @alignOf(std.meta.FieldType(ClientInterface, .mutex_state)));
     }
 };
 
@@ -172,7 +160,7 @@ pub fn ContextType(
         completion_callback: CompletionCallback,
         completion_context: usize,
 
-        submitted_mutex: *std.Thread.Mutex,
+        interface: *ClientInterface,
         submitted: FIFOType(Packet),
         pending: FIFOType(Packet),
 
@@ -262,8 +250,8 @@ pub fn ContextType(
             };
             errdefer context.client.deinit(context.allocator);
 
-            client_out.* = ClientInterface.init(context, &Context.vtable);
-            context.submitted_mutex = client_out.mutex();
+            ClientInterface.init(client_out, context, &Context.vtable);
+            context.interface = client_out;
             context.submitted = .{
                 .name = null,
                 .verify_push = builtin.is_test,
@@ -551,8 +539,8 @@ pub fn ContextType(
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
             for (0..safety_limit) |_| {
                 const packet: *Packet = pop: {
-                    self.submitted_mutex.lock();
-                    defer self.submitted_mutex.unlock();
+                    self.interface.locker.lock();
+                    defer self.interface.locker.unlock();
                     break :pop self.submitted.pop() orelse return;
                 };
                 self.packet_enqueue(packet);
@@ -568,8 +556,8 @@ pub fn ContextType(
             // Defer this work to later,
             // allowing the IO thread to remain free for processing completions.
             const empty: bool = empty: {
-                self.submitted_mutex.lock();
-                defer self.submitted_mutex.unlock();
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
                 break :empty self.submitted.empty();
             };
             if (!empty) {
@@ -857,4 +845,126 @@ pub fn ContextType(
             }
         }
     };
+}
+
+/// Implements the `Mutex` API as an `extern` struct, based on `std.Thread.Futex`.
+/// Vendored from `std.Thread.Mutex.FutexImpl`.
+const Locker = extern struct {
+    const Futex = std.Thread.Futex;
+    const unlocked: u32 = 0b00;
+    const locked: u32 = 0b01;
+    const contended: u32 = 0b11; // Must contain the `locked` bit for x86 optimization below.
+
+    state: std.atomic.Value(u32) = std.atomic.Value(u32).init(unlocked),
+
+    fn lock(self: *Locker) void {
+        if (!self.try_lock()) {
+            self.lock_slow();
+        }
+    }
+
+    fn try_lock(self: *Locker) bool {
+        // On x86, use `lock bts` instead of `lock cmpxchg` as:
+        // - they both seem to mark the cache-line as modified regardless: https://stackoverflow.com/a/63350048.
+        // - `lock bts` is smaller instruction-wise which makes it better for inlining.
+        if (comptime builtin.target.cpu.arch.isX86()) {
+            const locked_bit = @ctz(locked);
+            return self.state.bitSet(locked_bit, .acquire) == 0;
+        }
+
+        // Acquire barrier ensures grabbing the lock happens before the critical section
+        // and that the previous lock holder's critical section happens before we grab the lock.
+        return self.state.cmpxchgWeak(unlocked, locked, .acquire, .monotonic) == null;
+    }
+
+    fn lock_slow(self: *Locker) void {
+        @setCold(true);
+
+        // Avoid doing an atomic swap below if we already know the state is contended.
+        // An atomic swap unconditionally stores which marks the cache-line as modified
+        // unnecessarily.
+        if (self.state.load(.monotonic) == contended) {
+            Futex.wait(&self.state, contended);
+        }
+
+        // Try to acquire the lock while also telling the existing lock holder that there are
+        // threads waiting.
+        //
+        // Once we sleep on the Futex, we must acquire the mutex using `contended` rather than
+        // `locked`.
+        // If not, threads sleeping on the Futex wouldn't see the state change in unlock and
+        // potentially deadlock.
+        // The downside is that the last mutex unlocker will see `contended` and do an unnecessary
+        // Futex wake but this is better than having to wake all waiting threads on mutex unlock.
+        //
+        // Acquire barrier ensures grabbing the lock happens before the critical section
+        // and that the previous lock holder's critical section happens before we grab the lock.
+        while (self.state.swap(contended, .acquire) != unlocked) {
+            Futex.wait(&self.state, contended);
+        }
+    }
+
+    fn unlock(self: *Locker) void {
+        // Unlock the mutex and wake up a waiting thread if any.
+        //
+        // A waiting thread will acquire with `contended` instead of `locked`
+        // which ensures that it wakes up another thread on the next unlock().
+        //
+        // Release barrier ensures the critical section happens before we let go of the lock
+        // and that our critical section happens before the next lock holder grabs the lock.
+        const state = self.state.swap(unlocked, .release);
+        assert(state != unlocked);
+
+        if (state == contended) {
+            Futex.wake(&self.state, 1);
+        }
+    }
+};
+
+const testing = std.testing;
+test "Locker: smoke test" {
+    var locker = Locker{};
+
+    try testing.expect(locker.try_lock());
+    try testing.expect(!locker.try_lock());
+    locker.unlock();
+
+    locker.lock();
+    try testing.expect(!locker.try_lock());
+    locker.unlock();
+}
+
+test "Locker: contended" {
+    const threads_count = 4;
+    const increments = 1000;
+
+    const State = struct {
+        locker: Locker = .{},
+        counter: u32 = 0,
+    };
+
+    const Runner = struct {
+        thread: std.Thread = undefined,
+        state: *State,
+        fn run(self: *@This()) void {
+            while (true) {
+                self.state.locker.lock();
+                defer self.state.locker.unlock();
+                if (self.state.counter == increments) break;
+                self.state.counter += 1;
+            }
+        }
+    };
+
+    var state = State{};
+    var runners: [threads_count]Runner = undefined;
+    for (&runners) |*runner| {
+        runner.* = .{ .state = &state };
+        runner.thread = try std.Thread.spawn(.{}, Runner.run, .{runner});
+    }
+    for (&runners) |*runner| {
+        runner.thread.join();
+    }
+
+    try testing.expectEqual(state.counter, increments);
 }

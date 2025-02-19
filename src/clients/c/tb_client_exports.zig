@@ -9,7 +9,7 @@ pub const tb_packet_t = tb.Packet;
 pub const tb_packet_status = tb.PacketStatus;
 
 pub const tb_client_t = extern struct {
-    @"opaque": [4]u64,
+    @"opaque": [3]u64,
 
     pub inline fn cast(self: *tb_client_t) *tb.ClientInterface {
         return @ptrCast(self);

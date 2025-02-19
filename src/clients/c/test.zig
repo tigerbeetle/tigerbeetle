@@ -99,14 +99,14 @@ test "u128 consistency test" {
     try testing.expectEqual(pair, @as(@TypeOf(pair), @bitCast(decimal)));
 }
 
-// When initialized with tb_client_init_echo, the c_client uses a test context that echoes
+// When initialized with `init_echo`, the tb_client uses a test context that echoes
 // the data back without creating an actual client or connecting to a cluster.
 //
 // This same test should be implemented by all the target programming languages, asserting that:
-// 1. the c_client api was initialized correctly.
+// 1. the tb_client api was initialized correctly.
 // 2. the application can submit messages and receive replies through the completion callback.
 // 3. the data marshaling is correct, and exactly the same data sent was received back.
-test "c_client echo" {
+test "tb_client echo" {
     // Using the create_accounts operation for this test.
     const RequestContext = RequestContextType(constants.message_body_size_max);
     const create_accounts_operation: u8 = @intFromEnum(tb_client.Operation.create_accounts);

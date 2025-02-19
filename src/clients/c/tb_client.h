@@ -230,7 +230,7 @@ typedef enum TB_QUERY_FILTER_FLAGS {
 // This struct must be "pinned" (not copyable or movable), as its address must remain stable
 // throughout the lifetime of the client instance.
 typedef struct tb_client_t {
-    uint64_t opaque[4];
+    uint64_t opaque[3];
 } tb_client_t;
 
 // Struct containing the state of a request submitted through the client.

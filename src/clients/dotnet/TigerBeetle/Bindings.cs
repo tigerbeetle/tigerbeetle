@@ -1226,14 +1226,14 @@ internal enum TBOperation : byte
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 internal unsafe struct TBClient
 {
-    public const int SIZE = 32;
+    public const int SIZE = 24;
 
 
     [StructLayout(LayoutKind.Sequential, Size = OpaqueData.SIZE)]
     private unsafe struct OpaqueData
     {
-        public const int SIZE = 32;
-        private const int LENGTH = 4;
+        public const int SIZE = 24;
+        private const int LENGTH = 3;
 
         private fixed ulong raw[LENGTH];
 

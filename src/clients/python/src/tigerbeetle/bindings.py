@@ -314,7 +314,7 @@ class CClient(ctypes.Structure):
         )
 
 CClient._fields_ = [ # noqa: SLF001
-    ("opaque", ctypes.c_uint64 * 4),
+    ("opaque", ctypes.c_uint64 * 3),
 ]
 
 
