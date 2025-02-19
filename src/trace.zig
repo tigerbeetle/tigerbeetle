@@ -398,7 +398,7 @@ test "trace json" {
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat  tree=Account.id level_b=1","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
         \\{"pid":0,"tid":4,"ph":"E","ts":<snap:ignore>},
         \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
         \\
