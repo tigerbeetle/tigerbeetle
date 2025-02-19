@@ -10,7 +10,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     assert(shell.file_exists("TigerBeetle.sln"));
 
     try shell.exec_zig("build clients:dotnet -Drelease", .{});
-    try shell.exec_zig("build -Drelease", .{});
+    try shell.exec_zig("build", .{});
 
     try shell.exec("dotnet restore", .{});
     try shell.exec("dotnet format --no-restore --verify-no-changes", .{});
