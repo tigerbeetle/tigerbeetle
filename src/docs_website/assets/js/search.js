@@ -100,16 +100,7 @@ async function initSearch() {
 }
 
 function onSearchInput() {
-  const results = search(searchInput.value);
-  const groups = [];
-  let currentGroup;
-  for (const result of results) {
-    if (!currentGroup || currentGroup.pageIndex !== result.section.pageIndex) {
-      currentGroup = { pageIndex: result.section.pageIndex, results: [] };
-      groups.push(currentGroup);
-    }
-    currentGroup.results.push(result);
-  }
+  const groups = search(searchInput.value);
   let menus = [];
   for (const group of groups) {
     const details = document.createElement("details");
@@ -118,13 +109,13 @@ function onSearchInput() {
     const summary = document.createElement("summary");
     details.appendChild(summary);
     summary.pageIndex = group.pageIndex;
-    summary.href = urlPrefix + "/" + group.results[0].section.path + "/";
+    summary.href = urlPrefix + "/" + group.hits[0].section.path + "/";
     const p = document.createElement("p");
     summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
     const menu = document.createElement("ol");
     details.appendChild(menu);
-    for (const result of group.results) {
+    for (const result of group.hits) {
       const li = document.createElement("li");
       menu.appendChild(li);
       li.className = "item";
@@ -146,9 +137,10 @@ function onSearchInput() {
   }
   searchResults.replaceChildren(...menus);
 
-  const resultText = results.length === 1 ? "result" : "results";
+  const hitCount = groups.reduce((sum, group) => sum + group.hits.length, 0);
+  const resultText = hitCount === 1 ? "result" : "results";
   const pageText = groups.length === 1 ? "page" : "pages";
-  searchStats.innerText = `${results.length} ${resultText} on ${groups.length} ${pageText}`
+  searchStats.innerText = `${hitCount} ${resultText} on ${groups.length} ${pageText}`
 
   highlightText(searchInput.value, searchResults);
 
@@ -158,25 +150,37 @@ function onSearchInput() {
   } else {
     leftPane.classList.remove("search-active");
   }
-  searchNotFound.style.display = searchActive && results.length === 0 ? "flex" : "none";
+  searchNotFound.style.display = searchActive && hitCount === 0 ? "flex" : "none";
 }
 
 function search(term, limit = 100) {
   if (term.length === 0) return [];
   const escapedTerm = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const regex = new RegExp(escapedTerm, 'gi');
-  let hits = [];
+  let hitCount = 0;
+  let groups = [];
+  let currentGroup = null;
   for (const section of sections) {
     const match = regex.exec(section.text);
     if (match) {
       const firstIndex = match.index;
       const count = section.text.match(regex).length;
-      hits.push({ firstIndex, count, section });
-      if (hits.length == limit) break;
+      const hit = { firstIndex, count, section };
+      hit.context = makeContext(hit.section.text, hit.firstIndex, term.length);
+      if (!currentGroup || currentGroup.pageIndex !== section.pageIndex) {
+        currentGroup = { pageIndex: section.pageIndex, hits: [] };
+        currentGroup.order = section.pageIndex;
+        const titleMatch = regex.exec(pages[section.pageIndex].title);
+        if (titleMatch) currentGroup.order -= 1000;
+        groups.push(currentGroup);
+      }
+      currentGroup.hits.push(hit);
+      if (++hitCount == limit) break;
     }
   }
-  hits.forEach(hit => hit.context = makeContext(hit.section.text, hit.firstIndex, term.length));
-  return hits;
+  groups.sort((a, b) => a.order - b.order);
+
+  return groups;
 }
 
 function makeContext(text, i, length) {
