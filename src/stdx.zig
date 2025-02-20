@@ -876,7 +876,18 @@ test "Instant/Duration" {
     const instant_1 = Instant.now();
     const instant_2 = Instant.now();
     assert(instant_1.duration_since(instant_2).nanoseconds == 0);
-    assert(instant_2.duration_since(instant_1).nanoseconds > 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+
+    if (builtin.os.tag == .linux) {
+        var instant_3 = instant_1;
+        instant_3.base.timestamp.tv_sec += 1;
+        assert(instant_1.duration_since(instant_3).nanoseconds == 0);
+
+        const duration = instant_3.duration_since(instant_1);
+        assert(duration.nanoseconds == 1_000_000_000);
+        assert(duration.microseconds() == 1_000_000);
+        assert(duration.milliseconds() == 1_000);
+    }
 }
 
 // DateTime in UTC, intended primarily for logging.
