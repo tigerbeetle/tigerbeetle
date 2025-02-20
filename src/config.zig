@@ -97,7 +97,6 @@ const ConfigProcess = struct {
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
     cache_transfers_pending_size_default: usize,
-    cache_account_balances_size_default: usize,
     client_request_queue_max: usize = 2,
     lsm_manifest_node_size: usize = 16 * 1024,
     connection_delay_min_ms: u64 = 50,
@@ -227,7 +226,6 @@ pub const configs = struct {
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
-            .cache_account_balances_size_default = 0,
             .verify = true,
         },
         .cluster = .{
@@ -246,7 +244,6 @@ pub const configs = struct {
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
-            .cache_account_balances_size_default = 0,
             .journal_iops_read_max = 3,
             .journal_iops_write_max = 2,
             .grid_repair_request_max = 4,

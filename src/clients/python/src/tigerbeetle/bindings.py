@@ -22,6 +22,7 @@ class Operation(enum.IntEnum):
     GET_ACCOUNT_BALANCES = 134
     QUERY_ACCOUNTS = 135
     QUERY_TRANSFERS = 136
+    GET_EVENTS = 137
 
 
 class PacketStatus(enum.IntEnum):

@@ -763,7 +763,7 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
 pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
-    comptime assert(value % 1024 == 0);
+    comptime assert(value < 1024 or value % 1024 == 0);
     return .{ .data = value };
 }
 
@@ -785,22 +785,31 @@ fn format_int_size_bin_exact(
     var buf: [23]u8 = undefined;
 
     var magnitude: u8 = 0;
-    var val = value;
-    while (val % 1024 == 0) : (magnitude += 1) {
-        val = @divExact(val, 1024);
+    var value_unit = value;
+    while (value_unit % 1024 == 0) : (magnitude += 1) {
+        value_unit = @divExact(value_unit, 1024);
     }
 
-    const mags_iec = " KMGTPEZY";
-    const suffix = mags_iec[magnitude];
+    const magnitudes_iec = "BKMGTPEZY";
+    const suffix = magnitudes_iec[magnitude];
 
-    const i = std.fmt.formatIntBuf(&buf, val, 10, .lower, .{});
-    buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+    const length: usize = length: {
+        const i = std.fmt.formatIntBuf(&buf, value_unit, 10, .lower, .{});
+        if (magnitude == 0) {
+            buf[i] = suffix;
+            break :length i + 1;
+        } else {
+            buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+            break :length i + 3;
+        }
+    };
 
-    return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
+    return std.fmt.formatBuf(buf[0..length], options, writer);
 }
 
 test fmt_int_size_bin_exact {
     try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
+    try std.testing.expectFmt("128B", "{}", .{fmt_int_size_bin_exact(128)});
     try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
     try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
     try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});

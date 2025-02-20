@@ -226,7 +226,7 @@ fn request(
             const packet = buffer.packet();
             break :blk .{ packet, std.mem.sliceAsBytes(events) };
         },
-        .pulse => unreachable,
+        .pulse, .get_events => unreachable,
     };
 
     packet.* = .{
@@ -277,7 +277,7 @@ fn on_completion(
                     // during `on_completion_js`.
                     packet.user_tag = @intCast(results.len);
                 },
-                .pulse => unreachable,
+                .pulse, .get_events => unreachable,
             }
         },
         .client_evicted,
@@ -354,7 +354,7 @@ fn on_completion_js(
                 else => unreachable, // all other packet status' handled in previous callback.
             }
         },
-        .pulse => unreachable,
+        .pulse, .get_events => unreachable,
     };
 
     // Parse Result array out of packet data, freeing it in the process.

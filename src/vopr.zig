@@ -201,7 +201,6 @@ pub fn main() !void {
                 .cache_entries_accounts = if (random.boolean()) 256 else 0,
                 .cache_entries_transfers = if (random.boolean()) 256 else 0,
                 .cache_entries_posted = if (random.boolean()) 256 else 0,
-                .cache_entries_account_balances = if (random.boolean()) 256 else 0,
             },
         },
         .on_cluster_reply = Simulator.on_cluster_reply,
