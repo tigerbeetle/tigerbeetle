@@ -14,7 +14,7 @@ misunderstanding) its isolation level. For this reason, TigerBeetle intentionall
 strictest possible isolation level --- **strict serializability**. All transfers are executed
 one-by-one, on a single core.
 
-Furthermore, TigerBeetle's state machine is designed according to
+Furthermore, TigerBeetle's state machine is designed according to the
 [**end-to-end idempotency principle**](../coding/reliable-transaction-submission.md) ---
 each transfer has a unique client-generated `u128` id, and each transfer is processed at most once,
 even in the presence of intermediate retry loops.
@@ -30,7 +30,7 @@ To avoid these pitfalls, TigerBeetle implements pioneering
 that guarantees correct, automatic failover. It's worth emphasizing that consensus proper needs only
 be engaged during actual failover. During the normal operation, the cost of consensus is just the
 cost of replication, which is further minimized because of
-[batching](./performance.md#batching-batching-batching), tail latency tolerance and pipelining.
+[batching](./performance.md#batching-batching-batching), tail latency tolerance, and pipelining.
 
 TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and
 **performs leader-based timestamping** so that your application can deal only with safe relative
@@ -68,9 +68,9 @@ repair replica's local disks.
 - All data in TigerBeetle is immutable, checksummed, and hash-chained, providing a strong guarantee
   that no corruption or tampering happened. In case of a latent sector error, the error is detected
   and repaired without any operator involvement.
-- Most consensus algorithm lose data or become unavailable if the write ahead log gets corrupted.
-  TigerBeetle uses [Protocol Aware Recovery](https://www.youtube.com/watch?v=fDY6Wi0GcPs) to remain
-  available unless the data gets corrupted on every single replica.
+- Most consensus implementations lose data or become unavailable if the write ahead log gets
+  corrupted. TigerBeetle uses [Protocol Aware Recovery](https://www.youtube.com/watch?v=fDY6Wi0GcPs)
+  to remain available unless the data gets corrupted on every single replica.
 - To minimize impact of software bugs, TigerBeetle puts as little software as possible between
   itself and the disk --- TigerBeetle manages its own page cache, writes data to disk with O_DIRECT
   and can work with a block device directly, no file system is necessary.
@@ -99,6 +99,17 @@ simulation can find both logical errors in the algorithms and coding bugs in the
 simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database.
 
 It also **runs in your browser**: <https://sim.tigerbeetle.com>!
+
+## Human Fallibility
+
+While, with a lot of care, software can be perfected to become virtually bug-free, humans will
+always make mistakes. TigerBeetle takes this into account and tries to protect from operator errors:
+
+- The surface area is intentionally minimized, with little configurability.
+- In particular, there's only one isolation level --- strict serializability.
+- Upgrades are automatic and atomic, guaranteeing that each transfer is applied by only a single
+  version of code.
+- TigerBeetle always runs with online verification on, to detect any discrepancies in the data.
 
 ## Is TigerBeetle ACID-compliant?
 

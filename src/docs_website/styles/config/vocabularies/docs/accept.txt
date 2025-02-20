@@ -46,6 +46,7 @@ codespell
 Comptime
 concurrency_max
 config
+configurability
 coroutines
 Correnteza
 CPUs
