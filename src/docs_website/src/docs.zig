@@ -24,7 +24,7 @@ pub fn build(
     var search_index = SearchIndex.init(arena);
 
     var page_buffer: [1 << 16]u8 = undefined;
-    var base = try std.fs.cwd().openDir(base_path, .{});
+    var base = try b.build_root.handle.openDir(base_path, .{});
     defer base.close();
     const root_page = try content.load(arena, base, &page_buffer);
 
