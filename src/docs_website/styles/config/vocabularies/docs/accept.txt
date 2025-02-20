@@ -36,6 +36,7 @@ chaitanyabhandari
 Changfoot
 checkpointed
 checkpointing
+checksummed
 checksumming
 Chegou
 CLIArgs
@@ -172,6 +173,7 @@ memcpy
 memcpy'ing
 memfd
 MEMLOCK
+misconfiguring
 mlns
 mlock
 Mojaloop
@@ -207,6 +209,7 @@ OOMKiller
 openat
 otherstuff
 Paxos
+pdf
 peer_type
 pending_status
 perfetto

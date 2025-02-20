@@ -1,122 +1,104 @@
 # Safety
 
-TigerBeetle is designed to a higher safety standard than a general-purpose relational database such
-as MySQL or an in-memory database such as Redis:
+The purpose of a database is to store data: if the database accepted new data, it should be able to
+retrieve it later. Surprisingly, many databases don't provide guaranteed durability --- usually the
+data is there, but, under certain edge case conditions, it can get lost!
 
-- Strict consistency, CRCs and crash safety are not enough.
+As the purpose of TigerBeetle is to be the system of record for business transaction, associated
+with real-world value transfers, it is paramount that the data stored in TigerBeetle is safe.
 
-- TigerBeetle **handles and recovers from Latent Sector Errors** (e.g. at least
-  [0.031% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf),
-  and
-  [1.4% of Enterprise HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf))
-  **detects and repairs disk corruption or misdirected I/O where firmware reads/writes the wrong
-  sector** (e.g. at least
-  [0.023% of SSD disks per year on average](https://www.usenix.org/system/files/fast20-maneas.pdf),
-  and
-  [0.466% of Nearline HDD disks per year on average](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
-  and **detects and repairs data tampering** (on a minority of the cluster, as if it were
-  non-Byzantine corruption) with hash-chained cryptographic checksums.
+## Strict Serializability
 
-- TigerBeetle **uses Direct I/O by design** to sidestep
-  [cache coherency bugs in the kernel page cache](https://www.usenix.org/system/files/atc20-rebello.pdf)
-  after an EIO fsync error.
+The easiest way to lose data is by using the database incorrectly, by misconfiguring (or just
+misunderstanding) its isolation level. For this reason, TigerBeetle intentionally supports only the
+strictest possible isolation level --- **strict serializability**. All transfers are executed
+one-by-one, on a single core.
 
-- TigerBeetle **exceeds the fsync durability of a single disk** and the hardware of a single server
-  because disk firmware can contain bugs and because single server systems fail.
+Furthermore, TigerBeetle's state machine is designed according to
+[**end-to-end idempotency principle**](../coding/reliable-transaction-submission.md) ---
+each transfer has a unique client-generated `u128` id, and each transfer is processed at most once,
+even in the presence of intermediate retry loops.
 
-- TigerBeetle **provides strict serializability**, the gold standard of consistency, as a replicated
-  state machine, and as a cluster of TigerBeetle servers (called replicas), for optimal high
-  availability and distributed fault-tolerance.
+## High Availability
 
-- TigerBeetle **performs synchronous replication** to a quorum of backup TigerBeetle servers using
-  the pioneering [Viewstamped Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) and
-  consensus protocol for low-latency automated leader election and to eliminate the risk of
-  split-brain associated with ad hoc manual failover systems.
+Some databases rely on a single central server, which puts the data at risk as any single server
+might fail catastrophically (e.g. due to a fire in the data center). Primary/backup systems with
+ad-hoc failover can lose data due to split-brain.
 
-- TigerBeetle is “fault-aware” and **recovers from local storage failures in the context of the
-  global consensus protocol**, providing
-  [more safety than replicated state machines such as ZooKeeper and LogCabin](https://www.youtube.com/watch?v=fDY6Wi0GcPs).
-  For example, TigerBeetle can disentangle corruption in the middle of the committed journal (caused
-  by bitrot) from torn writes at the end of the journal (caused by a power failure) to uphold
-  durability guarantees given for committed data and maximize availability.
+To avoid these pitfalls, TigerBeetle implements pioneering
+[Viewstamped Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus algorithm,
+that guarantees correct, automatic failover. It's worth emphasizing that consensus proper needs only
+be engaged during actual failover. During the normal operation, the cost of consensus is just the
+cost of replication, which is further minimized because of
+[batching](./performance.md#batching-batching-batching), tail latency tolerance and pipelining.
 
-- TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and
-  **performs leader-based timestamping** so that your application can deal only with safe relative
-  quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within
-  safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a
-  fault-tolerant clock that we call
-  ["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
+TigerBeetle does not depend on synchronized system clocks, does not use leader leases, and
+**performs leader-based timestamping** so that your application can deal only with safe relative
+quantities of time with respect to transfer timeouts. To ensure that the leader's clock is within
+safe bounds of "true time", TigerBeetle combines all the clocks in the cluster to create a
+fault-tolerant clock that we call
+["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
 
-## Fault Models
+For highest availability, TigerBeetle should be deployed as a cluster of six replicas across three
+different cloud providers (two replicas per provider). Because TigerBeetle uses
+[Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
+to tolerate a complete outage of any cloud provider and will likely survive even if one extra
+replica fails.
 
-We adopt the following fault models with respect to storage, network, memory and processing:
+## Storage Fault Tolerance
 
-### Storage Fault Model
+Traditionally, databases assume that disks do not fail, or at least fail politely with a clear error
+code. This is usually a reasonable assumption, but edge cases matter.
 
-- Disks experience data corruption with significant and material probability.
+HDD and SSD hardware can fail. Disks can silently return corrupt data (
+[0.031% of SSD disks per year](https://www.usenix.org/system/files/fast20-maneas.pdf),
+[1.4% of Enterprise HDD disks per year](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
+misdirect IO (
+[0.023% of SSD disks per year](https://www.usenix.org/system/files/fast20-maneas.pdf),
+[0.466% of Nearline HDD disks per year](https://www.usenix.org/legacy/events/fast08/tech/full_papers/bairavasundaram/bairavasundaram.pdf)),
+or just suddenly become extremely slow, without returning an error code (the so called
+[gray failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)).
 
-- Disk firmware or hardware may cause writes to be misdirected and written to the wrong sector, or
-  not written at all, with low but nevertheless material probability.
+On top of hardware, software might be buggy or just tricky to use correctly. Handling fsync failures
+correctly is [particularly hard](https://www.usenix.org/system/files/atc20-rebello.pdf).
 
-- Disk firmware or hardware may cause reads to be misdirected and read from the wrong sector, or not
-  read at all, with low but nevertheless material probability.
+**TigerBeetle assumes that its disk _will_ fail** and takes advantage of replication to proactively
+repair replica's local disks.
 
-- Corruption does not always imply a system crash. Data may be corrupted at any time during its
-  storage lifecycle: before being written, while being written, after being written, and while being
-  read.
+- All data in TigerBeetle is immutable, checksummed, and hash-chained, providing a strong guarantee
+  that no corruption or tampering happened. In case of a latent sector error, the error is detected
+  and repaired without any operator involvement.
+- Most consensus algorithm lose data or become unavailable if the write ahead log gets corrupted.
+  TigerBeetle uses [Protocol Aware Recovery](https://www.youtube.com/watch?v=fDY6Wi0GcPs) to remain
+  available unless the data gets corrupted on every single replica.
+- To minimize impact of software bugs, TigerBeetle puts as little software as possible between
+  itself and the disk --- TigerBeetle manages its own page cache, writes data to disk with O_DIRECT
+  and can work with a block device directly, no file system is necessary.
+- TigerBeetle also tolerates gray failure --- if a disk on a replica becomes very slow, the cluster
+  fall backs on other replicas for durability.
 
-- Disk sector writes are not atomic. For example, an Advanced Format 4096 byte sector write to a
-  disk with an emulated logical sector size of 4096 bytes, but a physical sector size of 512 bytes
-  is not atomic and would be split into 8 physical sector writes, which may or may not be atomic.
-  Therefore, we do not depend on any sector atomicity guarantees from the disk.
+## Software Reliability
 
-- The Linux kernel page cache is not reliable and may misrepresent the state of data on disk after
-  an EIO or latent sector error. See
-  _[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)_
-  from the University of Wisconsin – Madison presented at the 2020 USENIX Annual Technical
-  Conference.
+Even the advanced algorithm with a formally proved correctness theorem is useless if the
+implementation is buggy. TigerBeetle uses the oldest and the newest software engineering practices
+to ensure correctness.
 
-- File system metadata (such as a file's size) is unreliable and may change at any time.
+TigerBeetle is written in [Zig](https://ziglang.org) --- a modern systems programming language that
+removes many instances of undefined behavior, provides spatial memory safety and encourages simple,
+straightforward code.
 
-- Disk performance and read and write latencies can sometimes be volatile, causing latency spikes on
-  the order of seconds. A slow disk does not always indicate a failing disk, and a slow disk may
-  return to median performance levels — for example, an SSD undergoing garbage collection.
+TigerBeetle adheres to a strict code style,
+[TIGER_STYLE](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md), inspired by
+[NASA's power of ten](https://spinroot.com/gerard/pdf/P10.pdf). For example, TigerBeetle uses static
+memory allocation, which designs away memory fragmentation, out-of-memory errors and
+use-after-frees.
 
-### Network Fault Model
+TigerBeetle is tested in the VOPR --- a simulated environment where an entire cluster, running real
+code, is subjected to all kinds of network, storage and process faults, at 1000x speed. This
+simulation can find both logical errors in the algorithms and coding bugs in the source. This
+simulator is running 24/7 on 1024 cores, fuzzing the latest version of the database.
 
-- Messages may be lost.
-
-- Messages may be corrupted.
-
-- Messages may be delayed.
-
-- Messages may be replayed.
-
-- TCP checksums are inadequate to prevent checksum collisions.
-
-- Network performance may be asymmetrical for the upload and download paths.
-
-### Memory Fault Model
-
-- Memory protected with error-correcting codes is sufficient for our purpose. We make no further
-  effort to protect against memory faults.
-
-- Non-ECC memory is not recommended by TigerBeetle.
-
-### Processing Fault Model
-
-- The system may crash at any time.
-
-- The system may freeze process execution for minutes or hours at a time, for example, during a VM
-  migration.
-
-- The system clock may jump backwards or forwards in time, at any time.
-
-- NTP can help, but we cannot depend on NTP for strict serializability.
-
-- NTP may stop working because of a network partition, which may not impact TigerBeetle. We,
-  therefore, need to detect when a TigerBeetle cluster's clocks are not being synchronized by NTP so
-  that financial transaction timestamps are accurate and within the operator's tolerance for error.
+It also **runs in your browser**: <https://sim.tigerbeetle.com>!
 
 ## Is TigerBeetle ACID-compliant?
 
@@ -132,8 +114,8 @@ TigerBeetle's LSM-Forest local storage engine.
 The WAL is what allows TigerBeetle to achieve atomicity and durability since the WAL is the source
 of truth. If TigerBeetle crashes, the WAL is replayed at startup from the last checkpoint on disk.
 
-However, financial atomicity goes further than this: events and transfers can be linked when created
-so they all succeed or fail together.
+However, financial atomicity goes further than this: events and transfers can be
+[linked](../coding/linked-events.md) when created so they all succeed or fail together.
 
 ### Consistency
 
