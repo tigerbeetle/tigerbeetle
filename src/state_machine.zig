@@ -77,11 +77,11 @@ pub const tree_ids = struct {
     pub const AccountEvents = .{
         .timestamp = 22,
         .account_timestamp = 27,
-        .dr_account_id_expired = 28,
-        .cr_account_id_expired = 29,
-        .transfer_pending_status = 30,
+        .transfer_pending_status = 28,
+        .dr_account_id_expired = 29,
+        .cr_account_id_expired = 30,
         .transfer_pending_id_expired = 31,
-        .transfer_expired_ledger = 32,
+        .ledger_expired = 32,
         .prunable = 33,
     };
 };
@@ -325,16 +325,16 @@ pub fn StateMachineType(
                     "cr_debits_posted",
                     "cr_credits_pending",
                     "cr_credits_posted",
+                    "dr_account_timestamp",
+                    "cr_account_timestamp",
+                    "dr_account_flags",
+                    "cr_account_flags",
+                    "transfer_flags",
+                    "transfer_pending_flags",
+                    "transfer_pending_id",
                     "amount_requested",
                     "amount",
                     "ledger",
-                    "dr_account_flags",
-                    "cr_account_flags",
-                    "dr_account_timestamp",
-                    "cr_account_timestamp",
-                    "transfer_pending_id",
-                    "transfer_flags",
-                    "transfer_pending_flags",
                     "reserved",
                 },
                 .optional = &[_][]const u8{},
@@ -393,7 +393,7 @@ pub fn StateMachineType(
                     // However, expired events require a specific index to be searchable
                     // by ledger.
                     // Example: "All expiry events where ledger=X".
-                    .transfer_expired_ledger = struct {
+                    .ledger_expired = struct {
                         fn transfer_expired_ledger(object: *const AccountEvent) ?u128 {
                             return if (object.transfer_pending_status == .expired)
                                 object.ledger
@@ -431,17 +431,17 @@ pub fn StateMachineType(
             cr_debits_posted: u128,
             cr_credits_pending: u128,
             cr_credits_posted: u128,
-            amount_requested: u128,
-            amount: u128,
             timestamp: u64,
-            ledger: u32,
-            dr_account_flags: AccountFlags,
-            cr_account_flags: AccountFlags,
             dr_account_timestamp: u64,
             cr_account_timestamp: u64,
-            transfer_pending_id: u128,
+            dr_account_flags: AccountFlags,
+            cr_account_flags: AccountFlags,
             transfer_flags: TransferFlags,
             transfer_pending_flags: TransferFlags,
+            transfer_pending_id: u128,
+            amount_requested: u128,
+            amount: u128,
+            ledger: u32,
 
             /// Although similar to `TransferPending.status`, this index tracks the event,
             /// not the original pending transfer.
@@ -3352,7 +3352,7 @@ pub fn StateMachineType(
                 dr_account_id_expired: u32,
                 cr_account_id_expired: u32,
                 transfer_pending_id_expired: u32,
-                transfer_expired_ledger: u32,
+                ledger_expired: u32,
                 prunable: u32,
             },
         } {
@@ -3401,12 +3401,12 @@ pub fn StateMachineType(
                 },
                 .account_events = .{
                     .timestamp = batch_create_transfers,
-                    .transfer_pending_status = batch_create_transfers,
                     .account_timestamp = 2 * batch_create_transfers, // dr and cr accounts.
+                    .transfer_pending_status = batch_create_transfers,
                     .dr_account_id_expired = batch_create_transfers,
                     .cr_account_id_expired = batch_create_transfers,
                     .transfer_pending_id_expired = batch_create_transfers,
-                    .transfer_expired_ledger = batch_create_transfers,
+                    .ledger_expired = batch_create_transfers,
                     .prunable = batch_create_transfers,
                 },
             };
