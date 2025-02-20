@@ -509,6 +509,8 @@ The collection of papers behind TigerBeetle:
 - [Viewstamped Replication: A New Primary Copy Method to Support Highly-Available Distributed
   Systems](http://pmg.csail.mit.edu/papers/vr.pdf)
 
+- [Flexible Paxos: Quorum intersection revisited](https://arxiv.org/pdf/1608.06696v1)
+
 - [Scalability! But at what COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf)
 
 - [ZFS: The Last Word in File Systems (Jeff Bonwick and Bill
@@ -525,10 +527,10 @@ The collection of papers behind TigerBeetle:
 - [A Study of SSD Reliability in Large Scale Enterprise Storage
   Deployments](https://www.usenix.org/system/files/fast20-maneas.pdf)
 
-- [SDC 2018 - Protocol-Aware Recovery for Consensus-Based
-  Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs) - Why replicated state machines need to
-  distinguish between a crash and corruption, and why it would be disastrous to truncate the journal
-  when encountering a checksum mismatch.
+- [SDC 2018 - Protocol-Aware Recovery for Consensus-Based Storage](https://www.youtube.com/watch?v=fDY6Wi0GcPs)
+  ([pdf](https://www.usenix.org/conference/fast18/presentation/alagappan)) - Why replicated state
+  machines need to distinguish between a crash and corruption, and why it would be disastrous to
+  truncate the journal when encountering a checksum mismatch.
 
 - [Can Applications Recover from fsync
   Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf) - Why we use Direct I/O in
