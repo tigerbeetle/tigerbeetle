@@ -1,7 +1,11 @@
-window.urlPrefix = "$url_prefix";
+function assert(condition) {
+  if (!condition) {
+    alert("Assertion failed");
+    throw "Assertion failed";
+  }
+}
 
-// Enable search if JavaScript is enabled.
-document.querySelector(".search-box").style.removeProperty("display");
+window.urlPrefix = "$url_prefix";
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
