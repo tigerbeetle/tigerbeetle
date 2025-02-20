@@ -49,6 +49,8 @@ pub const Status = enum {
 pub const ReplicaEvent = union(enum) {
     message_sent: *const Message,
     state_machine_opened,
+    /// Called immediately after a primary prepares a new request.
+    new_prepare: *const Message.Prepare,
     /// Called immediately after a prepare is committed by the state machine.
     committed: struct {
         prepare: *const Message.Prepare,
@@ -815,6 +817,7 @@ pub fn ReplicaType(
                 // completes.
                 self.log_view += 1;
                 self.view += 1;
+                self.commit_max = self.op;
                 self.primary_update_view_headers();
                 self.view_durable_update();
 
@@ -1269,7 +1272,7 @@ pub fn ReplicaType(
                 .grid_repair_message_timeout = Timeout{
                     .name = "grid_repair_message_timeout",
                     .id = replica_index,
-                    .after = options.timeout_grid_repair_message_ticks orelse 50,
+                    .after = options.timeout_grid_repair_message_ticks orelse 25,
                 },
                 .grid_scrub_timeout = Timeout{
                     .name = "grid_scrub_timeout",
@@ -6224,7 +6227,7 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        fn op_checkpoint_next(self: *const Replica) u64 {
+        pub fn op_checkpoint_next(self: *const Replica) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
@@ -6539,6 +6542,7 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
+            if (self.event_callback) |hook| hook(self, .{ .new_prepare = message });
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -6649,7 +6653,6 @@ pub fn ReplicaType(
                 log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.replica});
                 return;
             }
-
             self.repair_timeout.reset();
             if (self.syncing == .updating_checkpoint) return;
             if (!self.state_machine_opened) return;
