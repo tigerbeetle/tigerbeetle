@@ -611,9 +611,6 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     // the invariant is that this code is running _before_ we've finished opening, that is,
     // release_transition is called in open().
     if (release.value < replica.release.value) {
-        assert(replica.release.value ==
-            replica.releases_bundled.get(replica.releases_bundled.count() - 1).value);
-
         multiversion.exec_release(
             release,
         ) catch |err| {

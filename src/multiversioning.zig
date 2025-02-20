@@ -1164,6 +1164,30 @@ pub const Multiversion = struct {
 
         const header = &self.target_header.?;
 
+        if (header.current_release == constants.config.process.release.value) {
+            // Normally if we are downgrading, it means that we are running the newest release
+            // in the list of bundled releases.
+            assert(constants.config.process.release.value ==
+                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+        } else {
+            // Scenario:
+            // 1. Replica starts on release A.
+            // 2. Replica detects that its binary has been replaced by B.
+            //    It reads the binary of B into a memfd.
+            // 3. Replica decides to upgrade to B, so it exec()'s the memfd.
+            // 4. (Swap B's binary on disk with C.)
+            // 5. Replica starts up, running B's binary.
+            // 6. During open, replica reads the binary's header from disk.
+            // But that's C's binary/header, so B is unexpectedly not the latest release in it.
+            log.warn("binary changed unexpectedly (expected={} found={})", .{
+                constants.config.process.release,
+                Release{ .value = header.current_release },
+            });
+
+            assert(constants.config.process.release.value !=
+                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+        }
+
         // It should never happen that index is null: the caller must (and does, in the case of
         // replica_release_execute) ensure that exec_release is only called if the release
         // is available.

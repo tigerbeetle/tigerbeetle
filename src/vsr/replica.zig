@@ -9706,8 +9706,6 @@ pub fn ReplicaType(
                 // The replica just started in the newest available release, but discovered that its
                 // superblock has not upgraded to that release yet.
                 assert(self.commit_min == self.op_checkpoint());
-                assert(self.release.value ==
-                    self.releases_bundled.get(self.releases_bundled.count() - 1).value);
                 assert(self.journal.status == .init);
             }
 
