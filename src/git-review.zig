@@ -214,6 +214,7 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
             continue;
         }
         assert(file_name.len > 0);
+        if (std.mem.eql(u8, file_name, "b/REVIEW_SUMMARY.md")) continue;
         errdefer log.err("invalid review in '{s}':\n{s}", .{ file_name, line });
 
         if (std.mem.startsWith(u8, line, "- ")) {
