@@ -109,7 +109,8 @@ function onSearchInput() {
     const summary = document.createElement("summary");
     details.appendChild(summary);
     summary.pageIndex = group.pageIndex;
-    summary.href = urlPrefix + "/" + group.hits[0].section.path + "/";
+    summary.href = urlPrefix + "/"
+    if (group.hits[0].section.path) summary.href += group.hits[0].section.path + "/";
     const p = document.createElement("p");
     summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
@@ -125,7 +126,9 @@ function onSearchInput() {
         e.preventDefault();
         selectResult(a);
       });
-      a.href = urlPrefix + "/" + result.section.path + "/" + result.section.hash;
+      a.href = urlPrefix + "/";
+      if (result.section.path) a.href += result.section.path + "/";
+      a.href += result.section.hash;
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
       a.appendChild(h3);
