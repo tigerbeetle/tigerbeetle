@@ -146,7 +146,7 @@ the database, avoiding moving data to code over the network.
 TigerBeetle is single-threaded. There are both positive and negative reasons for this design choice.
 
 The primarily negative reason is that the underlying workload is inherently contentious: some
-accounts are just way more popular than owners, and transfers between hot accounts inherently
+accounts are just way more popular than others, and transfers between hot accounts inherently
 sequentialize the system. Trying to make transactions parallel not only doesn't make it faster, in
 fact, the overhead of synchronization tends to dominate useful work. Formally, our claim is that
 financial transaction processing is an infinite-COST problem, using the terminology from [Frank
@@ -182,7 +182,7 @@ everything has an explicit upper bound.
 When TigerBeetle starts, it looks at the CLI arguments and then computes, for every programming
 "object" in the system, how many such objects would be needed in the worst-case, and preallocates
 all of the objects. After startup, no new objects are created, and, as a consequence, no dynamic
-memory allocation is needed. The upper bounds are computing using combination of static and dynamic
+memory allocation is needed. The upper bounds are computed using a combination of static and dynamic
 information.
 
 Knowing the limits is useful, because it ensures that the system continues to function correctly
@@ -426,7 +426,7 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
   - and starts the replication loop.
 
   Because the prepare is considered committed when the primary receives a quorum of `prepare_ok`
-  from a set of replicas which doesn't necessary include the primary itself, it can the case that
+  from a set of replicas which doesn't necessarily include the primary itself, it can the case that
   the primary concurrently executes a prepare while still writing corresponding message to the Write
   Ahead Log (WAL).
 
