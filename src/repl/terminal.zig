@@ -92,7 +92,7 @@ pub const Terminal = struct {
         const stdin = self.stdin.reader();
 
         switch (try stdin.readByte()) {
-            std.ascii.control_code.eot => return null,
+            std.ascii.control_code.eot => return .ctrld,
             std.ascii.control_code.etx => return .ctrlc,
             std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
@@ -110,6 +110,8 @@ pub const Terminal = struct {
                             else => return .unhandled,
                         }
                     },
+                    'b' => return .altb,
+                    'f' => return .altf,
                     else => return .unhandled,
                 }
             },
@@ -298,6 +300,7 @@ const Screen = struct {
 
 const UserInput = union(enum) {
     printable: u8,
+    ctrld,
     ctrlc,
     newline,
     backspace,
@@ -306,6 +309,8 @@ const UserInput = union(enum) {
     right,
     up,
     down,
+    altf,
+    altb,
     unhandled,
 };
 
