@@ -111,6 +111,7 @@ function onSearchInput() {
     summary.pageIndex = group.pageIndex;
     summary.href = urlPrefix + "/"
     if (group.hits[0].section.path) summary.href += group.hits[0].section.path + "/";
+    assert(URL.canParse(summary.href, location.href));
     const p = document.createElement("p");
     summary.appendChild(p);
     p.innerText = pages[group.pageIndex].title;
@@ -129,6 +130,7 @@ function onSearchInput() {
       a.href = urlPrefix + "/";
       if (result.section.path) a.href += result.section.path + "/";
       a.href += result.section.hash;
+      assert(URL.canParse(a.href, location.href));
       a.pageIndex = result.section.pageIndex;
       const h3 = document.createElement("h3");
       a.appendChild(h3);

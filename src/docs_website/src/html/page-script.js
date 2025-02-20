@@ -1,3 +1,10 @@
+function assert(condition) {
+  if (!condition) {
+    alert("Assertion failed");
+    throw "Assertion failed";
+  }
+}
+
 window.urlPrefix = "$url_prefix";
 
 // Enable search if JavaScript is enabled.
