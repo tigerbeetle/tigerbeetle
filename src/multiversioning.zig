@@ -831,6 +831,8 @@ pub const Multiversion = struct {
     }
 
     fn binary_statx_callback(self: *Multiversion, _: *IO.Completion, result: anyerror!void) void {
+        assert(self.stage == .source_stat);
+
         _ = result catch |e| {
             self.timeout_statx_previous = .err;
 
@@ -932,6 +934,7 @@ pub const Multiversion = struct {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
+        assert(self.source_offset.? < self.source_buffer.len);
 
         defer {
             if (self.stage != .source_read) {
@@ -1114,7 +1117,7 @@ pub const Multiversion = struct {
         // populated by checking that target_header has been set.
         assert(self.target_header != null);
 
-        // The release_taget is only used as a sanity check, and doesn't control the exec path here.
+        // `release_target` is only used as a sanity check, and doesn't control the exec path here.
         // There are two possible cases:
         // * release_target == target_header.current_release:
         //   The latest release will be executed, and it won't do any more re-execs from there
@@ -1130,8 +1133,7 @@ pub const Multiversion = struct {
             release_target.value,
         ) != null;
 
-        assert(!(release_target_current and release_target_past));
-        assert(release_target_current or release_target_past);
+        assert(release_target_current != release_target_past);
 
         // The trailing newline is intentional - it provides visual separation in the logs when
         // exec'ing new versions.
@@ -1142,7 +1144,7 @@ pub const Multiversion = struct {
             });
         } else if (release_target_past) {
             log.info("executing current release {} (target: {}) via {s}...\n", .{
-                self.target_header.?.current_release,
+                Release{ .value = self.target_header.?.current_release },
                 release_target,
                 self.exe_path,
             });
