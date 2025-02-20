@@ -182,7 +182,7 @@ everything has an explicit upper bound.
 When TigerBeetle starts, it looks at the CLI arguments and then computes, for every programming
 "object" in the system, how many such objects would be needed in the worst-case, and preallocates
 all of the objects. After startup, no new objects are created, and, as a consequence, no dynamic
-memory allocation is needed. The upper bounds are computed using combination of static and dynamic
+memory allocation is needed. The upper bounds are computed using a combination of static and dynamic
 information.
 
 Knowing the limits is useful, because it ensures that the system continues to function correctly
