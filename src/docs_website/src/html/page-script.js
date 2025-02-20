@@ -7,9 +7,6 @@ function assert(condition) {
 
 window.urlPrefix = "$url_prefix";
 
-// Enable search if JavaScript is enabled.
-document.querySelector(".search-box").style.removeProperty("display");
-
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
 }

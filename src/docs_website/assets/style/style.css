@@ -233,6 +233,10 @@ nav.left-pane {
   }
 
   .search-box {
+    @media (scripting: none) {
+      display: none;
+    }
+
     position: relative;
     overflow: hidden;
     margin-top: 16px;
