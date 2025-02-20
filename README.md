@@ -1,6 +1,6 @@
 # tigerbeetle
 
-*TigerBeetle is the financial transactions database designed for mission critical safety and performance to power the next 30 years of [OLTP](https://docs.tigerbeetle.com/concepts/oltp).*
+*TigerBeetle is the financial transactions database designed for mission critical safety and performance to power the next 30 years of [OLTP](https://docs.tigerbeetle.com/about/oltp).*
 
 ## Documentation
 
@@ -14,7 +14,7 @@
 
 ## Start
 
-Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/start/)):
+Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/quick-start/)):
 
 ```console
 $ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
