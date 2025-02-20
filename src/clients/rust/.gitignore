@@ -1,0 +1,3 @@
+target/
+src/tb_client.rs
+assets/
