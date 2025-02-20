@@ -76,6 +76,7 @@ pub fn build(b: *std.Build) !void {
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
+        .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
         .run = b.step("run", "Run TigerBeetle"),
@@ -313,6 +314,13 @@ pub fn build(b: *std.Build) !void {
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
+    });
+
+    // zig build docs
+    build_steps.docs.dependOn(blk: {
+        const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
+        nested_build.setCwd(b.path("./src/docs_website/"));
+        break :blk &nested_build.step;
     });
 }
 
