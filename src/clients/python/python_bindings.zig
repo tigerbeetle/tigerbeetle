@@ -525,9 +525,10 @@ pub fn main() !void {
         inline for (std.meta.fields(StateMachine.Operation)) |operation| {
             const op: StateMachine.Operation = @enumFromInt(operation.value);
             // TODO: Pulse shouldn't be hardcoded.
-            if (op != .pulse) {
-                emit_method(&buffer, operation, .{ .is_async = is_async });
-            }
+            if (op == .pulse) continue;
+            if (op == .get_events) continue;
+
+            emit_method(&buffer, operation, .{ .is_async = is_async });
         }
 
         buffer.print("\n\n", .{});

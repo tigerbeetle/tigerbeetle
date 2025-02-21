@@ -1221,6 +1221,8 @@ internal enum TBOperation : byte
 
     QueryTransfers = 136,
 
+    GetEvents = 137,
+
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
