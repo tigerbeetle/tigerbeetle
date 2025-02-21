@@ -1499,6 +1499,10 @@ pub fn ReplicaType(
                     return;
                 },
                 .reserved => unreachable,
+                .deprecated_12 => unreachable,
+                .deprecated_21 => unreachable,
+                .deprecated_22 => unreachable,
+                .deprecated_23 => unreachable,
             }
 
             if (self.loopback_queue) |loopback_message| {
@@ -8186,6 +8190,11 @@ pub fn ReplicaType(
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.into_any()) {
                 .reserved => unreachable,
+                // Deprecated messages are always `invalid()`.
+                .deprecated_12 => unreachable,
+                .deprecated_21 => unreachable,
+                .deprecated_22 => unreachable,
+                .deprecated_23 => unreachable,
                 .request => {
                     assert(!self.standby());
                     // Do not assert message.header.replica because we forward .request messages.

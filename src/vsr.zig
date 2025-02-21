@@ -217,27 +217,14 @@ pub const Command = enum(u8) {
     start_view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
-    const gaps = .{
-        12, // start_view without checkpoint
-        21, // request_sync_checkpoint
-        22, // sync_checkpoint
-        23, // start_view with an older version of CheckpointState
-    };
+    deprecated_12 = 12, // start_view without checkpoint
+    deprecated_21 = 21, // request_sync_checkpoint
+    deprecated_22 = 22, // sync_checkpoint
+    deprecated_23 = 23, // start_view with an older version of CheckpointState
 
     comptime {
-        var value_previous: ?u8 = null;
         for (std.enums.values(Command)) |command| {
-            const value_current = @intFromEnum(command);
-            assert(std.mem.indexOfScalar(u8, &gaps, value_current) == null);
-            if (value_previous == null) {
-                assert(value_current == 0);
-            } else {
-                assert(value_previous.? < value_current);
-                for (value_previous.? + 1..value_current) |value_gap| {
-                    assert(std.mem.indexOfScalar(u8, &gaps, value_gap) != null);
-                }
-            }
-            value_previous = value_current;
+            assert(@intFromEnum(command) < std.enums.values(Command).len);
         }
     }
 };
