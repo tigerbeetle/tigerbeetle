@@ -188,7 +188,7 @@ pub const IO = struct {
         };
 
         const Transfer = struct {
-            socket: std.posix.socket_t,
+            socket: socket_t,
             buf: os.windows.ws2_32.WSABUF,
             overlapped: Overlapped,
             pending: bool,
@@ -197,12 +197,12 @@ pub const IO = struct {
         const Operation = union(enum) {
             accept: struct {
                 overlapped: Overlapped,
-                listen_socket: std.posix.socket_t,
-                client_socket: std.posix.socket_t,
+                listen_socket: socket_t,
+                client_socket: socket_t,
                 addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
             },
             connect: struct {
-                socket: std.posix.socket_t,
+                socket: socket_t,
                 address: std.net.Address,
                 overlapped: Overlapped,
                 pending: bool,
@@ -304,10 +304,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!std.posix.socket_t,
+            result: AcceptError!socket_t,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
     ) void {
         self.submit(
             context,
@@ -324,7 +324,7 @@ pub const IO = struct {
                 fn do_operation(
                     ctx: Completion.Context,
                     op: anytype,
-                ) AcceptError!std.posix.socket_t {
+                ) AcceptError!socket_t {
                     var flags: os.windows.DWORD = undefined;
                     var transferred: os.windows.DWORD = undefined;
 
@@ -431,7 +431,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         address: std.net.Address,
     ) void {
         self.submit(
@@ -613,7 +613,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         buffer: []const u8,
     ) void {
         const transfer = Completion.Transfer{
@@ -716,7 +716,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         buffer: []u8,
     ) void {
         const transfer = Completion.Transfer{
@@ -963,7 +963,7 @@ pub const IO = struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) CloseError!void {
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
-                    const socket: std.posix.socket_t = @ptrCast(op.fd);
+                    const socket: socket_t = @ptrCast(op.fd);
                     getsockoptError(socket) catch |err| switch (err) {
                         error.FileDescriptorNotASocket => return os.windows.CloseHandle(op.fd),
                         else => {},
@@ -1078,10 +1078,11 @@ pub const IO = struct {
         assert(event != INVALID_EVENT);
     }
 
+    pub const socket_t = std.posix.socket_t;
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !std.posix.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
         // SOCK_NONBLOCK | SOCK_CLOEXEC
         var flags: os.windows.DWORD = 0;
         flags |= os.windows.ws2_32.WSA_FLAG_OVERLAPPED;
@@ -1115,7 +1116,7 @@ pub const IO = struct {
     }
 
     /// Closes a socket opened by the IO instance.
-    pub fn close_socket(self: *IO, socket: std.posix.socket_t) void {
+    pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
         std.posix.close(socket);
     }

@@ -54,7 +54,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             .replica => struct {
                 replica: u8,
                 /// The file descriptor for the process on which to accept connections.
-                accept_fd: posix.socket_t,
+                accept_fd: IO.socket_t,
                 /// Address the accept_fd is bound to, as reported by `getsockname`.
                 ///
                 /// This allows passing port 0 as an address for the OS to pick an open port for us
@@ -192,7 +192,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: posix.socket_t,
+            fd: IO.socket_t,
             address: std.net.Address,
         } {
             const fd = try io.open_socket(
@@ -203,7 +203,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             errdefer io.close_socket(fd);
 
             const set = struct {
-                fn set(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
+                fn set(_fd: IO.socket_t, level: i32, option: u32, value: c_int) !void {
                     try posix.setsockopt(_fd, level, option, &mem.toBytes(value));
                 }
             }.set;
@@ -375,7 +375,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         fn on_accept(
             bus: *MessageBus,
             completion: *IO.Completion,
-            result: IO.AcceptError!posix.socket_t,
+            result: IO.AcceptError!IO.socket_t,
         ) void {
             _ = completion;
 
@@ -465,7 +465,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// IO.INVALID_SOCKET instead of undefined here for safety to ensure an error if the
             /// invalid value is ever used, instead of potentially performing an action on an
             /// active fd.
-            fd: posix.socket_t = IO.INVALID_SOCKET,
+            fd: IO.socket_t = IO.INVALID_SOCKET,
 
             /// This completion is used for all recv operations.
             /// It is also used for the initial connect when establishing a replica connection.
@@ -611,7 +611,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
-            pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: posix.socket_t) void {
+            pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: IO.socket_t) void {
                 assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);
