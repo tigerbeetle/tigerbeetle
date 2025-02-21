@@ -2097,8 +2097,7 @@ pub fn ReplicaType(
                 log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
 
                 self.send_prepare_ok(message.header);
-                defer self.flush_loopback_queue();
-                return;
+                return self.flush_loopback_queue();
             }
 
             if (self.repair_header(message.header)) {
@@ -7851,7 +7850,7 @@ pub fn ReplicaType(
                 // This is safe only because the primary can verify against the prepare checksum.
                 if (self.journal.header_with_op(op)) |header| {
                     self.send_prepare_ok(header);
-                    defer self.flush_loopback_queue();
+                    self.flush_loopback_queue();
                 }
             }
         }
@@ -7873,7 +7872,7 @@ pub fn ReplicaType(
 
             if (!self.start_view_change_from_all_replicas.isSet(self.replica)) {
                 self.send_header_to_replica(self.replica, header.frame_const().*);
-                defer self.flush_loopback_queue();
+                return self.flush_loopback_queue();
             }
         }
 
@@ -8010,7 +8009,7 @@ pub fn ReplicaType(
                 self.do_view_change_from_all_replicas[self.replica] == null)
             {
                 self.send_message_to_replica(self.replica, message);
-                defer self.flush_loopback_queue();
+                return self.flush_loopback_queue();
             }
         }
 
@@ -10068,12 +10067,10 @@ pub fn ReplicaType(
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;
 
-            {
-                // repair() may send prepare_ok's to ourself if we are the primary, so we must flush
-                // the loopback queue immediately.
-                self.send_prepare_ok(message.header);
-                defer self.flush_loopback_queue();
-            }
+            // repair() may send prepare_ok's to ourself if we are the primary, so we must flush
+            // the loopback queue immediately.
+            self.send_prepare_ok(message.header);
+            self.flush_loopback_queue();
 
             switch (trigger) {
                 .append => {},
@@ -10233,7 +10230,7 @@ pub fn ReplicaType(
             request.header.set_checksum();
 
             self.send_message_to_replica(self.replica, request);
-            defer self.flush_loopback_queue();
+            return self.flush_loopback_queue();
         }
 
         fn upgrading(self: *const Replica) bool {
