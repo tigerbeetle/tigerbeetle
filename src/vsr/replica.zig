@@ -7850,6 +7850,7 @@ pub fn ReplicaType(
                 // This is safe only because the primary can verify against the prepare checksum.
                 if (self.journal.header_with_op(op)) |header| {
                     self.send_prepare_ok(header);
+                    if (self.loopback_queue != null) assert(self.journal.has_prepare(header));
                     self.flush_loopback_queue();
                 }
             }
