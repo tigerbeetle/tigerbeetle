@@ -97,6 +97,10 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
+            .deprecated_12 => Deprecated,
+            .deprecated_21 => Deprecated,
+            .deprecated_22 => Deprecated,
+            .deprecated_23 => Deprecated,
         };
     }
 
@@ -208,6 +212,10 @@ pub const Header = extern struct {
             .prepare => return .unknown,
             .block => return .unknown,
             .reply => return .unknown,
+            .deprecated_12 => return .unknown,
+            .deprecated_21 => return .unknown,
+            .deprecated_22 => return .unknown,
+            .deprecated_23 => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
             // All other messages identify the peer as a replica:
@@ -295,6 +303,33 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
             return "reserved is invalid";
+        }
+    };
+
+    /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
+    /// type for each command.
+    pub const Deprecated = extern struct {
+        pub usingnamespace HeaderFunctionsType(@This());
+
+        checksum: u128,
+        checksum_padding: u128 = 0,
+        checksum_body: u128,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128,
+        cluster: u128,
+        size: u32,
+        epoch: u32 = 0,
+        view: u32 = 0,
+        release: vsr.Release,
+        protocol: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0,
+        reserved_frame: [12]u8,
+
+        reserved: [128]u8 = [_]u8{0} ** 128,
+
+        fn invalid_header(_: *const @This()) ?[]const u8 {
+            return "deprecated message type";
         }
     };
 
