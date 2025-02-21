@@ -3182,8 +3182,7 @@ pub fn ReplicaType(
                 return self.commit_pipeline();
             }
 
-            // See replicate().
-            const ring_direction: i16 = if (prepare.message.header.op % 2 == 0) 1 else -1;
+            const ring_direction = replicate_direction(prepare.message);
 
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
@@ -7589,6 +7588,17 @@ pub fn ReplicaType(
             if (!self.journal.has_header(header)) self.journal.set_header_as_dirty(header);
         }
 
+        /// Even ops replicate clockwise.
+        /// Odd ops replicate counter-clockwise.
+        ///
+        /// This means that if the first backup after the primary is down, replication
+        /// doesn't necessarily need to wait for prepare_timeout, since the next prepare
+        /// (routed backwards) could trigger repair in the other replicas.
+        /// TODO Once we use health data to skip faulty replicas, then this isn't needed.
+        fn replicate_direction(message: *const Message.Prepare) i16 {
+            return if (message.header.op % 2 == 0) 1 else -1;
+        }
+
         /// Replicates to the next replica in the configuration (until we get back to the primary):
         /// Replication starts and ends with the primary, we never forward back to the primary.
         /// Does not flood the network with prepares that have already committed.
@@ -7615,15 +7625,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Even ops replicate clockwise.
-            // Odd ops replicate counter-clockwise.
-            //
-            // This means that if the first backup after the primary is down, replication
-            // doesn't necessarily need to wait for prepare_timeout, since the next prepare
-            // (routed backwards) could trigger repair in the other replicas.
-            // TODO Once we use health data to skip faulty replicas, then this isn't needed.
-            const ring_direction: i16 = if (message.header.op % 2 == 0) 1 else -1;
-
+            const ring_direction = replicate_direction(message);
             const next = next: {
                 // Replication in the ring of active replicas.
                 if (!self.standby()) {
