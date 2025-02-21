@@ -74,6 +74,7 @@ test "tidy" {
 
             if (tidy_dead_declarations(&tree, &dead_declarations)) |name| {
                 std.debug.print("{s}: error: '{s}' is dead code\n", .{ source_file.path, name });
+                return error.DeadDeclaration;
             }
 
             function_line_count_longest = @max(
