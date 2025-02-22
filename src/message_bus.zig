@@ -5,8 +5,6 @@ const mem = std.mem;
 const os = std.os;
 const posix = std.posix;
 
-const is_linux = builtin.target.os.tag == .linux;
-
 const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
 
@@ -30,11 +28,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             .client => constants.connection_send_queue_max_client,
         },
     });
-
-    const tcp_sndbuf = switch (process_type) {
-        .replica => constants.tcp_sndbuf_replica,
-        .client => constants.tcp_sndbuf_client,
-    };
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -202,72 +195,21 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             );
             errdefer io.close_socket(fd);
 
-            const set = struct {
-                fn set(_fd: IO.socket_t, level: i32, option: u32, value: c_int) !void {
-                    try posix.setsockopt(_fd, level, option, &mem.toBytes(value));
-                }
-            }.set;
-
-            if (constants.tcp_rcvbuf > 0) rcvbuf: {
-                if (is_linux) {
-                    // Requires CAP_NET_ADMIN privilege (settle for SO_RCVBUF in case of an EPERM):
-                    if (set(fd, posix.SOL.SOCKET, posix.SO.RCVBUFFORCE, constants.tcp_rcvbuf)) |_| {
-                        break :rcvbuf;
-                    } else |err| switch (err) {
-                        error.PermissionDenied => {},
-                        else => |e| return e,
-                    }
-                }
-                try set(fd, posix.SOL.SOCKET, posix.SO.RCVBUF, constants.tcp_rcvbuf);
-            }
-
-            if (tcp_sndbuf > 0) sndbuf: {
-                if (is_linux) {
-                    // Requires CAP_NET_ADMIN privilege (settle for SO_SNDBUF in case of an EPERM):
-                    if (set(fd, posix.SOL.SOCKET, posix.SO.SNDBUFFORCE, tcp_sndbuf)) |_| {
-                        break :sndbuf;
-                    } else |err| switch (err) {
-                        error.PermissionDenied => {},
-                        else => |e| return e,
-                    }
-                }
-                try set(fd, posix.SOL.SOCKET, posix.SO.SNDBUF, tcp_sndbuf);
-            }
-
-            if (constants.tcp_keepalive) {
-                try set(fd, posix.SOL.SOCKET, posix.SO.KEEPALIVE, 1);
-                if (is_linux) {
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPIDLE, constants.tcp_keepidle);
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPINTVL, constants.tcp_keepintvl);
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.KEEPCNT, constants.tcp_keepcnt);
-                }
-            }
-
-            if (constants.tcp_user_timeout_ms > 0) {
-                if (is_linux) {
-                    const timeout_ms = constants.tcp_user_timeout_ms;
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.USER_TIMEOUT, timeout_ms);
-                }
-            }
-
-            // Set tcp no-delay
-            if (constants.tcp_nodelay) {
-                if (is_linux) {
-                    try set(fd, posix.IPPROTO.TCP, posix.TCP.NODELAY, 1);
-                }
-            }
-
-            try set(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
-            try posix.bind(fd, &address.any, address.getOsSockLen());
-
-            // Resolve port 0 to an actual port picked by the OS.
-            var address_resolved: std.net.Address = .{ .any = undefined };
-            var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
-            try posix.getsockname(fd, &address_resolved.any, &addrlen);
-            assert(address_resolved.getOsSockLen() == addrlen);
-            assert(address_resolved.any.family == address.any.family);
-
-            try posix.listen(fd, constants.tcp_backlog);
+            const address_resolved = try io.listen(fd, address, .{
+                .rcvbuf = constants.tcp_rcvbuf,
+                .sndbuf = switch (process_type) {
+                    .replica => constants.tcp_sndbuf_replica,
+                    .client => constants.tcp_sndbuf_client,
+                },
+                .keepalive = if (constants.tcp_keepalive) .{
+                    .keepidle = constants.tcp_keepidle,
+                    .keepintvl = constants.tcp_keepintvl,
+                    .keepcnt = constants.tcp_keepcnt,
+                } else null,
+                .user_timeout_ms = constants.tcp_user_timeout_ms,
+                .nodelay = constants.tcp_nodelay,
+                .backlog = constants.tcp_backlog,
+            });
 
             return .{ .fd = fd, .address = address_resolved };
         }

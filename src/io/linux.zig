@@ -10,6 +10,7 @@ const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
+const common = @import("./common.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -1453,6 +1454,18 @@ pub const IO = struct {
     pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
         posix.close(socket);
+    }
+
+    /// Listen on the given TCP socket.
+    /// Returns socket resolved address, which might be more specific
+    /// than the input address (e.g., listening on port 0).
+    pub fn listen(
+        _: *IO,
+        fd: socket_t,
+        address: std.net.Address,
+        options: common.ListenOptions,
+    ) !std.net.Address {
+        return common.listen(fd, address, options);
     }
 
     /// Opens a directory with read only access.
