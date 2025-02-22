@@ -1229,6 +1229,16 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
+    /// Best effort to synchroneously transfer bytes to the kernel.
+    pub fn send_now(self: *IO, socket: socket_t, buffer: []const u8) ?usize {
+        _ = self;
+        return posix.send(socket, buffer, posix.MSG.DONTWAIT) catch |err| switch (err) {
+            error.WouldBlock => return null,
+            // To avoid duplicating error handling, force the caller to fallback to normal send.
+            else => return null,
+        };
+    }
+
     pub const StatxError = error{
         SymLinkLoop,
         FileNotFound,

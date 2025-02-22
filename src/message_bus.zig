@@ -1,8 +1,6 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const mem = std.mem;
-const os = std.os;
 const posix = std.posix;
 
 const constants = @import("constants.zig");
@@ -191,7 +189,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             const fd = try io.open_socket(
                 address.any.family,
                 posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
+                posix.IPPROTO.TCP
             );
             errdefer io.close_socket(fd);
 
@@ -975,23 +973,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
                 assert(!connection.send_submitted);
-                // We rely on linux-specific DONTWAIT here.
-                if (builtin.os.tag != .linux) return;
 
                 for (0..SendQueue.count_max) |_| {
                     const message = connection.send_queue.head() orelse return;
                     assert(connection.send_progress < message.header.size);
-                    const write_size = std.posix.send(
+                    const write_size = bus.io.send_now(
                         connection.fd,
                         message.buffer[connection.send_progress..message.header.size],
-                        std.posix.MSG.DONTWAIT,
-                    ) catch |err| switch (err) {
-                        // Fall back to asynchronous send via io_uring.
-                        error.WouldBlock => return,
-                        // We could handle genuine errors here, but, for simplicity, fallback to
-                        // io_uring as well.
-                        else => return,
-                    };
+                    ) orelse return;
                     connection.send_progress += write_size;
                     assert(connection.send_progress <= message.header.size);
                     if (connection.send_progress == message.header.size) {

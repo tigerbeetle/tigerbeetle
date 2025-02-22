@@ -705,6 +705,10 @@ pub const IO = struct {
         );
     }
 
+    pub fn send_now(_: *IO, _: socket_t, _: []const u8) ?usize {
+        return null; // No support for best-effort non-blocking synchronous send.
+    }
+
     pub const RecvError = std.posix.RecvFromError;
 
     pub fn recv(
