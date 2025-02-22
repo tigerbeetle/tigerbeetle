@@ -189,7 +189,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             const fd = try io.open_socket(
                 address.any.family,
                 posix.SOCK.STREAM,
-                posix.IPPROTO.TCP
+                posix.IPPROTO.TCP,
             );
             errdefer io.close_socket(fd);
 
@@ -630,7 +630,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         //
                         // TODO: Investigate differences between shutdown() on Linux vs Darwin.
                         // Especially how this interacts with our assumptions around pending I/O.
-                        posix.shutdown(connection.fd, .both) catch |err| switch (err) {
+                        bus.io.shutdown(connection.fd, .both) catch |err| switch (err) {
                             error.SocketNotConnected => {
                                 // This should only happen if we for some reason decide to terminate
                                 // a connection while a connect operation is in progress.

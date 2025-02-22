@@ -1139,6 +1139,10 @@ pub const IO = struct {
         return common.listen(fd, address, options);
     }
 
+    pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
+        return posix.shutdown(socket, how);
+    }
+
     /// Opens a directory with read only access.
     pub fn open_dir(dir_path: []const u8) !fd_t {
         const dir = try std.fs.cwd().openDir(dir_path, .{});
