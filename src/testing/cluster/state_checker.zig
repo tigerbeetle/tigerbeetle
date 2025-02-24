@@ -114,8 +114,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             if (replica.status != .recovering_head) {
                 const head_max = &state_checker.replica_head_max[replica_index];
-                const wal_headers = replica.superblock.storage.wal_headers();
-                const head_max_journal = wal_headers[head_max.op % constants.journal_slot_count];
+                const wal_prepares = replica.superblock.storage.wal_prepares();
+                const head_max_journal =
+                    wal_prepares[head_max.op % constants.journal_slot_count].header;
 
                 assert(replica.view > head_max.view or
                     (replica.view == head_max.view and (replica.op >= head_max.op or
