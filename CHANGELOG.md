@@ -37,7 +37,7 @@ Released: 2025-02-24
 
 - [#2727](https://github.com/tigerbeetle/tigerbeetle/pull/2727)
 
-  Implement more standard shorctucts for REPL.
+  Implement more standard shortcuts for REPL.
 
 ### Internals
 
