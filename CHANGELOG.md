@@ -3,6 +3,66 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.29
+
+Released: 2025-02-24
+
+### Safety And Performance
+
+- [#2763](https://github.com/tigerbeetle/tigerbeetle/pull/2763)
+
+  Explicitly ignore deprecated protocol messages.
+
+- [#2758](https://github.com/tigerbeetle/tigerbeetle/pull/2758)
+
+  Fix a crash when, during upgrade, replica's binary is changed the second time.
+
+### Features
+
+- [#2698](https://github.com/tigerbeetle/tigerbeetle/pull/2698)
+
+  Implement metrics, using statsd format.
+
+- [#2507](https://github.com/tigerbeetle/tigerbeetle/pull/2507)
+
+  Add new indexes to the account balances to enable CDC.
+
+- [#2521](https://github.com/tigerbeetle/tigerbeetle/pull/2521),
+  [#2751](https://github.com/tigerbeetle/tigerbeetle/pull/2751),
+  [#2756](https://github.com/tigerbeetle/tigerbeetle/pull/2756),
+  [#2757](https://github.com/tigerbeetle/tigerbeetle/pull/2757),
+  [#2754](https://github.com/tigerbeetle/tigerbeetle/pull/2754)
+
+  Restructure documentation.
+
+- [#2727](https://github.com/tigerbeetle/tigerbeetle/pull/2727)
+
+  Implement more standard shortcuts for REPL.
+
+### Internals
+
+- [#2742](https://github.com/tigerbeetle/tigerbeetle/pull/2742)
+
+  Refactor C client API to remove internal mutex.
+
+- [#2747](https://github.com/tigerbeetle/tigerbeetle/pull/2747)
+
+  Don't use deprecated NodeJS APIs in the samples.
+
+- [#2748](https://github.com/tigerbeetle/tigerbeetle/pull/2748),
+  [#2744](https://github.com/tigerbeetle/tigerbeetle/pull/2744)
+
+  Improve documentation search.
+
+- [#2734](https://github.com/tigerbeetle/tigerbeetle/pull/2734)
+
+  Switch to vale for documentation spell checking.
+
+
+### TigerTracks 🎧
+
+- [Зов Крови](https://open.spotify.com/track/6YS6ZOCL6KX9kDRQRzD9s0?si=46730a9a7a7842ab)
+
 ## TigerBeetle 0.16.28
 
 Released: 2025-02-17

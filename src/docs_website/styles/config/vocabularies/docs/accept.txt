@@ -288,6 +288,7 @@ SQPOLL
 src
 stacktracehash
 start_view
+statsd
 statx
 stderr
 stdin
