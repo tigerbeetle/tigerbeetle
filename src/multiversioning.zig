@@ -587,6 +587,8 @@ pub const Multiversion = struct {
     target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
     /// This list is referenced by `Replica.releases_bundled`.
+    /// Note that this only contains the advertisable releases, which are a subset of the actual
+    /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
     releases_bundled: ReleaseList = .{},
 
     completion: IO.Completion = undefined,
