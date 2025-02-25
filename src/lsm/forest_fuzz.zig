@@ -403,15 +403,15 @@ const Environment = struct {
         }
     }
 
-    fn put_account(env: *Environment, a: *const Account, maybe_old: ?*const Account) void {
-        if (maybe_old) |old| {
+    fn put_account(env: *Environment, a: *const Account, maybe_old: ?Account) void {
+        if (maybe_old) |*old| {
             env.forest.grooves.accounts.update(.{ .old = old, .new = a });
         } else {
             env.forest.grooves.accounts.insert(a);
         }
     }
 
-    fn get_account(env: *Environment, id: u128) ?*const Account {
+    fn get_account(env: *Environment, id: u128) ?Account {
         return switch (env.forest.grooves.accounts.get(id)) {
             .found_object => |a| a,
             .found_orphaned_id => unreachable,
@@ -696,7 +696,7 @@ const Environment = struct {
                     if (model.checkpointed.objects.get(id)) |*checkpointed_account| {
                         try env.prefetch_account(id);
                         if (env.get_account(id)) |lsm_account| {
-                            assert(stdx.equal_bytes(Account, lsm_account, checkpointed_account));
+                            assert(stdx.equal_bytes(Account, &lsm_account, checkpointed_account));
                         } else {
                             std.debug.panic(
                                 "Account checkpointed but not in lsm after crash.\n {}\n",
@@ -756,7 +756,7 @@ const Environment = struct {
                 if (model_account == null) {
                     assert(lsm_account == null);
                 } else {
-                    assert(stdx.equal_bytes(Account, &model_account.?, lsm_account.?));
+                    assert(stdx.equal_bytes(Account, &model_account.?, &lsm_account.?));
                 }
             },
             .exists_account => |timestamp| {

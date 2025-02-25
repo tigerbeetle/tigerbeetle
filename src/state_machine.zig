@@ -2117,7 +2117,7 @@ pub fn StateMachineType(
             var results_count: usize = 0;
             for (batch) |id| {
                 if (self.get_account(id)) |account| {
-                    results[results_count] = account.*;
+                    results[results_count] = account;
                     results_count += 1;
                 }
             }
@@ -2136,7 +2136,7 @@ pub fn StateMachineType(
             var results_count: usize = 0;
             for (batch) |id| {
                 if (self.get_transfer(id)) |result| {
-                    results[results_count] = result.*;
+                    results[results_count] = result;
                     results_count += 1;
                 }
             }
@@ -2301,7 +2301,7 @@ pub fn StateMachineType(
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.accounts.get(a.id)) {
-                .found_object => |e| return create_account_exists(a, e),
+                .found_object => |e| return create_account_exists(a, &e),
                 .found_orphaned_id => unreachable,
                 .not_found => {},
             }
@@ -2366,7 +2366,7 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(client_release, t, e),
+                .found_object => |e| return self.create_transfer_exists(client_release, t, &e),
                 .found_orphaned_id => if (!retry_transient_error(client_release)) {
                     return .id_already_failed;
                 },
@@ -2538,8 +2538,8 @@ pub fn StateMachineType(
             t2.amount = amount;
             self.forest.grooves.transfers.insert(&t2);
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
+            var dr_account_new = dr_account;
+            var cr_account_new = cr_account;
             if (t.flags.pending) {
                 dr_account_new.debits_pending += amount;
                 cr_account_new.credits_pending += amount;
@@ -2560,15 +2560,21 @@ pub fn StateMachineType(
             if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
 
             const dr_updated = amount > 0 or dr_account_new.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &dr_account,
+                    .new = &dr_account_new,
+                });
             }
 
             const cr_updated = amount > 0 or cr_account_new.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &cr_account,
+                    .new = &cr_account_new,
+                });
             }
 
             self.account_event(.{
@@ -2615,7 +2621,7 @@ pub fn StateMachineType(
                 // Since both `t` and `e` have the same `pending_id`,
                 // it must be a valid transfer.
                 const p = self.get_transfer(t.pending_id).?;
-                return post_or_void_pending_transfer_exists(client_release, t, e, p);
+                return post_or_void_pending_transfer_exists(client_release, t, e, &p);
             } else {
                 if (t.debit_account_id != e.debit_account_id) {
                     return .exists_with_different_debit_account_id;
@@ -2834,10 +2840,10 @@ pub fn StateMachineType(
                 if (t2.flags.void_pending_transfer) break :status .voided;
                 unreachable;
             };
-            self.transfer_update_pending_status(transfer_pending, transfer_pending_status);
+            self.transfer_update_pending_status(&transfer_pending, transfer_pending_status);
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
+            var dr_account_new = dr_account;
+            var cr_account_new = cr_account;
             dr_account_new.debits_pending -= p.amount;
             cr_account_new.credits_pending -= p.amount;
 
@@ -2865,16 +2871,22 @@ pub fn StateMachineType(
 
             const dr_updated = amount > 0 or p.amount > 0 or
                 dr_account_new.flags.closed != dr_account.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &dr_account,
+                    .new = &dr_account_new,
+                });
             }
 
             const cr_updated = amount > 0 or p.amount > 0 or
                 cr_account_new.flags.closed != cr_account.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &cr_account,
+                    .new = &cr_account_new,
+                });
             }
 
             self.account_event(.{
@@ -2883,7 +2895,7 @@ pub fn StateMachineType(
                 .cr_account = &cr_account_new,
                 .transfer_flags = t2.flags,
                 .transfer_pending_status = transfer_pending_status,
-                .transfer_pending = p,
+                .transfer_pending = &p,
                 .amount_requested = t.amount,
                 .amount = t2.amount,
             });
@@ -3065,14 +3077,14 @@ pub fn StateMachineType(
             }
         }
 
-        fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
+        fn get_transfer(self: *const StateMachine, id: u128) ?Transfer {
             return switch (self.forest.grooves.transfers.get(id)) {
                 .found_object => |t| t,
                 .found_orphaned_id, .not_found => null,
             };
         }
 
-        fn get_account(self: *const StateMachine, id: u128) ?*const Account {
+        fn get_account(self: *const StateMachine, id: u128) ?Account {
             return switch (self.forest.grooves.accounts.get(id)) {
                 .found_object => |a| a,
                 .found_orphaned_id => unreachable,
@@ -3085,7 +3097,7 @@ pub fn StateMachineType(
         fn get_transfer_pending(
             self: *const StateMachine,
             pending_timestamp: u64,
-        ) ?*const TransferPending {
+        ) ?TransferPending {
             return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
                 .found_object => |a| a,
                 .found_orphaned_id => unreachable,
@@ -3149,8 +3161,8 @@ pub fn StateMachineType(
                 ).?;
                 assert(cr_account.credits_pending >= p.amount);
 
-                var dr_account_new = dr_account.*;
-                var cr_account_new = cr_account.*;
+                var dr_account_new = dr_account;
+                var cr_account_new = cr_account;
                 dr_account_new.debits_pending -= p.amount;
                 cr_account_new.credits_pending -= p.amount;
 
@@ -3171,7 +3183,7 @@ pub fn StateMachineType(
                     dr_account_new.flags.closed != dr_account.flags.closed;
                 if (dr_updated) {
                     self.forest.grooves.accounts.update(.{
-                        .old = dr_account,
+                        .old = &dr_account,
                         .new = &dr_account_new,
                     });
                 }
@@ -3180,7 +3192,7 @@ pub fn StateMachineType(
                     cr_account_new.flags.closed != cr_account.flags.closed;
                 if (cr_updated) {
                     self.forest.grooves.accounts.update(.{
-                        .old = cr_account,
+                        .old = &cr_account,
                         .new = &cr_account_new,
                     });
                 }
@@ -3188,7 +3200,7 @@ pub fn StateMachineType(
                 const transfer_pending = self.get_transfer_pending(p.timestamp).?;
                 assert(p.timestamp == transfer_pending.timestamp);
                 assert(transfer_pending.status == .pending);
-                self.transfer_update_pending_status(transfer_pending, .expired);
+                self.transfer_update_pending_status(&transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
@@ -4144,7 +4156,7 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null);
 
                 const account = context.state_machine.get_account(b.account).?;
-                var account_new = account.*;
+                var account_new = account;
 
                 account_new.debits_pending = b.debits_pending;
                 account_new.debits_posted = b.debits_posted;
@@ -4153,9 +4165,9 @@ fn check(test_table: []const u8) !void {
                 assert(!account_new.debits_exceed_credits(0));
                 assert(!account_new.credits_exceed_debits(0));
 
-                if (!stdx.equal_bytes(Account, &account_new, account)) {
+                if (!stdx.equal_bytes(Account, &account_new, &account)) {
                     context.state_machine.forest.grooves.accounts.update(.{
-                        .old = account,
+                        .old = &account,
                         .new = &account_new,
                     });
                 }
