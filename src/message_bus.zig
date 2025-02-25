@@ -717,6 +717,18 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         return null;
                     }
 
+                    comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
+                        @TypeOf(header.command) == vsr.Command);
+                    const command_raw: u8 = data[@offsetOf(Header, "command")];
+                    _ = std.meta.intToEnum(vsr.Command, @intFromEnum(header.command)) catch {
+                        log.err(
+                            "unknown vsr command, crashing for safety: " ++
+                                "command={d} protocol={d} replica={d} release={}",
+                            .{ command_raw, header.protocol, header.replica, header.release },
+                        );
+                        @panic("unknown vsr command");
+                    };
+
                     switch (process_type) {
                         // Replicas may forward messages from clients or from other replicas so we
                         // may receive messages from a peer before we know who they are:
