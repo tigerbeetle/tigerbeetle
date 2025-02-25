@@ -25,7 +25,11 @@ pub fn build(b: *std.Build) !void {
 
     const check_spelling = std.Build.Step.Run.create(b, "run vale");
     check_spelling.addFileArg(vale_bin);
-    check_spelling.addArg("../.."); // Check all Markdown files in the repository.
+    const md_files = try exec_stdout(b.allocator, &.{ "git", "ls-files", "../../**/*.md" });
+    var md_files_iter = std.mem.tokenize(u8, md_files, "\n");
+    while (md_files_iter.next()) |md_file| {
+        check_spelling.addArg(md_file);
+    }
 
     const content = b.addWriteFiles();
     { //TODO(Zig 0.14.0): https://github.com/ziglang/zig/issues/20571
@@ -121,4 +125,16 @@ fn get_vale_bin(b: *std.Build) ?std.Build.LazyPath {
     } else {
         return null;
     }
+}
+
+fn exec_stdout(allocator: std.mem.Allocator, argv: []const []const u8) ![]const u8 {
+    var child = std.process.Child.init(argv, allocator);
+    child.stdout_behavior = .Pipe;
+
+    try child.spawn();
+    const output = try child.stdout.?.readToEndAlloc(allocator, 10 * 1024);
+    const term = try child.wait();
+    std.debug.assert(term == .Exited);
+
+    return output;
 }
