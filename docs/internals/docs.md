@@ -43,15 +43,18 @@ into the `./internals` folder: it will get properly reorganized&compacted with t
 
 ## Micro
 
-- Because docs are viewable on GitHub, GitHub Flavored Markdown is used for all the content.
-- Hard wrap long lines to keep them readable as source.
-- Hard wrap at 100 because that's what TIGER_STYLE says.
-- Use Oxford comma (A, B, and C), for consistency.
-- Use Standard American English for consistency.
-- Cool URIs don't change! Think hard about file and section names, as they form parts of URLs
 - As Dijkstra said, we should regard every line of documentation not as a line produced, but as a
   line spend. The value of the docs is not in the number of words, but in the number of concepts
   covered. Number of words is the cost. A good process for documentation writing is:
 
   - list all the facts that you want to communicate,
   - find the shortest set of words that explain _all_ listed ideas, clearly and concisely.
+- Cool URIs don't change! Think hard about file and section names, as they form parts of URLs.
+- Because docs are viewable on GitHub, GitHub Flavored Markdown is used for all the content.
+- Hard wrap long lines to keep them readable as source.
+- Hard wrap at 100 because that's what TIGER_STYLE says.
+- Use Oxford comma (A, B, and C), for consistency.
+- Use Standard American English for consistency.
+- Use `_underscores_` for weak emphasis (_italics_) and `**double starts**` for strong emphasis (
+  **bold**) for consistency.
+- Use `-`, not `*` for lists for consistency.
