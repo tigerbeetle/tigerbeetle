@@ -28,7 +28,7 @@ pub fn build(b: *std.Build) !void {
     const md_files = b.run(&.{ "git", "ls-files", "../../**/*.md" });
     var md_files_iter = std.mem.tokenize(u8, md_files, "\n");
     while (md_files_iter.next()) |md_file| {
-        check_spelling.addArg(md_file);
+        check_spelling.addFileArg(b.path(md_file));
     }
 
     const content = b.addWriteFiles();
