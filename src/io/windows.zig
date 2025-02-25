@@ -1,8 +1,10 @@
 const std = @import("std");
 const os = std.os;
+const posix = std.posix;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
+const common = @import("./common.zig");
 
 const FIFOType = @import("../fifo.zig").FIFOType;
 const Time = @import("../time.zig").Time;
@@ -188,7 +190,7 @@ pub const IO = struct {
         };
 
         const Transfer = struct {
-            socket: std.posix.socket_t,
+            socket: socket_t,
             buf: os.windows.ws2_32.WSABUF,
             overlapped: Overlapped,
             pending: bool,
@@ -197,12 +199,12 @@ pub const IO = struct {
         const Operation = union(enum) {
             accept: struct {
                 overlapped: Overlapped,
-                listen_socket: std.posix.socket_t,
-                client_socket: std.posix.socket_t,
+                listen_socket: socket_t,
+                client_socket: socket_t,
                 addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
             },
             connect: struct {
-                socket: std.posix.socket_t,
+                socket: socket_t,
                 address: std.net.Address,
                 overlapped: Overlapped,
                 pending: bool,
@@ -295,7 +297,7 @@ pub const IO = struct {
         // TODO Cancel in-flight async IO and wait for all completions.
     }
 
-    pub const AcceptError = std.posix.AcceptError || std.posix.SetSockOptError;
+    pub const AcceptError = posix.AcceptError || posix.SetSockOptError;
 
     pub fn accept(
         self: *IO,
@@ -304,10 +306,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!std.posix.socket_t,
+            result: AcceptError!socket_t,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
     ) void {
         self.submit(
             context,
@@ -324,7 +326,7 @@ pub const IO = struct {
                 fn do_operation(
                     ctx: Completion.Context,
                     op: anytype,
-                ) AcceptError!std.posix.socket_t {
+                ) AcceptError!socket_t {
                     var flags: os.windows.DWORD = undefined;
                     var transferred: os.windows.DWORD = undefined;
 
@@ -333,9 +335,9 @@ pub const IO = struct {
                         INVALID_SOCKET => blk: {
                             // Create the socket that will be used for accept.
                             op.client_socket = ctx.io.open_socket(
-                                std.posix.AF.INET,
-                                std.posix.SOCK.STREAM,
-                                std.posix.IPPROTO.TCP,
+                                posix.AF.INET,
+                                posix.SOCK.STREAM,
+                                posix.IPPROTO.TCP,
                             ) catch |err| switch (err) {
                                 error.AddressFamilyNotSupported => unreachable,
                                 error.ProtocolNotSupported => unreachable,
@@ -417,9 +419,9 @@ pub const IO = struct {
         DiskQuota,
         InputOutput,
         NoSpaceLeft,
-    } || std.posix.UnexpectedError;
+    } || posix.UnexpectedError;
 
-    pub const ConnectError = std.posix.ConnectError || error{FileDescriptorNotASocket};
+    pub const ConnectError = posix.ConnectError || error{FileDescriptorNotASocket};
 
     pub fn connect(
         self: *IO,
@@ -431,7 +433,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         address: std.net.Address,
     ) void {
         self.submit(
@@ -465,7 +467,7 @@ pub const IO = struct {
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY)
                         const inaddr_any = std.mem.zeroes([4]u8);
                         const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
-                        std.posix.bind(
+                        posix.bind(
                             op.socket,
                             &bind_addr.any,
                             bind_addr.getOsSockLen(),
@@ -483,7 +485,7 @@ pub const IO = struct {
                         const LPFN_CONNECTEX = *const fn (
                             Socket: os.windows.ws2_32.SOCKET,
                             SockAddr: *const os.windows.ws2_32.sockaddr,
-                            SockLen: std.posix.socklen_t,
+                            SockLen: posix.socklen_t,
                             SendBuf: ?*const anyopaque,
                             SendBufLen: os.windows.DWORD,
                             BytesSent: *os.windows.DWORD,
@@ -570,7 +572,7 @@ pub const IO = struct {
         );
     }
 
-    pub const FsyncError = std.posix.SyncError || std.posix.UnexpectedError;
+    pub const FsyncError = posix.SyncError || posix.UnexpectedError;
 
     pub fn fsync(
         self: *IO,
@@ -595,13 +597,13 @@ pub const IO = struct {
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) FsyncError!void {
                     _ = ctx;
-                    return std.posix.fsync(op.fd);
+                    return posix.fsync(op.fd);
                 }
             },
         );
     }
 
-    pub const SendError = std.posix.SendError;
+    pub const SendError = posix.SendError;
 
     pub fn send(
         self: *IO,
@@ -613,7 +615,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         buffer: []const u8,
     ) void {
         const transfer = Completion.Transfer{
@@ -704,7 +706,11 @@ pub const IO = struct {
         );
     }
 
-    pub const RecvError = std.posix.RecvFromError;
+    pub fn send_now(_: *IO, _: socket_t, _: []const u8) ?usize {
+        return null; // No support for best-effort non-blocking synchronous send.
+    }
+
+    pub const RecvError = posix.RecvFromError;
 
     pub fn recv(
         self: *IO,
@@ -716,7 +722,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: std.posix.socket_t,
+        socket: socket_t,
         buffer: []u8,
     ) void {
         const transfer = Completion.Transfer{
@@ -808,7 +814,7 @@ pub const IO = struct {
         );
     }
 
-    pub const OpenatError = std.posix.OpenError || std.posix.UnexpectedError;
+    pub const OpenatError = posix.OpenError || posix.UnexpectedError;
 
     fn do_file_io(ctx: Completion.Context, op: anytype, comptime overlapped_fn: anytype) !usize {
         var transferred: os.windows.DWORD = undefined;
@@ -867,7 +873,7 @@ pub const IO = struct {
         SystemResources,
         Unseekable,
         ConnectionTimedOut,
-    } || std.posix.UnexpectedError;
+    } || posix.UnexpectedError;
 
     pub fn read(
         self: *IO,
@@ -904,7 +910,7 @@ pub const IO = struct {
         );
     }
 
-    pub const WriteError = std.posix.PWriteError;
+    pub const WriteError = posix.PWriteError;
 
     pub fn write(
         self: *IO,
@@ -963,7 +969,7 @@ pub const IO = struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) CloseError!void {
                     // Check if the fd is a SOCKET by seeing if getsockopt() returns ENOTSOCK
                     // https://stackoverflow.com/a/50981652
-                    const socket: std.posix.socket_t = @ptrCast(op.fd);
+                    const socket: socket_t = @ptrCast(op.fd);
                     getsockoptError(socket) catch |err| switch (err) {
                         error.FileDescriptorNotASocket => return os.windows.CloseHandle(op.fd),
                         else => {},
@@ -975,7 +981,7 @@ pub const IO = struct {
         );
     }
 
-    pub const TimeoutError = error{Canceled} || std.posix.UnexpectedError;
+    pub const TimeoutError = error{Canceled} || posix.UnexpectedError;
 
     pub fn timeout(
         self: *IO,
@@ -1078,10 +1084,11 @@ pub const IO = struct {
         assert(event != INVALID_EVENT);
     }
 
+    pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !std.posix.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
         // SOCK_NONBLOCK | SOCK_CLOEXEC
         var flags: os.windows.DWORD = 0;
         flags |= os.windows.ws2_32.WSA_FLAG_OVERLAPPED;
@@ -1115,9 +1122,25 @@ pub const IO = struct {
     }
 
     /// Closes a socket opened by the IO instance.
-    pub fn close_socket(self: *IO, socket: std.posix.socket_t) void {
+    pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
-        std.posix.close(socket);
+        posix.close(socket);
+    }
+
+    /// Listen on the given TCP socket.
+    /// Returns socket resolved address, which might be more specific
+    /// than the input address (e.g., listening on port 0).
+    pub fn listen(
+        _: *IO,
+        fd: socket_t,
+        address: std.net.Address,
+        options: common.ListenOptions,
+    ) !std.net.Address {
+        return common.listen(fd, address, options);
+    }
+
+    pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
+        return posix.shutdown(socket, how);
     }
 
     /// Opens a directory with read only access.
@@ -1126,7 +1149,7 @@ pub const IO = struct {
         return dir.fd;
     }
 
-    pub const fd_t = std.posix.fd_t;
+    pub const fd_t = posix.fd_t;
     pub const INVALID_FILE = os.windows.INVALID_HANDLE_VALUE;
 
     fn open_file_handle(
@@ -1272,7 +1295,7 @@ pub const IO = struct {
                 const write_offset = size - sector.len;
                 var written: usize = 0;
                 while (written < sector.len) {
-                    written += try std.posix.pwrite(
+                    written += try posix.pwrite(
                         handle,
                         sector[written..],
                         write_offset + written,
@@ -1286,13 +1309,13 @@ pub const IO = struct {
         // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
         if (method != .open_read_only) {
-            try std.posix.fsync(handle);
+            try posix.fsync(handle);
         }
 
         // We cannot fsync the directory handle on Windows.
         // We have no way to open a directory with write access.
         //
-        // try std.posix.fsync(dir_handle);
+        // try posix.fsync(dir_handle);
 
         const file_size = try os.windows.GetFileSizeEx(handle);
         if (file_size < size) @panic("data file inode size was truncated or corrupted");
@@ -1380,14 +1403,14 @@ pub const IO = struct {
     }
 };
 
-// TODO: use std.posix.getsockoptError when fixed for windows in stdlib
-fn getsockoptError(socket: std.posix.socket_t) IO.ConnectError!void {
+// TODO: use posix.getsockoptError when fixed for windows in stdlib
+fn getsockoptError(socket: posix.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
     var size: i32 = @sizeOf(u32);
     const rc = os.windows.ws2_32.getsockopt(
         socket,
-        std.posix.SOL.SOCKET,
-        std.posix.SO.ERROR,
+        posix.SOL.SOCKET,
+        posix.SO.ERROR,
         std.mem.asBytes(&err_code),
         &size,
     );
