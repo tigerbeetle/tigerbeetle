@@ -468,6 +468,25 @@ This high-quality time implementation is than utilized not only for baseness log
 also plays a key role in the internal implementation. Every object in TigerBeetle has a globally
 unique `u64` creation timestamp, which plays the role of synthetic primary key.
 
+### Direct IO
+
+TigerBeetle bypasses operating system's page cache and uses Direct IO. That is, normally, when an
+application writes to a file, the operating system only updates the in-memory cache, and the data
+gets to disk later. This is a good default for the vast majority of the applications. TigerBeetle is
+an exception --- it instructs the operating system to read directly from the disk, and write directly
+to the disk, bypassing any caches (please refer to this
+[excellent article](https://transactional.blog/how-to-learn/disk-io) for the overview of the
+relevant OS APIs).
+
+Bypassing page cache is required for correctness. While operating systems provide `fsync` API to
+flush page cache to disk, it doesn't allow handling errors reliably:
+[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)
+
+The second reason to bypass the cache is the general principle of avoiding dependencies and assuming
+less about the interface. Concretely, TigerBeetle doesn't require the OS to provide a page cache,
+and it doesn't require a file system by virtue of using only a single file. As a consequence,
+TigerBeetle can run directly against a block device.
+
 ## References
 
 The collection of papers behind TigerBeetle:
