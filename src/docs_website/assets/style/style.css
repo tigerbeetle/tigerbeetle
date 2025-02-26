@@ -492,10 +492,6 @@ nav.left-pane {
 }
 
 nav.side {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(100% - 107px); /* height of top-wrapper */
-  justify-content: space-between;
   padding: 0 16px 16px 16px;
   font-size: 14px;
   line-height: 20px;
