@@ -695,7 +695,7 @@ pub const data_file_size_min =
     superblock_zone_size +
     constants.journal_size +
     constants.client_replies_size +
-    vsr.Zone.size(.grid_padding).?;
+    vsr.Zone.size(.grid_padding);
 
 /// This table shows the sequence number progression of the SuperBlock's headers.
 ///
