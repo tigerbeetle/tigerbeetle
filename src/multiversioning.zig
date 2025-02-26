@@ -587,6 +587,8 @@ pub const Multiversion = struct {
     target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
     /// This list is referenced by `Replica.releases_bundled`.
+    /// Note that this only contains the advertisable releases, which are a subset of the actual
+    /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
     releases_bundled: ReleaseList = .{},
 
     completion: IO.Completion = undefined,
@@ -761,8 +763,11 @@ pub const Multiversion = struct {
         assert(self.stage == .init);
         assert(!self.timeout.ticking);
 
-        self.binary_open();
-
+        if (comptime builtin.target.os.tag == .linux) {
+            self.binary_statx();
+        } else {
+            self.binary_open();
+        }
         assert(self.stage != .init);
 
         while (self.stage != .ready and self.stage != .err) {
@@ -779,6 +784,14 @@ pub const Multiversion = struct {
             self.releases_bundled.append_assume_capacity(constants.config.process.release);
 
             return self.stage.err;
+        }
+
+        assert(self.stage == .ready);
+        assert(self.target_header != null);
+        assert(self.releases_bundled.count() >= 1);
+
+        if (comptime builtin.target.os.tag == .linux) {
+            assert(self.timeout_statx_previous != .none);
         }
     }
 
@@ -816,6 +829,13 @@ pub const Multiversion = struct {
             .init, .ready, .err => {},
         }
 
+        self.stage = .init;
+        self.binary_statx();
+    }
+
+    fn binary_statx(self: *Multiversion) void {
+        assert(self.stage == .init);
+
         self.stage = .source_stat;
         self.io.statx(
             *Multiversion,
@@ -846,18 +866,20 @@ pub const Multiversion = struct {
         // Zero the atime, so we can compare the rest of the struct directly.
         self.timeout_statx.atime = std.mem.zeroes(os.linux.statx_timestamp);
 
-        if (self.timeout_statx_previous == .err or
-            (self.timeout_statx_previous == .previous and !stdx.equal_bytes(
+        if (self.timeout_statx_previous == .previous and
+            stdx.equal_bytes(
             os.linux.Statx,
             &self.timeout_statx_previous.previous,
             &self.timeout_statx,
-        ))) {
-            log.info("binary change detected: {s}", .{self.exe_path});
+        )) {
+            self.stage = .init;
+        } else {
+            if (self.timeout_statx_previous != .none) {
+                log.info("binary change detected: {s}", .{self.exe_path});
+            }
 
             self.stage = .init;
             self.binary_open();
-        } else {
-            self.stage = .init;
         }
 
         self.timeout_statx_previous = .{ .previous = self.timeout_statx };
