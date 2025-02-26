@@ -15,7 +15,7 @@ cd tigerbeetle
 ./tigerbeetle version
 ```
 
-See the [Quick Start](./quick-start.md) for how to use a freshly-built TigerBeetle.
+See the [Quick Start](./start.md) for how to use a freshly-built TigerBeetle.
 
 ## Testing
 

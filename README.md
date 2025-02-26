@@ -14,7 +14,7 @@
 
 ## Start
 
-Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/quick-start/)):
+Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/start/)):
 
 ```console
 $ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
