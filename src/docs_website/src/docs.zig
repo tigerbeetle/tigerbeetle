@@ -86,6 +86,11 @@ fn page_install(
     const nav_html = try Html.create(b.allocator);
     try nav_fill(website, nav_html, root, page);
 
+    try nav_html.write(
+        @embedFile("html/single-page-link.html"),
+        .{ .url_prefix = website.url_prefix },
+    );
+
     const page_path = website.write_page(.{
         .title = page_title,
         .nav = nav_html.string(),
@@ -189,6 +194,7 @@ fn write_single_page(
     // TODO: rewrite all the links
 
     const single_page = website.write_page(.{
+        .include_search = false,
         .nav = nav_html.string(),
         .content = run_single_page_writer.captureStdOut(),
     });
