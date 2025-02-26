@@ -640,6 +640,24 @@ body.sidenav-collapsed {
   }
 }
 
+#single-page-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  text-decoration: none;
+  color: var(--gray-11);
+  border-radius: 6px;
+  padding: 6px 8px;
+
+  &:hover {
+    color: var(--gray-12);
+    background-color: var(--gray-3);
+  }
+}
+
 article {
   flex: 1;
   height: 100%;
