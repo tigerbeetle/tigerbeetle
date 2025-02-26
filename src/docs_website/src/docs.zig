@@ -43,6 +43,8 @@ pub fn build(
         "search-index.json",
     );
 
+    try write_single_page(b, website, &search_index, root_page, output);
+
     try write_404_page(b, website, output);
 }
 
@@ -156,6 +158,34 @@ fn run_pandoc(
     const result = pandoc_step.addPrefixedOutputFileArg("--output=", "pandoc-out.html");
     pandoc_step.addFileArg(b.path(base_path).path(b, source));
     return result;
+}
+
+fn write_single_page(
+    b: *std.Build,
+    website: Website,
+    search_index: *const SearchIndex,
+    root: content.Page,
+    docs: *std.Build.Step.WriteFile,
+) !void {
+    const run_single_page_writer = b.addRunArtifact(b.addExecutable(.{
+        .name = "single_page_writer",
+        .root_source_file = b.path("src/single_page_writer.zig"),
+        .target = b.graph.host,
+    }));
+    for (search_index.items) |entry| {
+        run_single_page_writer.addArg(entry.page_path);
+        run_single_page_writer.addFileArg(entry.html_path);
+    }
+    const nav_html = try Html.create(b.allocator);
+    try nav_fill(website, nav_html, root, root);
+    // TODO: rewrite all the links
+
+    const single_page = website.write_page(.{
+        .nav = nav_html.string(),
+        .content = run_single_page_writer.captureStdOut(),
+    });
+
+    _ = docs.addCopyFile(single_page, "single-page/index.html");
 }
 
 fn write_404_page(

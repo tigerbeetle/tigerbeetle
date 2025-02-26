@@ -623,6 +623,7 @@ const DeadFilesDetector = struct {
             "vortex.zig",
             "file_checker.zig",
             "page_writer.zig",
+            "single_page_writer.zig",
             "search_index_writer.zig",
             "service_worker_writer.zig",
         };
