@@ -492,6 +492,10 @@ nav.left-pane {
 }
 
 nav.side {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100% - 107px); /* height of top-wrapper */
+  justify-content: space-between;
   padding: 0 16px 16px 16px;
   font-size: 14px;
   line-height: 20px;
@@ -643,6 +647,24 @@ body.sidenav-collapsed {
 
   &:hover {
     color: var(--gray-12);
+  }
+}
+
+#single-page-link {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  text-decoration: none;
+  color: var(--gray-11);
+  border-radius: 6px;
+  padding: 6px 8px;
+
+  &:hover {
+    color: var(--gray-12);
+    background-color: var(--gray-3);
   }
 }
 
