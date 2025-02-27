@@ -256,7 +256,7 @@ fn check_link_fragment(
     const html = try read_file_cached(context.arena, context.dir, target_path);
     const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", fragment, "\"" });
     if (std.mem.indexOf(u8, html, needle) == null) {
-        log.err("link target '{s}'' does not contain anchor: '{s}'", .{ target_path, fragment });
+        log.err("link target '{s}' does not contain anchor: '{s}'", .{ target_path, fragment });
         return error.AnchorNotFound;
     }
 }
