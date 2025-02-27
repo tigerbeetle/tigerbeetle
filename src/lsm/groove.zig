@@ -734,7 +734,7 @@ pub fn GrooveType(
         }
 
         pub fn get(groove: *const Groove, key: PrimaryKey) union(enum) {
-            found_object: *const Object,
+            found_object: Object,
             found_orphaned_id,
             not_found,
         } {
@@ -745,7 +745,7 @@ pub fn GrooveType(
                     return .found_orphaned_id;
                 }
 
-                return .{ .found_object = object };
+                return .{ .found_object = object.* };
             }
 
             return .not_found;
@@ -1257,12 +1257,7 @@ pub fn GrooveType(
 
             if (constants.verify) {
                 const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
-
-                // While all that's actually required is that the _contents_ of the old_from_cache
-                // and old objects are identical, in current usage they're always the same piece of
-                // memory. We'll assert that for now, and this can be weakened in future if
-                // required.
-                assert(old_from_cache == old);
+                assert(stdx.equal_bytes(Object, old_from_cache, old));
             }
 
             // Sanity check to ensure the caller didn't accidentally pass in an alias.
