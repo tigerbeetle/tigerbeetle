@@ -65,7 +65,7 @@ correctly is [particularly hard](https://www.usenix.org/system/files/atc20-rebel
 **TigerBeetle assumes that its disk _will_ fail** and takes advantage of replication to proactively
 repair replica's local disks.
 
-- All data in TigerBeetle is immutable, checksummed, and hash-chained, providing a strong guarantee
+- All data in TigerBeetle is immutable, checksummed, and [hash-chained](https://csrc.nist.gov/glossary/term/hash_chain), providing a strong guarantee
   that no corruption or tampering happened. In case of a latent sector error, the error is detected
   and repaired without any operator involvement.
 - Most consensus implementations lose data or become unavailable if the write ahead log gets
