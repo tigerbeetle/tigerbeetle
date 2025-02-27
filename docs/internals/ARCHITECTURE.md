@@ -468,6 +468,67 @@ This high-quality time implementation is than utilized not only for baseness log
 also plays a key role in the internal implementation. Every object in TigerBeetle has a globally
 unique `u64` creation timestamp, which plays the role of synthetic primary key.
 
+### Direct IO
+
+TigerBeetle bypasses the operating system's page cache and uses Direct IO. Normally, when an
+application writes to a file, the operating system only updates the in-memory cache, and the data
+gets to disk later. This is a good default for the vast majority of the applications. TigerBeetle is
+an exception --- it instructs the operating system to read directly from the disk, and write directly
+to the disk, bypassing any caches (please refer to this
+[excellent article](https://transactional.blog/how-to-learn/disk-io) for the overview of the
+relevant OS APIs).
+
+Bypassing page cache is required for correctness. While operating systems provide an `fsync` API to
+flush page cache to disk, it doesn't allow handling errors reliably:
+[Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)
+
+The second reason to bypass the cache is the general principle of avoiding dependencies and assuming
+less about the interface. Concretely, TigerBeetle doesn't require the OS to provide page cache,
+and it doesn't require a file system by virtue of using only a single file. As a consequence,
+TigerBeetle can run directly against a block device.
+
+### Flexible Quorums
+
+There's something odd about a TigerBeetle cluster --- we recommend using an even number of replicas,
+`6`. Usually, consensus implementations use `2f + 1` nodes, `3` or `5`, to have a clear majority for
+quorums. TigerBeetle uses so-called flexible quorums. For `6` replicas, the replication quorum is
+only `3`. It is enough for only a half of the cluster to persist a prepare durably to disk
+for it to be considered logically committed. On the other hand, for changing views (that is, rotating
+the role of the primary to a different replica), at least `4` replicas are needed. Because any
+subset of three replicas and any subset of four replicas intersect, the new primary is guaranteed to
+know all potentially committed prepares.
+
+The upshot here is that it's enough for `3` replicas to be online, including the primary, to keep
+the cluster available. If in a cluster of `6`, three replicas crash simultaneously, there's a
+50% chance that the cluster remains available. If the replicas are crashing one by one, the chance
+is higher: when only `4` replicas remain, the chance that the next one to crash would be a primary
+is only 25%.
+
+### Protocol Aware Recovery
+
+TigerBeetle assumes that the disk can fail, and that the data can be physically lost eventually even
+if the original `write` and `fsync` completed successfully. If that happens, TigerBeetle
+transparently repairs faulty disk sectors using identical data present on the other replicas.
+
+Faulty storage can not be fully encapsulated by the storage interface, and requires consensus
+cooperation to resolve. Here's a useful counter-example. Suppose that the primary accepts a request
+from the client, converts it to a prepare by assigning it a specific op number, and starts the
+replication procedure. During replication, the primary successfully appends the prepare to its local
+WAL, but fails to broadcast it to other replicas. Now, the primary restarts, for whatever reason,
+the cluster switches to a different primary, and, meanwhile, the prepare gets corrupted in the
+original primary's WAL. As the request was prepared, the prepare should make it into the new view.
+But because there's only one copy of prepare in the cluster, and it got corrupted, it is impossible
+to execute this prepare.
+
+This is the key difficulty: _potentially_ committed prepares are not necessary replicated to a full
+replication quorum, and, as such, their durability is reduced. Corruption of a potentially committed
+prepare requires special handling.
+
+The solution is to use the NACK protocol: during a view change, participating replica can positively
+state that it _never_ accepted a particular prepare. If at least `4` out of `6` replicas NACK the
+prepare, then it can be inferred that the prepare was never replicated fully, and it can be safely
+discarded, even if it is corrupted.
+
 ## References
 
 The collection of papers behind TigerBeetle:
