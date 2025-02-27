@@ -470,7 +470,7 @@ unique `u64` creation timestamp, which plays the role of synthetic primary key.
 
 ### Direct IO
 
-TigerBeetle bypasses operating system's page cache and uses Direct IO. That is, normally, when an
+TigerBeetle bypasses the operating system's page cache and uses Direct IO. Normally, when an
 application writes to a file, the operating system only updates the in-memory cache, and the data
 gets to disk later. This is a good default for the vast majority of the applications. TigerBeetle is
 an exception --- it instructs the operating system to read directly from the disk, and write directly
@@ -478,12 +478,12 @@ to the disk, bypassing any caches (please refer to this
 [excellent article](https://transactional.blog/how-to-learn/disk-io) for the overview of the
 relevant OS APIs).
 
-Bypassing page cache is required for correctness. While operating systems provide `fsync` API to
+Bypassing page cache is required for correctness. While operating systems provide an `fsync` API to
 flush page cache to disk, it doesn't allow handling errors reliably:
 [Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)
 
 The second reason to bypass the cache is the general principle of avoiding dependencies and assuming
-less about the interface. Concretely, TigerBeetle doesn't require the OS to provide a page cache,
+less about the interface. Concretely, TigerBeetle doesn't require the OS to provide page cache,
 and it doesn't require a file system by virtue of using only a single file. As a consequence,
 TigerBeetle can run directly against a block device.
 
@@ -492,7 +492,7 @@ TigerBeetle can run directly against a block device.
 There's something odd about a TigerBeetle cluster --- we recommend using an even number of replicas,
 `6`. Usually, consensus implementations use `2f + 1` nodes, `3` or `5`, to have a clear majority for
 quorums. TigerBeetle uses so-called flexible quorums. For `6` replicas, the replication quorum is
-only `3`. That is, it is enough for only a half of the cluster to persist a prepare durably to disk
+only `3`. It is enough for only a half of the cluster to persist a prepare durably to disk
 for it to be considered logically committed. On the other hand, for changing views (that is, rotating
 the role of the primary to a different replica), at least `4` replicas are needed. Because any
 subset of three replicas and any subset of four replicas intersect, the new primary is guaranteed to
