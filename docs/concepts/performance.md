@@ -20,7 +20,7 @@ SQL.
 
 On a busy day in a busy city, taking subway is faster than using a car. On empty streets, a personal
 sports car gives you the best latency, but, when the load and contention increases, due to
-**Little's law**, both latency and throughput become abysmal.
+[**Little's law**](https://en.wikipedia.org/wiki/Little%27s_law), both latency and throughput become abysmal.
 
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
 transactions, 8k apiece. Although TigerBeetle is a replicated database using a consensus algorithm,
