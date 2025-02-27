@@ -6,6 +6,12 @@ function Link (link)
   local is_absolute = link.target:sub(1, 1) == "/"
   local is_anchor = link.target:sub(1, 1) == "#"
 
+  if link.target:sub(1, 29) == "https://docs.tigerbeetle.com/" then
+    link.target = link.target:gsub("https://docs.tigerbeetle.com/", "/")
+    is_external = false
+    is_absolute = true
+  end
+
   -- We have to adjust relative links to go up one more level.
   if not (is_readme or is_external or is_mailto or is_absolute or is_anchor) then
     if link.target:sub(1, 2) == "./"  then
