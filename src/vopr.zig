@@ -217,7 +217,7 @@ pub fn main() !void {
     });
 
     const simulator_requests_max =
-        constants.journal_slot_count * @as(u32, if (cli_args.lite) 1000 else 3);
+        constants.journal_slot_count * @as(u32, if (cli_args.lite) 1000 else 50);
 
     const simulator_options = Simulator.Options{
         .cluster = cluster_options,
