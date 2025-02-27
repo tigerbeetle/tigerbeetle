@@ -76,7 +76,7 @@ fn page_install(
     });
 
     const nav_html = try Html.create(b.allocator);
-    try nav_fill(website, nav_html, root, page);
+    try nav_fill(website, nav_html, root, .{ .target = page });
 
     try nav_html.write(
         @embedFile("html/single-page-link.html"),
@@ -102,32 +102,46 @@ fn page_url(arena: Allocator, page: content.Page) []const u8 {
     return cut_prefix(url, "./").?;
 }
 
-fn nav_fill(website: Website, html: *Html, node: content.Page, target: content.Page) !void {
+fn url2slug(arena: Allocator, url: []const u8) []const u8 {
+    const slug = arena.dupe(u8, url) catch @panic("OOM");
+    std.mem.replaceScalar(u8, slug, '/', '-');
+    return std.mem.concat(arena, u8, &.{ "#", slug }) catch @panic("OOM");
+}
+
+fn nav_fill(website: Website, html: *Html, node: content.Page, options: struct {
+    target: content.Page,
+    single_page: bool = false,
+}) !void {
     try html.write("<ol>\n", .{});
     for (node.children, node.content.children) |node_child, content_child| {
+        var url = page_url(html.arena, node_child);
+        if (options.single_page) {
+            url = url2slug(html.arena, url);
+        } else {
+            url = try std.fmt.allocPrint(html.arena, "{s}/{s}/", .{ website.url_prefix, url });
+        }
+
         if (node_child.children.len > 0) {
             try html.write("<li>\n<details", .{});
-            if (nav_contains(node_child, target)) try html.write(" open", .{});
+            if (nav_contains(node_child, options.target)) try html.write(" open", .{});
             try html.write("><summary class=\"item\">", .{});
             try html.write(
-                \\<a href="$url_prefix/$url/">$title</a>
+                \\<a href="$url">$title</a>
             , .{
-                .url_prefix = website.url_prefix,
-                .url = page_url(html.arena, node_child),
+                .url = url,
                 // Fabio: index page titles are too long
                 .title = content_child.title,
             });
             try html.write("</summary>\n", .{});
-            try nav_fill(website, html, node_child, target);
+            try nav_fill(website, html, node_child, options);
             try html.write("</details></li>\n", .{});
         } else {
             try html.write(
-                \\<li class="item"><a href="$url_prefix/$url/"$class>$title</a></li>
+                \\<li class="item"><a href="$url"$class>$title</a></li>
                 \\
             , .{
-                .url_prefix = website.url_prefix,
-                .url = page_url(html.arena, node_child),
-                .class = if (nav_same_page(node_child, target)) " class=\"target\"" else "",
+                .url = url,
+                .class = if (nav_same_page(node_child, options.target)) " class=\"target\"" else "",
                 .title = content_child.title,
             });
         }
@@ -182,8 +196,7 @@ fn write_single_page(
         run_single_page_writer.addFileArg(entry.html_path);
     }
     const nav_html = try Html.create(b.allocator);
-    try nav_fill(website, nav_html, root, root);
-    // TODO: rewrite all the links
+    try nav_fill(website, nav_html, root, .{ .target = root, .single_page = true });
 
     const single_page = website.write_page(.{
         .include_search = false,
