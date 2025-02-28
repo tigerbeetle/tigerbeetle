@@ -53,7 +53,8 @@ function syncSideNavWithLocation() {
   if (target) target.classList.remove("target");
   document.querySelectorAll("nav.side details").forEach(details => details.open = false);
 
-  const path = location.pathname;
+  let path = location.pathname;
+  if (path.includes("single-page")) path = location.hash;
   if (path.length > 1) {
     document.querySelectorAll("nav.side a").forEach(a => {
       if (a.href.endsWith(path)) {
@@ -67,6 +68,7 @@ function syncSideNavWithLocation() {
 }
 
 syncSideNavWithLocation();
+addEventListener("hashchange", syncSideNavWithLocation);
 
 function addContentEventHandlers() {
   function copyCode(button) {
