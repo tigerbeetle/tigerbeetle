@@ -1,6 +1,6 @@
 # TigerBeetle Architecture
 
-This document is a technical overview of the internals of TigerBeetle.  It includes a problem 
+This document is a technical overview of the internals of TigerBeetle.  It includes a problem
 statement, overview, motivation for design decisions and list of references that have inspired us.
 
 ## Problem Statement
@@ -20,8 +20,9 @@ architecture inefficient. Locking the two accounts and then crossing the network
 application to compute the balances' update is slow. Due to contention, this work also can't be
 efficiently distributed across separate machines.
 
-TigerBeetle implements accounting logic but the underlying state machine can be swapped. TigerBeetle 
-does double-entry bookkeeping but _can_ do anything that has the same requirements.
+TigerBeetle implements accounting logic but the underlying state machine can be swapped. TigerBeetle
+does double-entry bookkeeping but _can_ do anything that has the same requirements: safety and
+performance under extreme contention.
 
 ## Overview
 
@@ -46,19 +47,19 @@ the prepare is considered committed. This means it can no longer be removed from
 the log.
 
 Replicas execute committed prepares in sequence number order by applying a batch of transfers to
-local state. Because all replicas start with the same (empty) state and the state transition function 
+local state. Because all replicas start with the same (empty) state and the state transition function
 is deterministic, the replicas arrive at the same state.
 
 If a primary fails, the consensus algorithm proper ensures that a different replica becomes a
 primary. The new primary correctly reconstructs the latest state of the log.
 
-The derived state of the system is the append-only log of immutable transfers and the current 
+The derived state of the system is the append-only log of immutable transfers and the current
 balances of all accounts. Past transfers are stored for idempotence. Physically on disk, the state is
 stored as a collection (forest) of LSM trees. Each LSM tree is a sorted collection of objects.
-For example, transfer objects are stored in a tree sorted by a unique timestamp which allows for 
-efficient lookup. Auxiliary index trees are used to speed up other kinds of lookups. For example, 
-there's a tree which stores a tuple of each transfer's debit account id and transfer's timestamp 
-sorted by account id. This tree allows looking up all the timestamps for transfers from a specific 
+For example, transfer objects are stored in a tree sorted by a unique timestamp which allows for
+efficient lookup. Auxiliary index trees are used to speed up other kinds of lookups. For example,
+there's a tree which stores a tuple of each transfer's debit account id and transfer's timestamp
+sorted by account id. This tree allows looking up all the timestamps for transfers from a specific
 account. Knowing the timestamp, it is then possible to retrieve the transfer object itself.
 
 The forest of LSM trees is implemented as an on-disk functional data structure. The data is
@@ -66,17 +67,17 @@ organized as a tree of on-disk blocks (a block is 0.5 MiB in size). Blocks refer
 their on-disk address and checksum of their content. From a root block, called the superblock,
 the rest of the state is reachable.
 
-When applying prepares to local state, replicsa don't overwrite any existing blocks in the data
+When applying prepares to local state, replicas don't overwrite any existing blocks in the data
 file and instead write new blocks only. This maintains the state of the superblock in memory. Once in
 a while, the superblock is atomically flushed to storage forming a new checkpoint. When a replica
-crashes and restarts it loses access to its previous in-memory superblock. It reads the previous 
-checkpoint/superblock from storage and reconstructs the lost state by replaying the suffix of the 
-log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the exact 
+crashes and restarts it loses access to its previous in-memory superblock. It reads the previous
+checkpoint/superblock from storage and reconstructs the lost state by replaying the suffix of the
+log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the exact
 same state.
 
 TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
-block of an LSM trees and the corresponding `fsync` returns `0` it could still be the case that when 
-reading this data later it will be found to be corrupted. Given that the system is already replicated 
+block of an LSM trees and the corresponding `fsync` returns `0` it could still be the case that when
+reading this data later it will be found to be corrupted. Given that the system is already replicated
 for high-availability, it would be wasteful to not use redundancy to repair local storage failures. So
 this is exactly what TigerBeetle does.
 
@@ -106,7 +107,7 @@ replicated across six replicas. Even if some of them are down, the cluster as a 
 available.
 
 **Large Data Sets:** an in-memory hash table is good until your data stops fitting in RAM.
-TigerBeetle allows working with larger-than-memory datasets. To keep optimal performance, the 
+TigerBeetle allows working with larger-than-memory datasets. To keep optimal performance, the
 hot path of the dataset should still fit within RAM.
 
 ### Don't Waste Durability
@@ -114,7 +115,7 @@ hot path of the dataset should still fit within RAM.
 The function of consensus algorithm is to convert durability into availability. Data placed on
 durable storage is valuable and should be utilized fully.
 
-If an individual block on any replica bit rots it is wasteful not to repair this block using 
+If an individual block on any replica bit rots it is wasteful not to repair this block using
 equivalent data from other replicas in the cluster.
 
 ### Non-Interactive Transactions
@@ -129,7 +130,7 @@ general-purpose relational database, the application:
 5. Commits the transaction.
 
 Crucially, step 2 acquires a lock on the balances which is not released until step 5. A lock is
-held over a network round-trip. This approach gives good performance if most transactions are 
+held over a network round-trip. This approach gives good performance if most transactions are
 independent (e.g. are mostly reads).
 
 For financial accounting, the opposite is true. Most transactions are writes and conflict due
@@ -145,7 +146,7 @@ accounts are just way more popular than others. Transfers between hot accounts i
 sequentialize the system. Trying to make transactions parallel doesn't make it faster. The
 overhead of synchronization tends to dominate useful work. Channeling [Frank
 McSherry's paper](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf),
-our claim is that financial transaction processing is an infinite-COST problem. 
+our claim is that financial transaction processing is an infinite-COST problem.
 
 The positive reason for using a single thread is that CPUs are actually quite fast and the reports
 of Moore's Law demise are somewhat overstated. A single core can easily scale to 1mil TPS if you:
@@ -160,41 +161,45 @@ testing much more efficient.
 ### Static Memory Allocation
 
 We state that TigerBeetle doesn't use `malloc` and `free` and instead does "static memory allocation".
-This is somewhat idiosyncratic use of the term so let's be precise about what TigerBeetle does and 
+This is somewhat idiosyncratic use of the term so let's be precise about what TigerBeetle does and
 does not do.
 
-Unlike some embedded systems, TigerBeetle doesn't use global statics (`.bss` section) for allocation.
-The memory usage of TigerBeetle depends on the CLI arguments passed at runtime.
+When TigerBeetle starts, for every "object type" in the system it computes the worst-case upper
+bound for the number of objects needed, based on CLI arguments. Then TigerBeetle allocates exactly
+that number of objects and enters the main even loop. After startup, no new objects are created.
+Therefore no dynamic memory allocation or deallocation is needed.
 
-TigerBeetle also doesn't do arena allocation. It allocates an appropriately fixed-sized arena for 
-allocations at the start and fails with an 'out of memory' error if the limit is exceeded. In 
-TigerBeetle, static memory allocation is a consequence of everything having an explicit upper bound.
+This is different form truly static allocation of some embedded systems. TigerBeetle doesn't use
+global statics (`.bss` section) for allocation and memory usage depends on the runtime CLI arguments.
 
-When TigerBeetle starts, it computes the worst case memory allocation scenario for every "object" in 
-the system. After startup, no new objects are created therefore no dynamic memory allocation 
-is needed. The upper bounds are computed using a combination of static and dynamic information.
+This is also different from arena allocation. Some systems allocate a fixed-sized arena at the start
+and fail with an 'out of memory' error if the limit is ever exceeded. That is, while the memory
+usage is bounded, there's no guarantee that enough memory is reserved. In TigerBeetle, the amount of
+memory used is a consequence of everything having an explicit upper bound.
 
-Knowing the limits ensures that the system continues to function correctly even when overloaded. For 
-example, TigerBeetle doesn't need to have _explicit_ code for handling backpressure. If everything has 
-a limit, there's nothing to grow without bound to begin with. Backpressure arsis from the entire 
+Knowing the limits ensures that the system continues to function correctly even when overloaded. For
+example, TigerBeetle doesn't need to have _explicit_ code for handling backpressure. If everything
+has a limit, there's nothing to grow without bound to begin with. Backpressure arsis from the entire
 system of components needing to honor each-other's limits.
 
-Another interesting consequence of static limits is runway concurrency. In highly concurrent 
-applications there are more concurrent tasks than the number of underlying resources available. This 
-leads to oversubscription. A concurrent task is usually a closure allocated somewhere on the heap and 
-registered with an event loop (a `Box<dyn Future>`). TigerBeetle _can't_ heap allocate structures at 
-runtime. Each TigerBeetle "future" is represented by an explicit struct which is statically allocated 
-as a field of a component that owns the structure. There's always a natural limit of how many concurrent 
-tasks can be in flight!
+Another interesting consequence of static limits is runway concurrency. In highly concurrent
+applications there are more concurrent tasks than the number of underlying resources available. This
+leads to oversubscription. A concurrent task is usually a closure allocated somewhere on the heap
+and registered with an event loop (a `Box<dyn Future>`). TigerBeetle _can't_ heap allocate
+structures at runtime. Each TigerBeetle "future" is represented by an explicit struct which is
+statically allocated as a field of a component that owns the structure. There's always a natural
+limit of how many concurrent tasks can be in flight!
 
-In summary, **static allocation is a forcing function to ensure that everything has a limit**, 
+In summary, **static allocation is a forcing function to ensure that everything has a limit**,
 and a natural consequence of these limits.
 
 Somewhat surprisingly, our experience is that static allocation also simplifies the system greatly.
-You spend more time thinking up-front but after the initial design the interplay tends to just work out.
+You spend more time thinking up-front but after the initial design the interplay tends to just work
+out.
 
-Static allocation makes the system faster and greatly reduces latency variation. This is another 
-consequence of knowing the limits and "physics" of the underlying system.
+Static allocation makes the system faster and greatly reduces latency variation. This is another
+consequence of knowing the limits and "physics" of the underlying system, but is not the main reason
+for choosing static allocation.
 
 ### No Dependencies
 
@@ -205,10 +210,10 @@ TigerBeetle avoids dependencies. It depends on:
 - parts of Zig standard library, for various basic appliances like sorting algorithms or hash maps.
 
 The usefulness of dependencies is generally inversely-proportional to the lifetime of the project.
-For longer lived projects, it makes sense to control more of the underlying moving parts. TigerBeetle 
-is explicitly engineered for the long-term. It makes sense to start building all the necessary 
-infrastructure today. This removes temptation to compromise --- static allocation is done throughout 
-the stack because we wrote most of the stack. It is a pleasant intentional coincidence that Zig's 
+For longer lived projects, it makes sense to control more of the underlying moving parts. TigerBeetle
+is explicitly engineered for the long-term. It makes sense to start building all the necessary
+infrastructure today. This removes temptation to compromise --- static allocation is done throughout
+the stack because we wrote most of the stack. It is a pleasant intentional coincidence that Zig's
 standard library APIs are compatible with static allocation.
 
 Avoiding dependencies also acts as a forcing function for keeping the code simple and easy to
@@ -226,13 +231,13 @@ close contender.
 Both Zig and Rust provide spatial memory safety. Rust has better temporal and thread safety but
 static allocation and single-threaded execution reduce the relative importance of these benefits.
 Additionally, mere memory safety would a low bar for TigerBeetle. General correctness is table
-stakes. Requiring a comprehensive testing strategy leaves little space for bugs to escape testing 
+stakes. Requiring a comprehensive testing strategy leaves little space for bugs to escape testing
 but be caught by Rust-style type system.
 
 The primary benefit of Zig is the favorable ratio of expressivity to language complexity.
 "Expressivity" here means ability to produce the desired machine code versus source-level
 abstractions. Zig is a DSL for machine code. Its comptime features makes it very easy to _directly_
-express what you want the computer to do. This comes at the cost of missing declaration-site 
+express what you want the computer to do. This comes at the cost of missing declaration-site
 interfaces but it's less important in a zero-dependency context.
 
 Zig provides excellent control over layout, alignment and padding. Alignment-carrying pointer types
@@ -241,17 +246,17 @@ constructor. Instead they explicitly pass allocator to the specific methods that
 This is a perfect fit for the memory management strategy used in TigerBeetle. Cross compilation
 that works and direct (glibc-less) bindings to the kernel help keep dependency count down.
 
-Most importantly, this all is possible using very frugal language machinery. Zig lends itself to 
+Most importantly, this all is possible using very frugal language machinery. Zig lends itself to
 low-abstraction first-order code that does the work directly. This makes it easy to author
 and debug performance-oriented code.
 
 ### Determinism
 
-A meta principle above "static allocation" is determinism. Determinism means that given the same input 
-the software gives the same logical result and arrives at it using the same physical path. In general, 
-everything in TigerBeetle is deterministic.There's no single or specific reason to demand determinism 
-but it consistently simplifies and improves the system. Here are some of the places where determinism 
-leads to big advantages:
+A meta principle above "static allocation" is determinism. Determinism means that given the same input
+the software gives the same logical result and arrives at it using the same physical path. In general,
+everything in TigerBeetle is deterministic.There's no single reason to demand determinism but it
+consistently simplifies and improves the system. Here are some of the places where determinism leads
+to big advantages:
 
 - Simplifies the implementation of a replicated state machine. It reduces the
   problem of synchronizing mutable state to a much simpler problem of synchronizing an immutable,
@@ -262,7 +267,7 @@ leads to big advantages:
   presence of uncorrelated faults.
 
   If on top of logical consistency the replicas guarantee that the bytes on disk representing the data
-  are _also_ the same it it becomes sufficient for repair to transfer just a single disk block containing
+  are _also_ the same it becomes sufficient for repair to transfer just a single disk block containing
   the problematic byte. This is the approach taken by TigerBeetle. It is guaranteed that replicas in the
   cluster converge on byte-for-byte identical LSM tree structure.
 - Physical repair in turn massively simplifies error handing. The function that reads data from
@@ -275,8 +280,8 @@ leads to big advantages:
 
 ### Simulation Testing
 
-TigerBeetle uses a variety of techniques to ensure that the code is correct – from example-based 
-tests to strict style guides. The most important technique deployed is simulation testing, as seen 
+TigerBeetle uses a variety of techniques to ensure that the code is correct – from example-based
+tests to strict style guides. The most important technique deployed is simulation testing, as seen
 on [Sim TigerBeetle](https://sim.tigerbeetle.com).
 
 TigerBeetle's simulator, the VOPR, can run an entire cluster on a single thread, injecting various storage
@@ -284,7 +289,7 @@ faults and infinitely speeding up time. VOPR combines a smart workload generator
 a thousand CPU cores. It makes is easy to exercise all the possible behaviors of the system.
 
 Crucially, unlike formal proofs and model checking, the simulation testing exercises a specific
-implementation. Tools like TLA are invaluable to debug an algorithm. They are of little help if you 
+implementation. Tools like TLA are invaluable to debug an algorithm. They are of little help if you
 want to check if your code implements the algorithm correctly or verify underlying _assumptions_.
 
 ### Mechanical Sympathy
@@ -301,22 +306,22 @@ In the context of TigerBeetle, mechanical sympathy spans all four primary colors
 - Memory
 - CPU
 
-Network has limited bandwidth. This means that if one node in the network requires much higher
-bandwidth then the rest, the network will be underutilized. When the primary needs to replicate a 
-prepare across the cluster, a ring topology is used: the primary doesn't broadcast the prepare to every 
+**Network** has limited bandwidth. This means that if one node in the network requires much higher
+bandwidth then the rest, the network will be underutilized. When the primary needs to replicate a
+prepare across the cluster, a ring topology is used: the primary doesn't broadcast the prepare to every
 other replica. It sends it to just one other replica, relying on that replica to forward on the prepare.
 
-Storage is typically capable of sustaining several parallel IO operations and TigerBeetle tries to
+**Storage** is typically capable of sustaining several parallel IO operations and TigerBeetle tries to
 keep it saturated. For example, when compaction needs to read a table from disk it enqueues writes
 for several of the table's blocks at a time. At the same time, care is taken to not oversubscribe
 the storage and there is a limit on the maximum number of concurrent IO operations.
 
-Memory is not fast. Operations that miss the cache and hit the memory are dramatically slower.
+**Memory** is not fast. Operations that miss the cache and hit the memory are dramatically slower.
 TigerBeetle data structures are compact, to maximize the chance that the data is cached, and
-organized around cache lines. All data for a particular operation can be found in a single cache 
+organized around cache lines. All data for a particular operation can be found in a single cache
 line as opposed to spread out in memory. For example, the size of a Transfer object is two cache lines.
 
-CPU can both sprint and parkour. But it is so much better at sprinting! CPU is very fast at straight
+**CPU** can both sprint and parkour. But it is so much better at sprinting! CPU is very fast at straight
 line code and can sweep several lanes at once with SIMD but `if`s (especially unpredictable ones)
 make it stagger. When processing events, where each event is either a new account or a new transfer,
 TigerBeetle lifts the branching up. Events come in batches and each batch is homogeneous ---
@@ -328,7 +333,7 @@ One of the most effective optimization principles is the idea of amortizing the 
 have to do a costly operation, make sure that its results "pay for" many smaller useful operation.
 TigerBeetle uses batching at many different levels:
 
-- Individual transfers are aggregated into a prepare. This amortizes replication and prefetches IO
+- Individual transfers are aggregated into a prepare. This amortizes replication and prefetch IO
   overhead.
 - Changes from 32 prepares are aggregated in memory before being written to disk together
 - Changes from 1024 prepares are aggregated before checkpoint is atomically advanced by overwriting
@@ -352,7 +357,7 @@ using key prefixes. This is not the case for TigerBeetle and instead many indivi
 (the LSM forest). These trees store fixed-sized values. For example, in the Transfer object tree the
 value is 128 bytes and for id tree the size of value is 32 bytes (`u128` id, `u64` timestamp, `u64`
 padding). Each tree can be specialized for specific value size. This improves performance
-and storage efficiency. Zig's `comptime` makes it particularly easy to configure the LSM Forest 
+and storage efficiency. Zig's `comptime` makes it particularly easy to configure the LSM Forest
 through meta programming.
 
 ### Control Plane / Data Plane Separation
@@ -363,7 +368,7 @@ and buttons. By pressing the buttons, you control the jet engines. Most of the w
 plane is done by the engines, the data plane. The pilot doesn't do the heavy lifting, they direct
 the power of the engine.
 
-In the context of TigerBeetle, deciding which prepare to apply is 'control plane' and going through 
+In the context of TigerBeetle, deciding which prepare to apply is 'control plane' and going through
 each individual transfer is 'data plane'. In general, control plane is O(1) to data plane's O(N).
 
 It is important to separate the two modes of operation. Keeping control plane `if`s outside
@@ -379,8 +384,8 @@ transfer whether it is applicable. Then it computes the desired balance change a
 a result in the output slice. Crucially, the `commit` function itself doesn't do any reading from
 storage. This is the key to performance.
 
-All IO happens in the separate prefetch phase. Given a batch of transfers, it is possible to predict 
-which accounts need to be fetched without actually executing the transfers. What's more, while commit 
+All IO happens in the separate prefetch phase. Given a batch of transfers, it is possible to predict
+which accounts need to be fetched without actually executing the transfers. What's more, while commit
 execution has to happen sequentially, all prefetch IO can happen in parallel.
 
 ### Embracing Concurrency
@@ -404,7 +409,7 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
   - starts the replication loop.
 
   The prepare is considered committed when the primary receives a quorum of `prepare_ok`from a set
-  of replicas. Ths quorum doesn't need to include the primary. It can the case that the primary
+  of replicas. This quorum doesn't need to include the primary. It can the case that the primary
   concurrently executes a prepare while still writing corresponding message to the (WAL).
 
 - A similar pipelining structure works in LSM compaction. Compaction is a batched two-way merge
@@ -436,34 +441,34 @@ prepare.
 
 The ultimate source of time for the TigerBeetle cluster is Network Time Protocol (NTP). A potential
 failure mode with NTP is primary partitioned from NTP servers. To make sure that the primary's clock
-is within acceptable error margin, the cluster aggregates timing information from a replication quorum 
+is within acceptable error margin, the cluster aggregates timing information from a replication quorum
 of replicas. TigerBeetle also guarantees that the time observed by the state machine is strictly monotonic.
 
-This high-quality time implementation is utilized for baseness logic (timeouts) and plays a key role 
-in the internal implementation. Every object in TigerBeetle has a globally unique `u64` creation timestam
-which plays the role of synthetic primary key.
+This high-quality time implementation is utilized for business logic (timeouts) and plays a key role
+in the internal implementation. Every object in TigerBeetle has a globally unique `u64` creation
+timestamp which plays the role of synthetic primary key.
 
 ### Direct IO
 
 TigerBeetle bypasses the operating system's page cache and uses Direct IO. Normally, when an
 application writes to a file, the operating system only updates the in-memory cache and the data
 gets to disk later. This is a good default for the vast majority of the applications but TigerBeetle is
-an exception. It instructs the operating system to read directly from and write directly to the disk, 
-bypassing any caches (refer to this [excellent article](https://transactional.blog/how-to-learn/disk-io) 
+an exception. It instructs the operating system to read directly from and write directly to the disk,
+bypassing any caches (refer to this [excellent article](https://transactional.blog/how-to-learn/disk-io)
 for the overview of the relevant OS APIs).
 
 Bypassing page cache is required for correctness. While operating systems provide an `fsync` API to
 flush page cache to disk, it doesn't allow handling errors reliably:
 [Can Applications Recover from fsync Failures?](https://www.usenix.org/system/files/atc20-rebello.pdf)
 
-The second reason to bypass the cache is the general principle of avoiding dependencies and reducing 
-assumptions. Concretely, TigerBeetle require neither the OS to provide page cache nor a 
-file system by virtue of using only a single file. As a consequence, TigerBeetle can run directly 
+The second reason to bypass the cache is the general principle of avoiding dependencies and reducing
+assumptions. Concretely, TigerBeetle require neither the OS to provide page cache nor a
+file system by virtue of using only a single file. As a consequence, TigerBeetle can run directly
 against a block device.
 
 ### Flexible Quorums
 
-There's something odd about a TigerBeetle cluster. We recommend using an even number of `6` replicas. 
+There's something odd about a TigerBeetle cluster. We recommend using an even number of `6` replicas.
 Usually, consensus implementations use `2f + 1` nodes, `3` or `5`, to have a clear majority for
 quorums. TigerBeetle uses so-called flexible quorums. For `6` replicas, the replication quorum is
 only `3`. It is enough for only a half of the cluster to persist a prepare durably to disk
@@ -487,27 +492,27 @@ transparently repairs faulty disk sectors using identical data present on the ot
 Faulty storage can not be fully encapsulated by the storage interface and requires consensus
 cooperation to resolve. Here's a useful counter-example.
 
-The primary accepts a request from the client, converts it to a prepare by assigning it a specific 
-operation number and starts the replication procedure. During replication, the primary successfully 
-appends the prepare to its local WAL but fails to broadcast it to other replicas. Now, for whatever 
-reason, the primary restarts, the cluster switches to a different primary and the prepare gets corrupted 
-in the original primary's WAL. As the request was prepared, the prepare should make it into the new view. 
-But because there's only one copy of prepare in the cluster, and it got corrupted, it is impossible 
+The primary accepts a request from the client, converts it to a prepare by assigning it a specific
+operation number and starts the replication procedure. During replication, the primary successfully
+appends the prepare to its local WAL but fails to broadcast it to other replicas. Now, for whatever
+reason, the primary restarts, the cluster switches to a different primary and the prepare gets corrupted
+in the original primary's WAL. As the request was prepared, the prepare should make it into the new view.
+But because there's only one copy of prepare in the cluster, and it got corrupted, it is impossible
 to execute this prepare.
 
 The key difficulty: _potentially_ committed prepares are not necessary replicated to a full
 replication quorum. As such their durability is reduced. Corruption of a potentially committed
 prepare requires special handling. The solution is to use the NACK protocol.
 
-During a view change, participating replicas can positively state that they _never_ accepted a particular 
-prepare. If at least `4` out of `6` replicas NACK the prepare then it can be inferred that the prepare 
-was never replicated fully and it can be safelydiscarded _even if it is corrupted_.
+During a view change, participating replicas can positively state that they _never_ accepted a particular
+prepare. If at least `4` out of `6` replicas NACK the prepare then it can be inferred that the prepare
+was never replicated fully and it can be safely discarded _even if it is corrupted_.
 
 ## Conclusion
 
-TigerBeetle is designed to deliver mission-critical safety and 1000x performance. Presently focused 
-on financial transactions, it fundamentally solves the challenge of cost-efficienct OLTP at scale 
-in a world and future becoming exponentially more transactional. 
+TigerBeetle is designed to deliver mission-critical safety and 1000x performance. Presently focused
+on financial transactions, it fundamentally solves the challenge of cost-efficiency OLTP at scale
+in a world and future becoming exponentially more transactional.
 
 ## References
 
