@@ -22,6 +22,9 @@
   --orange-10: #EF5F00;
   --yellow-10: #F1A600;
   --sky-10: #32C6F6;
+  --amber-2: #FEFBE9;
+  --amber-6: #F3D673;
+  --amber-12: #4F3422;
 
   --highlight-active: #FFFFFF4D;
 
@@ -65,6 +68,9 @@
     --orange-10: #FF801F;
     --yellow-10: #FFEF5C;
     --sky-10: #A8EEFF;
+    --amber-2: #1D180F;
+    --amber-6: #5C3D05;
+    --amber-12: #FFE7B3;
 
     --highlight-active: #FFFFFFB2;
 
@@ -637,6 +643,23 @@ body.sidenav-collapsed {
 
   &:hover {
     color: var(--gray-12);
+  }
+}
+
+#note-nested-css {
+  color: var(--amber-12);
+  background-color: var(--amber-2);
+  border: 1px solid var(--amber-6);
+  border-radius: 6px;
+  margin: 20px;
+  padding: 12px 16px;
+  max-width: 850px;
+  font-size: 16px;
+  line-height: 24px;
+
+  & {
+    /* Hide this note in supported browsers. */
+    display: none;
   }
 }
 
