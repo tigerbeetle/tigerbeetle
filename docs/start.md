@@ -28,7 +28,7 @@ powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.co
 ```
 
 Building from source is possible and easy, but is not recommended for most users. Refer to the
-[internal documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internal) for
+[internals documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internals) for
 compilation instructions.
 
 ## Run a Cluster
