@@ -492,6 +492,9 @@ nav.left-pane {
 }
 
 nav.side {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
   padding: 0 16px 16px 16px;
   font-size: 14px;
   line-height: 20px;
@@ -540,6 +543,7 @@ nav.side {
 
   /* indentation */
   ol {
+    flex-grow: 1;
     background-repeat: repeat-y;
 
     li.item {
@@ -648,6 +652,7 @@ body.sidenav-collapsed {
 
 #single-page-link {
   display: flex;
+  justify-content: center;
   align-items: center;
   gap: 8px;
   font-size: 14px;
@@ -655,12 +660,14 @@ body.sidenav-collapsed {
   font-weight: 400;
   text-decoration: none;
   color: var(--gray-11);
+  border: 1px solid var(--gray-4);
   border-radius: 6px;
-  padding: 6px 8px;
+  padding: 5px 7px;
+  margin-top: 16px;
 
   &:hover {
     color: var(--gray-12);
-    background-color: var(--gray-3);
+    background-color: var(--gray-4);
   }
 }
 
