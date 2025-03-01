@@ -1,7 +1,7 @@
 // todo: don't double-prefix enum/packed struct variant names
 // todo: dead code? `skip = &.{ "reserved", "root", "register" };`
 // todo: investigate build script rebuilding on commit (.git directory changes?)
-// todo: packed struct typedefs are not the right width
+// todo: packed struct typedefs are not the right width in C generator, etc
 // todo: use zig names for structs?
 
 const std = @import("std");
@@ -91,7 +91,27 @@ fn emit_enum(
     var suffix_pos = std.mem.lastIndexOf(u8, rust_name, "_").?;
     if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
 
-    try buffer.writer().print("pub type {s} = ::std::os::raw::c_uint;\n", .{rust_name});
+    const backing_type = switch(@typeInfo(Type)) {
+        .Struct => |s| s.backing_integer.?,
+        .Enum => |e| e.tag_type,
+        else => @panic("unexpected"),
+    };
+    const rust_backing_type_str = switch (@typeInfo(backing_type)) {
+        .Int => |i| brk: {
+            break :brk switch (i.bits) {
+                32 => switch (i.signedness) {
+                    .unsigned => "u32",
+                    .signed => "i32",
+                },
+                16 => "u16",
+                8 => "u8",
+                else => @panic("unexpected"),
+            };
+        },
+        else => @panic("unexpected"),
+    };
+
+    try buffer.writer().print("pub type {s} = {s};\n", .{rust_name, rust_backing_type_str});
 
     inline for (type_info.fields, 0..) |field, i| {
         comptime var skip = false;

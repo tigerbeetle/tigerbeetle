@@ -247,8 +247,8 @@ impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
     }
 }
 
-impl From<u32> for Status {
-    fn from(other: u32) -> Status {
+impl From<i32> for Status {
+    fn from(other: i32) -> Status {
         use tbc::*;
         use Status::*;
 
@@ -270,7 +270,7 @@ impl From<u8> for PacketStatus {
         use tbc::*;
         use PacketStatus::*;
 
-        match other as u32 {
+        match other {
             TB_PACKET_STATUS_TB_PACKET_OK => panic!(),
             TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA => TooMuchData,
             TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED => ClientEvicted,

@@ -678,7 +678,7 @@ pub enum Status {
     AddressLimitExceeded,
     SystemResources,
     NetworkSubsystem,
-    Unknown(u32),
+    Unknown(i32),
 }
 
 impl std::error::Error for Status {}
@@ -706,7 +706,7 @@ pub enum PacketStatus {
     ClientShutdown,
     InvalidOperation,
     InvalidDataSize,
-    Unknown(u32),
+    Unknown(u8),
 }
 
 impl std::error::Error for PacketStatus {}
@@ -745,7 +745,7 @@ impl<const N: usize> Default for Reserved<N> {
 }
 
 fn create_packet<RustEvent, CEvent>(
-    op: u32, // TB_OPERATION
+    op: u8, // TB_OPERATION
     events: &[RustEvent],
 ) -> (Box<tbc::tb_packet_t>, Receiver<CompletionMessage<CEvent>>)
 where
@@ -789,7 +789,7 @@ where
     let packet = Box::new(tbc::tb_packet_t {
         next: ptr::null_mut(),
         user_data: Box::into_raw(callback) as *mut c_void,
-        operation: op as u8,
+        operation: op,
         status: tbc::TB_PACKET_STATUS_TB_PACKET_OK as u8,
         data_size: (mem::size_of::<CEvent>() * events_len) as u32,
         data: events_ptr as *mut c_void,
