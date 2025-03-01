@@ -231,11 +231,7 @@ function selectResult(node) {
     searchPreviewUsed = true;
   }
   statePathname = location.pathname;
-  if (page.title === "TigerBeetle Docs") {
-    document.title = page.title;
-  } else {
-    document.title = "TigerBeetle Docs | " + page.title;
-  }
+  document.title = page.title;
   handleAnchor();
   highlightText(searchInput.value, content);
   if (node.tagName == "A") markActiveHighlight(content);
