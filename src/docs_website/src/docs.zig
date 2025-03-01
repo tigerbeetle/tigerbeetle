@@ -73,19 +73,11 @@ fn page_install(
         .html_path = page_html,
     });
 
-    const title_suffix = "TigerBeetle Docs";
-    const page_title = blk: {
-        if (std.mem.eql(u8, page.content.title, title_suffix)) {
-            break :blk page.content.title;
-        }
-        break :blk try std.mem.join(b.allocator, " | ", &.{ page.content.title, title_suffix });
-    };
-
     const nav_html = try Html.create(b.allocator);
     try nav_fill(website, nav_html, root, page);
 
     const page_path = website.write_page(.{
-        .title = page_title,
+        .title = page.content.title,
         .nav = nav_html.string(),
         .content = page_html,
     });
@@ -175,7 +167,7 @@ fn write_404_page(
     var html = try Html.create(b.allocator);
     try html.write(template, .{
         .url_prefix = website.url_prefix,
-        .title = "Page not found | TigerBeetle Docs",
+        .title = "Page not found",
         .author = "TigerBeetle Team",
     });
     _ = docs.add("404.html", html.string());
