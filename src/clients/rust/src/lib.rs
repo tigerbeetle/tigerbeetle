@@ -36,7 +36,7 @@ impl Client {
     pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, Status> {
         unsafe {
             let mut tb_client = std::ptr::null_mut();
-            let status = tb_client::tb_client_init(
+            let status = tbc::tb_client_init(
                 &mut tb_client,
                 &cluster_id.to_le_bytes() as *const u8,
                 addresses.as_ptr() as *const c_char,
@@ -44,7 +44,7 @@ impl Client {
                 COMPLETION_CONTEXT,
                 Some(on_completion),
             );
-            if status == tb_client::TB_STATUS_TB_STATUS_SUCCESS {
+            if status == tbc::TB_STATUS_TB_STATUS_SUCCESS {
                 Ok(Client { client: tb_client })
             } else {
                 Err(status.into())

@@ -72,6 +72,7 @@ pub fn build(b: *std.Build) !void {
         .clients_c = b.step("clients:c", "Build C client library"),
         .clients_c_sample = b.step("clients:c:sample", "Build C client sample"),
         .clients_dotnet = b.step("clients:dotnet", "Build dotnet client shared library"),
+        .clients_rust = b.step("clients:rust", "Build Rust client shared library"),
         .clients_go = b.step("clients:go", "Build Go client shared library"),
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
@@ -265,6 +266,11 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build clients:$lang
+    build_rust_client(b, build_steps.clients_rust, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .mode = mode,
+    });
     build_go_client(b, build_steps.clients_go, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
@@ -926,6 +932,30 @@ fn strip_glibc_version(triple: []const u8) []const u8 {
     }
     assert(std.mem.indexOf(u8, triple, "gnu") == null);
     return triple;
+}
+
+fn build_rust_client(
+    b: *std.Build,
+    step_clients_rust: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        mode: Mode,
+    },
+) void {
+    const rust_bindings_generator = b.addExecutable(.{
+        .name = "rust_bindings",
+        .root_source_file = b.path("src/clients/rust/rust_bindings.zig"),
+        .target = b.graph.host,
+    });
+    rust_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    rust_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = rust_bindings_generator,
+        .path = "./src/clients/rust/src/tb_client.rs",
+    });
+
+    step_clients_rust.dependOn(&bindings.step);
 }
 
 fn build_go_client(

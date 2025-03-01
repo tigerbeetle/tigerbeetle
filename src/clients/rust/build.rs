@@ -1,4 +1,3 @@
-use anyhow::Context as _;
 use ignore::Walk;
 use std::{env, fs, path::Path};
 
@@ -43,21 +42,6 @@ fn main() -> anyhow::Result<()> {
     } else {
         todo!();
     }
-
-    let tb_client_h_path = format!("{cargo_manifest_dir}/assets/tb_client.h");
-    let bindings = bindgen::Builder::default()
-        .header(tb_client_h_path)
-        // Tell cargo to invalidate the built crate whenever any of the
-        // included header files changed.
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .generate()
-        .context("Unable to generate bindings")?;
-
-    // Write the bindings to the $OUT_DIR/bindings.rs file.
-    let bindings_path = format!("{cargo_manifest_dir}/src/tb_client.rs");
-    bindings
-        .write_to_file(bindings_path)
-        .context("Couldn't write bindings!")?;
 
     Ok(())
 }
@@ -111,8 +95,9 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
     }
 
     let build_targets = [
-        "clients:c", // Build the tb_client library
-        "install",   // Build tigerbeetle binary for testing
+        "clients:c",    // Build the tb_client library and tb_client.h
+        "clients:rust", // Build the tb_client library and tb_client.rs
+        "install",      // Build tigerbeetle binary for testing
     ];
 
     for build_target in build_targets {
