@@ -44,32 +44,6 @@ pub fn StateMachineType(
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
 
-        /// Empty demuxer to be compatible with vsr.Client batching.
-        pub fn DemuxerType(comptime operation: Operation) type {
-            return struct {
-                const Demuxer = @This();
-
-                reply: []ResultType(operation),
-                offset: u32 = 0,
-
-                pub fn init(reply: []u8) Demuxer {
-                    return .{
-                        .reply = @alignCast(std.mem.bytesAsSlice(
-                            ResultType(operation),
-                            reply,
-                        )),
-                    };
-                }
-
-                pub fn decode(self: *Demuxer, event_offset: u32, event_count: u32) []u8 {
-                    assert(self.offset == event_offset);
-                    assert(event_offset + event_count <= self.reply.len);
-                    defer self.offset += event_count;
-                    return std.mem.sliceAsBytes(self.reply[self.offset..][0..event_count]);
-                }
-            };
-        }
-
         pub const Options = struct {
             batch_size_limit: u32,
             lsm_forest_node_count: u32,
@@ -321,6 +295,10 @@ fn WorkloadType(comptime StateMachine: type) type {
         const Workload = @This();
         const constants = StateMachine.constants;
 
+        pub const releases_supported: []const vsr.Release = &.{
+            vsr.Release.minimum,
+        };
+
         random: std.rand.Random,
         options: Options,
         requests_sent: usize = 0,
@@ -355,18 +333,26 @@ fn WorkloadType(comptime StateMachine: type) type {
         ) struct {
             operation: StateMachine.Operation,
             size: usize,
+            batch_count: u16,
         } {
             _ = client_index;
-
             workload.requests_sent += 1;
+            const size: u32 = size: {
+                var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(body, .{
+                    .element_size = @sizeOf(StateMachine.EventType(.echo)),
+                });
 
-            // +1 for inclusive limit.
-            const size = workload.random.uintAtMost(usize, workload.options.batch_size_limit);
-            workload.random.bytes(body[0..size]);
+                const writtable = body_encoder.writable().?;
+                const size: u32 = workload.random.uintAtMost(u32, @intCast(writtable.len));
+                workload.random.bytes(writtable[0..size]);
+                body_encoder.add(size);
+                break :size body_encoder.finish();
+            };
 
             return .{
                 .operation = .echo,
                 .size = size,
+                .batch_count = 1,
             };
         }
 
@@ -385,7 +371,17 @@ fn WorkloadType(comptime StateMachine: type) type {
             assert(workload.requests_delivered <= workload.requests_sent);
 
             assert(operation == .echo);
-            assert(std.mem.eql(u8, request_body, reply_body));
+
+            const request_decoder = vsr.multi_batch.MultiBatchDecoder.init(request_body, .{
+                .element_size = @sizeOf(StateMachine.EventType(.echo)),
+            }) catch unreachable;
+            assert(request_decoder.batch_count() == 1);
+            const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(reply_body, .{
+                .element_size = @sizeOf(StateMachine.EventType(.echo)),
+            }) catch unreachable;
+            assert(reply_decoder.batch_count() == 1);
+
+            assert(std.mem.eql(u8, request_decoder.payload, reply_decoder.payload));
         }
 
         pub fn on_pulse(
@@ -406,6 +402,7 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             pub fn generate(random: std.rand.Random, options: struct {
                 batch_size_limit: u32,
+                multi_batch_per_request_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
