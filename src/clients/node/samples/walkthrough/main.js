@@ -262,7 +262,7 @@ async function main() {
   try {
     // section:batch
     const batch = []; // Array of transfer to create.
-    const BATCH_SIZE = 8190;
+    const BATCH_SIZE = 8189;
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
       const transfer_errors = await client.createTransfers(
         batch.slice(i, Math.min(batch.length, BATCH_SIZE)),

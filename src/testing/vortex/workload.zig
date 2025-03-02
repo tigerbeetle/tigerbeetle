@@ -40,7 +40,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 const StateMachine = StateMachineType(void, constants.state_machine_config);
 
-const events_count_max = 8190;
+const events_count_max = 8189;
 const pending_transfers_count_max = 1024;
 const accounts_count_max = 128;
 

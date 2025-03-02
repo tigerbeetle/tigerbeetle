@@ -52,6 +52,8 @@ const accountB: Account = {
   timestamp: 0n // this will be set correctly by the TigerBeetle server
 }
 
+const BATCH_MAX = 8189;
+
 const tests: Array<{ name: string, fn: () => Promise<void> }> = []
 function test(name: string, fn: () => Promise<void>) {
   tests.push({ name, fn })
@@ -542,7 +544,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   var transfers = await client.getAccountTransfers(filter)
@@ -569,7 +571,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.debits |  AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
@@ -597,7 +599,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits |  AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
@@ -771,7 +773,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -786,7 +788,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: (1n << 64n) - 1n, // ulong max value
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -801,7 +803,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: (1n << 64n) - 1n, // ulong max value
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -816,7 +818,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: (1n << 64n) - 2n, // ulong max - 1
     timestamp_max: 1n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.credits | AccountFilterFlags.debits,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -846,7 +848,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: AccountFilterFlags.none,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -861,7 +863,7 @@ test('can get account transfers', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: 0xFFFF,
   }
   assert.deepStrictEqual((await client.getAccountTransfers(filter)), [])
@@ -907,7 +909,7 @@ test('can query accounts', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Account[] = await client.queryAccounts(filter)
@@ -938,7 +940,7 @@ test('can query accounts', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.reversed,
     }
     var query: Account[] = await client.queryAccounts(filter)
@@ -968,7 +970,7 @@ test('can query accounts', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Account[] = await client.queryAccounts(filter)
@@ -1038,7 +1040,7 @@ test('can query accounts', async (): Promise<void> => {
       code: 0,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Account[] = await client.queryAccounts(filter)
@@ -1102,7 +1104,7 @@ test('can query transfers', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Transfer[] = await client.queryTransfers(filter)
@@ -1133,7 +1135,7 @@ test('can query transfers', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.reversed,
     }
     var query: Transfer[] = await client.queryTransfers(filter)
@@ -1163,7 +1165,7 @@ test('can query transfers', async (): Promise<void> => {
       code: 999,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Transfer[] = await client.queryTransfers(filter)
@@ -1233,7 +1235,7 @@ test('can query transfers', async (): Promise<void> => {
       code: 0,
       timestamp_min: 0n,
       timestamp_max: 0n,
-      limit: 8190,
+      limit: BATCH_MAX,
       flags: QueryFilterFlags.none,
     }
     var query: Transfer[] = await client.queryTransfers(filter)
@@ -1251,7 +1253,7 @@ test('query with invalid filter', async (): Promise<void> => {
     code: 0,
     timestamp_min: (1n << 64n) - 1n, // ulong max value
     timestamp_max: 0n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: QueryFilterFlags.none,
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])
@@ -1266,7 +1268,7 @@ test('query with invalid filter', async (): Promise<void> => {
     code: 0,
     timestamp_min: 0n,
     timestamp_max: (1n << 64n) - 1n, // ulong max value,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: QueryFilterFlags.none,
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])
@@ -1281,7 +1283,7 @@ test('query with invalid filter', async (): Promise<void> => {
     code: 0,
     timestamp_min: (1n << 64n) - 2n, // ulong max - 1
     timestamp_max: 1n,
-    limit: 8190,
+    limit: BATCH_MAX,
     flags: QueryFilterFlags.none,
   }
   assert.deepStrictEqual((await client.queryAccounts(filter)), [])

@@ -576,7 +576,7 @@ fn BufferType(comptime op: Operation) type {
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
-                => 8190,
+                => 8189,
                 else => count,
             };
         }

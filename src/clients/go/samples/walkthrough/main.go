@@ -194,7 +194,7 @@ func main() {
 	{
 		// section:batch
 		batch := []Transfer{}
-		BATCH_SIZE := 8190
+		BATCH_SIZE := 8189
 		for i := 0; i < len(batch); i += BATCH_SIZE {
 			size := BATCH_SIZE
 			if i+BATCH_SIZE > len(batch) {
