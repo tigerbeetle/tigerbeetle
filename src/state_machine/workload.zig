@@ -184,6 +184,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub const Options = OptionsType(AccountingStateMachine, Action);
 
+        /// List of releases where the workload/auditor expects and handles different
+        /// behavior.
+        pub const releases_supported: []const vsr.Release = &[_]vsr.Release{
+            vsr.constants.config.process.release,
+            // The release 0.16.30 before multi-batch encoded messages.
+            vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 30 }),
+        };
+
         random: std.rand.Random,
         auditor: Auditor,
         options: Options,
@@ -230,10 +238,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(options.linked_invalid_probability <= 100);
 
             assert(options.accounts_batch_size_span + options.accounts_batch_size_min <=
-                AccountingStateMachine.constants.batch_max.create_accounts);
+                AccountingStateMachine.constants.values_max.create_accounts);
             assert(options.accounts_batch_size_span >= 1);
             assert(options.transfers_batch_size_span + options.transfers_batch_size_min <=
-                AccountingStateMachine.constants.batch_max.create_transfers);
+                AccountingStateMachine.constants.values_max.create_transfers);
             assert(options.transfers_batch_size_span >= 1);
 
             var auditor = try Auditor.init(allocator, random, options.auditor_options);
@@ -274,7 +282,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 allocator,
                 options.transfer_transient_errors_max,
             );
-            errdefer transient_errors.deinit();
+            errdefer transient_errors.deinit(allocator);
 
             return .{
                 .random = random,
@@ -301,13 +309,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         pub fn build_request(
             self: *Workload,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
+            client_release: vsr.Release,
+            body_buffer: []align(@alignOf(vsr.Header)) u8,
         ) struct {
             operation: Operation,
             size: usize,
         } {
             assert(client_index < self.auditor.options.client_count);
-            assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
+            assert(body_buffer.len == constants.message_size_max - @sizeOf(vsr.Header));
 
             const action = action: {
                 if (!self.accounts_sent and self.random.boolean()) {
@@ -328,99 +337,329 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 };
             };
 
-            const size = switch (action) {
-                .create_accounts => @sizeOf(tb.Account) * self.build_create_accounts(
+            const operation: Operation = @enumFromInt(@intFromEnum(action));
+            const event_size: u32 = AccountingStateMachine.event_size_bytes(
+                client_release,
+                operation,
+            );
+            const result_size: u32 = AccountingStateMachine.result_size_bytes(
+                client_release,
+                operation,
+            );
+            const batch_event_max: u32 = AccountingStateMachine.batch_event_max(
+                client_release,
+                operation,
+                self.options.batch_size_limit,
+            );
+            assert(body_buffer.len >= event_size * batch_event_max);
+
+            if (AccountingStateMachine.multi_batch_disabled(client_release)) {
+                const size = self.build_request_batch(
                     client_index,
-                    self.batch(tb.Account, action, body),
-                ),
-                .create_transfers => @sizeOf(tb.Transfer) * self.build_create_transfers(
+                    client_release,
+                    action,
+                    body_buffer,
+                    batch_event_max,
+                );
+                assert(size <= body_buffer.len);
+                return .{
+                    .operation = operation,
+                    .size = size,
+                };
+            }
+
+            const batch_result_max: u32 = AccountingStateMachine.batch_result_max(
+                client_release,
+                operation,
+            );
+            assert(batch_result_max > 0);
+
+            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(
+                body_buffer[0..self.options.batch_size_limit],
+                .{
+                    .element_size = event_size,
+                },
+            );
+            var event_count: u32 = 0;
+            var result_count: u32 = 0;
+            for (0..self.options.multi_batch_per_request_limit) |_| {
+                const writable = body_encoder.writable() orelse break;
+                if (writable.len == 0) break;
+
+                const event_count_remain: u32 =
+                    if (AccountingStateMachine.event_is_batchable(operation))
+                    batch_event_max - event_count
+                else
+                    1;
+                const batch_size = self.build_request_batch(
                     client_index,
-                    self.batch(tb.Transfer, action, body),
-                ),
-                .lookup_accounts => @sizeOf(u128) *
-                    self.build_lookup_accounts(self.batch(u128, action, body)),
-                .lookup_transfers => @sizeOf(u128) *
-                    self.build_lookup_transfers(self.batch(u128, action, body)),
-                .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
-                    self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
-                inline .query_accounts,
-                .query_transfers,
-                => |action_comptime| @sizeOf(tb.QueryFilter) * self.build_query_filter(
-                    action_comptime,
-                    self.batch(tb.QueryFilter, action, body),
-                ),
-            };
-            assert(size <= body.len);
+                    client_release,
+                    action,
+                    writable,
+                    event_count_remain,
+                );
+                assert(batch_size <= writable.len);
+
+                // Checking if the expected result will fit in the multi-batch reply.
+                const reply_trailer_size: u32 = vsr.multi_batch.trailer_total_size(.{
+                    .element_size = result_size,
+                    .batch_count = body_encoder.batch_count + 1,
+                });
+                const result_count_expected: u32 =
+                    AccountingStateMachine.batch_results_expected(
+                    client_release,
+                    operation,
+                    writable[0..batch_size],
+                );
+                const reply_message_size: u32 =
+                    ((result_count + result_count_expected) * result_size) +
+                    reply_trailer_size;
+                if (reply_message_size >
+                    AccountingStateMachine.constants.message_body_size_max)
+                {
+                    // For operations that produce 1:1 result per event
+                    // (e.g., `create_*` and `lookup_*`), this was already validated
+                    // when checking if `event_count` fits within the multi-batch request.
+                    assert(!AccountingStateMachine.event_is_batchable(operation));
+                    break;
+                }
+                assert(result_count + result_count_expected <= batch_result_max);
+
+                body_encoder.add(@intCast(batch_size));
+                event_count += @intCast(@divExact(batch_size, event_size));
+                if (AccountingStateMachine.event_is_batchable(operation)) {
+                    assert(event_count <= batch_event_max);
+                }
+
+                result_count += result_count_expected;
+                assert(result_count <= batch_result_max);
+
+                // Maybe single-batch request.
+                if (body_encoder.batch_count == 1 and self.random.boolean()) break;
+            }
+            maybe(event_count == 0);
+            assert(result_count == 0 or event_count > 0);
+            assert(body_encoder.batch_count > 0);
+            assert(body_encoder.batch_count <= self.options.multi_batch_per_request_limit);
+
+            const bytes_written = body_encoder.finish();
+            assert(bytes_written <= self.options.batch_size_limit);
 
             return .{
-                .operation = @as(Operation, @enumFromInt(@intFromEnum(action))),
-                .size = size,
+                .operation = operation,
+                .size = bytes_written,
             };
+        }
+
+        fn build_request_batch(
+            self: *Workload,
+            client_index: usize,
+            client_release: vsr.Release,
+            action: Action,
+            body: []u8,
+            batch_limit: u32,
+        ) usize {
+            switch (action) {
+                inline else => |action_comptime| {
+                    const operation_comptime = comptime std.enums.nameCast(
+                        Operation,
+                        action_comptime,
+                    );
+                    const Event = AccountingStateMachine.EventType(operation_comptime);
+                    const event_size: u32 = @sizeOf(Event);
+                    const batchable: []Event = self.batch(
+                        Event,
+                        action_comptime,
+                        body,
+                        batch_limit,
+                    );
+                    assert(batchable.len <= batch_limit);
+
+                    const count = switch (action_comptime) {
+                        .create_accounts => self.build_create_accounts(
+                            client_index,
+                            client_release,
+                            batchable,
+                        ),
+                        .create_transfers => self.build_create_transfers(
+                            client_index,
+                            client_release,
+                            batchable,
+                        ),
+                        .lookup_accounts => self.build_lookup_accounts(batchable),
+                        .lookup_transfers => self.build_lookup_transfers(batchable),
+                        .get_account_transfers,
+                        .get_account_balances,
+                        => self.build_get_account_filter(
+                            client_index,
+                            client_release,
+                            action_comptime,
+                            batchable,
+                        ),
+                        .query_accounts,
+                        .query_transfers,
+                        => self.build_query_filter(
+                            client_index,
+                            client_release,
+                            action_comptime,
+                            batchable,
+                        ),
+                    };
+                    assert(count <= batchable.len);
+                    assert(count <= batch_limit);
+
+                    const batch_size: usize = count * event_size;
+                    assert(batch_size <= body.len);
+                    maybe(batch_size == 0);
+                    return batch_size;
+                },
+            }
         }
 
         /// `on_reply` is called for replies in commit order.
         pub fn on_reply(
             self: *Workload,
             client_index: usize,
+            client_release: vsr.Release,
             operation: AccountingStateMachine.Operation,
             timestamp: u64,
-            request_body: []align(@alignOf(vsr.Header)) const u8,
-            reply_body: []align(@alignOf(vsr.Header)) const u8,
+            request_body: []const u8,
+            reply_body: []const u8,
         ) void {
             assert(timestamp != 0);
-            assert(request_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
-            assert(reply_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
+            assert(request_body.len <= constants.message_body_size_max);
+            assert(reply_body.len <= constants.message_body_size_max);
 
+            if (AccountingStateMachine.multi_batch_disabled(client_release)) {
+                return self.on_reply_batch(
+                    client_index,
+                    client_release,
+                    operation,
+                    timestamp,
+                    request_body,
+                    reply_body,
+                );
+            }
+
+            assert(!AccountingStateMachine.multi_batch_disabled(client_release));
+            const event_size: u32 = AccountingStateMachine.event_size_bytes(
+                client_release,
+                operation,
+            );
+            const result_size: u32 = AccountingStateMachine.result_size_bytes(
+                client_release,
+                operation,
+            );
+            var body_decoder = vsr.multi_batch.MultiBatchDecoder.init(request_body, .{
+                .element_size = event_size,
+            }) catch unreachable;
+            assert(body_decoder.batch_count() > 0);
+            var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(reply_body, .{
+                .element_size = result_size,
+            }) catch unreachable;
+            assert(reply_decoder.batch_count() > 0);
+            assert(body_decoder.batch_count() == reply_decoder.batch_count());
+
+            const prepare_nanoseconds = struct {
+                fn prepare_nanoseconds(
+                    operation_inner: AccountingStateMachine.Operation,
+                    input_len: usize,
+                ) u64 {
+                    return switch (operation_inner) {
+                        .pulse => AccountingStateMachine.constants.values_max.create_transfers,
+                        .create_accounts => @divExact(input_len, @sizeOf(tb.Account)),
+                        .create_transfers => @divExact(input_len, @sizeOf(tb.Transfer)),
+                        .lookup_accounts => 0,
+                        .lookup_transfers => 0,
+                        .get_account_transfers => 0,
+                        .get_account_balances => 0,
+                        .query_accounts => 0,
+                        .query_transfers => 0,
+                        .get_events => unreachable,
+                    };
+                }
+            }.prepare_nanoseconds;
+            var batch_timestamp: u64 = timestamp - prepare_nanoseconds(
+                operation,
+                body_decoder.payload.len,
+            );
+            while (body_decoder.pop()) |batch_body| {
+                const batch_reply = reply_decoder.pop().?;
+                batch_timestamp += prepare_nanoseconds(
+                    operation,
+                    batch_body.len,
+                );
+                self.on_reply_batch(
+                    client_index,
+                    client_release,
+                    operation,
+                    batch_timestamp,
+                    batch_body,
+                    batch_reply,
+                );
+            }
+            assert(reply_decoder.pop() == null);
+        }
+
+        pub fn on_reply_batch(
+            self: *Workload,
+            client_index: usize,
+            client_release: vsr.Release,
+            operation: AccountingStateMachine.Operation,
+            timestamp: u64,
+            request_body: []const u8,
+            reply_body: []const u8,
+        ) void {
             switch (operation) {
                 .create_accounts => self.auditor.on_create_accounts(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.Account, request_body),
-                    std.mem.bytesAsSlice(tb.CreateAccountsResult, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.Account, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.CreateAccountsResult, reply_body)),
                 ),
                 .create_transfers => self.on_create_transfers(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.Transfer, request_body),
-                    std.mem.bytesAsSlice(tb.CreateTransfersResult, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.Transfer, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.CreateTransfersResult, reply_body)),
                 ),
                 .lookup_accounts => self.auditor.on_lookup_accounts(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(u128, request_body),
-                    std.mem.bytesAsSlice(tb.Account, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(u128, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.Account, reply_body)),
                 ),
                 .lookup_transfers => self.on_lookup_transfers(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(u128, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(u128, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.Transfer, reply_body)),
                 ),
                 .get_account_transfers => self.on_get_account_transfers(
-                    client_index,
+                    client_release,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.AccountFilter, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.Transfer, reply_body)),
                 ),
                 .get_account_balances => self.on_get_account_balances(
-                    client_index,
+                    client_release,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
-                    std.mem.bytesAsSlice(tb.AccountBalance, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.AccountFilter, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.AccountBalance, reply_body)),
                 ),
                 .query_accounts => self.on_query(
                     tb.Account,
-                    client_index,
+                    client_release,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Account, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.QueryFilter, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.Account, reply_body)),
                 ),
                 .query_transfers => self.on_query(
                     tb.Transfer,
-                    client_index,
+                    client_release,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    @alignCast(std.mem.bytesAsSlice(tb.QueryFilter, request_body)),
+                    @alignCast(std.mem.bytesAsSlice(tb.Transfer, reply_body)),
                 ),
                 //Not handled by the client.
                 .pulse, .get_events => unreachable,
@@ -442,8 +681,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn build_create_accounts(
             self: *Workload,
             client_index: usize,
+            client_release: vsr.Release,
             accounts: []tb.Account,
         ) usize {
+            _ = client_release;
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts, 0..) |*account, i| {
                 const account_index =
@@ -476,8 +717,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn build_create_transfers(
             self: *Workload,
             client_index: usize,
+            client_release: vsr.Release,
             transfers: []tb.Transfer,
         ) usize {
+            _ = client_release;
             const results = self.auditor.expect_create_transfers(client_index);
             assert(results.len >= transfers.len);
             var transfers_count: usize = transfers.len;
@@ -639,7 +882,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return lookup_ids.len;
         }
 
-        fn build_get_account_filter(self: *const Workload, body: []tb.AccountFilter) usize {
+        fn build_get_account_filter(
+            self: *const Workload,
+            client_index: usize,
+            client_release: vsr.Release,
+            comptime action: Action,
+            body: []tb.AccountFilter,
+        ) usize {
+            _ = client_index;
+            comptime assert(action == .get_account_transfers or action == .get_account_balances);
             assert(body.len == 1);
             const account_filter = &body[0];
             account_filter.* = tb.AccountFilter{
@@ -701,23 +952,23 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     },
                 }
 
-                const batch_size = batch_size: {
-                    // This same function is used for both `get_account_{transfers,accounts}`.
-                    const batch_max = AccountingStateMachine.constants.batch_max;
-                    comptime assert(batch_max.get_account_transfers ==
-                        batch_max.get_account_balances);
-                    break :batch_size batch_max.get_account_transfers;
-                };
+                const operation = comptime std.enums.nameCast(Operation, action);
+                const batch_result_max = AccountingStateMachine.batch_result_max(
+                    client_release,
+                    operation,
+                );
                 account_filter.limit = switch (self.random.enumValue(enum {
-                    none,
+                    zero,
                     one,
-                    batch,
-                    max,
+                    random,
+                    batch_max,
+                    int_max,
                 })) {
-                    .none => 0, // Testing invalid limit.
+                    .zero => 0,
                     .one => 1,
-                    .batch => batch_size,
-                    .max => std.math.maxInt(u32),
+                    .random => self.random.uintLessThan(u32, batch_result_max),
+                    .batch_max => batch_result_max,
+                    .int_max => std.math.maxInt(u32),
                 };
             }
 
@@ -726,17 +977,33 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn build_query_filter(
             self: *const Workload,
+            client_index: usize,
+            client_release: vsr.Release,
             comptime action: Action,
             body: []tb.QueryFilter,
         ) usize {
+            _ = client_index;
             comptime assert(action == .query_accounts or action == .query_transfers);
             assert(body.len == 1);
             const query_filter = &body[0];
 
-            const batch_max = switch (action) {
-                .query_accounts => AccountingStateMachine.constants.batch_max.query_accounts,
-                .query_transfers => AccountingStateMachine.constants.batch_max.query_accounts,
-                else => unreachable,
+            const operation = comptime std.enums.nameCast(Operation, action);
+            const batch_result_max = AccountingStateMachine.batch_result_max(
+                client_release,
+                operation,
+            );
+            const limit: u32 = switch (self.random.enumValue(enum {
+                zero,
+                one,
+                random,
+                batch_max,
+                int_max,
+            })) {
+                .zero => 0,
+                .one => 1,
+                .random => self.random.uintLessThan(u32, batch_result_max),
+                .batch_max => batch_result_max,
+                .int_max => std.math.maxInt(u32),
             };
 
             if (chance(self.random, self.options.query_filter_not_found_probability)) {
@@ -746,7 +1013,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = 0,
                     .code = 0,
                     .ledger = 999, // Non-existent ledger
-                    .limit = batch_max,
+                    .limit = limit,
                     .flags = .{
                         .reversed = false,
                     },
@@ -767,7 +1034,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = query_intersection.user_data_32,
                     .code = query_intersection.code,
                     .ledger = 0,
-                    .limit = self.random.int(u32),
+                    .limit = limit,
                     .flags = .{
                         .reversed = self.random.boolean(),
                     },
@@ -782,7 +1049,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     else => unreachable,
                 };
 
-                if (state.count > 1 and state.count <= batch_max and
+                if (state.count > 1 and state.count <= batch_result_max and
                     chance(self.random, self.options.query_filter_timestamp_range_probability))
                 {
                     // Excluding the first or last object:
@@ -943,8 +1210,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn batch(
             self: *const Workload,
             comptime T: type,
-            action: Action,
-            body: []align(@alignOf(vsr.Header)) u8,
+            comptime action: Action,
+            body: []u8,
+            event_count_remain: u32,
         ) []T {
             const batch_min = switch (action) {
                 .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
@@ -965,9 +1233,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 => 0,
             };
 
-            // +1 because the span is inclusive.
-            const batch_size = batch_min + self.random.uintLessThanBiased(usize, batch_span + 1);
-            return std.mem.bytesAsSlice(T, body)[0..batch_size];
+            const slice: []T = stdx.buffer_as_slice(T, body);
+            const batch_size = @min(
+                // +1 because the span is inclusive.
+                batch_min + self.random.uintLessThanBiased(usize, batch_span + 1),
+                event_count_remain,
+            );
+
+            return slice[0..batch_size];
         }
 
         fn transfer_id_to_index(self: *const Workload, id: u128) usize {
@@ -1109,19 +1382,21 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn on_get_account_transfers(
             self: *Workload,
-            client_index: usize,
+            client_release: vsr.Release,
             timestamp: u64,
             body: []const tb.AccountFilter,
             results: []const tb.Transfer,
         ) void {
-            _ = client_index;
             _ = timestamp;
             assert(body.len == 1);
 
-            const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+            const batch_result_max = AccountingStateMachine.batch_result_max(
+                client_release,
+                .get_account_transfers,
+            );
             const account_filter = &body[0];
             assert(results.len <= account_filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             const account_state = self.auditor.get_account_state(
                 account_filter.account_id,
@@ -1141,7 +1416,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            validate_account_filter_result_count(
+            self.validate_account_filter_result_count(
+                client_release,
                 account_state,
                 account_filter,
                 results.len,
@@ -1212,19 +1488,21 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn on_get_account_balances(
             self: *Workload,
-            client_index: usize,
+            client_release: vsr.Release,
             timestamp: u64,
             body: []const tb.AccountFilter,
             results: []const tb.AccountBalance,
         ) void {
-            _ = client_index;
             _ = timestamp;
             assert(body.len == 1);
 
-            const batch_size = AccountingStateMachine.constants.batch_max.get_account_balances;
+            const batch_result_max = AccountingStateMachine.batch_result_max(
+                client_release,
+                .get_account_balances,
+            );
             const account_filter = &body[0];
             assert(results.len <= account_filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             const account_state = self.auditor.get_account_state(
                 account_filter.account_id,
@@ -1245,7 +1523,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            validate_account_filter_result_count(
+            self.validate_account_filter_result_count(
+                client_release,
                 account_state,
                 account_filter,
                 results.len,
@@ -1271,26 +1550,35 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn validate_account_filter_result_count(
+            self: *const Workload,
+            client_release: vsr.Release,
             account_state: *const Auditor.AccountState,
             account_filter: *const tb.AccountFilter,
             result_count: usize,
         ) void {
-            assert(account_filter.limit != 0);
-
-            const batch_size = batch_size: {
+            _ = self;
+            maybe(account_filter.limit == 0);
+            const batch_result_max = batch_result_max: {
                 // This same function is used for both `get_account_{transfers,accounts}`.
-                const batch_max = AccountingStateMachine.constants.batch_max;
-                comptime assert(batch_max.get_account_transfers ==
-                    batch_max.get_account_balances);
-                break :batch_size batch_max.get_account_transfers;
+                const get_account_transfers = AccountingStateMachine.batch_result_max(
+                    client_release,
+                    .get_account_transfers,
+                );
+                const get_account_balances = AccountingStateMachine.batch_result_max(
+                    client_release,
+                    .get_account_transfers,
+                );
+                assert(get_account_balances ==
+                    get_account_transfers);
+                break :batch_result_max get_account_transfers;
             };
 
             const transfer_count = account_state.transfers_count(account_filter.flags);
             if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
-                assert(account_filter.limit == 1 or
-                    account_filter.limit == batch_size or
+                assert(account_filter.limit <= batch_result_max or
                     account_filter.limit == std.math.maxInt(u32));
-                assert(result_count == @min(account_filter.limit, batch_size, transfer_count));
+                assert(result_count ==
+                    @min(account_filter.limit, batch_result_max, transfer_count));
             } else {
                 // If timestamp range is set, then the limit is exactly the number of transfer
                 // at the time the filter was generated, but new transfers could have been
@@ -1313,7 +1601,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 // Either `transfer_count` is greater than the batch size (so removing a result
                 // doesn't make a difference) or there is exactly one less result that was
                 // excluded by the timestamp filter.
-                assert((result_count == batch_size and transfer_count > batch_size) or
+                assert((result_count == batch_result_max and transfer_count > batch_result_max) or
                     result_count == account_filter.limit - 1);
             }
         }
@@ -1321,21 +1609,22 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn on_query(
             self: *Workload,
             comptime Object: type,
-            client_index: usize,
+            client_release: vsr.Release,
             timestamp: u64,
             body: []const tb.QueryFilter,
             results: []const Object,
         ) void {
-            _ = client_index;
             _ = timestamp;
             assert(body.len == 1);
 
-            const batch_size = switch (Object) {
-                tb.Account => AccountingStateMachine.constants.batch_max.query_accounts,
-                tb.Transfer => AccountingStateMachine.constants.batch_max.query_transfers,
-                else => unreachable,
-            };
-
+            const batch_result_max: u32 = AccountingStateMachine.batch_result_max(
+                client_release,
+                switch (Object) {
+                    tb.Account => .query_accounts,
+                    tb.Transfer => .query_transfers,
+                    else => unreachable,
+                },
+            );
             const filter = &body[0];
 
             if (filter.ledger != 0) {
@@ -1362,7 +1651,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             };
 
             assert(results.len <= filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             if (filter.timestamp_min > 0 or filter.timestamp_max > 0) {
                 assert(filter.limit <= state.count);
@@ -1375,7 +1664,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             } else {
                 assert(results.len == @min(
                     filter.limit,
-                    batch_size,
+                    batch_result_max,
                     state.count,
                 ));
             }
@@ -1425,6 +1714,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
     return struct {
         const Options = @This();
+
+        batch_size_limit: u32,
+        multi_batch_per_request_limit: u32,
 
         auditor_options: Auditor.Options,
         transfer_id_permutation: IdPermutation,
@@ -1476,20 +1768,31 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 
         pub fn generate(random: std.rand.Random, options: struct {
             batch_size_limit: u32,
+            multi_batch_per_request_limit: u32,
             client_count: usize,
             in_flight_max: usize,
         }) Options {
             const batch_create_accounts_limit =
-                @divFloor(options.batch_size_limit, @sizeOf(tb.Account));
-            const batch_create_transfers_limit =
-                @divFloor(options.batch_size_limit, @sizeOf(tb.Transfer));
+                StateMachine.constants.values_max.operation_values_max(
+                .create_accounts,
+                options.batch_size_limit,
+            );
             assert(batch_create_accounts_limit > 0);
-            assert(batch_create_accounts_limit <= StateMachine.constants.batch_max.create_accounts);
+            assert(batch_create_accounts_limit <=
+                StateMachine.constants.values_max.create_accounts);
+
+            const batch_create_transfers_limit =
+                StateMachine.constants.values_max.operation_values_max(
+                .create_transfers,
+                options.batch_size_limit,
+            );
             assert(batch_create_transfers_limit > 0);
             assert(batch_create_transfers_limit <=
-                StateMachine.constants.batch_max.create_transfers);
+                StateMachine.constants.values_max.create_transfers);
 
             return .{
+                .batch_size_limit = options.batch_size_limit,
+                .multi_batch_per_request_limit = options.multi_batch_per_request_limit,
                 .auditor_options = .{
                     .accounts_max = 2 + random.uintLessThan(usize, 128),
                     .account_id_permutation = IdPermutation.generate(random),

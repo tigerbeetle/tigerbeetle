@@ -78,6 +78,14 @@ pub const Release = extern struct {
     // Minimum is used for all development builds, to distinguish them from production deployments.
     pub const minimum = Release.from(.{ .major = 0, .minor = 0, .patch = 1 });
 
+    pub inline fn is_development(release: Release) bool {
+        // Patch can be incremented, so upgrade can be tested.
+        const release_triple = release.triple();
+        return release_triple.major == 0 and
+            release_triple.minor == 0 and
+            release_triple.patch > 0;
+    }
+
     pub fn from(release_triple: ReleaseTriple) Release {
         return std.mem.bytesAsValue(Release, std.mem.asBytes(&release_triple)).*;
     }
