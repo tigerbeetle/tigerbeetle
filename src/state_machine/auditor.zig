@@ -21,8 +21,8 @@ pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Or
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
-const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
-const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
+const accounts_batch_size_max = StateMachine.constants.values_max.create_accounts;
+const transfers_batch_size_max = StateMachine.constants.values_max.create_transfers;
 
 /// Store expected possible results for an in-flight request.
 /// This reply validation takes advantage of the Workload's additional context about the request.
@@ -349,7 +349,9 @@ pub const AccountingAuditor = struct {
         results: []const tb.CreateAccountsResult,
     ) void {
         assert(accounts.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (accounts.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
@@ -402,7 +404,9 @@ pub const AccountingAuditor = struct {
         results: []const tb.CreateTransfersResult,
     ) void {
         assert(transfers.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (transfers.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
@@ -513,7 +517,7 @@ pub const AccountingAuditor = struct {
     ) void {
         _ = client_index;
         assert(ids.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp <= timestamp);
         defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookupType(tb.Account).init(results);
@@ -564,7 +568,7 @@ pub const AccountingAuditor = struct {
     ) void {
         _ = client_index;
         assert(ids.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp <= timestamp);
         defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookupType(tb.Transfer).init(results);
