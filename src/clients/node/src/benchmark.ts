@@ -8,7 +8,7 @@ import {
 
 const MAX_TRANSFERS = 51200
 // CI runs benchmark.ts against a "--development" replica.
-const MAX_REQUEST_BATCH_SIZE = 254
+const MAX_REQUEST_BATCH_SIZE = 253
 const IS_TWO_PHASE_TRANSFER = false
 
 const client = createClient({
@@ -22,7 +22,7 @@ const accountA: Account = {
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,  
+  credits_posted: 0n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -38,7 +38,7 @@ const accountB: Account = {
   debits_pending: 0n,
   debits_posted: 0n,
   credits_pending: 0n,
-  credits_posted: 0n,  
+  credits_posted: 0n,
   user_data_128: 0n,
   user_data_64: 0n,
   user_data_32: 0,
@@ -66,7 +66,7 @@ const runBenchmark = async () => {
         id: BigInt(count),
         debit_account_id: accountA.id,
         credit_account_id: accountB.id,
-        amount: 1n,        
+        amount: 1n,
         pending_id: 0n,
         user_data_128: 0n,
         user_data_64: 0n,
@@ -77,7 +77,7 @@ const runBenchmark = async () => {
         flags: IS_TWO_PHASE_TRANSFER ? TransferFlags.pending : 0,
         timestamp: 0n,
       })
-    
+
       if (IS_TWO_PHASE_TRANSFER) {
         postBatch.push({
           id: BigInt(MAX_TRANSFERS + count),
@@ -140,7 +140,7 @@ const runBenchmark = async () => {
   }
 }
 
-const main = async () => {  
+const main = async () => {
   console.log("creating the accounts...")
   await client.createAccounts([accountA, accountB])
   const accountResults = await client.lookupAccounts([accountA.id, accountB.id])
@@ -149,7 +149,7 @@ const main = async () => {
   assert(accountResults[1].debits_posted === 0n)
 
   const benchmark = await runBenchmark()
-  
+
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
   const result = Math.floor((1000 * MAX_TRANSFERS)/benchmark.ms)
   console.log("=============================")
@@ -161,7 +161,7 @@ const main = async () => {
   assert(accounts[1].credits_posted === BigInt(MAX_TRANSFERS))
 }
 
-main().catch(error => { 
+main().catch(error => {
   console.log(error)
 }).finally(async () => {
   await client.destroy()
