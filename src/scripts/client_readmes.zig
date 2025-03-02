@@ -294,7 +294,7 @@ fn readme_root(ctx: *Context) !void {
             \\potential. Instead, **always batch what you can**.
             \\
             \\The maximum batch size is set in the TigerBeetle server. The default
-            \\is 8190.
+            \\is 8189.
         );
         ctx.code_section("batch");
 

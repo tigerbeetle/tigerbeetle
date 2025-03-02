@@ -344,11 +344,11 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8190.
+is 8189.
 
 ```go
 batch := []Transfer{}
-BATCH_SIZE := 8190
+BATCH_SIZE := 8189
 for i := 0; i < len(batch); i += BATCH_SIZE {
 	size := BATCH_SIZE
 	if i+BATCH_SIZE > len(batch) {

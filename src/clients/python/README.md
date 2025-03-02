@@ -363,11 +363,11 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8190.
+is 8189.
 
 ```python
 batch = [] # Array of transfer to create.
-BATCH_SIZE = 8190 #FIXME
+BATCH_SIZE = 8189 #FIXME
 for i in range(0, len(batch), BATCH_SIZE):
     transfer_errors = client.create_transfers(
         batch[i:min(len(batch), i + BATCH_SIZE)],
