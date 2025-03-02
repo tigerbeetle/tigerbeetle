@@ -335,7 +335,7 @@ fn emit_method(buffer: *Buffer, comptime operation: std.builtin.Type.EnumField, 
 }) void {
     const op: StateMachine.Operation = @enumFromInt(operation.value);
 
-    const event_type = comptime if (StateMachine.event_is_slice(op))
+    const event_type = comptime if (StateMachine.event_is_batchable(op))
         "list[" ++ zig_to_python(StateMachine.EventType(op)) ++ "]"
     else
         zig_to_python(StateMachine.EventType(op));
@@ -345,10 +345,10 @@ fn emit_method(buffer: *Buffer, comptime operation: std.builtin.Type.EnumField, 
 
     // For ergonomics, the client allows calling things like .query_accounts(filter) even
     // though the _submit function requires a list for everything. Wrap them here.
-    const event_name_or_list = comptime if (!StateMachine.event_is_slice(op))
-        "[" ++ StateMachine.event_name(op) ++ "]"
+    const event_name_or_list = comptime if (!StateMachine.event_is_batchable(op))
+        "[" ++ event_name(op) ++ "]"
     else
-        StateMachine.event_name(op);
+        event_name(op);
 
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
@@ -364,7 +364,7 @@ fn emit_method(buffer: *Buffer, comptime operation: std.builtin.Type.EnumField, 
         .{
             .prefix_fn = if (options.is_async) "async " else "",
             .fn_name = operation.name,
-            .event_name = StateMachine.event_name(op),
+            .event_name = event_name(op),
             .event_type = event_type,
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
@@ -535,4 +535,21 @@ pub fn main() !void {
     }
 
     try std.io.getStdOut().writeAll(buffer.inner.items);
+}
+
+/// Used by client code generation to make clearer APIs: the name of the Event parameter,
+/// when used as a variable.
+/// Inline function so that `operation` can be known at comptime.
+inline fn event_name(operation: StateMachine.Operation) []const u8 {
+    return switch (operation) {
+        .pulse, .get_events => "none",
+        .create_accounts => "accounts",
+        .create_transfers => "transfers",
+        .lookup_accounts => "accounts",
+        .lookup_transfers => "transfers",
+        .get_account_transfers => "filter",
+        .get_account_balances => "filter",
+        .query_accounts => "query_filter",
+        .query_transfers => "query_filter",
+    };
 }
