@@ -3,9 +3,83 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.30
+
+Released: 2025-03-03
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+
+### Safety And Performance
+
+- [#2774](https://github.com/tigerbeetle/tigerbeetle/pull/2774)
+
+  Fix TOCTOU bug in our hybrid set-associative cache and hash map structure, wherein a promotion
+  to the cache coupled with an eviction from the cache could lead to invalid pointer references.
+
+- [#2771](https://github.com/tigerbeetle/tigerbeetle/pull/2771)
+
+  Add logic to crash replica upon receiving unknown commands from clients and other replicas.
+
+- [#2766](https://github.com/tigerbeetle/tigerbeetle/pull/2766)
+
+  Fix upgrade bug wherein a replica does not detect a change in the binary if it is replaced during
+  its initialization in `Replica.open()`.
+
+- [#2761](https://github.com/tigerbeetle/tigerbeetle/pull/2761)
+
+  Alternate replication direction for even and odd ops to better detect breaks in the ring topology.
+
+### Internals
+
+- [#2770](https://github.com/tigerbeetle/tigerbeetle/pull/2770),
+  [#2781](https://github.com/tigerbeetle/tigerbeetle/pull/2781),
+  [#2779](https://github.com/tigerbeetle/tigerbeetle/pull/2779),
+  [#2778](https://github.com/tigerbeetle/tigerbeetle/pull/2778),
+  [#2769](https://github.com/tigerbeetle/tigerbeetle/pull/2769),
+
+  Add new docs content to `TigerBeetle Architecture`, fix miscellaneous typos and references.
+
+- [#2760](https://github.com/tigerbeetle/tigerbeetle/pull/2760)
+
+  Simplify idiom around a replica sending messages to itself.
+
+- [#2764](https://github.com/tigerbeetle/tigerbeetle/pull/2764)
+
+  Refactor MessageBus to remove platform-specific IO logic.
+
+### TigerTracks 🎧
+
+- [For Crying Out Loud](https://open.spotify.com/track/4nsd2DbMYqRwkvIQ51r4cp?si=411872dc9c444535)
+
 ## TigerBeetle 0.16.29
 
 Released: 2025-02-24
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
 
 ### Safety And Performance
 
