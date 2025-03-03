@@ -124,7 +124,7 @@ pub inline fn copy_disjoint(
     }
 
     assert(disjoint_slices(T, T, target, source));
-    @memcpy(target[0..source.len], source);
+    @memcpy(target[0..source.len], source); // Bypass tidy's ban.
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
