@@ -18,6 +18,7 @@ const Storage = vsr.storage.StorageType(vsr.io.IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;
+const stdx = vsr.stdx;
 
 pub const std_options = .{
     .log_level = .debug,
@@ -271,7 +272,12 @@ fn on_completion(
                         Result,
                         result_ptr.?[0..result_len],
                     ));
-                    @memcpy(buffer.results()[0..results.len], results);
+                    stdx.copy_disjoint(
+                        .exact,
+                        Result,
+                        buffer.results()[0..results.len],
+                        results,
+                    );
 
                     // Store the size of the results in the `tag` field, so we can access it back
                     // during `on_completion_js`.
