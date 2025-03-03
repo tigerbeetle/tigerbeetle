@@ -207,6 +207,7 @@ pub fn CacheMapType(
         }
 
         fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
+            defer assert(self.stash.count() <= self.options.map_value_count_max);
             // Using `getOrPutAssumeCapacity` instead of `putAssumeCapacity` is
             // critical, since we use HashMaps with no Value, `putAssumeCapacity`
             // _will not_ clobber the existing value.
@@ -243,6 +244,7 @@ pub fn CacheMapType(
         }
 
         fn stash_remove(self: *CacheMap, key: Key) ?Value {
+            assert(self.stash.count() <= self.options.map_value_count_max);
             return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
                 kv.key
             else
@@ -300,7 +302,7 @@ pub fn CacheMapType(
         pub fn compact(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            maybe(self.stash.count() <= self.options.map_value_count_max);
+            assert(self.stash.count() <= self.options.map_value_count_max);
 
             self.stash.clearRetainingCapacity();
         }
