@@ -153,13 +153,6 @@ pub const MultiBatchDecoder = struct {
         {
             return error.MultiBatchInvalid;
         }
-
-        const payload: []const u8 = body[0 .. body.len - trailer_size];
-        if ((options.element_size > 0 and payload.len % options.element_size != 0) or
-            (options.element_size == 0 and payload.len != 0))
-        {
-            return error.MultiBatchInvalid;
-        }
         if (!std.mem.isAligned(
             @intFromPtr(body[body.len - trailer_size ..].ptr),
             @alignOf(TrailerItem),
@@ -184,19 +177,35 @@ pub const MultiBatchDecoder = struct {
                 @bitCast(TrailerItem.padding),
             )) return error.MultiBatchInvalid;
         }
+        const events_count_total: u32 = count: {
+            var count: u32 = 0;
+            for (trailer_items_used) |trailer_item| {
+                count += trailer_item.element_count;
+            }
+            break :count count;
+        };
+        if (options.element_size == 0 and events_count_total != 0) return error.MultiBatchInvalid;
+        const payload_size: u32 = std.math.mul(
+            u32,
+            events_count_total,
+            options.element_size,
+        ) catch |err| switch (err) {
+            error.Overflow => return error.MultiBatchInvalid,
+        };
 
-        var events_count_total: usize = 0;
-        for (trailer_items_used) |trailer_item| {
-            events_count_total += trailer_item.element_count;
-        }
-        if ((options.element_size > 0 and payload.len != events_count_total *
-            options.element_size) or (options.element_size == 0 and events_count_total != 0))
-        {
-            return error.MultiBatchInvalid;
-        }
+        // For element sizes not aligned with `TrailerItem` (e.g., `u8`, `[3]u8`),
+        // we had to add padding between the payload and the trailer.
+        const padding: u32 = @intCast(payload_size % @sizeOf(TrailerItem));
+        assert(padding < @sizeOf(TrailerItem));
+        if (!std.mem.allEqual(
+            u8,
+            body[body.len - padding - trailer_size ..][0..padding],
+            std.math.maxInt(u8),
+        )) return error.MultiBatchInvalid;
+        if (body.len != payload_size + padding + trailer_size) return error.MultiBatchInvalid;
 
         return .{
-            .payload = payload,
+            .payload = body[0..payload_size],
             .trailer_items = trailer_items_used,
             .payload_index = 0,
             .batch_index = 0,
@@ -442,13 +451,20 @@ pub const MultiBatchEncoder = struct {
             .batch_count = self.batch_count,
             .element_size = self.options.element_size,
         });
-        assert(buffer.len >= self.buffer_index + trailer_size);
+
+        // For element sizes not aligned with `TrailerItem` (e.g., `u8`, `[3]u8`),
+        // we had to add padding between the payload and the trailer.
+        const padding: u32 = self.buffer_index % @sizeOf(TrailerItem);
+        assert(padding < @sizeOf(TrailerItem));
+        assert(buffer.len >= self.buffer_index + padding + trailer_size);
+        // Filling the padding with sentinels.
+        @memset(buffer[self.buffer_index..][0..padding], std.math.maxInt(u8));
 
         // While batches are being encoded, the trailer is written at the end of the buffer.
         // Once all batches are encoded, the trailer needs to be moved closer to the last
         // element written.
         const source: []const u8 = buffer[buffer.len - trailer_size ..];
-        const target: []u8 = buffer[self.buffer_index..][0..trailer_size];
+        const target: []u8 = buffer[self.buffer_index + padding ..][0..trailer_size];
         assert(source.len == target.len);
         assert(@intFromPtr(source.ptr) >= @intFromPtr(target.ptr));
         if (source.ptr != target.ptr) {
@@ -462,7 +478,7 @@ pub const MultiBatchEncoder = struct {
 
         const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
             TrailerItem,
-            buffer[self.buffer_index..][0 .. trailer_size - @sizeOf(Postamble)],
+            buffer[self.buffer_index + padding ..][0 .. trailer_size - @sizeOf(Postamble)],
         ));
         // Filling in the extra alignment bytes with sentinels.
         @memset(
@@ -471,12 +487,12 @@ pub const MultiBatchEncoder = struct {
         );
 
         const postamble: *Postamble = @alignCast(@ptrCast(
-            buffer[self.buffer_index + trailer_size - @sizeOf(Postamble) ..],
+            buffer[self.buffer_index + padding + trailer_size - @sizeOf(Postamble) ..],
         ));
         postamble.batch_count = self.batch_count;
 
         self.buffer = null;
-        const bytes_written: u32 = self.buffer_index + trailer_size;
+        const bytes_written: u32 = self.buffer_index + padding + trailer_size;
         assert(self.options.element_size > 0 or bytes_written == trailer_size);
         assert(self.options.element_size == 0 or
             bytes_written % self.options.element_size == 0);
