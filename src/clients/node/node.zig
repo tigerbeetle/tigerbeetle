@@ -261,11 +261,16 @@ fn on_completion(
             const operation: Operation = @enumFromInt(packet_extern.operation);
             switch (operation) {
                 inline else => |operation_comptime| {
+                    const Event = StateMachine.EventType(operation_comptime);
+                    const Result = StateMachine.ResultType(operation_comptime);
+
                     const packet = packet_extern.cast();
-                    const request_buffer: []u8 = @constCast(packet.slice());
+                    const request_buffer: []align(@alignOf(Event)) u8 =
+                        @constCast(@alignCast(packet.slice()));
+
                     // Trying to reallocate the request buffer instead of allocating a new one.
                     // This is optimal for create_* operations.
-                    const reply_buffer: []u8 = global_allocator.realloc(
+                    const reply_buffer: []align(@alignOf(Result)) u8 = global_allocator.realloc(
                         request_buffer,
                         result_len,
                     ) catch {
@@ -273,15 +278,14 @@ fn on_completion(
                         @panic("Failed to allocated the request buffer.");
                     };
 
-                    const Result = StateMachine.ResultType(operation_comptime);
                     const source: []const Result = @alignCast(std.mem.bytesAsSlice(
                         Result,
                         result_ptr.?[0..result_len],
                     ));
-                    const target: []Result = @alignCast(std.mem.bytesAsSlice(
+                    const target: []Result = std.mem.bytesAsSlice(
                         Result,
                         reply_buffer,
-                    ));
+                    );
                     stdx.copy_disjoint(
                         .exact,
                         Result,
