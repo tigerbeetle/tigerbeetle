@@ -66,7 +66,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
-            var uncommitted_headers: [constants.pipeline_prepare_queue_max]vsr.Header.Prepare = undefined;
+            const pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max;
+            var uncommitted_headers: [pipeline_prepare_queue_max]vsr.Header.Prepare = undefined;
             for (0..constants.pipeline_prepare_queue_max) |slot| {
                 uncommitted_headers[slot] = vsr.Header.Prepare.reserved(options.cluster_id, slot);
             }
