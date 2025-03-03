@@ -85,7 +85,8 @@ pub fn trailer_total_size(options: struct {
 }) u32 {
     assert(options.batch_count > 0);
     assert(options.batch_count <= multi_batch_count_max);
-    maybe(options.element_size == 0);
+    // Supports zero-sized elements, or any power of two, including 2^0.
+    assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
     const trailer_unpadded_size: u32 =
         (@as(u32, options.batch_count) * @sizeOf(TrailerItem)) + @sizeOf(Postamble);
@@ -119,7 +120,8 @@ pub const MultiBatchDecoder = struct {
         body: []const u8,
         options: Options,
     ) error{MultiBatchInvalid}!MultiBatchDecoder {
-        maybe(options.element_size == 0);
+        // Supports zero-sized elements, or any power of two, including 2^0.
+        assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
         // Empty messages are considered valid.
         if (body.len == 0) return .{
@@ -193,8 +195,7 @@ pub const MultiBatchDecoder = struct {
             error.Overflow => return error.MultiBatchInvalid,
         };
 
-        // For element sizes not aligned with `TrailerItem` (e.g., `u8`, `[3]u8`),
-        // we had to add padding between the payload and the trailer.
+        // For byte-aligned elements, padding may be required between the payload and the trailer.
         const padding: u32 = @intCast(payload_size % @sizeOf(TrailerItem));
         assert(padding < @sizeOf(TrailerItem));
         if (!std.mem.allEqual(
@@ -311,8 +312,8 @@ pub const MultiBatchEncoder = struct {
     options: Options,
 
     pub fn init(buffer: []u8, options: Options) MultiBatchEncoder {
-        // Support zero-sized elements.
-        maybe(options.element_size == 0);
+        // Supports zero-sized elements, or any power of two, including 2^0.
+        assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
         // The buffer must be large enough for at least one batch.
         const trailer_size_min = trailer_total_size(.{
@@ -452,8 +453,7 @@ pub const MultiBatchEncoder = struct {
             .element_size = self.options.element_size,
         });
 
-        // For element sizes not aligned with `TrailerItem` (e.g., `u8`, `[3]u8`),
-        // we had to add padding between the payload and the trailer.
+        // For byte-aligned elements, padding may be required between the payload and the trailer.
         const padding: u32 = self.buffer_index % @sizeOf(TrailerItem);
         assert(padding < @sizeOf(TrailerItem));
         assert(buffer.len >= self.buffer_index + padding + trailer_size);

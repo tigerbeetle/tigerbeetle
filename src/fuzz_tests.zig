@@ -34,6 +34,7 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
+    .vsr_multi_batch = @import("./vsr/multi_batch_fuzz.zig"),
     .signal = @import("./clients/c/tb_client/signal_fuzz.zig"),
     // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
     .canary = {},
@@ -89,6 +90,7 @@ fn main_smoke() !void {
             .vsr_superblock_quorums,
             .storage,
             .signal,
+            .vsr_multi_batch,
             => null,
         };
 
