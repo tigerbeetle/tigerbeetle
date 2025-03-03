@@ -347,11 +347,11 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8190.
+is 8189.
 
 ```cs
 var batch = new Transfer[] { }; // Array of transfer to create.
-var BATCH_SIZE = 8190;
+var BATCH_SIZE = 8189;
 for (int firstIndex = 0; firstIndex < batch.Length; firstIndex += BATCH_SIZE)
 {
     var lastIndex = firstIndex + BATCH_SIZE;

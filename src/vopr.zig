@@ -120,19 +120,26 @@ pub fn main() !void {
     // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
     const client_count = @max(1, random.uintAtMost(u8, constants.clients_max * 2 - 1));
 
-    const batch_size_limit_min = comptime batch_size_limit_min: {
-        var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
+    const event_size_max = comptime event_size_max: {
+        var event_size_max: u32 = 0;
         for (std.enums.values(StateMachine.Operation)) |operation| {
             const event_size = @sizeOf(StateMachine.EventType(operation));
             event_size_max = @max(event_size_max, event_size);
         }
-        break :batch_size_limit_min event_size_max;
+        break :event_size_max event_size_max;
     };
+    const batch_size_limit_min = @max(@sizeOf(vsr.RegisterRequest), event_size_max);
     const batch_size_limit: u32 = if (random.boolean())
         constants.message_body_size_max
     else
         batch_size_limit_min +
             random.uintAtMost(u32, constants.message_body_size_max - batch_size_limit_min);
+
+    const multi_batch_per_request_limit: u32 = random.intRangeAtMost(
+        u32,
+        1,
+        @divFloor(batch_size_limit, event_size_max) - 1,
+    );
 
     const MiB = 1024 * 1024;
     const storage_size_limit = vsr.sector_floor(
@@ -147,7 +154,6 @@ pub fn main() !void {
         .storage_size_limit = storage_size_limit,
         .seed = random.int(u64),
         .releases = &releases,
-        .client_release = releases[0].release,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,
@@ -200,7 +206,7 @@ pub fn main() !void {
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = if (random.boolean()) 256 else 0,
                 .cache_entries_transfers = if (random.boolean()) 256 else 0,
-                .cache_entries_posted = if (random.boolean()) 256 else 0,
+                .cache_entries_transfers_pending = if (random.boolean()) 256 else 0,
             },
         },
         .on_cluster_reply = Simulator.on_cluster_reply,
@@ -209,11 +215,12 @@ pub fn main() !void {
 
     const workload_options = StateMachine.Workload.Options.generate(random, .{
         .batch_size_limit = batch_size_limit,
+        .multi_batch_per_request_limit = multi_batch_per_request_limit,
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
         // private. Also maybe make it dynamic (computed from the client_count instead of
         // clients_max).
-        .in_flight_max = ReplySequence.stalled_queue_capacity,
+        .in_flight_max = ReplySequence.stalled_queue_capacity * multi_batch_per_request_limit,
     });
 
     const simulator_options = Simulator.Options{
@@ -1002,8 +1009,10 @@ pub const Simulator = struct {
                 }
 
                 if (!commit.prepare.header.operation.vsr_reserved()) {
+                    const client: *const Cluster.Client = &cluster.clients[commit.client_index.?];
                     simulator.workload.on_reply(
                         commit.client_index.?,
+                        client.release,
                         commit.reply.header.operation.cast(StateMachine),
                         commit.reply.header.timestamp,
                         commit.prepare.body_used(),
@@ -1088,9 +1097,10 @@ pub const Simulator = struct {
 
         const request_metadata = simulator.workload.build_request(
             client_index,
+            client.release,
             request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
         );
-        assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
+        assert(request_metadata.size <= constants.message_body_size_max);
 
         simulator.cluster.request(
             client_index,

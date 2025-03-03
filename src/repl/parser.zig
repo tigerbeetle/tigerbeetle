@@ -55,7 +55,7 @@ pub const Parser = struct {
 
     pub const Statement = struct {
         operation: Operation,
-        arguments: []const u8,
+        arguments: *std.ArrayListUnmanaged(u8),
     };
 
     fn print_current_position(parser: *const Parser) !void {
@@ -275,10 +275,10 @@ pub const Parser = struct {
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = switch (operation) {
-                    .get_account_transfers => StateMachine.constants
-                        .batch_max.get_account_transfers,
-                    .get_account_balances => StateMachine.constants
-                        .batch_max.get_account_balances,
+                    .get_account_transfers,
+                    => StateMachine.constants.values_max.get_account_transfers,
+                    .get_account_balances,
+                    => StateMachine.constants.values_max.get_account_transfers,
                     else => unreachable,
                 },
                 .flags = .{
@@ -296,10 +296,10 @@ pub const Parser = struct {
                 .timestamp_min = 0,
                 .timestamp_max = 0,
                 .limit = switch (operation) {
-                    .query_accounts => StateMachine.constants
-                        .batch_max.query_accounts,
-                    .query_transfers => StateMachine.constants
-                        .batch_max.query_transfers,
+                    .query_accounts,
+                    => StateMachine.constants.values_max.query_accounts,
+                    .query_transfers,
+                    => StateMachine.constants.values_max.query_transfers,
                     else => unreachable,
                 },
                 .flags = .{
@@ -331,7 +331,7 @@ pub const Parser = struct {
                     @tagName(operation),
                 ).?;
 
-                if (!StateMachine.event_is_slice(state_machine_op)) {
+                if (!StateMachine.event_is_batchable(state_machine_op)) {
                     try parser.print_current_position();
                     try parser.terminal.print_error(
                         "{s} expects a single {s} but received multiple.\n",
@@ -461,7 +461,7 @@ pub const Parser = struct {
 
         return Statement{
             .operation = operation,
-            .arguments = arguments.items,
+            .arguments = arguments,
         };
     }
 };
@@ -690,7 +690,11 @@ test "parser.zig: Parser single transfer successfully" {
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -756,7 +760,7 @@ test "parser.zig: Parser multiple transfers successfully" {
         try std.testing.expectEqual(statement.operation, .create_transfers);
         try std.testing.expectEqualSlices(
             u8,
-            statement.arguments,
+            statement.arguments.items,
             std.mem.sliceAsBytes(&vector.result),
         );
     }
@@ -848,7 +852,11 @@ test "parser.zig: Parser single account successfully" {
         const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -869,7 +877,7 @@ test "parser.zig: Parser account filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.constants.batch_max.get_account_transfers,
+                .limit = StateMachine.constants.values_max.get_account_transfers,
                 .flags = .{
                     .credits = true,
                     .debits = true,
@@ -919,7 +927,11 @@ test "parser.zig: Parser account filter successfully" {
         const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -940,7 +952,7 @@ test "parser.zig: Parser query filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.constants.batch_max.query_transfers,
+                .limit = StateMachine.constants.values_max.query_transfers,
                 .flags = .{
                     .reversed = false,
                 },
@@ -990,7 +1002,11 @@ test "parser.zig: Parser query filter successfully" {
         );
 
         try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -1056,7 +1072,7 @@ test "parser.zig: Parser multiple accounts successfully" {
         try std.testing.expectEqual(statement.operation, .create_accounts);
         try std.testing.expectEqualSlices(
             u8,
-            statement.arguments,
+            statement.arguments.items,
             std.mem.sliceAsBytes(&vector.result),
         );
     }
@@ -1192,7 +1208,11 @@ test "parser.zig: Parser odd but correct formatting" {
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
