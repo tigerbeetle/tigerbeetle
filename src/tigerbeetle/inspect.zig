@@ -138,7 +138,7 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
             inline else => |zone_sized| {
                 try print_size_count(
                     output,
-                    zone_sized.size().?,
+                    zone_sized.size(),
                     1,
                 );
             },
@@ -160,7 +160,7 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
                 try print_size_count(
                     output,
                     constants.sector_size,
-                    @divExact(vsr.Zone.wal_headers.size().?, constants.sector_size),
+                    @divExact(vsr.Zone.wal_headers.size(), constants.sector_size),
                 );
 
                 try print_header(output, 2, "header");
