@@ -31,11 +31,6 @@ pub fn StateMachineType(
             pub const message_body_size_max = config.message_body_size_max;
         };
 
-        pub const batch_logical_allowed = std.enums.EnumArray(Operation, bool).init(.{
-            // Batching not supported by test StateMachine.
-            .echo = false,
-        });
-
         pub fn EventType(comptime _: Operation) type {
             return u8; // Must be non-zero-sized for sliceAsBytes().
         }
@@ -329,36 +324,40 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub fn build_request(
             workload: *Workload,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
+            client_release: vsr.Release,
+            body_buffer: []align(@alignOf(vsr.Header)) u8,
         ) struct {
             operation: StateMachine.Operation,
             size: usize,
-            batch_count: u16,
         } {
             _ = client_index;
+            _ = client_release;
+            assert(body_buffer.len == constants.message_body_size_max);
             workload.requests_sent += 1;
-            const size: u32 = size: {
-                var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(body, .{
-                    .element_size = @sizeOf(StateMachine.EventType(.echo)),
-                });
 
-                const writtable = body_encoder.writable().?;
-                const size: u32 = workload.random.uintAtMost(u32, @intCast(writtable.len));
-                workload.random.bytes(writtable[0..size]);
-                body_encoder.add(size);
-                break :size body_encoder.finish();
-            };
+            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(
+                body_buffer[0..workload.options.batch_size_limit],
+                .{
+                    .element_size = @sizeOf(StateMachine.EventType(.echo)),
+                },
+            );
+
+            const writtable = body_encoder.writable().?;
+            const count: u32 = workload.random.uintAtMost(u32, @intCast(writtable.len));
+            workload.random.bytes(writtable[0..count]);
+            body_encoder.add(count);
+            const size: u32 = body_encoder.finish();
 
             return .{
                 .operation = .echo,
                 .size = size,
-                .batch_count = 1,
             };
         }
 
         pub fn on_reply(
             workload: *Workload,
             client_index: usize,
+            client_release: vsr.Release,
             operation: StateMachine.Operation,
             timestamp: u64,
             request_body: []align(@alignOf(vsr.Header)) const u8,
@@ -366,6 +365,7 @@ fn WorkloadType(comptime StateMachine: type) type {
         ) void {
             _ = client_index;
             _ = timestamp;
+            _ = client_release;
 
             workload.requests_delivered += 1;
             assert(workload.requests_delivered <= workload.requests_sent);
