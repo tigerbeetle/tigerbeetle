@@ -1,4 +1,4 @@
-# Tiger Style
+# TigerStyle
 
 ## The Essence Of Style
 
