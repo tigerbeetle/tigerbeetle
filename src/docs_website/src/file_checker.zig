@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 
 const file_size_max = 166 * 1024;
 const search_index_size_max = 950 * 1024;
+const single_page_size_max = 950 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
 const check_links_external: bool = false;
@@ -82,6 +83,8 @@ fn validate_file(context: FileValidationContext) !void {
     };
     const size_max: u64 = if (std.mem.eql(u8, context.path, "search-index.json"))
         search_index_size_max
+    else if (std.mem.eql(u8, context.path, "single-page/index.html"))
+        single_page_size_max
     else
         file_size_max;
     if (stat.size > size_max) {
@@ -130,7 +133,7 @@ fn validate_text_file(context: FileValidationContext) !void {
 fn read_file_cached(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8) ![]const u8 {
     if (file_cache.get(path)) |content| return content;
 
-    const content = try dir.readFileAlloc(arena, path, file_size_max);
+    const content = try dir.readFileAlloc(arena, path, 1 * 1024 * 1024);
     try file_cache.put(try arena.dupe(u8, path), content);
 
     return content;
@@ -253,7 +256,7 @@ fn check_link_fragment(
     const html = try read_file_cached(context.arena, context.dir, target_path);
     const needle = try std.mem.concat(context.arena, u8, &.{ "id=\"", fragment, "\"" });
     if (std.mem.indexOf(u8, html, needle) == null) {
-        log.err("link target '{s}'' does not contain anchor: '{s}'", .{ target_path, fragment });
+        log.err("link target '{s}' does not contain anchor: '{s}'", .{ target_path, fragment });
         return error.AnchorNotFound;
     }
 }
