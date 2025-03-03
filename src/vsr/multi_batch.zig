@@ -637,14 +637,6 @@ test "batch: invalid format" {
     ));
     try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
         buffer[0..bytes_written],
-        .{ .element_size = element_size + 1 },
-    ));
-    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
-        buffer[0..bytes_written],
-        .{ .element_size = element_size - 1 },
-    ));
-    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
-        buffer[0..bytes_written],
         .{ .element_size = element_size * 2 },
     ));
     try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
@@ -661,6 +653,32 @@ test "batch: invalid format" {
         .{ .element_size = element_size },
     ));
     postamble.batch_count = batch_count - 1;
+    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
+        buffer[0..bytes_written],
+        .{ .element_size = element_size },
+    ));
+    postamble.batch_count = 0;
+    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
+        buffer[0..bytes_written],
+        .{ .element_size = element_size },
+    ));
+    postamble.batch_count = std.math.maxInt(u16);
+    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
+        buffer[0..bytes_written],
+        .{ .element_size = element_size },
+    ));
+    postamble.batch_count = batch_count; // Restore the correct value.
+
+    const trailer_items: []TrailerItem = @alignCast(std.mem.bytesAsSlice(
+        TrailerItem,
+        buffer[bytes_written - trailer_size .. bytes_written - @sizeOf(Postamble)],
+    ));
+    trailer_items[trailer_items.len - 1].element_count += 1;
+    try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
+        buffer[0..bytes_written],
+        .{ .element_size = element_size },
+    ));
+    trailer_items[trailer_items.len - 1].element_count = std.math.maxInt(u16);
     try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
         buffer[0..bytes_written],
         .{ .element_size = element_size },
