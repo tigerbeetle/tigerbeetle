@@ -390,12 +390,8 @@ func doTestClient(t *testing.T, client Client) {
 		assert.Empty(t, results)
 	})
 
-	t.Run("can create concurrent transfers", func(t *testing.T) {
+	t.Run("can submit concurrent requests", func(t *testing.T) {
 		accountA, accountB := createTwoAccounts(t)
-
-		// NB: this test is _not_ parallel, so can use up all the concurrency.
-		const TRANSFERS_MAX = 1_000_000
-
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
 			t.Fatal(err)
@@ -404,29 +400,38 @@ func doTestClient(t *testing.T, client Client) {
 		accountACredits := accounts[0].CreditsPosted.BigInt()
 		accountBDebits := accounts[1].DebitsPosted.BigInt()
 
+		const TASKS_MAX = 1_000_000
 		var waitGroup sync.WaitGroup
-		for i := 0; i < TRANSFERS_MAX; i++ {
+		for i := 0; i < TASKS_MAX; i++ {
 			waitGroup.Add(1)
 
 			go func(i int) {
 				defer waitGroup.Done()
-
-				results, err := client.CreateTransfers([]types.Transfer{
-					{
-						ID:              types.ID(),
-						CreditAccountID: accountA.ID,
-						DebitAccountID:  accountB.ID,
-						Amount:          types.ToUint128(1),
-						Ledger:          1,
-						Code:            1,
-					},
-				})
-
-				if err != nil {
-					t.Error(err)
-					return
+				if i%2 == 0 {
+					results, err := client.CreateTransfers([]types.Transfer{
+						{
+							ID:              types.ID(),
+							CreditAccountID: accountA.ID,
+							DebitAccountID:  accountB.ID,
+							Amount:          types.ToUint128(1),
+							Ledger:          1,
+							Code:            1,
+						},
+					})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					assert.Empty(t, results)
+				} else {
+					results, err := client.LookupAccounts([]types.Uint128{accountA.ID})
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					assert.Len(t, results, 1)
+					assert.Equal(t, results[0].ID, accountA.ID)
 				}
-				assert.Empty(t, results)
 			}(i)
 		}
 		waitGroup.Wait()
@@ -441,8 +446,8 @@ func doTestClient(t *testing.T, client Client) {
 
 		// Each transfer moves ONE unit,
 		// so the credit/debit must differ from TRANSFERS_MAX units:
-		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountACreditsAfter, &accountACredits).Int64())
-		assert.Equal(t, TRANSFERS_MAX, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
+		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(&accountACreditsAfter, &accountACredits).Int64())
+		assert.Equal(t, TASKS_MAX/2, big.NewInt(0).Sub(&accountBDebitsAfter, &accountBDebits).Int64())
 	})
 
 	t.Run("can create concurrent linked chains", func(t *testing.T) {
