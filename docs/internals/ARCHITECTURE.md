@@ -92,7 +92,7 @@ software, judge the results and then revert or double down. For TigerBeetle, we 
 different. We think from the first principles what the right solution _should_ be then use
 "experiments" to confirm or disprove the mental model.
 
-For example, our [TIGER_STYLE](./TIGER_STYLE.md) is an explicitly engineered engineering process.
+For example, our [TigerStyle](../TIGER_STYLE.md) is an explicitly engineered engineering process.
 
 ### As Fast as a Hash Table
 
