@@ -5,7 +5,7 @@ systemd. The unit is configured to start a single-node cluster, so you may need 
 other cluster configurations.
 
 ### **tigerbeetle.service**
-```
+```toml
 [Unit]
 Description=TigerBeetle Replica
 Documentation=https://docs.tigerbeetle.com/
@@ -64,7 +64,7 @@ Here's how to do that:
    This will bring you to an editor with instructions.
 3. Add your overrides.
    Example:
-   ```
+   ```toml
    [Service]
    Environment=TIGERBEETLE_CACHE_GRID_SIZE=4GiB
    Environment=TIGERBEETLE_ADDRESSES=0.0.0.0:3001

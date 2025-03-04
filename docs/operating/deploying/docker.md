@@ -54,7 +54,7 @@ Note that the data file stores which replica in the cluster the file belongs to.
 
 Then, create a docker-compose.yml file:
 
-```docker-compose
+```yaml
 version: "3.7"
 
 ##
