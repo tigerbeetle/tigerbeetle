@@ -153,7 +153,7 @@ of Moore's Law demise are somewhat overstated. A single core can easily scale to
 
 - use the core efficiently, keep it busy with useful work and move everything else off the hot path
 - do your homework: cache line aligned data structures, memory prefetching, SIMD and other
-boring performance engineering 101.
+  performance engineering 101.
 
 Additionally, keeping the system single threaded greatly simplifies the programming model and makes
 testing much more efficient.
@@ -179,7 +179,7 @@ memory used is a consequence of everything having an explicit upper bound.
 
 Knowing the limits ensures that the system continues to function correctly even when overloaded. For
 example, TigerBeetle doesn't need to have _explicit_ code for handling backpressure. If everything
-has a limit, there's nothing to grow without bound to begin with. Backpressure arsis from the entire
+has a limit, there's nothing to grow without bound to begin with. Backpressure arises from the entire
 system of components needing to honor each-other's limits.
 
 Another interesting consequence of static limits is runway concurrency. In highly concurrent
