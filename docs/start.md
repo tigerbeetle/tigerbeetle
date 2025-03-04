@@ -171,7 +171,7 @@ follow:
 
 - [Monthly Newsletter](https://mailchi.mp/8e9fa0f36056/subscribe-to-tigerbeetle) covers everything
   of importance that happened with TigerBeetle. It is a changelog director's cut!
-- [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg) is the place to hang out with users and developers
+- [Slack](https://slack.tigerbeetle.com/join) is the place to hang out with users and developers
   of TigerBeetle. We try to answer every question.
 - [YouTube](https://www.youtube.com/@tigerbeetledb) channel has most of the talks about TigerBeetle,
   as well as talks from the Systems Distributed conference. We also stream on
