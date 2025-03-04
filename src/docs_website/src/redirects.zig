@@ -10,6 +10,7 @@ const Redirect = struct {
         .{ .old = "quick-start/", .new = "start/" },
         .{ .old = "about/", .new = "concepts/" },
         .{ .old = "about/vopr", .new = "concepts/safety" },
+        .{ .old = "about/oltp", .new = "concepts/oltp" },
     };
 };
 
