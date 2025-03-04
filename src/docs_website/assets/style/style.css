@@ -264,6 +264,15 @@ nav.left-pane {
       right: 8px;
       top: 50%;
       transform: translateY(-50%);
+      display: block;
+      width: 16px;
+      height: 16px;
+      border: 1px solid var(--gray-7);
+      border-radius: 3px;
+
+      svg {
+        display: block;
+      }
     }
 
     .clear-button {
