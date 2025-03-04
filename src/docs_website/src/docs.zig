@@ -70,8 +70,10 @@ fn page_install(
 ) !void {
     const page_html = run_pandoc(b, website.pandoc_bin, page.path);
 
+    const page_path = page_url(b.allocator, page);
+
     try search_index.append(.{
-        .page_path = page_url(b.allocator, page),
+        .page_path = page_path,
         .html_path = page_html,
     });
 
@@ -83,12 +85,16 @@ fn page_install(
         .{ .url_prefix = website.url_prefix },
     );
 
-    const page_path = website.write_page(.{
+    // Add trailing slash.
+    const page_path_canonical = if (page_path.len == 0) "" else b.fmt("{s}/", .{page_path});
+
+    const page_out = website.write_page(.{
         .title = page.content.title,
+        .page_path = page_path_canonical,
         .nav = nav_html.string(),
         .content = page_html,
     });
-    _ = output.addCopyFile(page_path, b.pathJoin(&.{ page_url(b.allocator, page), "index.html" }));
+    _ = output.addCopyFile(page_out, b.pathJoin(&.{ page_path, "index.html" }));
 }
 
 fn page_url(arena: Allocator, page: content.Page) []const u8 {
@@ -199,6 +205,7 @@ fn write_single_page(
     try nav_fill(website, nav_html, root, .{ .target = root, .single_page = true });
 
     const single_page = website.write_page(.{
+        .page_path = "single-page/",
         .include_search = false,
         .nav = nav_html.string(),
         .content = run_single_page_writer.captureStdOut(),

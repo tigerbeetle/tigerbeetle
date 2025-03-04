@@ -13,14 +13,15 @@ pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     const allocator = arena.allocator();
     const args = try std.process.argsAlloc(allocator);
-    assert(args.len == 8);
+    assert(args.len == 9);
     const title = args[1];
     const author = args[2];
     const url_prefix = args[3];
-    const include_search = std.mem.eql(u8, args[4], "true");
-    const nav = args[5];
-    const source_file_path = args[6];
-    const target_file_path = args[7];
+    const page_path = args[4];
+    const include_search = std.mem.eql(u8, args[5], "true");
+    const nav = args[6];
+    const source_file_path = args[7];
+    const target_file_path = args[8];
 
     var script = try Html.create(allocator);
     try script.write(page_script, .{ .url_prefix = url_prefix });
@@ -50,6 +51,7 @@ pub fn main() !void {
         .title = title,
         .author = author,
         .url_prefix = url_prefix,
+        .page_path = page_path,
         .nav = nav,
         .search_box = search_box,
         .search_results = search_results,
