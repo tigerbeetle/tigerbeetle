@@ -537,7 +537,7 @@ which cannot be detected using only internal checksums. External checksums also 
 repair possible: if a replica fails to read a block from its local storage, it doesn't report an
 error and instead automatically requests other replicas to send the block, using the checksum as an
 identifier. The root checksum is stored on disk in the superblock, where the hash-chain starts. To
-protect integrity of superblock itself, it is physically duplicated across four copies on disk.
+protect the integrity of the superblock itself, it is physically duplicated across four copies on disk.
 Superblock changes over time, and each _version_ of a superblock includes a checksum of the previous
 version --- if two versions co-exist on disk at the same time, their ordering is constrained weakly
 by a sequence number and strongly by hash-chaining.
