@@ -53,6 +53,22 @@ menuButton.addEventListener("click", () => {
   if (leftPane.classList.contains("search-active")) closeSearch();
 });
 
+// Restore and save the state of the side navigation.
+const navState = JSON.parse(localStorage.getItem("navState"));
+if (navState) {
+  leftPane.style.width = navState.width;
+  if (navState.collapsed) document.body.classList.add("sidenav-collapsed");
+  leftPane.scrollTop = navState.scrollTop;
+}
+window.addEventListener("beforeunload", () => {
+  const navState = {
+    width: leftPane.style.width,
+    collapsed: document.body.classList.contains("sidenav-collapsed"),
+    scrollTop: leftPane.scrollTop,
+  };
+  localStorage.setItem("navState", JSON.stringify(navState));
+});
+
 function syncSideNavWithLocation() {
   const target = document.querySelector("nav.side .target");
   if (target) target.classList.remove("target");
