@@ -17,8 +17,6 @@ document.addEventListener("keydown", event => {
     document.body.classList.remove("sidenav-collapsed");
     searchInput.focus();
     event.preventDefault();
-  } else if (event.key === "m" && searchInput !== document.activeElement) {
-    document.body.classList.toggle("sidenav-collapsed");
   } else if (event.key === "Escape") {
     if (searchInput === document.activeElement || searchInput.value !== "") {
       closeSearch();

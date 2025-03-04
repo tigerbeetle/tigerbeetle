@@ -41,6 +41,11 @@ const collapseButton = document.querySelector(".collapse-button");
 collapseButton.addEventListener("click", () => document.body.classList.add("sidenav-collapsed"));
 const expandButton = document.querySelector(".expand-button");
 expandButton.addEventListener("click", () => document.body.classList.remove("sidenav-collapsed"));
+document.addEventListener("keydown", event => {
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (document.activeElement.tagName === "INPUT") return;
+  if (event.key === "m") document.body.classList.toggle("sidenav-collapsed");
+});
 
 const menuButton = document.querySelector(".menu-button");
 menuButton.addEventListener("click", () => {
