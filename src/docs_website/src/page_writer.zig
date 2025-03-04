@@ -7,7 +7,7 @@ const page_template = @embedFile("html/page.html");
 const search_box_template = @embedFile("html/search-box.html");
 const search_results_template = @embedFile("html/search-results.html");
 const search_script_template = "<script src=\"$url_prefix/js/search.js\"></script>";
-const page_script = @embedFile("html/page-script.js");
+const page_script = @embedFile("js/page-script.js");
 
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
