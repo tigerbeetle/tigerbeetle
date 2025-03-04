@@ -11,6 +11,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
 }
 
+document.querySelector("article").focus();
 const content = document.querySelector("article>.content");
 const leftPane = document.querySelector(".left-pane");
 const resizer = document.querySelector(".resizer");

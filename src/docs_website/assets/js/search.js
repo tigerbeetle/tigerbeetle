@@ -42,6 +42,7 @@ document.addEventListener("keydown", event => {
         } else {
           closeSearch();
           searchPreviewUsed = false;
+          document.querySelector("article").focus();
         }
         event.preventDefault();
       }
@@ -348,7 +349,7 @@ function highlightText(term, container) {
       if (lastIndex < node.nodeValue.length) {
         fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
       }
-      replacements.push({parent, fragment, node});
+      replacements.push({ parent, fragment, node });
     }
   }
   replacements.forEach(r => r.parent.replaceChild(r.fragment, r.node));

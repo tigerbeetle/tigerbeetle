@@ -705,6 +705,7 @@ article {
   flex-direction: column;
   align-items: center;
   position: relative;
+  outline: none;
 
   >.content {
     display: flex;
