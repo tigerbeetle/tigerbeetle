@@ -180,6 +180,7 @@ fn run_pandoc(
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/table-wrapper.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/code-block-buttons.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/edit-link-footer.lua"));
+    pandoc_step.addArg("--reference-location=section");
     const result = pandoc_step.addPrefixedOutputFileArg("--output=", "pandoc-out.html");
     pandoc_step.addFileArg(b.path(base_path).path(b, source));
     return result;

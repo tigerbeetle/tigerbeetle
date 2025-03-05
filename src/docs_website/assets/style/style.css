@@ -996,7 +996,7 @@ article {
       }
     }
 
-    #footnotes {
+    .footnotes {
       margin-top: 24px;
       font-size: 13px;
       line-height: 20px;
