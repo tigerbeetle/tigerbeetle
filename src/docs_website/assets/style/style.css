@@ -27,6 +27,7 @@
   --amber-12: #4F3422;
 
   --highlight-active: #FFFFFF4D;
+  --visited-link: #A144AF;
 
   --primary-1: #0080FF04;
   --primary-2: #008CFF0B;
@@ -73,6 +74,7 @@
     --amber-12: #FFE7B3;
 
     --highlight-active: #FFFFFFB2;
+    --visited-link: #FFA51F;
 
     --primary-1: #D1510004;
     --primary-2: #F9B4000B;
@@ -741,9 +743,18 @@ article {
         text-decoration-color: var(--primary-8);
       }
 
-      code {
-        color: var(--primary-10);
+      &:visited {
+        color: var(--visited-link);
+        text-decoration-color: var(--visited-link);
       }
+    }
+
+    a>code {
+      color: var(--primary-10);
+    }
+
+    a:visited>code {
+      color: var(--visited-link);
     }
 
     h1 {
@@ -781,6 +792,10 @@ article {
       a {
         color: var(--gray-12);
 
+        &:visited {
+          color: var(--gray-12);
+        }
+
         &:hover {
           text-decoration: none;
         }
@@ -789,6 +804,10 @@ article {
           color: var(--gray-12);
           word-break: break-all;
         }
+      }
+
+      a:visited>code {
+        color: var(--gray-12);
       }
     }
 
@@ -1021,8 +1040,13 @@ article {
       text-decoration: none;
       color: var(--gray-9);
 
+      &:visited {
+        color: var(--gray-9);
+      }
+
       &:hover {
         color: var(--gray-11);
+        text-decoration: none;
       }
     }
   }
