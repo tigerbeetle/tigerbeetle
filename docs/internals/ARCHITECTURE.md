@@ -122,8 +122,9 @@ equivalent data from other replicas in the cluster.
 
 ### Non-Interactive Transactions
 
-The primary paradigm for OLGP is interactive transactions. To implement a bank transfer in a
-general-purpose relational database, the application:
+The primary paradigm for OLGP databases ([Online General Purpose](https://docs.tigerbeetle.com/concepts/oltp/))
+is interactive transactions. To implement a bank transfer in a general-purpose relational database,
+the application:
 
 1. Opens a transaction
 2. Fetches balances from the database
