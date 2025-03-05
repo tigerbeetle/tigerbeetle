@@ -178,6 +178,23 @@ jobs:
       - run: ./zig/download.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
 
+  devhub_dry_run:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2147483647
+      - run: sudo apt-get update && sudo apt-get install -y kcov
+      - run: ./zig/download.sh
+      # Run under sudo to enable memory locking for accurate RSS stats.
+      - run: sudo -E ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Not providing DEVHUBDB_PAT and NYRKIO_TOKEN stops devhub from uploading its results, but
+          # it still runs everything.
+
   devhub:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04

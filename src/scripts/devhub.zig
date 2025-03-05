@@ -133,12 +133,14 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         timer.reset();
 
         try shell.exec(
-            "./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 datafile",
+            "./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 datafile-devhub",
             .{},
         );
 
         break :blk timer.read() / std.time.ns_per_ms;
     };
+    defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
+
     const startup_time_ms = blk: {
         timer.reset();
 
@@ -146,9 +148,9 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{
                 .stdin_behavior = .Pipe,
                 .stdout_behavior = .Pipe,
-                .stderr_behavior = .Inherit,
+                .stderr_behavior = .Ignore,
             },
-            "./tigerbeetle start --addresses=0 --cache-grid=8GiB datafile",
+            "./tigerbeetle start --addresses=0 --cache-grid=8GiB datafile-devhub",
             .{},
         );
         errdefer _ = process.kill() catch unreachable;
@@ -196,7 +198,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         break :blk timer.read() / std.time.ns_per_ms;
     };
 
-    const ci_pipeline_duration_s = blk: {
+    const ci_pipeline_duration_s: ?u64 = blk: {
         const times_gh = try shell.exec_stdout("gh run list -c {sha} -e merge_group " ++
             "--json startedAt,updatedAt -L 1 --template {template}", .{
             .sha = cli_args.sha,
@@ -209,6 +211,14 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         const epoch_updated_at = try shell.iso8601_to_timestamp_seconds(iso8601_updated_at);
 
         break :blk epoch_updated_at - epoch_started_at;
+    } orelse blk: {
+        // Return 0 instead of null when running locally or without DEVHUBDB_PAT set - the results
+        // won't be uploaded, and this allows the rest of the code to succeed.
+        if ((shell.env_get("DEVHUBDB_PAT") catch null) == null) {
+            break :blk 0;
+        } else {
+            break :blk null;
+        }
     };
 
     const batch = MetricBatch{
@@ -238,11 +248,17 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         },
     };
 
-    try upload_run(shell, &batch);
+    upload_run(shell, &batch) catch |err| {
+        log.err("failed to upload devhubdb metrics: {}", .{err});
+    };
 
     upload_nyrkio(shell, &batch) catch |err| {
         log.err("failed to upload Nyrkiö metrics: {}", .{err});
     };
+
+    for (batch.metrics) |metric| {
+        std.log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
+    }
 }
 
 fn get_measurement(
