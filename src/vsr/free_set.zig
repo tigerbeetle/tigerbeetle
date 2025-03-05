@@ -202,7 +202,7 @@ pub const FreeSet = struct {
         assert((options.encoded.blocks_acquired.len == 0 and
             options.encoded.blocks_released.len == 0) ==
             (options.free_set_block_addresses.blocks_acquired.len == 0 and
-            options.free_set_block_addresses.blocks_released.len == 0));
+                options.free_set_block_addresses.blocks_released.len == 0));
         set.decode_chunks(
             options.encoded.blocks_acquired,
             options.encoded.blocks_released,

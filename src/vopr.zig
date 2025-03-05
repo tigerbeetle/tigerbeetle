@@ -326,14 +326,13 @@ pub fn main() !void {
         }
         const requests_done = simulator.requests_replied == simulator.options.requests_max;
         const upgrades_done =
-            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
-        {
-            if (health == .down) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
-            }
-        } else false;
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
+                if (health == .down) continue;
+                const release_latest = releases[simulator.replica_releases_limit - 1].release;
+                if (replica.release.value == release_latest.value) {
+                    break true;
+                }
+            } else false;
 
         if (requests_done and upgrades_done) break;
     } else {
@@ -1152,8 +1151,10 @@ pub const Simulator = struct {
         const restart_upgrade =
             simulator.replica_releases[replica.replica] <
             simulator.replica_releases_limit and
-            (simulator.core.isSet(replica.replica) or
-            chance_f64(simulator.random, simulator.options.replica_release_catchup_probability));
+            (simulator.core.isSet(replica.replica) or chance_f64(
+                simulator.random,
+                simulator.options.replica_release_catchup_probability,
+            ));
         if (restart_upgrade) simulator.replica_upgrade(replica.replica);
 
         const restart_random =

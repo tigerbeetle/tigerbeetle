@@ -69,9 +69,10 @@ fn ScanMergeType(
             fn probe(self: *MergeScanStream, timestamp: u64) void {
                 if (self.current != null and
                     switch (self.scan.direction()) {
-                    .ascending => self.current.? >= timestamp,
-                    .descending => self.current.? <= timestamp,
-                }) {
+                        .ascending => self.current.? >= timestamp,
+                        .descending => self.current.? <= timestamp,
+                    })
+                {
                     // The scan may be in a key ahead of the probe key.
                     // E.g. `WHERE P AND (A OR B) ORDER BY ASC`:
                     //  - `P` yields key 2, which is the probe key;
