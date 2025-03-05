@@ -559,8 +559,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-x86_64-linux.zip",
                         .file_name = "llvm-objcopy",
-                        .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e09" ++
-                            "13f33504b03a",
+                        .hash = "N-V-__8AAFCWcgAxBPUOMe_uJrFGfQ2Ri_SsbNp77pPYZdAe",
                     });
                 },
                 .aarch64 => {
@@ -568,8 +567,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-aarch64-linux.zip",
                         .file_name = "llvm-objcopy",
-                        .hash = "122006fbe2af4f6cdbd7236b951b4d128de95b7688828a6999b4fe71" ++
-                            "50e4bb3142ee",
+                        .hash = "N-V-__8AAIgJcQAG--KvT2zb1yNrlRtNEo3pW3aIgoppmbT-",
                     });
                 },
                 else => @panic("unsupported arch"),
