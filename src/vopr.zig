@@ -842,11 +842,11 @@ pub const Simulator = struct {
     ) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
-        var blocks_missing = std.ArrayList(struct {
-            replica: u8,
-            address: u64,
-            checksum: u128,
-        }).init(allocator);
+        const FaultyReplicas = std.StaticBitSet(constants.replicas_max + constants.standbys_max);
+        var blocks_missing = std.AutoArrayHashMap(
+            struct { address: u64, checksum: u128 },
+            FaultyReplicas,
+        ).init(allocator);
         defer blocks_missing.deinit();
 
         // Find all blocks that any replica in the core is missing.
@@ -854,13 +854,16 @@ pub const Simulator = struct {
             if (!simulator.core.isSet(replica.replica)) continue;
 
             const storage = &simulator.cluster.storages[replica.replica];
+
             var fault_iterator = replica.grid.read_global_queue.peek();
             while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
-                try blocks_missing.append(.{
-                    .replica = replica.replica,
+                const v = try blocks_missing.getOrPut(.{
                     .address = faulty_read.address,
                     .checksum = faulty_read.checksum,
                 });
+
+                if (!v.found_existing) v.value_ptr.* = FaultyReplicas.initEmpty();
+                v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
                     "missing address={} checksum={} corrupt={} (remote read)", .{
@@ -873,11 +876,13 @@ pub const Simulator = struct {
 
             var repair_iterator = replica.grid.blocks_missing.faulty_blocks.iterator();
             while (repair_iterator.next()) |fault| {
-                try blocks_missing.append(.{
-                    .replica = replica.replica,
+                const v = try blocks_missing.getOrPut(.{
                     .address = fault.key_ptr.*,
                     .checksum = fault.value_ptr.checksum,
                 });
+
+                if (!v.found_existing) v.value_ptr.* = FaultyReplicas.initEmpty();
+                v.value_ptr.set(replica.replica);
 
                 log.debug("{}: core_missing_blocks: " ++
                     "missing address={} checksum={} corrupt={} (GridBlocksMissing)", .{
@@ -891,14 +896,17 @@ pub const Simulator = struct {
 
         // Check whether every replica in the core is missing the blocks.
         // (If any core replica has the block, then that is a bug, since it should have repaired.)
-        for (blocks_missing.items) |block_missing| {
+        var blocks_missing_iterator = blocks_missing.iterator();
+        while (blocks_missing_iterator.next()) |block_missing_and_faulty_replicas| {
+            const block_missing = block_missing_and_faulty_replicas.key_ptr;
+            const faulty_replicas = block_missing_and_faulty_replicas.value_ptr;
             for (simulator.cluster.replicas) |replica| {
                 const storage = &simulator.cluster.storages[replica.replica];
 
                 // A replica might actually have the block that it is requesting, but not know.
                 // This can occur after state sync: if we compact and create a table, but then skip
                 // over that table via state sync, we will try to sync the table anyway.
-                if (replica.replica == block_missing.replica) continue;
+                if (faulty_replicas.isSet(replica.replica)) continue;
 
                 if (!simulator.core.isSet(replica.replica)) continue;
                 if (replica.standby()) continue;
@@ -919,10 +927,10 @@ pub const Simulator = struct {
             }
         }
 
-        if (blocks_missing.items.len == 0) {
+        if (blocks_missing.count() == 0) {
             return null;
         } else {
-            return blocks_missing.items.len;
+            return blocks_missing.count();
         }
     }
 
