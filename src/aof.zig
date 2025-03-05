@@ -850,7 +850,7 @@ pub fn main() !void {
             .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
         );
     } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
-        try aof_merge(allocator, paths[0 .. count - 2], "prepared.aof");
+        try aof_merge(allocator, @ptrCast(paths[0 .. count - 2]), "prepared.aof");
     } else {
         std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
         std.posix.exit(1);
