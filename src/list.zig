@@ -207,7 +207,7 @@ test "DoublyLinkedList fuzz" {
                     assert(node.back == null);
                     assert(node.next == null);
 
-                    const node_id = list_model.pop();
+                    const node_id = list_model.pop().?;
                     assert(node_id == node.id);
                     assert(nodes_free.count() < nodes_count);
                     assert(!nodes_free.isSet(node_id));

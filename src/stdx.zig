@@ -899,7 +899,7 @@ test "Instant/Duration" {
 
     if (builtin.os.tag == .linux) {
         var instant_3 = instant_1;
-        instant_3.base.timestamp.tv_sec += 1;
+        instant_3.base.timestamp.sec += 1;
         assert(instant_1.duration_since(instant_3).nanoseconds == 0);
 
         const duration = instant_3.duration_since(instant_1);

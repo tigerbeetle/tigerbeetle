@@ -1291,7 +1291,7 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 1000,
                 },
-                .prng = std.rand.DefaultPrng.init(replica_index),
+                .prng = std.Random.DefaultPrng.init(replica_index),
 
                 .trace = self.trace,
                 .test_context = options.test_context,
