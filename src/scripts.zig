@@ -24,7 +24,7 @@ const antithesis = @import("./scripts/antithesis.zig");
 
 pub fn log_fn(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -32,7 +32,7 @@ pub fn log_fn(
     stdx.log_with_timestamp(message_level, scope, format, args);
 }
 
-pub const std_options = .{ .logFn = log_fn };
+pub const std_options = std.Options{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,
