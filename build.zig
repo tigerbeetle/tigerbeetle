@@ -576,7 +576,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-x86_64-windows.zip",
                 .file_name = "llvm-objcopy.exe",
-                .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
+                .hash = "N-V-__8AAADuPABpdHRgl3oetSEQ6yq8i5kq9XJC73JDFtMH",
             });
         },
         .macos => {
@@ -586,7 +586,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-aarch64-macos.zip",
                 .file_name = "llvm-objcopy",
-                .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
+                .hash = "N-V-__8AAFAsVgArdRpU50gjJhqaAUSXsTemKo2A9rCaewUV",
             });
         },
         else => @panic("unsupported host"),
