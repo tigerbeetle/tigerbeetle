@@ -657,6 +657,12 @@ pub const Simulator = struct {
             if (simulator.cluster.replica_health[replica_index] == .down) {
                 simulator.replica_restart(@intCast(replica_index), fault);
             }
+
+            const replica_health = simulator.cluster.replica_health[replica_index];
+            if (replica_health == .up and replica_health.up.paused) {
+                simulator.cluster.replica_unpause(@intCast(replica_index));
+            }
+
             simulator.cluster.storages[replica_index].transition_to_liveness_mode();
         }
 
