@@ -49,13 +49,10 @@ const zig_version = std.SemanticVersion{
 };
 
 comptime {
-    // TODO(zig): Remove when zig 0.14 is released.
-    const is_master = true;
-
     // Compare versions while allowing different pre/patch metadata.
     const zig_version_eq = zig_version.major == builtin.zig_version.major and
         zig_version.minor == builtin.zig_version.minor and
-        (zig_version.patch == builtin.zig_version.patch or is_master);
+        (zig_version.patch == builtin.zig_version.patch);
     if (!zig_version_eq) {
         @compileError(std.fmt.comptimePrint(
             "unsupported zig version: expected {}, found {}",
