@@ -6,8 +6,9 @@ function Link (link)
   local is_absolute = link.target:sub(1, 1) == "/"
   local is_anchor = link.target:sub(1, 1) == "#"
 
-  if link.target:sub(1, 29) == "https://docs.tigerbeetle.com/" then
-    link.target = link.target:gsub("https://docs.tigerbeetle.com/", "/")
+  local docs = "https://docs.tigerbeetle.com/"
+  if link.target:sub(1, #docs) == docs then
+    link.target = link.target:gsub(docs, "/")
     is_external = false
     is_absolute = true
   end
