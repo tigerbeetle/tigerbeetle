@@ -9,8 +9,8 @@ const Redirect = struct {
     const all: []const Redirect = &.{
         .{ .old = "quick-start/", .new = "start/" },
         .{ .old = "about/", .new = "concepts/" },
-        .{ .old = "about/vopr", .new = "concepts/safety" },
-        .{ .old = "about/oltp", .new = "concepts/oltp" },
+        .{ .old = "about/vopr/", .new = "concepts/safety/" },
+        .{ .old = "about/oltp/", .new = "concepts/oltp/" },
     };
 };
 
@@ -26,7 +26,7 @@ fn build_redirect(
     website: Website,
     redirect: Redirect,
 ) !void {
-    const path = b.fmt("{s}/index.html", .{redirect.old});
+    const path = b.pathJoin(&.{ redirect.old, "index.html" });
     const url = b.fmt("{s}/{s}", .{ website.url_prefix, redirect.new });
     const html_redirect = b.fmt(
         \\<!DOCTYPE html>

@@ -18,12 +18,13 @@
     <meta name="author" content="$author">
     <title id="title">$title</title>
     <link rel="icon" href="$url_prefix/img/favicon.png">
+    <link rel="canonical" href="$url_prefix/$page_path">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/style.css">
     <link rel="stylesheet" type="text/css" href="$url_prefix/style/highlight.css">
     <script defer data-domain="docs.tigerbeetle.com" src="https://plausible.io/js/script.js"></script>
   </head>
   <body>
-    <a class="expand-button" title="Show menu">
+    <a class="expand-button" title="Show menu (press M to toggle)">
       <div>
         <svg width="28" height="24" viewBox="0 0 28 24" aria-label="TigerBeetle logo">
           <use href="#svg-tigerbeetle-logo"></use>
@@ -55,41 +56,16 @@
                 <path d="M6 6 18 18M6 18 18 6" stroke-width="1.5" stroke-linecap="round" stroke="currentColor" />
               </svg>
             </a>
-            <a class="collapse-button" title="Hide menu">
+            <a class="collapse-button" title="Hide menu (press M to toggle)">
               <svg width="16" height="16" fill="none">
                 <path d="M7 5L4 8L7 11M12 5L9 8L12 11" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" stroke="currentColor"/>
               </svg>
             </a>
           </header>
-          <div class="search-box">
-            <input type="search" placeholder="Search" />
-            <svg class="search-icon" width="16" height="16" fill="none">
-              <circle cx="6.5" cy="6.5" r="4.5" stroke-width="1.5" stroke="currentColor"/>
-              <path d="M10 10l4 4" stroke-width="1.5" stroke-linecap="round" stroke="currentColor"/>
-            </svg>
-            <svg class="hotkey" width="16" height="16" fill="none">
-              <rect x="0.5" y="0.5" width="15" height="15" rx="2.5" stroke="var(--gray-7)"/>
-              <path d="M9.55584 3.38636L7.21209 12.0938H6.44505L8.7888 3.38636H9.55584Z" fill="var(--gray-11)"/>
-            </svg>
-            <svg class="clear-button" width="16" height="16">
-              <path d="m16 8a8 8 0 0 0-16 0 8 8 0 0 0 16 0m-9 0-2.5-2.5 1-1 2.5 2.5 2.5-2.5 1 1-2.5 2.5 2.5 2.5-1 1-2.5-2.5-2.5 2.5-1-1" fill="currentColor" />
-            </svg>
-          </div>
-          <p class="search-stats"></p>
+          $search_box
         </div>
       </div>
-      <div class="search-results"></div>
-      <div class="search-notfound">
-        <picture>
-          <source width="158" height="119" srcset="$url_prefix/img/notfound-light.webp" media="(prefers-color-scheme: light)"/>
-          <source width="160" height="119" srcset="$url_prefix/img/notfound-dark.webp" media="(prefers-color-scheme: dark)"/>
-          <img width="158" height="119" src="$url_prefix/img/notfound-light.webp"/>
-        </picture>
-        <p>
-          Still haven't found what you're looking for?<br>
-          <a href="https://slack.tigerbeetle.com/join">Ask the TigerBeetle Slack Community.</a>
-        </p>
-      </div>
+      $search_results
       <nav class="side">
         $nav
       </nav>
@@ -124,6 +100,6 @@
       </svg>
     </div>
     <script>$page_script</script>
-    <script src="$url_prefix/js/search.js"></script>
+    $search_script
   </body>
 </html>

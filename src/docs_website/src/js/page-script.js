@@ -11,6 +11,7 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register(urlPrefix + "/service-worker.js");
 }
 
+document.querySelector("article").focus();
 const content = document.querySelector("article>.content");
 const leftPane = document.querySelector(".left-pane");
 const resizer = document.querySelector(".resizer");
@@ -41,6 +42,11 @@ const collapseButton = document.querySelector(".collapse-button");
 collapseButton.addEventListener("click", () => document.body.classList.add("sidenav-collapsed"));
 const expandButton = document.querySelector(".expand-button");
 expandButton.addEventListener("click", () => document.body.classList.remove("sidenav-collapsed"));
+document.addEventListener("keydown", event => {
+  if (event.ctrlKey || event.altKey || event.metaKey) return;
+  if (document.activeElement.tagName === "INPUT") return;
+  if (event.key === "m") document.body.classList.toggle("sidenav-collapsed");
+});
 
 const menuButton = document.querySelector(".menu-button");
 menuButton.addEventListener("click", () => {
@@ -48,12 +54,29 @@ menuButton.addEventListener("click", () => {
   if (leftPane.classList.contains("search-active")) closeSearch();
 });
 
+// Restore and save the state of the side navigation.
+const navState = JSON.parse(localStorage.getItem("navState"));
+if (navState) {
+  leftPane.style.width = navState.width;
+  if (navState.collapsed) document.body.classList.add("sidenav-collapsed");
+  leftPane.scrollTop = navState.scrollTop;
+}
+window.addEventListener("beforeunload", () => {
+  const navState = {
+    width: leftPane.style.width,
+    collapsed: document.body.classList.contains("sidenav-collapsed"),
+    scrollTop: leftPane.scrollTop,
+  };
+  localStorage.setItem("navState", JSON.stringify(navState));
+});
+
 function syncSideNavWithLocation() {
   const target = document.querySelector("nav.side .target");
   if (target) target.classList.remove("target");
   document.querySelectorAll("nav.side details").forEach(details => details.open = false);
 
-  const path = location.pathname;
+  let path = location.pathname;
+  if (path.includes("single-page")) path = location.hash;
   if (path.length > 1) {
     document.querySelectorAll("nav.side a").forEach(a => {
       if (a.href.endsWith(path)) {
@@ -67,6 +90,7 @@ function syncSideNavWithLocation() {
 }
 
 syncSideNavWithLocation();
+addEventListener("hashchange", syncSideNavWithLocation);
 
 function addContentEventHandlers() {
   function copyCode(button) {

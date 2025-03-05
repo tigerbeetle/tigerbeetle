@@ -43,6 +43,8 @@ pub fn build(
         "search-index.json",
     );
 
+    try write_single_page(b, website, &search_index, root_page, output);
+
     try write_404_page(b, website, output);
 }
 
@@ -68,20 +70,31 @@ fn page_install(
 ) !void {
     const page_html = run_pandoc(b, website.pandoc_bin, page.path);
 
+    const page_path = page_url(b.allocator, page);
+
     try search_index.append(.{
-        .page_path = page_url(b.allocator, page),
+        .page_path = page_path,
         .html_path = page_html,
     });
 
     const nav_html = try Html.create(b.allocator);
-    try nav_fill(website, nav_html, root, page);
+    try nav_fill(website, nav_html, root, .{ .target = page });
 
-    const page_path = website.write_page(.{
+    try nav_html.write(
+        @embedFile("html/single-page-link.html"),
+        .{ .url_prefix = website.url_prefix },
+    );
+
+    // Add trailing slash.
+    const page_path_canonical = if (page_path.len == 0) "" else b.fmt("{s}/", .{page_path});
+
+    const page_out = website.write_page(.{
         .title = page.content.title,
+        .page_path = page_path_canonical,
         .nav = nav_html.string(),
         .content = page_html,
     });
-    _ = output.addCopyFile(page_path, b.pathJoin(&.{ page_url(b.allocator, page), "index.html" }));
+    _ = output.addCopyFile(page_out, b.pathJoin(&.{ page_path, "index.html" }));
 }
 
 fn page_url(arena: Allocator, page: content.Page) []const u8 {
@@ -95,32 +108,46 @@ fn page_url(arena: Allocator, page: content.Page) []const u8 {
     return cut_prefix(url, "./").?;
 }
 
-fn nav_fill(website: Website, html: *Html, node: content.Page, target: content.Page) !void {
+fn url2slug(arena: Allocator, url: []const u8) []const u8 {
+    const slug = arena.dupe(u8, url) catch @panic("OOM");
+    std.mem.replaceScalar(u8, slug, '/', '-');
+    return std.mem.concat(arena, u8, &.{ "#", slug }) catch @panic("OOM");
+}
+
+fn nav_fill(website: Website, html: *Html, node: content.Page, options: struct {
+    target: content.Page,
+    single_page: bool = false,
+}) !void {
     try html.write("<ol>\n", .{});
     for (node.children, node.content.children) |node_child, content_child| {
+        var url = page_url(html.arena, node_child);
+        if (options.single_page) {
+            url = url2slug(html.arena, url);
+        } else {
+            url = try std.fmt.allocPrint(html.arena, "{s}/{s}/", .{ website.url_prefix, url });
+        }
+
         if (node_child.children.len > 0) {
             try html.write("<li>\n<details", .{});
-            if (nav_contains(node_child, target)) try html.write(" open", .{});
+            if (nav_contains(node_child, options.target)) try html.write(" open", .{});
             try html.write("><summary class=\"item\">", .{});
             try html.write(
-                \\<a href="$url_prefix/$url/">$title</a>
+                \\<a href="$url">$title</a>
             , .{
-                .url_prefix = website.url_prefix,
-                .url = page_url(html.arena, node_child),
+                .url = url,
                 // Fabio: index page titles are too long
                 .title = content_child.title,
             });
             try html.write("</summary>\n", .{});
-            try nav_fill(website, html, node_child, target);
+            try nav_fill(website, html, node_child, options);
             try html.write("</details></li>\n", .{});
         } else {
             try html.write(
-                \\<li class="item"><a href="$url_prefix/$url/"$class>$title</a></li>
+                \\<li class="item"><a href="$url"$class>$title</a></li>
                 \\
             , .{
-                .url_prefix = website.url_prefix,
-                .url = page_url(html.arena, node_child),
-                .class = if (nav_same_page(node_child, target)) " class=\"target\"" else "",
+                .url = url,
+                .class = if (nav_same_page(node_child, options.target)) " class=\"target\"" else "",
                 .title = content_child.title,
             });
         }
@@ -153,9 +180,39 @@ fn run_pandoc(
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/table-wrapper.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/code-block-buttons.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/edit-link-footer.lua"));
+    pandoc_step.addArg("--reference-location=section");
     const result = pandoc_step.addPrefixedOutputFileArg("--output=", "pandoc-out.html");
     pandoc_step.addFileArg(b.path(base_path).path(b, source));
     return result;
+}
+
+fn write_single_page(
+    b: *std.Build,
+    website: Website,
+    search_index: *const SearchIndex,
+    root: content.Page,
+    docs: *std.Build.Step.WriteFile,
+) !void {
+    const run_single_page_writer = b.addRunArtifact(b.addExecutable(.{
+        .name = "single_page_writer",
+        .root_source_file = b.path("src/single_page_writer.zig"),
+        .target = b.graph.host,
+    }));
+    for (search_index.items) |entry| {
+        run_single_page_writer.addArg(entry.page_path);
+        run_single_page_writer.addFileArg(entry.html_path);
+    }
+    const nav_html = try Html.create(b.allocator);
+    try nav_fill(website, nav_html, root, .{ .target = root, .single_page = true });
+
+    const single_page = website.write_page(.{
+        .page_path = "single-page/",
+        .include_search = false,
+        .nav = nav_html.string(),
+        .content = run_single_page_writer.captureStdOut(),
+    });
+
+    _ = docs.addCopyFile(single_page, "single-page/index.html");
 }
 
 fn write_404_page(
