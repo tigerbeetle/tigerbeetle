@@ -712,7 +712,11 @@ test "flags" {
             errdefer gpa.destroy(flags_exe_buf);
 
             { // Compile this file as an executable!
-                const this_file = try std.fs.cwd().realpath(@src().file, flags_exe_buf);
+
+                const this_file = try std.fs.cwd().realpath(
+                    "src/" ++ @src().file,
+                    flags_exe_buf,
+                );
                 const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
                 const exec_result = try std.process.Child.run(.{
                     .allocator = gpa,
