@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const StateMachine = StateMachineType(void, constants.state_machine_config);
@@ -121,7 +122,7 @@ pub fn on_complete(
     assert(tb_packet.*.status == c.TB_PACKET_OK);
     assert(result_ptr != null);
 
-    @memcpy(context.result[0..result_len], result_ptr[0..result_len]);
+    stdx.copy_disjoint(.exact, u8, context.result[0..result_len], result_ptr[0..result_len]);
     context.result_size = result_len;
     context.completed = true;
     context.condition.signal();

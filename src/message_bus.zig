@@ -693,7 +693,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // `Message` anyway, fixing the alignment issue, but care must be taken to
                 // ensure header alignment before that.
                 var header: Header = undefined;
-                @memcpy(mem.asBytes(&header), data[0..@sizeOf(Header)]);
+                stdx.copy_disjoint(.exact, u8, mem.asBytes(&header), data[0..@sizeOf(Header)]);
 
                 if (!connection.recv_checked_header) {
                     if (!header.valid_checksum()) {

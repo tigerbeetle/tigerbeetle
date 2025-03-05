@@ -123,8 +123,15 @@ pub inline fn copy_disjoint(
         .inexact => assert(target.len >= source.len),
     }
 
+    // disjoint_slices() doesn't work in comptime, because of limitations with @intFromPtr:
+    // https://github.com/ziglang/zig/issues/23072.
+    //
+    // It's also possible to construct slices into an array at comptime that are _not_ disjoint,
+    // which would violate the intention of this function, so it can't just be skipped.
+    assert(!@inComptime());
     assert(disjoint_slices(T, T, target, source));
-    @memcpy(target[0..source.len], source);
+
+    @memcpy(target[0..source.len], source); // Bypass tidy's ban, for stdx.
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
