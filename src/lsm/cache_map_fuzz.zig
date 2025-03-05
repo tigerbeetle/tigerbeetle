@@ -13,10 +13,10 @@ const log = std.log.scoped(.lsm_cache_map_fuzz);
 const Key = TestTable.Key;
 const Value = TestTable.Value;
 
-const map_value_count_max = 1024;
-// Use a large scope (relative to map_value_count_max) to increase the chances of
+const stash_value_count_max = 1024;
+// Use a large scope (relative to stash_value_count_max) to increase the chances of
 // (SetAssociativeCache) hash collisions.
-const scope_value_count_max = map_value_count_max;
+const scope_value_count_max = stash_value_count_max;
 
 const OpValue = struct {
     op: u32,
@@ -314,7 +314,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
     var operations_since_scope_open: usize = 0;
     const operations_since_scope_open_max: usize = scope_value_count_max;
     var upserts_since_compact: usize = 0;
-    const upserts_since_compact_max: usize = map_value_count_max;
+    const upserts_since_compact_max: usize = stash_value_count_max;
     var scope_is_open = false;
     for (fuzz_ops, 0..) |*fuzz_op, i| {
         var fuzz_op_tag: FuzzOpTag = undefined;
@@ -405,7 +405,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
         const options = TestCacheMap.Options{
             .cache_value_count_max = cache_value_count_max,
-            .map_value_count_max = map_value_count_max,
+            .stash_value_count_max = stash_value_count_max,
             .scope_value_count_max = scope_value_count_max,
             .name = "fuzz map",
         };

@@ -605,11 +605,11 @@ pub fn GrooveType(
             groove.objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
-                // In the worst case, each Map must be able to store batch_value_count_limit per
+                // In the worst case, each stash must be able to store batch_value_count_limit per
                 // beat (to contain either TableMutable or TableImmutable) as well as the maximum
                 // number of prefetches a bar may perform, excluding prefetches already accounted
                 // for by batch_value_count_limit.
-                .map_value_count_max = constants.lsm_compaction_ops *
+                .stash_value_count_max = constants.lsm_compaction_ops *
                     (options.tree_options_object.batch_value_count_limit +
                     options.prefetch_entries_for_read_max),
 
