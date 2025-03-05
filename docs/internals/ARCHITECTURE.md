@@ -232,7 +232,7 @@ close contender.
 
 Both Zig and Rust provide spatial memory safety. Rust has better temporal and thread safety but
 static allocation and single-threaded execution reduce the relative importance of these benefits.
-Additionally, mere memory safety would a low bar for TigerBeetle. General correctness is table
+Additionally, mere memory safety would be a low bar for TigerBeetle. General correctness is table
 stakes. Requiring a comprehensive testing strategy leaves little space for bugs to escape testing
 but be caught by Rust-style type system.
 
@@ -288,7 +288,7 @@ on [Sim TigerBeetle](https://sim.tigerbeetle.com).
 
 TigerBeetle's simulator, the VOPR ([./vopr.md](./vopr.md)), can run an entire cluster on a single
 thread, injecting various storage faults and infinitely speeding up time. VOPR combines a smart
-workload generator, swarm testing and a thousand CPU cores. It makes is easy to exercise all the
+workload generator, swarm testing and a thousand CPU cores. It makes it easy to exercise all the
 possible behaviors of the system.
 
 Crucially, unlike formal proofs and model checking, the simulation testing exercises a specific
@@ -310,7 +310,7 @@ In the context of TigerBeetle, mechanical sympathy spans all four primary colors
 - CPU
 
 **Network** has limited bandwidth. This means that if one node in the network requires much higher
-bandwidth then the rest, the network will be underutilized. When the primary needs to replicate a
+bandwidth than the rest, the network will be underutilized. When the primary needs to replicate a
 prepare across the cluster, a ring topology is used: the primary doesn't broadcast the prepare to every
 other replica. It sends it to just one other replica, relying on that replica to forward on the prepare.
 
