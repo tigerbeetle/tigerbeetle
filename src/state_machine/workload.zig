@@ -1491,7 +1491,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 
             return .{
                 .auditor_options = .{
-                    .accounts_max = 2 + random.uintLessThan(usize, 128),
+                    .accounts_max = 2 + random.uintLessThan(usize, 2048),
                     .account_id_permutation = IdPermutation.generate(random),
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
@@ -1500,7 +1500,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
                 },
                 .transfer_id_permutation = IdPermutation.generate(random),
                 .operations = .{
-                    .create_accounts = 1 + random.uintLessThan(usize, 10),
+                    .create_accounts = 1 + random.uintLessThan(usize, 100),
                     .create_transfers = 1 + random.uintLessThan(usize, 100),
                     .lookup_accounts = 1 + random.uintLessThan(usize, 20),
                     .lookup_transfers = 1 + random.uintLessThan(usize, 20),
