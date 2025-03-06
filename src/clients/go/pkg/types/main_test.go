@@ -1,6 +1,7 @@
 package types
 
 import (
+	"math/big"
 	"sync"
 	"testing"
 	"time"
@@ -70,6 +71,22 @@ func Test_BigIntToUint128(t *testing.T) {
 			t.Fatalf("Expected %s to be %s, got %s", test, test, string_back)
 		}
 	}
+}
+
+func Test_BigIntToUint128_Negative(t *testing.T) {
+	negative := new(big.Int).SetInt64(-1)
+	testFunc := func() {
+		BigIntToUint128(*negative)
+	}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Errorf("Expected panic")
+		}
+	}()
+
+	testFunc()
+	t.Errorf("Expected panic, but execution continued")
 }
 
 func Test_ID(t *testing.T) {
