@@ -120,6 +120,29 @@ pub const Terminal = struct {
                             'B' => return .down,
                             'C' => return .right,
                             'D' => return .left,
+                            'H' => return .home,
+                            'F' => return .end,
+                            '1' => {
+                                const fourth_byte = try stdin.readByte();
+                                switch (fourth_byte) {
+                                    ';' => {
+                                        const fifth_byte = try stdin.readByte();
+                                        switch (fifth_byte) {
+                                            '5' => {
+                                                const sixth_byte = try stdin.readByte();
+                                                switch (sixth_byte) {
+                                                    'C' => return .ctrlright,
+                                                    'D' => return .ctrlleft,
+                                                    else => return .unhandled,
+                                                }
+                                            },
+                                            else => return .unhandled,
+                                        }
+                                    },
+
+                                    else => return .unhandled,
+                                }
+                            },
                             '3' => {
                                 const fourth_byte = try stdin.readByte();
                                 switch (fourth_byte) {
@@ -344,6 +367,10 @@ const UserInput = union(enum) {
     down,
     altf,
     altb,
+    ctrlleft,
+    ctrlright,
+    home,
+    end,
     unhandled,
 };
 

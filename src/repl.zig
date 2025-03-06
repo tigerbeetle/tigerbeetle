@@ -452,7 +452,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         repl.buffer.append_slice_assume_capacity(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
-                    .altf => {
+                    .altf, .ctrlright => {
                         const forward = move_forward_by_word(repl.buffer.slice(), buffer_index);
                         terminal_screen.update_cursor_position(
                             @as(isize, @intCast(forward - buffer_index)),
@@ -463,7 +463,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index = forward;
                     },
-                    .altb => {
+                    .altb, .ctrlleft => {
                         const backward = move_backward_by_word(repl.buffer.slice(), buffer_index);
                         terminal_screen.update_cursor_position(
                             -@as(isize, @intCast(buffer_index - backward)),
@@ -474,7 +474,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index = backward;
                     },
-                    .ctrla => {
+                    .ctrla, .home => {
                         // Move to start of line.
                         const position_start_diff = -@as(isize, @intCast(buffer_index));
                         terminal_screen.update_cursor_position(position_start_diff);
@@ -484,7 +484,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index = 0;
                     },
-                    .ctrle => {
+                    .ctrle, .end => {
                         // Move to end of line.
                         const position_end_diff = @as(
                             isize,
