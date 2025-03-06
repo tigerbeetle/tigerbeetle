@@ -210,34 +210,39 @@ pub fn main() !void {
 
         if (requests_done and upgrades_done) break;
     } else {
+        if (cli_args.lite) return;
+
+        // Heal current network partitions, disable future process, storage, and network faults
+        // on all replicas. Run this fully-connected core of replicas for 500_000 ticks, which
+        // should enough to ensure all faulty grid blocks, headers, or prepares that can be repaired
+        // are repaired. After this, all we must be left with are correlated faults.
+        {
+            var replica: u8 = 0;
+            while (replica < replica_count) : (replica += 1) simulator.core.set(replica);
+            simulator.transition_to_liveness_mode();
+
+            tick = 0;
+            while (tick < 500_000) : (tick += 1) simulator.tick();
+        }
+
         log.info(
             "no liveness, final cluster state (requests_max={} requests_replied={}):",
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
-
-        if (cli_args.lite) return;
-
-        // Cluster may be correctly unavailable because too many replicas are in recovering_head.
-        // This is possible as `Cluster.replica_release_execute()` does not heal WAL faults while
-        // while restarting replicas (unlike `Simulator.replica_restart`).
-        var replicas_recovering_head: usize = 0;
-        const view_change_quorum = vsr.quorums(options.cluster.replica_count).view_change;
-
-        for (simulator.cluster.replicas) |*replica| {
-            replicas_recovering_head +=
-                @intFromBool(!replica.standby() and replica.status == .recovering_head);
-        }
-        if (view_change_quorum > options.cluster.replica_count - replicas_recovering_head) {
-            log.warn("no liveness, too many replicas replicas in recovering_head", .{});
-            return;
-        } else {
-            log.err("you can reproduce this failure with seed={}", .{seed});
+        if (try simulator.cluster_recoverable(allocator)) {
+            output.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
-        }
+        } else return;
     }
 
     if (cli_args.lite) return;
+
+    simulator.core = random_core(
+        simulator.random,
+        simulator.options.cluster.replica_count,
+        simulator.options.cluster.standby_count,
+    );
 
     simulator.transition_to_liveness_mode();
 
@@ -253,18 +258,8 @@ pub fn main() !void {
     }
 
     if (simulator.pending()) |reason| {
-        if (simulator.core_missing_primary()) {
-            unimplemented("repair requires reachable primary");
-        } else if (simulator.core_missing_quorum()) {
-            log.warn("no liveness, core replicas cannot view-change", .{});
-        } else if (try simulator.core_missing_prepare(allocator)) |header| {
-            log.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
-            log.warn("no liveness, {} blocks are not available in core", .{blocks});
-        } else if (simulator.core_missing_reply()) |header| {
-            log.warn("no liveness, reply op={} is not available in core", .{header.op});
-        } else {
-            log.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
+        if (try simulator.cluster_recoverable(allocator)) {
+            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
             log.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "no state convergence: {s}", .{reason});
@@ -634,8 +629,25 @@ pub const Simulator = struct {
         simulator.tick_pause();
     }
 
+    pub fn cluster_recoverable(simulator: *Simulator, allocator: std.mem.Allocator) !bool {
+        if (simulator.core_missing_primary()) {
+            stdx.unimplemented("repair requires reachable primary");
+        } else if (simulator.core_missing_quorum()) {
+            output.warn("no liveness, core replicas cannot view-change", .{});
+        } else if (try simulator.core_missing_prepare(allocator)) |header| {
+            output.warn("no liveness, op={} is not available in core", .{header.op});
+        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
+            output.warn("no liveness, {} blocks are not available in core", .{blocks});
+        } else if (simulator.core_missing_reply()) |header| {
+            output.warn("no liveness, reply op={} is not available in core", .{header.op});
+        } else {
+            return true;
+        }
+
+        return false;
+    }
+
     /// Executes the following:
-    /// * Pick a quorum of replicas to be fully available (the core)
     /// * Restart any core replicas that are down at the moment
     /// * Heal all network partitions between core replicas
     /// * Disable storage faults on the core replicas
@@ -644,11 +656,6 @@ pub const Simulator = struct {
     /// See https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness for broader
     /// context.
     pub fn transition_to_liveness_mode(simulator: *Simulator) void {
-        simulator.core = random_core(
-            simulator.prng,
-            simulator.options.cluster.replica_count,
-            simulator.options.cluster.standby_count,
-        );
         log.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
 
         var it = simulator.core.iterator(.{});
@@ -707,8 +714,8 @@ pub const Simulator = struct {
     pub fn core_missing_quorum(simulator: *const Simulator) bool {
         assert(simulator.core.count() > 0);
 
-        var core_replicas: usize = 0;
-        var core_recovering_head: usize = 0;
+        var core_replicas: u8 = 0;
+        var core_recovering_head: u8 = 0;
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 core_replicas += 1;
