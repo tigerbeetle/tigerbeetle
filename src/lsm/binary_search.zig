@@ -86,7 +86,7 @@ pub fn binary_search_values_upsert_index(
             inline for (0..cache_lines_per_value) |i| {
                 // Locality = 0 means no temporal locality. That is, the data can be immediately
                 // dropped from the cache after it is accessed.
-                const options = .{
+                const options = std.builtin.PrefetchOptions{
                     .rw = .read,
                     .locality = 0,
                     .cache = .data,
@@ -432,7 +432,7 @@ const test_binary_search = struct {
 
     fn random_sequence(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        random: std.Random,
         iter: usize,
     ) ![]const u32 {
         const keys_count = @min(
@@ -447,7 +447,7 @@ const test_binary_search = struct {
         return keys;
     }
 
-    fn random_search(random: std.rand.Random, iter: usize, comptime mode: anytype) !void {
+    fn random_search(random: std.Random, iter: usize, comptime mode: anytype) !void {
         const keys = try random_sequence(std.testing.allocator, random, iter);
         defer std.testing.allocator.free(keys);
 
@@ -500,7 +500,7 @@ const test_binary_search = struct {
         try std.testing.expectEqualSlices(u32, expected_slice, actual_slice);
     }
 
-    fn random_range_search(random: std.rand.Random, iter: usize) !void {
+    fn random_range_search(random: std.Random, iter: usize) !void {
         const keys = try random_sequence(std.testing.allocator, random, iter);
         defer std.testing.allocator.free(keys);
 
@@ -685,7 +685,7 @@ test "binary search: duplicates" {
 }
 
 test "binary search: random" {
-    var rng = std.rand.DefaultPrng.init(42);
+    var rng = std.Random.DefaultPrng.init(42);
     inline for (.{ .lower_bound, .upper_bound }) |mode| {
         var i: usize = 0;
         while (i < 2048) : (i += 1) {
@@ -842,7 +842,7 @@ test "binary search: duplicated range" {
 }
 
 test "binary search: random range" {
-    var rng = std.rand.DefaultPrng.init(42);
+    var rng = std.Random.DefaultPrng.init(42);
     var i: usize = 0;
     while (i < 2048) : (i += 1) {
         try test_binary_search.random_range_search(rng.random(), i);

@@ -1,16 +1,16 @@
-//! Utilities for generating random values, as extensions to what's already in `std.rand.Random`.
+//! Utilities for generating random values, as extensions to what's already in `std.Random`.
 const std = @import("std");
 
 const assert = std.debug.assert;
 
 /// Pick a random element from the slice.
-pub fn element(random: std.rand.Random, comptime T: type, values: []T) T {
+pub fn element(random: std.Random, comptime T: type, values: []T) T {
     return values[random.uintLessThan(usize, values.len)];
 }
 
 /// Pick a random element from the set (hashmap with void values).
 pub fn set_element(
-    random: std.rand.Random,
+    random: std.Random,
     comptime K: type,
     set: std.AutoHashMapUnmanaged(K, void),
 ) K {
@@ -27,9 +27,9 @@ pub fn set_element(
 }
 
 /// Set any (zero or more) of the provided flags randomly.
-pub fn flags(random: std.rand.Random, comptime Flags: type, fields: anytype) Flags {
+pub fn flags(random: std.Random, comptime Flags: type, fields: anytype) Flags {
     var result = std.mem.zeroes(Flags);
-    const flags_struct = @typeInfo(Flags).Struct;
+    const flags_struct = @typeInfo(Flags).@"struct";
     inline for (fields) |field| {
         // Check that provided flag fields are indeed booleans.
         inline for (flags_struct.fields) |struct_field| {
@@ -44,7 +44,7 @@ pub fn flags(random: std.rand.Random, comptime Flags: type, fields: anytype) Fla
 
 test flags {
     const F = packed struct { a: bool, b: bool, c: bool };
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     var a = false;
@@ -69,11 +69,11 @@ test flags {
 /// The `E` type parameter should be inferred, but seemingly to due to
 /// https://github.com/ziglang/zig/issues/19985, it can't be.
 pub fn weighted(
-    random: std.rand.Random,
+    random: std.Random,
     comptime E: type,
     weights: EnumWeightsType(E),
 ) ?E {
-    const s = @typeInfo(@TypeOf(weights)).Struct;
+    const s = @typeInfo(@TypeOf(weights)).@"struct";
     var total: u64 = 0;
     var enum_weights: [s.fields.len]std.meta.Tuple(&.{ E, u32 }) = undefined;
     var possible_values_count: usize = 0;
@@ -115,7 +115,7 @@ pub fn EnumWeightsType(comptime E: type) type {
 }
 
 test "weighted: no weights" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const Cases = enum {};
@@ -123,7 +123,7 @@ test "weighted: no weights" {
 }
 
 test "weighted: one weight" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const Cases = enum { a };
@@ -131,7 +131,7 @@ test "weighted: one weight" {
 }
 
 test "weighted: one non-zero weight" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const Cases = enum { a, b };
@@ -139,7 +139,7 @@ test "weighted: one non-zero weight" {
 }
 
 test "weighted: equal weights are picked equally often over time" {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     const sample_count = 10_000;
@@ -167,7 +167,7 @@ test "weighted: equal weights are picked equally often over time" {
 ///
 /// `odds(random, 2, 5)` means "a probability of 2 in 5".
 pub fn odds(
-    random: std.rand.Random,
+    random: std.Random,
     numerator: u32,
     denominator: u32,
 ) bool {
@@ -178,7 +178,7 @@ pub fn odds(
 }
 
 test odds {
-    var prng = std.rand.DefaultPrng.init(0);
+    var prng = std.Random.DefaultPrng.init(0);
     const random = prng.random();
 
     try std.testing.expect(odds(random, 1, 2));

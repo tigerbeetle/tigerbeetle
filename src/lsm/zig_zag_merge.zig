@@ -141,9 +141,9 @@ pub fn ZigZagMergeIteratorType(
                         it.probe_key_previous == null or
                             key == it.probe_key_previous.? or
                             it.key_ahead(.{
-                            .key_after = key,
-                            .key_before = it.probe_key_previous.?,
-                        }),
+                                .key_after = key,
+                                .key_before = it.probe_key_previous.?,
+                            }),
                     );
 
                     // The keys matches, continuing to the next stream.
@@ -334,7 +334,7 @@ fn TestContextType(comptime streams_max: u32) type {
             }
         }
 
-        fn fuzz(random: std.rand.Random, stream_key_count_max: u32) !void {
+        fn fuzz(random: std.Random, stream_key_count_max: u32) !void {
             const allocator = testing.allocator;
             var streams: [streams_max][]Value = undefined;
 
@@ -397,7 +397,7 @@ fn TestContextType(comptime streams_max: u32) type {
         }
 
         fn fuzz_make_intersection(
-            random: std.rand.Random,
+            random: std.Random,
             streams: []const []Value,
             intersection: []Value,
         ) void {
@@ -558,7 +558,7 @@ test "zig_zag_merge: fuzz" {
     const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     try TestContextType(32).fuzz(random, 256);

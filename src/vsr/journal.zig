@@ -1524,9 +1524,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.operation == .reserved);
                     assert(prepare.?.operation == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
-                    assert(
-                        header.?.checksum == Header.Prepare.reserved(cluster, slot.index).checksum,
-                    );
+                    assert(header.?.checksum ==
+                        Header.Prepare.reserved_operation(cluster, slot.index).checksum);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
                     journal.headers[slot.index] = header.?;
@@ -1548,7 +1547,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     }
                 },
                 .vsr => {
-                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserved_operation(
+                        cluster,
+                        slot.index,
+                    );
                     assert(journal.dirty.bit(slot));
                     assert(journal.faulty.bit(slot));
                 },
@@ -1557,7 +1559,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare == null);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
-                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserved_operation(
+                        cluster,
+                        slot.index,
+                    );
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1719,7 +1724,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub fn remove_entry(journal: *Journal, slot: Slot) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 
-            const reserved = Header.Prepare.reserved(replica.cluster, slot.index);
+            const reserved = Header.Prepare.reserved_operation(replica.cluster, slot.index);
             journal.headers[slot.index] = reserved;
             journal.headers_redundant[slot.index] = reserved;
             journal.dirty.clear(slot);
@@ -1772,7 +1777,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // faulty bit + nack this header.
                     journal.faulty.clear(slot);
                     journal.headers_redundant[slot.index] =
-                        Header.Prepare.reserved(header.cluster, slot.index);
+                        Header.Prepare.reserved_operation(header.cluster, slot.index);
                 }
 
                 journal.headers[slot.index] = header.*;
@@ -2585,7 +2590,7 @@ pub fn format_wal_headers(cluster: u128, offset_logical: u64, target: []u8) usiz
         if (slot == 0 and i == 0) {
             header.* = Header.Prepare.root(cluster);
         } else {
-            header.* = Header.Prepare.reserved(cluster, slot);
+            header.* = Header.Prepare.reserved_operation(cluster, slot);
         }
     }
     return headers_count * @sizeOf(Header);
@@ -2630,7 +2635,7 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
                 if (message_slot == 0) {
                     sector_header.* = Header.Prepare.root(cluster);
                 } else {
-                    sector_header.* = Header.Prepare.reserved(cluster, message_slot);
+                    sector_header.* = Header.Prepare.reserved_operation(cluster, message_slot);
                 }
             }
         }

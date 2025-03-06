@@ -35,7 +35,7 @@ const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmente
 const Value = packed struct(u128) {
     id: u64,
     value: u63,
-    tombstone: u1 = 0,
+    tombstone_bit: u1 = 0,
 
     comptime {
         assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
@@ -48,14 +48,14 @@ const Value = packed struct(u128) {
     const sentinel_key = std.math.maxInt(u64);
 
     inline fn tombstone(value: *const Value) bool {
-        return value.tombstone != 0;
+        return value.tombstone_bit != 0;
     }
 
     inline fn tombstone_from_key(key: u64) Value {
         return Value{
             .id = key,
             .value = 0,
-            .tombstone = 1,
+            .tombstone_bit = 1,
         };
     }
 };
@@ -552,7 +552,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                             const canonical_value: Value = .{
                                 .id = value.id,
                                 .value = 0,
-                                .tombstone = value.tombstone,
+                                .tombstone_bit = value.tombstone_bit,
                             };
                             if (model.contains(&canonical_value)) {
                                 env.tree.remove(&canonical_value);
@@ -761,7 +761,7 @@ const Model = struct {
     }
 };
 
-fn random_id(random: std.rand.Random, comptime Int: type) Int {
+fn random_id(random: std.Random, comptime Int: type) Int {
     // We have two opposing desires for random ids:
     const avg_int: Int = if (random.boolean())
         // 1. We want to cause many collisions.
@@ -772,7 +772,7 @@ fn random_id(random: std.rand.Random, comptime Int: type) Int {
     return fuzz.random_int_exponential(random, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(random: std.Random, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
@@ -851,7 +851,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 }
 
 fn generate_compact(
-    random: std.rand.Random,
+    random: std.Random,
     options: struct { op: u64, persisted_op: u64 },
 ) FuzzOp {
     const half_bar = @divExact(constants.lsm_compaction_ops, 2);
@@ -862,8 +862,8 @@ fn generate_compact(
         // Checkpoint at the normal rate.
         // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         options.op == vsr.Checkpoint.trigger_for_checkpoint(
-        vsr.Checkpoint.checkpoint_after(options.persisted_op),
-    );
+            vsr.Checkpoint.checkpoint_after(options.persisted_op),
+        );
     return FuzzOp{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,
@@ -872,7 +872,7 @@ fn generate_compact(
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    var rng = std.Random.DefaultPrng.init(fuzz_args.seed);
     const random = rng.random();
 
     const table_usage = random.enumValue(TableUsage);
@@ -887,7 +887,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     });
     defer storage_fault_atlas.deinit(allocator);
 
-    const storage_options = .{
+    const storage_options = Storage.Options{
         .seed = random.int(u64),
         .replica_index = 0,
         .read_latency_min = 0,

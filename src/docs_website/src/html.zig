@@ -26,10 +26,10 @@ pub fn create(arena: std.mem.Allocator) !*Html {
 pub fn write(html: *Html, template: []const u8, replacements: anytype) !void {
     const ReplacementsType = @TypeOf(replacements);
     const replacements_type_info = @typeInfo(ReplacementsType);
-    if (replacements_type_info != .Struct) @compileError("expected struct");
+    if (replacements_type_info != .@"struct") @compileError("expected struct");
 
     var unused = std.StringHashMap(void).init(html.arena);
-    inline for (replacements_type_info.Struct.fields) |field| {
+    inline for (replacements_type_info.@"struct".fields) |field| {
         try unused.put(field.name, {});
     }
 
@@ -44,7 +44,7 @@ pub fn write(html: *Html, template: []const u8, replacements: anytype) !void {
         } else chunk.len;
 
         const identifier = chunk[0..identifier_len];
-        const found = inline for (replacements_type_info.Struct.fields) |field| {
+        const found = inline for (replacements_type_info.@"struct".fields) |field| {
             if (std.mem.eql(u8, field.name, identifier)) {
                 try html.writer.writeAll(switch (field.type) {
                     *Html => @field(replacements, field.name).string(),

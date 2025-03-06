@@ -352,29 +352,29 @@ pub fn ScanType(
             // Union field for the id tree:
             if (Groove.IdTree != void) {
                 const ScanTree = ScanTreeType(*Context, Groove.IdTree, Storage);
-                type_info.Union.fields = type_info.Union.fields ++
+                type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
-                    .name = "id",
-                    .type = ScanTree,
-                    .alignment = @alignOf(ScanTree),
-                }};
+                        .name = "id",
+                        .type = ScanTree,
+                        .alignment = @alignOf(ScanTree),
+                    }};
             }
 
             // Union fields for each index tree:
             for (std.meta.fields(Groove.IndexTrees)) |field| {
                 const IndexTree = field.type;
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
-                type_info.Union.fields = type_info.Union.fields ++
+                type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
-                    .name = field.name,
-                    .type = ScanTree,
-                    .alignment = @alignOf(ScanTree),
-                }};
+                        .name = field.name,
+                        .type = ScanTree,
+                        .alignment = @alignOf(ScanTree),
+                    }};
             }
 
             // We need a tagged union for dynamic dispatching.
-            type_info.Union.tag_type = blk: {
-                const union_fields = type_info.Union.fields;
+            type_info.@"union".tag_type = blk: {
+                const union_fields = type_info.@"union".fields;
                 var tag_fields: [union_fields.len]std.builtin.Type.EnumField =
                     undefined;
                 for (&tag_fields, union_fields, 0..) |*tag_field, union_field, i| {
@@ -384,7 +384,7 @@ pub fn ScanType(
                     };
                 }
 
-                break :blk @Type(.{ .Enum = .{
+                break :blk @Type(.{ .@"enum" = .{
                     .tag_type = std.math.IntFittingRange(0, tag_fields.len - 1),
                     .fields = &tag_fields,
                     .decls = &.{},
@@ -399,6 +399,7 @@ pub fn ScanType(
         assigned: bool,
 
         pub fn read(scan: *Scan, context: *Context) void {
+            @setEvalBranchQuota(4_000);
             switch (scan.dispatcher) {
                 inline else => |*scan_impl, tag| read_dispatch(
                     tag,

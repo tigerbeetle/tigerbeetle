@@ -558,7 +558,7 @@ pub fn ReplicaType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
-        prng: std.rand.DefaultPrng,
+        prng: std.Random.DefaultPrng,
 
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque,
@@ -1291,7 +1291,7 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 1000,
                 },
-                .prng = std.rand.DefaultPrng.init(replica_index),
+                .prng = std.Random.DefaultPrng.init(replica_index),
 
                 .trace = self.trace,
                 .test_context = options.test_context,
@@ -1546,7 +1546,7 @@ pub fn ReplicaType(
                 const upgrade_targets = &self.upgrade_targets[message.header.replica];
                 if (upgrade_targets.* == null or
                     (upgrade_targets.*.?.checkpoint <= message.header.checkpoint_op and
-                    upgrade_targets.*.?.view <= message.header.view))
+                        upgrade_targets.*.?.view <= message.header.view))
                 {
                     upgrade_targets.* = .{
                         .checkpoint = message.header.checkpoint_op,
@@ -1645,7 +1645,7 @@ pub fn ReplicaType(
                     return;
                 };
 
-            const request = .{
+            const request = Request{
                 .message = message.ref(),
                 .realtime = realtime,
             };
@@ -1728,7 +1728,7 @@ pub fn ReplicaType(
 
             if (message.header.view < self.view or
                 (self.status == .normal and
-                message.header.view == self.view and message.header.op <= self.op))
+                    message.header.view == self.view and message.header.op <= self.op))
             {
                 log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
                 self.on_repair(message);
@@ -1792,7 +1792,7 @@ pub fn ReplicaType(
 
             if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
                 message.header.checkpoint_id !=
-                self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
+                    self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
             {
                 // Panic on encountering a prepare which does not match an expected checkpoint id.
                 //
@@ -2257,7 +2257,7 @@ pub fn ReplicaType(
             //   to step up as primary before it attempts to step up as primary.
             if (vsr.Checkpoint.durable(self.op_checkpoint_next(), commit_max) or
                 (op_checkpoint_max > self.op_checkpoint() and
-                (self.view - self.log_view < self.replica_count)))
+                    (self.view - self.log_view < self.replica_count)))
             {
                 // This serves a few purposes:
                 // 1. Availability: We pick a primary to minimize the number of WAL repairs, to
@@ -3602,7 +3602,7 @@ pub fn ReplicaType(
                 // This is *not* necessary for correctness.
                 if (m.header.checkpoint_op < message.header.checkpoint_op or
                     (m.header.checkpoint_op == message.header.checkpoint_op and
-                    m.header.commit_min < message.header.commit_min))
+                        m.header.commit_min < message.header.commit_min))
                 {
                     log.debug("{}: on_{s}: replacing " ++
                         "(newer message replica={} checkpoint={}..{} commit={}..{})", .{
@@ -4126,7 +4126,7 @@ pub fn ReplicaType(
                 // additionally verify ourselves that the hash-chain is not broken
                 const valid_hash_chain_or_same_view = self.valid_hash_chain(@src()) or
                     (self.status == .normal and
-                    header.view == self.journal.header_with_op(self.op).?.view);
+                        header.view == self.journal.header_with_op(self.op).?.view);
 
                 if (!valid_hash_chain_or_same_view) {
                     assert(!self.solo());
@@ -4645,8 +4645,8 @@ pub fn ReplicaType(
 
             assert(self.grid.free_set.count_released() >=
                 self.grid.free_set_checkpoint_blocks_acquired.block_count() +
-                self.grid.free_set_checkpoint_blocks_released.block_count() +
-                self.client_sessions_checkpoint.block_count());
+                    self.grid.free_set_checkpoint_blocks_released.block_count() +
+                    self.client_sessions_checkpoint.block_count());
 
             // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
             self.send_prepare_oks_after_checkpoint();
@@ -7958,9 +7958,10 @@ pub fn ReplicaType(
                         self.journal.prepare_checksums[slot.index] == header.checksum) or
                         self.journal.writing(header) == .exact or
                         self.pipeline_prepare_by_op_and_checksum(
-                        header.op,
-                        header.checksum,
-                    ) != null) {
+                            header.op,
+                            header.checksum,
+                        ) != null)
+                    {
                         if (journal_header != null) {
                             assert(journal_header.?.checksum == header.checksum);
                         }
@@ -8140,8 +8141,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_other_replicas(self: *Replica, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_other_replicas_base(message.base());
         }
@@ -8166,8 +8167,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_replica(self: *Replica, replica: u8, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_replica_base(replica, message.base());
         }
@@ -10293,7 +10294,7 @@ pub fn ReplicaType(
 
             assert((self.grid.free_set.count_acquired() - self.grid.free_set.count_released()) ==
                 (tables_index_block_count + tables_value_block_count +
-                self.state_machine.forest.manifest_log.log_block_checksums.count));
+                    self.state_machine.forest.manifest_log.log_block_checksums.count));
         }
     };
 }

@@ -19,7 +19,7 @@ pub fn ManifestLevelType(
     comptime TableInfo: type,
     comptime table_count_max_tree: u32,
 ) type {
-    comptime assert(@typeInfo(Key) == .Int or @typeInfo(Key) == .ComptimeInt);
+    comptime assert(@typeInfo(Key) == .int or @typeInfo(Key) == .comptime_int);
 
     return struct {
         const ManifestLevel = @This();
@@ -811,7 +811,7 @@ pub fn TestContextType(
         const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max_tree);
         const KeyRange = TestLevel.KeyRange;
 
-        random: std.rand.Random,
+        random: std.Random,
 
         pool: TestPool,
         level: TestLevel,
@@ -826,7 +826,7 @@ pub fn TestContextType(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(context: *TestContext, random: std.rand.Random) !void {
+        fn init(context: *TestContext, random: std.Random) !void {
             context.* = .{
                 .random = random,
 
@@ -1248,7 +1248,7 @@ pub fn TestContextType(
 test "ManifestLevel" {
     const seed = 42;
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const Options = struct {

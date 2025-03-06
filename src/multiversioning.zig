@@ -687,7 +687,7 @@ pub const Multiversion = struct {
         };
         errdefer posix.close(target_fd);
 
-        const args_envp = switch (builtin.target.os.tag) {
+        const args_envp: ArgsEnvp = switch (builtin.target.os.tag) {
             .linux, .macos => blk: {
                 // We can pass through our env as-is to exec. We have to manipulate the types
                 // here somewhat: they're cast in start.zig and we can't access `argc_argv_ptr`
@@ -868,10 +868,11 @@ pub const Multiversion = struct {
 
         if (self.timeout_statx_previous == .previous and
             stdx.equal_bytes(
-            os.linux.Statx,
-            &self.timeout_statx_previous.previous,
-            &self.timeout_statx,
-        )) {
+                os.linux.Statx,
+                &self.timeout_statx_previous.previous,
+                &self.timeout_statx,
+            ))
+        {
             self.stage = .init;
         } else {
             if (self.timeout_statx_previous != .none) {
@@ -1283,12 +1284,12 @@ pub const Multiversion = struct {
                 unreachable;
             },
             .windows => {
-                // Includes the null byte, that utf8ToUtf16LeWithNull needs.
+                // Includes the null byte, that utf8ToUtf16LeAllocZ needs.
                 var buffer: [std.fs.max_path_bytes]u8 = undefined;
                 var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
                 const allocator = fixed_allocator.allocator();
 
-                const target_path_w = std.unicode.utf8ToUtf16LeWithNull(
+                const target_path_w = std.unicode.utf8ToUtf16LeAllocZ(
                     allocator,
                     self.target_path,
                 ) catch unreachable;
@@ -1302,7 +1303,17 @@ pub const Multiversion = struct {
                 // That said, with how CreateProcessW is called, this should _never_ happen, since
                 // its both provided a full lpApplicationName, and because GetCommandLineW actually
                 // points to a copy of memory from the PEB.
-                const cmd_line_w = os.windows.kernel32.GetCommandLineW();
+                //
+                // Declaring the function with an alternative name because `CamelCase` functions are
+                // by convention, used for building generic types.
+                const get_command_line_w = @extern(
+                    *const fn () callconv(.C) std.os.windows.LPWSTR,
+                    .{
+                        .library_name = "kernel32",
+                        .name = "GetCommandLineW",
+                    },
+                );
+                const cmd_line_w = get_command_line_w();
 
                 var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
                 lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
@@ -1541,12 +1552,11 @@ pub fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBody
         .body_offset = body_offset.?,
         .body_size = body_size.?,
     };
-    const arch = elf_header.machine.toTargetCpuArch() orelse
-        return error.UnknownArchitecture;
-    return switch (arch) {
-        .aarch64 => .{ .format = .elf, .aarch64 = offsets, .x86_64 = null },
-        .x86_64 => .{ .format = .elf, .aarch64 = null, .x86_64 = offsets },
-        else => return error.UnknownArchitecture,
+
+    return switch (elf_header.machine) {
+        .AARCH64 => .{ .format = .elf, .aarch64 = offsets, .x86_64 = null },
+        .X86_64 => .{ .format = .elf, .aarch64 = null, .x86_64 = offsets },
+        else => error.UnknownArchitecture,
     };
 }
 
@@ -1653,12 +1663,10 @@ pub fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
         .body_size = body_size,
     };
 
-    const arch = coff.getCoffHeader().machine.toTargetCpuArch() orelse
-        return error.UnknownArchitecture;
-    return switch (arch) {
-        .aarch64 => .{ .format = .pe, .aarch64 = offsets, .x86_64 = null },
-        .x86_64 => .{ .format = .pe, .aarch64 = null, .x86_64 = offsets },
-        else => return error.UnknownArchitecture,
+    return switch (coff.getCoffHeader().machine) {
+        .ARM64 => .{ .format = .pe, .aarch64 = offsets, .x86_64 = null },
+        .X64 => .{ .format = .pe, .aarch64 = null, .x86_64 = offsets },
+        else => error.UnknownArchitecture,
     };
 }
 

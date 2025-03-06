@@ -30,14 +30,14 @@ pub const IO = struct {
 
     files: []const File,
     options: Options,
-    prng: std.rand.DefaultPrng,
+    prng: std.Random.DefaultPrng,
 
     completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(files: []const File, options: Options) IO {
         return .{
             .options = options,
-            .prng = std.rand.DefaultPrng.init(options.seed),
+            .prng = std.Random.DefaultPrng.init(options.seed),
             .files = files,
         };
     }
@@ -84,7 +84,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime operation_tag: std.meta.Tag(Operation),
-        operation_data: anytype,
+        operation_data: std.meta.TagPayload(Operation, operation_tag),
         comptime OperationImpl: type,
     ) void {
         const on_complete_fn = struct {
@@ -163,8 +163,9 @@ pub const IO = struct {
                         false;
 
                     const sector_has_larger_than_logical_sector_read_fault =
-                        (op.len > constants.sector_size and
-                        io.x_in_100(io.options.larger_than_logical_sector_read_fault_probability));
+                        (op.len > constants.sector_size and io.x_in_100(
+                            io.options.larger_than_logical_sector_read_fault_probability,
+                        ));
 
                     if (sector_marked_in_fault_map or
                         sector_has_larger_than_logical_sector_read_fault)

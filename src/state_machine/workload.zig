@@ -100,7 +100,7 @@ const TransferBatch = struct {
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
-    @setEvalBranchQuota(2_000);
+    @setEvalBranchQuota(4_000);
 
     const SNGL = @intFromEnum(TransferPlan.Method.single_phase);
     const PEND = @intFromEnum(TransferPlan.Method.pending);
@@ -109,7 +109,12 @@ const transfer_templates = table: {
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
-    const two_phase_ok = .{
+    const InitValues = std.enums.EnumFieldStruct(
+        tb.CreateTransferResult.Ordered,
+        bool,
+        false,
+    );
+    const two_phase_ok = InitValues{
         .ok = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
@@ -184,7 +189,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub const Options = OptionsType(AccountingStateMachine, Action);
 
-        random: std.rand.Random,
+        random: std.Random,
         auditor: Auditor,
         options: Options,
 
@@ -213,7 +218,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            random: std.Random,
             options: Options,
         ) !Workload {
             assert(options.create_account_invalid_probability <= 100);
@@ -572,9 +577,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     !transfers[i - 1].flags.linked;
                 if (can_retry and
                     chance(
-                    self.random,
-                    self.options.create_transfer_retry_probability,
-                )) {
+                        self.random,
+                        self.options.create_transfer_retry_probability,
+                    ))
+                {
                     const index = self.random.intRangeAtMost(
                         usize,
                         0,
@@ -663,9 +669,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .debits_must_not_exceed_credits = null,
                 .credits_must_not_exceed_debits = null,
             })) |account| account.id else
-            // Pick an account with valid index (rather than "random.int(u128)") because the
-            // Auditor must decode the id to check for a matching account.
-            self.auditor.account_index_to_id(self.random.int(usize));
+                // Pick an account with valid index (rather than "random.int(u128)") because the
+                // Auditor must decode the id to check for a matching account.
+                self.auditor.account_index_to_id(self.random.int(usize));
 
             // It may be an invalid account.
             const account_state: ?*const Auditor.AccountState = self.auditor.get_account_state(
@@ -819,7 +825,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 const default = transfer_plan.method;
                 if (default == .pending and
                     self.auditor.pending_expiries.count() + self.transfers_pending_in_flight ==
-                    self.auditor.options.transfers_pending_max)
+                        self.auditor.options.transfers_pending_max)
                 {
                     break :method .single_phase;
                 }
@@ -902,7 +908,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     while (iterator.next()) |id| {
                         if (previous == null or
                             @max(target, id.*) - @min(target, id.*) <
-                            @max(target, previous.?) - @min(target, previous.?))
+                                @max(target, previous.?) - @min(target, previous.?))
                         {
                             previous = id.*;
                         }
@@ -984,7 +990,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// * `Workload.transfer_plan_seed`, and
         /// * the transfer `index`.
         fn transfer_index_to_plan(self: *const Workload, index: usize) TransferPlan {
-            var prng = std.rand.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
+            var prng = std.Random.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
             const random = prng.random();
             const method: TransferPlan.Method = blk: {
                 if (chance(random, self.options.create_transfer_pending_probability)) {
@@ -1474,7 +1480,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         /// Maximum number of failed transfer IDs to retry in the next request.
         transfer_transient_errors_max: usize,
 
-        pub fn generate(random: std.rand.Random, options: struct {
+        pub fn generate(random: std.Random, options: struct {
             batch_size_limit: u32,
             client_count: usize,
             in_flight_max: usize,
@@ -1555,7 +1561,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 /// Sample from a discrete distribution.
 /// Use integers instead of floating-point numbers to avoid nondeterminism on different hardware.
 fn sample_distribution(
-    random: std.rand.Random,
+    random: std.Random,
     distribution: anytype,
 ) std.meta.FieldEnum(@TypeOf(distribution)) {
     const SampleSpace = std.meta.FieldEnum(@TypeOf(distribution));
@@ -1584,7 +1590,7 @@ fn sample_distribution(
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
+fn chance(random: std.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThanBiased(u8, 100) < p;
 }

@@ -7,12 +7,12 @@ const stdx = @import("../stdx.zig");
 /// See test cases for example usage.
 pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType(Row, 128) {
     var rows = stdx.BoundedArrayType(Row, 128){};
-    var row_strings = std.mem.tokenizeAny(u8, table_string, "\n");
+    var row_strings = std.mem.tokenizeScalar(u8, table_string, '\n');
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
         if (row_string.len == 0) continue;
 
-        var columns = std.mem.tokenizeAny(u8, row_string, " ");
+        var columns = std.mem.tokenizeScalar(u8, row_string, ' ');
         const row = parse_data(Row, &columns);
         rows.append_assume_capacity(row);
 
@@ -22,12 +22,12 @@ pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType
     return rows;
 }
 
-fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Data {
+fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .scalar)) Data {
     return switch (@typeInfo(Data)) {
-        .Optional => |info| parse_data(info.child, tokens),
-        .Enum => field(Data, tokens.next().?),
-        .Void => assert(tokens.next() == null),
-        .Bool => {
+        .optional => |info| parse_data(info.child, tokens),
+        .@"enum" => field(Data, tokens.next().?),
+        .void => assert(tokens.next() == null),
+        .bool => {
             const token = tokens.next().?;
             inline for (.{ "0", "false", "F" }) |t| {
                 if (std.mem.eql(u8, token, t)) return false;
@@ -37,7 +37,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
             }
             std.debug.panic("Unknown boolean: {s}", .{token});
         },
-        .Int => |info| {
+        .int => |info| {
             const max = std.math.maxInt(Data);
             const token = tokens.next().?;
             // If the first character is a letter ("a-zA-Z"), ignore it. (For example, "A1" → 1).
@@ -49,12 +49,12 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
             }
             return std.fmt.parseInt(Data, token[offset..], 10) catch unreachable;
         },
-        .Struct => {
+        .@"struct" => {
             var data: Data = undefined;
             inline for (std.meta.fields(Data)) |value_field| {
                 const Field = value_field.type;
                 const value: Field = value: {
-                    if (comptime value_field.default_value) |ptr| {
+                    if (comptime value_field.default_value_ptr) |ptr| {
                         if (eat(tokens, "_")) {
                             const value_ptr: *const Field = @ptrCast(@alignCast(ptr));
                             break :value value_ptr.*;
@@ -68,14 +68,14 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
             }
             return data;
         },
-        .Array => |info| {
+        .array => |info| {
             var values: Data = undefined;
             for (values[0..]) |*value| {
                 value.* = parse_data(info.child, tokens);
             }
             return values;
         },
-        .Union => |info| {
+        .@"union" => |info| {
             const variant_string = tokens.next().?;
             inline for (info.fields) |variant_field| {
                 if (std.mem.eql(u8, variant_field.name, variant_string)) {
@@ -92,7 +92,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
     };
 }
 
-fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
+fn eat(tokens: *std.mem.TokenIterator(u8, .scalar), token: []const u8) bool {
     const index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;
@@ -101,7 +101,7 @@ fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
 
 /// TODO This function is a workaround for a comptime bug:
 ///   error: unable to evaluate constant expression
-///   .Enum => @field(Column, column_string),
+///   .@"enum" => @field(Column, column_string),
 fn field(comptime Enum: type, name: []const u8) Enum {
     inline for (std.meta.fields(Enum)) |variant| {
         if (std.mem.eql(u8, variant.name, name)) {

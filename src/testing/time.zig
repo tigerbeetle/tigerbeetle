@@ -26,7 +26,7 @@ pub const Time = struct {
     offset_coefficient_B: i64,
     offset_coefficient_C: u32 = 0,
 
-    prng: std.rand.DefaultPrng = std.rand.DefaultPrng.init(0),
+    prng: std.Random.DefaultPrng = std.Random.DefaultPrng.init(0),
 
     /// The number of ticks elapsed since initialization.
     ticks: u64 = 0,
@@ -63,15 +63,15 @@ pub const Time = struct {
             .non_ideal => {
                 const phase: f64 = @as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
                     (@as(f64, @floatFromInt(self.offset_coefficient_B)) +
-                    self.prng.random().floatNorm(f64) * 10);
+                        self.prng.random().floatNorm(f64) * 10);
                 const unscaled = std.math.sin(phase);
                 const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
                 return @as(i64, @intFromFloat(std.math.floor(scaled))) +
                     self.prng.random().intRangeAtMost(
-                    i64,
-                    -@as(i64, @intCast(self.offset_coefficient_C)),
-                    self.offset_coefficient_C,
-                );
+                        i64,
+                        -@as(i64, @intCast(self.offset_coefficient_C)),
+                        self.offset_coefficient_C,
+                    );
             },
         }
     }

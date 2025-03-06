@@ -32,7 +32,7 @@ test "benchmark: binary search" {
     log.info("UT: utime time/search", .{});
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
 
     // Allocate on the heap just once.
     // All page allocations reuse this buffer to speed up the run time.
@@ -54,7 +54,7 @@ test "benchmark: binary search" {
     }
 }
 
-fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !void {
+fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.Random) !void {
     assert(blob.len == layout.blob_size);
     const V = ValueType(layout);
     const K = V.Key;
@@ -168,7 +168,23 @@ const Benchmark = struct {
             var kernel_time: std.os.windows.FILETIME = undefined;
             var user_time: std.os.windows.FILETIME = undefined;
 
-            if (std.os.windows.kernel32.GetProcessTimes(
+            // Declaring the function with an alternative name because `CamelCase` functions are
+            // by convention, used for building generic types.
+            const get_process_times = @extern(
+                *const fn (
+                    in_hProcess: std.os.windows.HANDLE,
+                    out_lpCreationTime: *std.os.windows.FILETIME,
+                    out_lpExitTime: *std.os.windows.FILETIME,
+                    out_lpKernelTime: *std.os.windows.FILETIME,
+                    out_lpUserTime: *std.os.windows.FILETIME,
+                ) callconv(std.os.windows.WINAPI) std.os.windows.BOOL,
+                .{
+                    .library_name = "kernel32",
+                    .name = "GetProcessTimes",
+                },
+            );
+
+            if (get_process_times(
                 std.os.windows.kernel32.GetCurrentProcess(),
                 &creation_time,
                 &exit_time,
@@ -183,13 +199,13 @@ const Benchmark = struct {
         }
 
         const utime_tv = std.posix.getrusage(std.posix.rusage.SELF).utime;
-        return (@as(u128, @intCast(utime_tv.tv_sec)) * std.time.ns_per_s) +
-            (@as(u32, @intCast(utime_tv.tv_usec)) * std.time.ns_per_us);
+        return (@as(u128, @intCast(utime_tv.sec)) * std.time.ns_per_s) +
+            (@as(u32, @intCast(utime_tv.usec)) * std.time.ns_per_us);
     }
 };
 
 // shuffle([0,1,…,n-1])
-fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
+fn shuffled_index(comptime n: usize, rand: std.Random) [n]usize {
     var indices: [n]usize = undefined;
     for (&indices, 0..) |*i, j| i.* = j;
     rand.shuffle(usize, indices[0..]);

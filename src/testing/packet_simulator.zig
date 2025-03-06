@@ -118,7 +118,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         const Recorded = std.ArrayListUnmanaged(RecordedPacket);
 
         options: PacketSimulatorOptions,
-        prng: std.rand.DefaultPrng,
+        prng: std.Random.DefaultPrng,
         ticks: u64 = 0,
 
         /// A send and receive path between each node in the network.
@@ -168,7 +168,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             return PacketSimulator{
                 .options = options,
-                .prng = std.rand.DefaultPrng.init(options.seed),
+                .prng = std.Random.DefaultPrng.init(options.seed),
                 .links = links,
 
                 .recorded = recorded,
@@ -186,7 +186,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 link.queue.deinit();
             }
 
-            while (self.recorded.popOrNull()) |packet| packet.packet.deinit();
+            while (self.recorded.pop()) |packet| packet.packet.deinit();
             self.recorded.deinit(allocator);
 
             allocator.free(self.links);
@@ -224,7 +224,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             assert(recording);
 
-            while (self.recorded.popOrNull()) |packet| {
+            while (self.recorded.pop()) |packet| {
                 self.submit_packet(packet.packet, packet.callback, packet.path);
             }
         }
@@ -338,13 +338,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path = Path{ .source = from, .target = to };
                     const enabled =
                         from >= self.options.node_count or
                         to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
-                        partition[from] == asymmetric_partition_side);
+                            partition[from] == asymmetric_partition_side);
                     self.links[self.path_index(path)].filter =
                         if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }
@@ -377,7 +377,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path = Path{ .source = from, .target = to };
                     if (self.is_clogged(path)) continue;
 
                     const queue = &self.links[self.path_index(path)].queue;

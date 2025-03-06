@@ -166,9 +166,18 @@ pub const Snap = struct {
         defer arena.deinit();
 
         const allocator = arena.allocator();
+        const file_path_relative = try std.fs.path.join(
+            allocator,
+            // The file location is relative to the module root path.
+            // TODO: Don't hardcode `src` here.
+            &.{ "src/", snapshot.location.file },
+        );
 
-        const file_text =
-            try std.fs.cwd().readFileAlloc(allocator, snapshot.location.file, 1024 * 1024);
+        const file_text = try std.fs.cwd().readFileAlloc(
+            allocator,
+            file_path_relative,
+            1024 * 1024,
+        );
         var file_text_updated = try std.ArrayList(u8).initCapacity(allocator, file_text.len);
 
         const line_zero_based = snapshot.location.line - 1;
@@ -182,7 +191,7 @@ pub const Snap = struct {
 
         try file_text_updated.appendSlice(snapshot_prefix);
         {
-            var lines = std.mem.split(u8, got, "\n");
+            var lines = std.mem.splitScalar(u8, got, '\n');
             while (lines.next()) |line| {
                 try file_text_updated.writer().print("{s}\\\\{s}\n", .{ indent, line });
             }
@@ -190,11 +199,11 @@ pub const Snap = struct {
         try file_text_updated.appendSlice(snapshot_suffix);
 
         try std.fs.cwd().writeFile(.{
-            .sub_path = snapshot.location.file,
+            .sub_path = file_path_relative,
             .data = file_text_updated.items,
         });
 
-        std.debug.print("Updated {s}\n", .{snapshot.location.file});
+        std.debug.print("Updated {s}\n", .{file_path_relative});
         return error.SnapUpdated;
     }
 };
@@ -281,7 +290,7 @@ fn snap_range(text: []const u8, src_line: u32) Range {
     var offset: usize = 0;
     var line_number: u32 = 0;
 
-    var lines = std.mem.split(u8, text, "\n");
+    var lines = std.mem.splitScalar(u8, text, '\n');
     const snap_start = while (lines.next()) |line| : (line_number += 1) {
         if (line_number == src_line) {
             assert(std.mem.indexOf(u8, line, "@src()") != null);
@@ -293,7 +302,7 @@ fn snap_range(text: []const u8, src_line: u32) Range {
         offset += line.len + 1; // 1 for \n
     } else unreachable;
 
-    lines = std.mem.split(u8, text[snap_start..], "\n");
+    lines = std.mem.splitScalar(u8, text[snap_start..], '\n');
     const snap_end = while (lines.next()) |line| {
         if (!is_multiline_string(line)) {
             break offset;

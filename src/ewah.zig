@@ -46,7 +46,7 @@ pub fn ewah(comptime Word: type) type {
 
         comptime {
             assert(@import("builtin").target.cpu.arch.endian() == std.builtin.Endian.little);
-            assert(@typeInfo(Word).Int.signedness == .unsigned);
+            assert(@typeInfo(Word).int.signedness == .unsigned);
             assert(word_bits % 8 == 0); // A multiple of a byte, so that words can be cast to bytes.
             assert(@bitSizeOf(Marker) == word_bits);
             assert(@sizeOf(Marker) == @sizeOf(Word));
@@ -301,13 +301,13 @@ pub fn ewah(comptime Word: type) type {
 
 test "ewah encode→decode cycle" {
     const fuzz = @import("./ewah_fuzz.zig");
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = std.Random.DefaultPrng.init(123);
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
+        const Context = fuzz.ContextType(Word);
         for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
             var decoded: [4096]Word = undefined;
-
-            const fuzz_options = .{
+            const fuzz_options = Context.TestOptions{
                 .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
                 .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
             };

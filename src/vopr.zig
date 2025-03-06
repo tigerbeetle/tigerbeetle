@@ -46,7 +46,7 @@ const releases = [_]Release{
 pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
 
-pub const std_options = .{
+pub const std_options = std.Options{
     // The -vopr-log=<full|short> build option selects two logging modes.
     // In "short" mode, only state transitions are printed (see `Cluster.log_replica`).
     // "full" mode is the usual logging according to the level.
@@ -107,7 +107,7 @@ pub fn main() !void {
         }
     }
 
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = std.Random.DefaultPrng.init(seed);
     const random = prng.random();
 
     const replica_count =
@@ -326,14 +326,13 @@ pub fn main() !void {
         }
         const requests_done = simulator.requests_replied == simulator.options.requests_max;
         const upgrades_done =
-            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
-        {
-            if (health == .down) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
-            }
-        } else false;
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
+                if (health == .down) continue;
+                const release_latest = releases[simulator.replica_releases_limit - 1].release;
+                if (replica.release.value == release_latest.value) {
+                    break true;
+                }
+            } else false;
 
         if (requests_done and upgrades_done) break;
     } else {
@@ -446,7 +445,7 @@ pub const Simulator = struct {
         request_idle_off_probability: u8, // percent
     };
 
-    random: std.rand.Random,
+    random: std.Random,
     options: Options,
     cluster: *Cluster,
     workload: StateMachine.Workload,
@@ -475,7 +474,7 @@ pub const Simulator = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        random: std.Random,
         options: Options,
     ) !Simulator {
         assert(options.replica_crash_probability < 100.0);
@@ -1152,8 +1151,10 @@ pub const Simulator = struct {
         const restart_upgrade =
             simulator.replica_releases[replica.replica] <
             simulator.replica_releases_limit and
-            (simulator.core.isSet(replica.replica) or
-            chance_f64(simulator.random, simulator.options.replica_release_catchup_probability));
+            (simulator.core.isSet(replica.replica) or chance_f64(
+                simulator.random,
+                simulator.options.replica_release_catchup_probability,
+            ));
         if (restart_upgrade) simulator.replica_upgrade(replica.replica);
 
         const restart_random =
@@ -1318,33 +1319,33 @@ fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noret
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
+fn chance(random: std.Random, p: u8) bool {
     assert(p <= 100);
     return random.uintLessThanBiased(u8, 100) < p;
 }
 
 /// Returns true, `p` percent of the time, else false.
-fn chance_f64(random: std.rand.Random, p: f64) bool {
+fn chance_f64(random: std.Random, p: f64) bool {
     assert(p <= 100.0);
     return random.float(f64) * 100.0 < p;
 }
 
 /// Returns a random partitioning mode.
-fn random_partition_mode(random: std.rand.Random) PartitionMode {
-    const typeInfo = @typeInfo(PartitionMode).Enum;
+fn random_partition_mode(random: std.Random) PartitionMode {
+    const typeInfo = @typeInfo(PartitionMode).@"enum";
     const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionMode, @enumFromInt(enumAsInt));
 }
 
-fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
-    const typeInfo = @typeInfo(PartitionSymmetry).Enum;
+fn random_partition_symmetry(random: std.Random) PartitionSymmetry {
+    const typeInfo = @typeInfo(PartitionSymmetry).@"enum";
     const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
     return @as(PartitionSymmetry, @enumFromInt(enumAsInt));
 }
 
 /// Returns a random fully-connected subgraph which includes at least view change
 /// quorum of active replicas.
-fn random_core(random: std.rand.Random, replica_count: u8, standby_count: u8) Core {
+fn random_core(random: std.Random, replica_count: u8, standby_count: u8) Core {
     assert(replica_count > 0);
     assert(replica_count <= constants.replicas_max);
     assert(standby_count <= constants.standbys_max);
@@ -1389,7 +1390,7 @@ var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
 
 fn log_override(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
+    comptime scope: @TypeOf(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
