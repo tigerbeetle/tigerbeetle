@@ -147,12 +147,16 @@ public enum UInt128 {
      * Gets an array of 16 bytes representing the 128-bit unsigned integer.
      *
      * @param value a {@link java.math.BigDecimal}
-     * @return an array of 16 bytes representing the 128-bit value.
+     * @return an array of 16 bytes representing the 128-bit unsigned value.
      *
      * @throws NullPointerException if {@code value} is null.
+     * @throws IllegalArgumentException if {@code value} is negative.
      */
     public static byte[] asBytes(final BigInteger value) {
         Objects.requireNonNull(value, "Value cannot be null");
+        if (value.signum() < 0)
+            throw new IllegalArgumentException("Value cannot be negative");
+
         if (BigInteger.ZERO.equals(value))
             return new byte[SIZE];
 
