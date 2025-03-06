@@ -103,12 +103,12 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     if (no_changelog_flag) {
         try shell.exec_zig(
             \\build scripts -- release --build --no-changelog --sha={sha}
-            \\    --language=zig
+            \\    --language=zig --devhub
         , .{ .sha = cli_args.sha });
     } else {
         try shell.exec_zig(
             \\build scripts -- release --build --sha={sha}
-            \\    --language=zig
+            \\    --language=zig --devhub
         , .{ .sha = cli_args.sha });
     }
     try shell.project_root.deleteFile("tigerbeetle");
