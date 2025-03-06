@@ -277,36 +277,36 @@ const Model = struct {
     }
 };
 
-fn random_id(random: std.rand.Random, comptime Int: type) Int {
+fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     // We have two opposing desires for random ids:
-    const avg_int: Int = if (random.boolean())
+    const avg_int: Int = if (prng.boolean())
         // 1. We want to cause many collisions.
         constants.lsm_growth_factor * 2048
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
         100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(random, Int, avg_int);
+    return fuzz.random_int_exponential(prng, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const fuzz_op_distribution = fuzz.DistributionType(FuzzOpTag){
+    const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
         // Always do puts, and always more puts than removes.
         .upsert = constants.lsm_compaction_ops * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .remove = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .get = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some extra compacts.
-        .compact = if (random.boolean()) 0 else 2,
+        .compact = if (prng.boolean()) 0 else 2,
         // Maybe use scopes.
-        .scope = if (random.boolean()) 0 else @divExact(constants.lsm_compaction_ops, 4),
+        .scope = if (prng.boolean()) 0 else @divExact(constants.lsm_compaction_ops, 4),
     };
-    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_weights = {:.2}", .{fuzz_op_weights});
 
     // TODO: Is there a point to making _max random (both here and in .init) and anything less than
     //       the maximum capacity...?
@@ -332,14 +332,14 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             // Ensure we close scope before ending.
             fuzz_op_tag = FuzzOpTag.scope;
         } else if (scope_is_open) {
-            fuzz_op_tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+            fuzz_op_tag = prng.enum_weighted(FuzzOpTag, fuzz_op_weights);
             if (fuzz_op_tag == FuzzOpTag.compact) {
                 // We can't compact while a scope is open.
                 fuzz_op_tag = FuzzOpTag.scope;
             }
         } else {
             // Otherwise pick a random FuzzOp.
-            fuzz_op_tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+            fuzz_op_tag = prng.enum_weighted(FuzzOpTag, fuzz_op_weights);
             if (i == fuzz_ops.len - 1 and fuzz_op_tag == FuzzOpTag.scope) {
                 // We can't let our final operation be a scope open.
                 fuzz_op_tag = FuzzOpTag.get;
@@ -355,8 +355,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 }
 
                 break :blk FuzzOp{ .upsert = .{
-                    .key = random_id(random, u32),
-                    .value = random.int(u32),
+                    .key = random_id(prng, u32),
+                    .value = prng.bytes(u32),
                 } };
             },
             .remove => blk: {
@@ -364,9 +364,9 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                     operations_since_scope_open += 1;
                 }
 
-                break :blk FuzzOp{ .remove = random_id(random, u32) };
+                break :blk FuzzOp{ .remove = random_id(prng, u32) };
             },
-            .get => FuzzOp{ .get = random_id(random, u32) },
+            .get => FuzzOp{ .get = random_id(prng, u32) },
             .compact => blk: {
                 upserts_since_compact = 0;
                 op += 1;
@@ -378,7 +378,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 defer scope_is_open = !scope_is_open;
 
                 if (scope_is_open) {
-                    break :blk FuzzOp{ .scope = if (random.boolean()) .persist else .discard };
+                    break :blk FuzzOp{ .scope = if (prng.boolean()) .persist else .discard };
                 } else {
                     break :blk FuzzOp{ .scope = .open };
                 }
@@ -390,15 +390,14 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
-    const random = rng.random();
+    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse @as(usize, 1E9),
-        fuzz.random_int_exponential(random, usize, 1E8),
+        fuzz.random_int_exponential(&prng, usize, 1E8),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
+    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     // Running the same fuzz with and without cache enabled.

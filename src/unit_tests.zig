@@ -14,6 +14,7 @@ comptime {
     _ = @import("stdx/ring_buffer.zig");
     _ = @import("stdx/sort_test.zig");
     _ = @import("stdx/zipfian.zig");
+    _ = @import("stdx/prng.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("trace.zig");

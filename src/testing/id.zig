@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 
 /// Permute indices (or other encoded data) into ids to:
 ///
@@ -63,13 +64,12 @@ pub const IdPermutation = union(enum) {
         };
     }
 
-    pub fn generate(random: std.rand.Random) IdPermutation {
-        return switch (random.uintLessThan(usize, 4)) {
-            0 => .{ .identity = {} },
-            1 => .{ .inversion = {} },
-            2 => .{ .zigzag = {} },
-            3 => .{ .random = random.int(u64) },
-            else => unreachable,
+    pub fn generate(prng: *stdx.PRNG) IdPermutation {
+        return switch (prng.enum_uniform(std.meta.Tag(IdPermutation))) {
+            .identity => .{ .identity = {} },
+            .inversion => .{ .inversion = {} },
+            .zigzag => .{ .zigzag = {} },
+            .random => .{ .random = prng.bytes(u64) },
         };
     }
 };

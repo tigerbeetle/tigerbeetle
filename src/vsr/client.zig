@@ -109,7 +109,7 @@ pub fn ClientType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the client's ID.
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
 
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
@@ -174,7 +174,7 @@ pub fn ClientType(
                     .id = options.id,
                     .after = 30000 / constants.tick_ms,
                 },
-                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(options.id))),
+                .prng = stdx.PRNG.from_seed(@as(u64, @truncate(options.id))),
                 .on_eviction_callback = options.eviction_callback,
             };
 
@@ -626,7 +626,7 @@ pub fn ClientType(
         }
 
         fn on_request_timeout(self: *Client) void {
-            self.request_timeout.backoff(self.prng.random());
+            self.request_timeout.backoff(&self.prng);
 
             const message = self.request_inflight.?.message;
             assert(message.header.command == .request);

@@ -28,6 +28,8 @@ const assert = std.debug.assert;
 const panic = std.debug.panic;
 const math = std.math;
 const mem = std.mem;
+const Ratio = stdx.PRNG.Ratio;
+const ratio = stdx.PRNG.ratio;
 
 const FIFOType = @import("../fifo.zig").FIFOType;
 const IOPSType = @import("../iops.zig").IOPSType;
@@ -65,16 +67,16 @@ pub const Storage = struct {
 
         /// Chance out of 100 that a read will corrupt a sector, if the target memory is within
         /// a faulty area of this replica.
-        read_fault_probability: u8 = 0,
+        read_fault_probability: Ratio = ratio(0, 100),
         /// Chance out of 100 that a write will corrupt a sector, if the target memory is within
         /// a faulty area of this replica.
-        write_fault_probability: u8 = 0,
+        write_fault_probability: Ratio = ratio(0, 100),
         /// Chance out of 100 that a write will misdirect to the wrong sector, if the target memory
         /// is within a faulty area of this replica.
-        write_misdirect_probability: u8 = 0,
+        write_misdirect_probability: Ratio = ratio(0, 100),
         /// Chance out of 100 that a crash will corrupt a sector of a pending write's target,
         /// if the target memory is within a faulty area of this replica.
-        crash_fault_probability: u8 = 0,
+        crash_fault_probability: Ratio = ratio(0, 100),
 
         /// Enable/disable automatic read/write faults.
         /// Does not impact crash faults or manual faults.
@@ -142,7 +144,7 @@ pub const Storage = struct {
 
     size: u64,
     options: Options,
-    prng: std.rand.DefaultPrng,
+    prng: stdx.PRNG,
 
     /// `memory` always contains the pristine data as-written -- it does not include storage faults.
     memory: []align(constants.sector_size) u8,
@@ -197,12 +199,7 @@ pub const Storage = struct {
         assert(options.read_latency_mean >= options.read_latency_min);
         assert(options.fault_atlas == null or options.replica_index != null);
 
-        assert(options.read_fault_probability <= 100);
-        assert(options.write_fault_probability <= 100);
-        assert(options.write_misdirect_probability <= 100);
-        assert(options.crash_fault_probability <= 100);
-
-        const prng = std.rand.DefaultPrng.init(options.seed);
+        const prng = stdx.PRNG.from_seed(options.seed);
         const sector_count = @divExact(size, constants.sector_size);
         const memory = try allocator.alignedAlloc(u8, constants.sector_size, size);
         errdefer allocator.free(memory);
@@ -260,12 +257,12 @@ pub const Storage = struct {
         });
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
-            if (!storage.x_in_100(storage.options.crash_fault_probability)) continue;
+            if (!storage.prng.chance(storage.options.crash_fault_probability)) continue;
 
             // Randomly corrupt one of the faulty sectors the operation targeted.
             // TODO: inject more realistic and varied storage faults as described above.
             const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
-            storage.fault_sector(write.zone, sectors.random(storage.prng.random()));
+            storage.fault_sector(write.zone, sectors.random(&storage.prng));
         }
         assert(storage.writes.items.len == 0);
 
@@ -436,7 +433,7 @@ pub const Storage = struct {
             storage.memory[offset_in_storage..][0..read.buffer.len],
         );
 
-        if (storage.x_in_100(storage.options.read_fault_probability)) {
+        if (storage.prng.chance(storage.options.read_fault_probability)) {
             if (storage.pick_faulty_sector(read.zone, read.offset, read.buffer.len)) |sector| {
                 storage.fault_sector(read.zone, sector);
             }
@@ -466,7 +463,7 @@ pub const Storage = struct {
             }
 
             if (sector_uninitialized) {
-                storage.prng.random().bytes(sector_bytes);
+                storage.prng.fill(sector_bytes);
             }
         }
 
@@ -592,7 +589,7 @@ pub const Storage = struct {
         // Apply a new misdirect.
         const misdirect = storage.overlays.available() >= 2 and
             storage.pick_faulty_sector(write.zone, write.offset, write.buffer.len) != null and
-            storage.x_in_100(storage.options.write_misdirect_probability);
+            storage.prng.chance(storage.options.write_misdirect_probability);
         const misdirect_offset = if (misdirect) storage.pick_faulty_chunk_offset(write) else null;
         if (misdirect_offset) |mistaken_offset| {
             assert(mistaken_offset != write.offset);
@@ -632,7 +629,7 @@ pub const Storage = struct {
             storage.memory_written.set(sector);
         }
 
-        if (storage.x_in_100(storage.options.write_fault_probability)) {
+        if (storage.prng.chance(storage.options.write_fault_probability)) {
             if (storage.pick_faulty_sector(write.zone, write.offset, write.buffer.len)) |sector| {
                 storage.fault_sector(write.zone, sector);
             }
@@ -661,13 +658,7 @@ pub const Storage = struct {
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
-        return min + fuzz.random_int_exponential(storage.prng.random(), u64, mean - min);
-    }
-
-    /// Return true with probability x/100.
-    fn x_in_100(storage: *Storage, x: u8) bool {
-        assert(x <= 100);
-        return x > storage.prng.random().uintLessThan(u8, 100);
+        return min + fuzz.random_int_exponential(&storage.prng, u64, mean - min);
     }
 
     fn pick_faulty_sector(
@@ -678,7 +669,7 @@ pub const Storage = struct {
     ) ?usize {
         const atlas = storage.options.fault_atlas orelse return null;
         return atlas.faulty_sector(
-            storage.prng.random(),
+            &storage.prng,
             storage.options.replica_index.?,
             zone,
             offset_in_zone,
@@ -689,7 +680,7 @@ pub const Storage = struct {
     fn pick_faulty_chunk_offset(storage: *Storage, write: *const Write) ?u64 {
         const atlas = storage.options.fault_atlas orelse return null;
         const offset = atlas.faulty_chunk_offset(
-            storage.prng.random(),
+            &storage.prng,
             storage.options.replica_index.?,
             write.zone,
             write.buffer.len,
@@ -907,10 +898,10 @@ pub const Storage = struct {
     }
 
     pub fn transition_to_liveness_mode(storage: *Storage) void {
-        storage.options.read_fault_probability = 0;
-        storage.options.write_fault_probability = 0;
-        storage.options.write_misdirect_probability = 0;
-        storage.options.crash_fault_probability = 0;
+        storage.options.read_fault_probability = ratio(0, 100);
+        storage.options.write_fault_probability = ratio(0, 100);
+        storage.options.write_misdirect_probability = ratio(0, 100);
+        storage.options.crash_fault_probability = ratio(0, 100);
     }
 };
 
@@ -964,8 +955,8 @@ const SectorRange = struct {
         };
     }
 
-    fn random(range: SectorRange, rand: std.rand.Random) usize {
-        return range.min + rand.uintLessThan(usize, range.max - range.min);
+    fn random(range: SectorRange, prng: *stdx.PRNG) usize {
+        return prng.range_inclusive(usize, range.min, range.max - 1);
     }
 
     fn next(range: *SectorRange) ?usize {
@@ -1011,7 +1002,7 @@ pub const ClusterFaultAtlas = struct {
     pub fn init(
         allocator: std.mem.Allocator,
         replica_count: u8,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
     ) !ClusterFaultAtlas {
         if (replica_count == 1) {
@@ -1067,7 +1058,7 @@ pub const ClusterFaultAtlas = struct {
             for (0..chunks[0].bit_length) |chunk| {
                 var replicas = ReplicaSet.initEmpty();
                 while (replicas.count() < faults_max) {
-                    const replica_index = random.uintLessThan(u8, replica_count);
+                    const replica_index = prng.int_inclusive(u8, replica_count - 1);
                     if (chunks[replica_index].count() + 1 <
                         chunks[replica_index].capacity())
                     {
@@ -1132,7 +1123,7 @@ pub const ClusterFaultAtlas = struct {
     /// zone/offset/size. Then on a future random write, misdirect to a compatible saved location.)
     fn faulty_chunk_offset(
         atlas: *const ClusterFaultAtlas,
-        random: std.Random,
+        prng: *stdx.PRNG,
         replica_index: u8,
         zone: vsr.Zone,
         size: u64,
@@ -1149,7 +1140,7 @@ pub const ClusterFaultAtlas = struct {
 
         const chunks_faulty = &chunks.faulty[replica_index];
         const chunk_count = chunks_faulty.bit_length;
-        const chunk_start = random.uintLessThan(usize, chunk_count);
+        const chunk_start = prng.int_inclusive(usize, chunk_count - 1);
         for (0..chunk_count) |i| {
             const chunk_index = (chunk_start + i) % chunk_count;
             if (chunks_faulty.isSet(chunk_index)) {
@@ -1163,7 +1154,7 @@ pub const ClusterFaultAtlas = struct {
 
     fn faulty_sector(
         atlas: *const ClusterFaultAtlas,
-        random: std.Random,
+        prng: *stdx.PRNG,
         replica_index: u8,
         zone: vsr.Zone,
         offset_in_zone: u64,
@@ -1189,7 +1180,7 @@ pub const ClusterFaultAtlas = struct {
                 zone,
                 chunks.chunk_size * start,
                 chunks.chunk_size * fault_count,
-            ).intersect(SectorRange.from_zone(zone, offset_in_zone, size)).?.random(random);
+            ).intersect(SectorRange.from_zone(zone, offset_in_zone, size)).?.random(prng);
         } else {
             return null;
         }
