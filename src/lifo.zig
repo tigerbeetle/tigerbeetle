@@ -18,14 +18,18 @@ pub fn LIFOType(comptime T: type) type {
         name: ?[]const u8,
 
         // If the number of elements is large, the constants.verify check in push() can be too
-        // expensive. Allow the user to gate it. Could also be a comptime param?
+        // expensive. Allow the user to gate it.
         verify_push: bool,
 
-        pub fn init(count_max: u64, name: ?[]const u8, verify_push: bool) LIFO {
+        pub fn init(options: struct {
+            capacity: u64,
+            verify_push: bool,
+            name: ?[]const u8,
+        }) LIFO {
             return LIFO{
-                .name = name,
-                .count_max = count_max,
-                .verify_push = verify_push,
+                .name = options.name,
+                .count_max = options.capacity,
+                .verify_push = options.verify_push,
             };
         }
 
@@ -43,7 +47,7 @@ pub fn LIFOType(comptime T: type) type {
             self.count += 1;
         }
 
-        /// Returns the first element of the stack, and removes it.
+        /// Returns the first element of the LIFO list, and removes it.
         pub fn pop(self: *LIFO) ?*T {
             assert((self.count == 0) == (self.head == null));
 
@@ -54,7 +58,7 @@ pub fn LIFOType(comptime T: type) type {
             return node;
         }
 
-        /// Returns the first element of the stack, but does not remove it.
+        /// Returns the first element of the LIFO list, but does not remove it.
         pub fn peek(self: LIFO) ?*T {
             return self.head;
         }
@@ -88,7 +92,7 @@ pub fn LIFOType(comptime T: type) type {
 }
 
 test "LIFO: fuzz" {
-    // Fuzzy test to compare behavioud of LIFO against ArrayList (reference model).
+    // Fuzzy test to compare behavior of LIFO against std.ArrayList (reference model).
     comptime assert(constants.verify);
 
     const fuzz = @import("testing/fuzz.zig");
@@ -104,7 +108,7 @@ test "LIFO: fuzz" {
     const LIFO = LIFOType(Node);
 
     const node_count_max = 1024;
-    const events_max = 1 << 8;
+    const events_max = 1 << 10;
 
     const Event = enum { push, pop };
     const event_distribution = fuzz.DistributionType(Event){
@@ -123,7 +127,11 @@ test "LIFO: fuzz" {
     var nodes_free = try std.DynamicBitSetUnmanaged.initFull(allocator, node_count_max);
     defer nodes_free.deinit(allocator);
 
-    var stack = LIFO.init(node_count_max, "fuzz", true);
+    var lifo = LIFO.init(.{
+        .capacity = node_count_max,
+        .name = "fuzz",
+        .verify_push = true,
+    });
 
     // Reference model: a dynamic array of node IDs in LIFO order (last is the top).
     var model = try std.ArrayList(u32).initCapacity(allocator, node_count_max);
@@ -131,9 +139,9 @@ test "LIFO: fuzz" {
 
     // Run a sequence of randomized events.
     for (0..events_max) |_| {
-        std.debug.assert(model.items.len <= node_count_max);
-        std.debug.assert(model.items.len == stack.count);
-        std.debug.assert(model.items.len == 0 or !stack.empty());
+        assert(model.items.len <= node_count_max);
+        assert(model.items.len == lifo.count);
+        assert(model.items.len == 0 or !lifo.empty());
 
         const event = fuzz.random_enum(random, Event, event_distribution);
         switch (event) {
@@ -141,41 +149,49 @@ test "LIFO: fuzz" {
                 // Only push if a free node is available.
                 const free_index = nodes_free.findFirstSet() orelse continue;
                 const node = &nodes[free_index];
-                stack.push(node);
+                lifo.push(node);
                 try model.append(node.id);
                 nodes_free.unset(node.id);
             },
             .pop => {
-                if (stack.pop()) |node| {
+                if (lifo.pop()) |node| {
                     // The reference model should have the same node at the top.
                     const id = node.id;
                     const expected = model.pop();
-                    std.debug.assert(id == expected);
+                    assert(id == expected);
                     nodes_free.set(id);
                 } else {
-                    std.debug.assert(model.items.len == 0);
+                    assert(model.items.len == 0);
+                    assert(lifo.empty());
+                    assert(lifo.count == 0);
+                    assert(lifo.peek() == null);
                 }
             },
         }
         // Verify that peek() returns the same as the last element in our model.
         if (model.items.len > 0) {
-            const top = stack.peek() orelse unreachable;
+            const top = lifo.peek() orelse unreachable;
             const top_ref = model.pop();
-            std.debug.assert(top.id == top_ref);
+            assert(top.id == top_ref);
             try model.append(top_ref);
         } else {
-            std.debug.assert(stack.peek() == null);
+            assert(lifo.empty());
+            assert(lifo.count == 0);
+            assert(lifo.peek() == null);
         }
     }
 
     // Finally, empty the LIFO and ensure our reference model agrees.
-    while (stack.pop()) |node| {
+    while (lifo.pop()) |node| {
         const id = node.id;
         const expected = model.pop();
-        std.debug.assert(id == expected);
+        assert(id == expected);
         nodes_free.set(id);
     }
-    std.debug.assert(model.items.len == 0);
+    assert(model.items.len == 0);
+    assert(lifo.empty());
+    assert(lifo.count == 0);
+    assert(lifo.peek() == null);
 }
 
 test "LIFO: push/pop/peek/empty" {
@@ -186,7 +202,12 @@ test "LIFO: push/pop/peek/empty" {
     var two: Foo = .{};
     var three: Foo = .{};
 
-    var lifo: LIFOType(Foo) = LIFOType(Foo).init(3, "test", true);
+    var lifo: LIFOType(Foo) = LIFOType(Foo).init(.{
+        .capacity = 3,
+        .name = "fuzz",
+        .verify_push = true,
+    });
+
     try testing.expect(lifo.empty());
 
     // Push one element and verify

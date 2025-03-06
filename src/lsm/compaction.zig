@@ -177,11 +177,11 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             }
             assert(blocks_allocated == block_count);
 
-            var blocks = LIFOType(Block).init(
-                blocks_allocated,
-                "compaction_blocks",
-                false,
-            );
+            var blocks = LIFOType(Block).init(.{
+                .capacity = blocks_allocated,
+                .name = "compaction_blocks",
+                .verify_push = false,
+            });
             for (blocks_backing_storage) |*block| blocks.push(block);
 
             return .{
