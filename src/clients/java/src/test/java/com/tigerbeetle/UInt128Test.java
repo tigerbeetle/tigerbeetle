@@ -137,6 +137,14 @@ public class UInt128Test {
         assert false;
     }
 
+    @Test(expected = IllegalArgumentException.class)
+    public void testAsBytesBigIntegerNegative() {
+        BigInteger bigint = BigInteger.valueOf(-1);
+        @SuppressWarnings("unused")
+        var nop = UInt128.asBytes(bigint);
+        assert false;
+    }
+
     @Test
     public void testAsBigIntegerFromLong() {
         var bigint = UInt128.asBigInteger(100, 1000);
