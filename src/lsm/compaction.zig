@@ -200,6 +200,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         pub fn reset(pool: *ResourcePool) void {
             pool.* = .{
                 .blocks = .{
+                    .count_max = pool.blocks.count_max,
                     .name = "compaction_blocks",
                     .verify_push = false,
                 },
