@@ -24,6 +24,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const schema = @import("./schema.zig");
 const compaction_tables_input_max = @import("./compaction.zig").compaction_tables_input_max;
 const TableInfo = schema.ManifestNode.TableInfo;
+const ratio = stdx.PRNG.ratio;
 
 const tree_count = 20;
 const manifest_log_compaction_pace = ManifestLogPace.init(.{
@@ -39,31 +40,31 @@ const manifest_log_compaction_pace = ManifestLogPace.init(.{
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = stdx.PRNG.from_seed(args.seed);
 
     const events_count = @min(
         args.events_max orelse @as(usize, 1e7),
-        fuzz.random_int_exponential(prng.random(), usize, 1e6),
+        fuzz.random_int_exponential(&prng, usize, 1e6),
     );
 
-    const events = try generate_events(allocator, prng.random(), events_count);
+    const events = try generate_events(allocator, &prng, events_count);
     defer allocator.free(events);
 
-    try run_fuzz(allocator, prng.random(), events);
+    try run_fuzz(allocator, &prng, events);
     log.info("Passed!", .{});
 }
 
 fn run_fuzz(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     events: []const ManifestEvent,
 ) !void {
     const storage_options = .{
-        .seed = random.int(u64),
+        .seed = prng.bytes(u64),
         .read_latency_min = 1,
-        .read_latency_mean = 1 + random.uintLessThan(u64, 40),
+        .read_latency_mean = 1 + prng.int_inclusive(u64, 40),
         .write_latency_min = 1,
-        .write_latency_mean = 1 + random.uintLessThan(u64, 40),
+        .write_latency_mean = 1 + prng.int_inclusive(u64, 40),
     };
 
     var env: Environment = undefined;
@@ -126,7 +127,7 @@ const ManifestEvent = union(enum) {
 
 fn generate_events(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     events_count: usize,
 ) ![]const ManifestEvent {
     var events = std.ArrayList(ManifestEvent).init(allocator);
@@ -141,19 +142,19 @@ fn generate_events(
     // Dummy table address for Table Infos.
     var table_address: u64 = 1;
 
-    const compacts_per_checkpoint = fuzz.random_int_exponential(random, usize, 16);
+    const compacts_per_checkpoint = fuzz.random_int_exponential(prng, usize, 16);
     log.info("compacts_per_checkpoint = {d}", .{compacts_per_checkpoint});
 
     // When true, create as many entries as possible.
     // This tries to test the manifest upper-bound calculation.
-    const fill_always = random.uintLessThan(usize, 4) == 0;
+    const fill_always = prng.chance(ratio(1, 4));
 
     // The maximum number of snapshot-max updates per half-bar.
     // For now, half of the total compactions.
     const updates_max = stdx.div_ceil(constants.lsm_levels, 2) * compaction_tables_input_max;
 
     while (events.items.len < events_count) {
-        const fill = fill_always or random.boolean();
+        const fill = fill_always or prng.boolean();
         // All of the trees we are inserting/modifying have the same id (for simplicity), but we
         // want to perform more updates if there are more trees, to better simulate a real state
         // machine.
@@ -163,7 +164,7 @@ fn generate_events(
                 update_snapshots: usize,
                 inserts: usize,
             } = operations: {
-                const move = !fill and random.uintLessThan(usize, 10) == 0;
+                const move = !fill and prng.chance(ratio(1, 10));
                 if (move) {
                     break :operations .{
                         .update_levels = 1,
@@ -172,7 +173,7 @@ fn generate_events(
                     };
                 } else {
                     const updates =
-                        if (fill) updates_max else random.uintAtMost(usize, updates_max);
+                        if (fill) updates_max else prng.int_inclusive(usize, updates_max);
                     break :operations .{
                         .update_levels = 0,
                         .update_snapshots = updates,
@@ -195,7 +196,7 @@ fn generate_events(
                     .tree_id = 1,
                     .label = .{
                         .event = .insert,
-                        .level = random.uintLessThan(u6, constants.lsm_levels),
+                        .level = prng.int_inclusive(u6, constants.lsm_levels - 1),
                     },
                 };
 
@@ -208,7 +209,7 @@ fn generate_events(
             for (0..operations.update_levels) |_| {
                 if (tables.items.len == 0) break;
 
-                var table = tables.items[random.uintLessThan(usize, tables.items.len)];
+                var table = tables.items[prng.index(tables.items)];
                 if (table.label.level == constants.lsm_levels - 1) continue;
                 table.label.event = .update;
                 table.label.level += 1;
@@ -218,7 +219,7 @@ fn generate_events(
             for (0..operations.update_snapshots) |_| {
                 if (tables.items.len == 0) break;
 
-                var table = tables.items[random.uintLessThan(usize, tables.items.len)];
+                var table = tables.items[prng.index(tables.items)];
                 // Only update a table snapshot_max once (like real compaction).
                 if (table.snapshot_max == 2) continue;
                 table.label.event = .update;
@@ -240,7 +241,7 @@ fn generate_events(
             }
         }
 
-        if (random.uintAtMost(usize, compacts_per_checkpoint) == 0) {
+        if (prng.int_inclusive(usize, compacts_per_checkpoint) == 0) {
             try events.append(.checkpoint);
         } else {
             try events.append(.compact);

@@ -4,6 +4,8 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
+const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const constants = @import("constants.zig");
 const flags = @import("./flags.zig");
@@ -107,18 +109,17 @@ pub fn main() !void {
         }
     }
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     const replica_count =
-        if (cli_args.lite) 3 else 1 + random.uintLessThan(u8, constants.replicas_max);
+        if (cli_args.lite) 3 else prng.range_inclusive(u8, 1, constants.replicas_max);
     const standby_count =
-        if (cli_args.lite) 0 else random.uintAtMost(u8, constants.standbys_max);
+        if (cli_args.lite) 0 else prng.int_inclusive(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     // -1 since otherwise it is possible that all clients will evict each other.
     // (Due to retried register messages from the first set of evicted clients.
     // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
-    const client_count = @max(1, random.uintAtMost(u8, constants.clients_max * 2 - 1));
+    const client_count = prng.range_inclusive(u8, 1, constants.clients_max * 2 - 1);
 
     const batch_size_limit_min = comptime batch_size_limit_min: {
         var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
@@ -128,15 +129,14 @@ pub fn main() !void {
         }
         break :batch_size_limit_min event_size_max;
     };
-    const batch_size_limit: u32 = if (random.boolean())
+    const batch_size_limit: u32 = if (prng.boolean())
         constants.message_body_size_max
     else
-        batch_size_limit_min +
-            random.uintAtMost(u32, constants.message_body_size_max - batch_size_limit_min);
+        prng.range_inclusive(u32, batch_size_limit_min, constants.message_body_size_max);
 
     const MiB = 1024 * 1024;
     const storage_size_limit = vsr.sector_floor(
-        200 * MiB - random.uintLessThan(u64, 20 * MiB),
+        200 * MiB - prng.int_inclusive(u64, 20 * MiB),
     );
 
     const cluster_options = Cluster.Options{
@@ -145,39 +145,56 @@ pub fn main() !void {
         .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = storage_size_limit,
-        .seed = random.int(u64),
+        .seed = prng.bytes(u64),
         .releases = &releases,
         .client_release = releases[0].release,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,
 
-            .seed = random.int(u64),
-            .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-            .one_way_delay_min = random.uintLessThan(u16, 3),
-            .packet_loss_probability = random.uintLessThan(u8, 30),
-            .path_maximum_capacity = 2 + random.uintLessThan(u8, 19),
-            .path_clog_duration_mean = random.uintLessThan(u16, 500),
-            .path_clog_probability = random.uintLessThan(u8, 2),
-            .packet_replay_probability = random.uintLessThan(u8, 50),
+            .seed = prng.bytes(u64),
 
-            .partition_mode = random_partition_mode(random),
-            .partition_symmetry = random_partition_symmetry(random),
-            .partition_probability = random.uintLessThan(u8, 3),
-            .unpartition_probability = 1 + random.uintLessThan(u8, 10),
-            .partition_stability = 100 + random.uintLessThan(u32, 100),
-            .unpartition_stability = random.uintLessThan(u32, 20),
+            .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
+            .one_way_delay_min = prng.int_inclusive(u16, 3),
+            .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
+            .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
+            .path_clog_duration_mean = prng.int_inclusive(u16, 500),
+            .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
+            .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
+
+            .partition_mode = prng.enum_uniform(PartitionMode),
+            .partition_symmetry = prng.enum_uniform(PartitionSymmetry),
+            .partition_probability = ratio(prng.int_inclusive(u8, 3), 100),
+            .unpartition_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
+            .partition_stability = 100 + prng.int_inclusive(u32, 100),
+            .unpartition_stability = prng.int_inclusive(u32, 20),
         },
         .storage = .{
-            .seed = random.int(u64),
-            .read_latency_min = random.uintLessThan(u16, 3),
-            .read_latency_mean = 3 + random.uintLessThan(u16, 10),
-            .write_latency_min = random.uintLessThan(u16, 3),
-            .write_latency_mean = 3 + random.uintLessThan(u16, 100),
-            .read_fault_probability = random.uintLessThan(u8, 10),
-            .write_fault_probability = random.uintLessThan(u8, 10),
-            .write_misdirect_probability = random.uintLessThan(u8, 10),
-            .crash_fault_probability = 80 + random.uintLessThan(u8, 21),
+            .seed = prng.bytes(u64),
+            .read_latency_min = prng.range_inclusive(u16, 0, 3),
+            .read_latency_mean = prng.range_inclusive(u16, 3, 10),
+            .write_latency_min = prng.range_inclusive(u16, 0, 3),
+            .write_latency_mean = prng.range_inclusive(
+                u16,
+                3,
+                100,
+            ),
+            .read_fault_probability = ratio(
+                prng.range_inclusive(u8, 0, 10),
+                100,
+            ),
+            .write_fault_probability = ratio(
+                prng.range_inclusive(u8, 0, 10),
+                100,
+            ),
+            .write_misdirect_probability = ratio(
+                prng.range_inclusive(u8, 0, 10),
+                100,
+            ),
+            .crash_fault_probability = ratio(
+                prng.range_inclusive(u8, 80, 100),
+                100,
+            ),
         },
         .storage_fault_atlas = .{
             .faulty_superblock = true,
@@ -195,19 +212,19 @@ pub fn main() !void {
             },
             .accounting => .{
                 .batch_size_limit = batch_size_limit,
-                .lsm_forest_compaction_block_count = random.uintAtMost(u32, 256) +
+                .lsm_forest_compaction_block_count = prng.int_inclusive(u32, 256) +
                     StateMachine.Forest.Options.compaction_block_count_min,
                 .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = if (random.boolean()) 256 else 0,
-                .cache_entries_transfers = if (random.boolean()) 256 else 0,
-                .cache_entries_posted = if (random.boolean()) 256 else 0,
+                .cache_entries_accounts = if (prng.boolean()) 256 else 0,
+                .cache_entries_transfers = if (prng.boolean()) 256 else 0,
+                .cache_entries_posted = if (prng.boolean()) 256 else 0,
             },
         },
         .on_cluster_reply = Simulator.on_cluster_reply,
         .on_client_reply = Simulator.on_client_reply,
     };
 
-    const workload_options = StateMachine.Workload.Options.generate(random, .{
+    const workload_options = StateMachine.Workload.Options.generate(&prng, .{
         .batch_size_limit = batch_size_limit,
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
@@ -220,23 +237,32 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = 0.00002,
-        .replica_crash_stability = random.uintLessThan(u32, 1_000),
-        .replica_restart_probability = 0.0002,
-        .replica_restart_stability = random.uintLessThan(u32, 1_000),
+        .replica_crash_probability = ratio(2, 100_000),
+        .replica_crash_stability = prng.int_inclusive(u32, 1_000),
+        .replica_restart_probability = ratio(2, 10_000),
+        .replica_restart_stability = prng.int_inclusive(u32, 1_000),
 
-        .replica_pause_probability = 0.00008,
-        .replica_pause_stability = random.uintLessThan(u32, 1_000),
-        .replica_unpause_probability = 0.0008,
-        .replica_unpause_stability = random.uintLessThan(u32, 1_000),
+        .replica_pause_probability = ratio(8, 100_000),
+        .replica_pause_stability = prng.int_inclusive(u32, 1_000),
+        .replica_unpause_probability = ratio(8, 1_000),
+        .replica_unpause_stability = prng.int_inclusive(u32, 1_000),
 
-        .replica_release_advance_probability = 0.0001,
-        .replica_release_catchup_probability = 0.001,
+        .replica_release_advance_probability = ratio(1, 10_000),
+        .replica_release_catchup_probability = ratio(1, 1_000),
 
         .requests_max = constants.journal_slot_count * 3,
-        .request_probability = 1 + random.uintLessThan(u8, 99),
-        .request_idle_on_probability = random.uintLessThan(u8, 20),
-        .request_idle_off_probability = 10 + random.uintLessThan(u8, 10),
+        .request_probability = ratio(
+            prng.range_inclusive(u8, 1, 100),
+            100,
+        ),
+        .request_idle_on_probability = ratio(
+            prng.range_inclusive(u8, 0, 20),
+            100,
+        ),
+        .request_idle_off_probability = ratio(
+            prng.range_inclusive(u8, 10, 20),
+            100,
+        ),
     };
 
     output.info(
@@ -246,31 +272,31 @@ pub fn main() !void {
         \\          replicas={}
         \\          standbys={}
         \\          clients={}
-        \\          request_probability={}%
-        \\          idle_on_probability={}%
-        \\          idle_off_probability={}%
+        \\          request_probability={}
+        \\          idle_on_probability={}
+        \\          idle_off_probability={}
         \\          one_way_delay_mean={} ticks
         \\          one_way_delay_min={} ticks
-        \\          packet_loss_probability={}%
+        \\          packet_loss_probability={}
         \\          path_maximum_capacity={} messages
         \\          path_clog_duration_mean={} ticks
-        \\          path_clog_probability={}%
-        \\          packet_replay_probability={}%
+        \\          path_clog_probability={}
+        \\          packet_replay_probability={}
         \\          partition_mode={}
         \\          partition_symmetry={}
-        \\          partition_probability={}%
-        \\          unpartition_probability={}%
+        \\          partition_probability={}
+        \\          unpartition_probability={}
         \\          partition_stability={} ticks
         \\          unpartition_stability={} ticks
         \\          read_latency_min={}
         \\          read_latency_mean={}
         \\          write_latency_min={}
         \\          write_latency_mean={}
-        \\          read_fault_probability={}%
-        \\          write_fault_probability={}%
-        \\          crash_probability={d}%
+        \\          read_fault_probability={}
+        \\          write_fault_probability={}
+        \\          crash_probability={}
         \\          crash_stability={} ticks
-        \\          restart_probability={d}%
+        \\          restart_probability={}
         \\          restart_stability={} ticks
     , .{
         seed,
@@ -305,7 +331,7 @@ pub fn main() !void {
         simulator_options.replica_restart_stability,
     });
 
-    var simulator = try Simulator.init(allocator, random, simulator_options);
+    var simulator = try Simulator.init(allocator, &prng, simulator_options);
     defer simulator.deinit(allocator);
 
     for (0..simulator.cluster.clients.len) |client_index| {
@@ -417,36 +443,36 @@ pub const Simulator = struct {
         workload: StateMachine.Workload.Options,
 
         /// Probability per tick that a crash will occur.
-        replica_crash_probability: f64,
+        replica_crash_probability: Ratio,
         /// Minimum duration of a crash.
         replica_crash_stability: u32,
         /// Probability per tick that a crashed replica will recovery.
-        replica_restart_probability: f64,
+        replica_restart_probability: Ratio,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
 
-        replica_pause_probability: f64,
+        replica_pause_probability: Ratio,
         replica_pause_stability: u32,
-        replica_unpause_probability: f64,
+        replica_unpause_probability: Ratio,
         replica_unpause_stability: u32,
 
         /// Probability per tick that a healthy replica will be crash-upgraded.
         /// This probability is set to 0 during liveness mode.
-        replica_release_advance_probability: f64,
+        replica_release_advance_probability: Ratio,
         /// Probability that a crashed with an outdated version will be upgraded as it restarts.
         /// This helps ensure that when the cluster upgrades, that replicas without the newest
         /// version don't take too long to receive that new version.
         /// This probability is set to 0 during liveness mode.
-        replica_release_catchup_probability: f64,
+        replica_release_catchup_probability: Ratio,
 
         /// The total number of requests to send. Does not count `register` messages.
         requests_max: usize,
-        request_probability: u8, // percent
-        request_idle_on_probability: u8, // percent
-        request_idle_off_probability: u8, // percent
+        request_probability: Ratio,
+        request_idle_on_probability: Ratio,
+        request_idle_off_probability: Ratio,
     };
 
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     options: Options,
     cluster: *Cluster,
     workload: StateMachine.Workload,
@@ -475,24 +501,17 @@ pub const Simulator = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
     ) !Simulator {
-        assert(options.replica_crash_probability < 100.0);
-        assert(options.replica_crash_probability >= 0.0);
-        assert(options.replica_restart_probability < 100.0);
-        assert(options.replica_restart_probability >= 0.0);
         assert(options.requests_max > 0);
-        assert(options.request_probability > 0);
-        assert(options.request_probability <= 100);
-        assert(options.request_idle_on_probability <= 100);
-        assert(options.request_idle_off_probability > 0);
-        assert(options.request_idle_off_probability <= 100);
+        assert(options.request_probability.numerator > 0);
+        assert(options.request_idle_off_probability.numerator > 0);
 
         var cluster = try Cluster.init(allocator, options.cluster);
         errdefer cluster.deinit();
 
-        var workload = try StateMachine.Workload.init(allocator, random, options.workload);
+        var workload = try StateMachine.Workload.init(allocator, prng, options.workload);
         errdefer workload.deinit(allocator);
 
         const replica_releases = try allocator.alloc(
@@ -513,7 +532,7 @@ pub const Simulator = struct {
         errdefer reply_sequence.deinit(allocator);
 
         return Simulator{
-            .random = random,
+            .prng = prng,
             .options = options,
             .cluster = cluster,
             .workload = workload,
@@ -625,7 +644,7 @@ pub const Simulator = struct {
     /// context.
     pub fn transition_to_liveness_mode(simulator: *Simulator) void {
         simulator.core = random_core(
-            simulator.random,
+            simulator.prng,
             simulator.options.cluster.replica_count,
             simulator.options.cluster.standby_count,
         );
@@ -641,11 +660,11 @@ pub const Simulator = struct {
         }
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
-        simulator.options.replica_crash_probability = 0;
-        simulator.options.replica_restart_probability = 0;
-        simulator.options.replica_pause_probability = 0;
-        simulator.options.replica_release_advance_probability = 0;
-        simulator.options.replica_release_catchup_probability = 0;
+        simulator.options.replica_crash_probability = ratio(0, 100);
+        simulator.options.replica_restart_probability = ratio(0, 100);
+        simulator.options.replica_pause_probability = ratio(0, 100);
+        simulator.options.replica_release_advance_probability = ratio(0, 100);
+        simulator.options.replica_release_catchup_probability = ratio(0, 100);
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
@@ -1033,11 +1052,11 @@ pub const Simulator = struct {
     /// Maybe send a request from one of the cluster's clients.
     fn tick_requests(simulator: *Simulator) void {
         if (simulator.requests_idle) {
-            if (chance(simulator.random, simulator.options.request_idle_off_probability)) {
+            if (simulator.prng.chance(simulator.options.request_idle_off_probability)) {
                 simulator.requests_idle = false;
             }
         } else {
-            if (chance(simulator.random, simulator.options.request_idle_on_probability)) {
+            if (simulator.prng.chance(simulator.options.request_idle_on_probability)) {
                 simulator.requests_idle = true;
             }
         }
@@ -1045,12 +1064,12 @@ pub const Simulator = struct {
         if (simulator.requests_idle) return;
         if (simulator.requests_sent - simulator.requests_cancelled() ==
             simulator.options.requests_max) return;
-        if (!chance(simulator.random, simulator.options.request_probability)) return;
+        if (!simulator.prng.chance(simulator.options.request_probability)) return;
 
         const client_index = index: {
             const client_count = simulator.options.cluster.client_count;
             const client_index_base =
-                simulator.random.uintLessThan(usize, client_count);
+                simulator.prng.int_inclusive(usize, client_count - 1);
             for (0..client_count) |offset| {
                 const client_index = (client_index_base + offset) % client_count;
                 if (simulator.cluster.client_eviction_reasons[client_index] == null) {
@@ -1130,12 +1149,13 @@ pub const Simulator = struct {
 
         const crash_upgrade =
             simulator.replica_releases[replica.replica] < releases.len and
-            chance_f64(simulator.random, simulator.options.replica_release_advance_probability);
+            simulator.prng.chance(simulator.options.replica_release_advance_probability);
         if (crash_upgrade) simulator.replica_upgrade(replica.replica);
 
-        const crash_probability = simulator.options.replica_crash_probability *
-            @as(f64, if (replica_writes == 0) 1.0 else 10.0);
-        const crash_random = chance_f64(simulator.random, crash_probability);
+        var crash_probability = simulator.options.replica_crash_probability;
+        if (replica_writes > 0) crash_probability.numerator *= 10;
+
+        const crash_random = simulator.prng.chance(crash_probability);
 
         if (!crash_upgrade and !crash_random) return;
 
@@ -1153,11 +1173,11 @@ pub const Simulator = struct {
             simulator.replica_releases[replica.replica] <
             simulator.replica_releases_limit and
             (simulator.core.isSet(replica.replica) or
-            chance_f64(simulator.random, simulator.options.replica_release_catchup_probability));
+            simulator.prng.chance(simulator.options.replica_release_catchup_probability));
         if (restart_upgrade) simulator.replica_upgrade(replica.replica);
 
         const restart_random =
-            chance_f64(simulator.random, simulator.options.replica_restart_probability);
+            simulator.prng.chance(simulator.options.replica_restart_probability);
 
         if (!restart_upgrade and !restart_random) return;
 
@@ -1278,14 +1298,8 @@ pub const Simulator = struct {
 
             if (simulator.cluster.replica_health[replica.replica] == .down) continue;
             const paused = simulator.cluster.replica_health[replica.replica].up.paused;
-            const pause = chance_f64(
-                simulator.random,
-                simulator.options.replica_pause_probability,
-            );
-            const unpause = chance_f64(
-                simulator.random,
-                simulator.options.replica_unpause_probability,
-            );
+            const pause = simulator.prng.chance(simulator.options.replica_pause_probability);
+            const unpause = simulator.prng.chance(simulator.options.replica_unpause_probability);
 
             if (!paused and pause) {
                 simulator.cluster.replica_pause(@intCast(replica_index));
@@ -1317,66 +1331,37 @@ fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noret
     std.process.exit(@intFromEnum(failure));
 }
 
-/// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThanBiased(u8, 100) < p;
-}
-
-/// Returns true, `p` percent of the time, else false.
-fn chance_f64(random: std.rand.Random, p: f64) bool {
-    assert(p <= 100.0);
-    return random.float(f64) * 100.0 < p;
-}
-
-/// Returns a random partitioning mode.
-fn random_partition_mode(random: std.rand.Random) PartitionMode {
-    const typeInfo = @typeInfo(PartitionMode).Enum;
-    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
-    return @as(PartitionMode, @enumFromInt(enumAsInt));
-}
-
-fn random_partition_symmetry(random: std.rand.Random) PartitionSymmetry {
-    const typeInfo = @typeInfo(PartitionSymmetry).Enum;
-    const enumAsInt = random.uintAtMost(typeInfo.tag_type, typeInfo.fields.len - 1);
-    return @as(PartitionSymmetry, @enumFromInt(enumAsInt));
-}
-
 /// Returns a random fully-connected subgraph which includes at least view change
 /// quorum of active replicas.
-fn random_core(random: std.rand.Random, replica_count: u8, standby_count: u8) Core {
+fn random_core(prng: *stdx.PRNG, replica_count: u8, standby_count: u8) Core {
     assert(replica_count > 0);
     assert(replica_count <= constants.replicas_max);
     assert(standby_count <= constants.standbys_max);
 
     const quorum_view_change = vsr.quorums(replica_count).view_change;
-    const replica_core_count = random.intRangeAtMost(u8, quorum_view_change, replica_count);
-    const standby_core_count = random.intRangeAtMost(u8, 0, standby_count);
+    const replica_core_count = prng.range_inclusive(u8, quorum_view_change, replica_count);
+    const standby_core_count = prng.range_inclusive(u8, 0, standby_count);
 
     var result: Core = Core.initEmpty();
 
-    var need = replica_core_count;
-    var left = replica_count;
-    var replica: u8 = 0;
-    while (replica < replica_count + standby_count) : (replica += 1) {
-        if (random.uintLessThan(u8, left) < need) {
-            result.set(replica);
-            need -= 1;
-        }
-        left -= 1;
-
-        if (replica == replica_count - 1) {
-            // Having selected active replicas, switch to selection of standbys.
-            assert(left == 0);
-            assert(need == 0);
-            assert(result.count() == replica_core_count);
-            assert(result.count() >= quorum_view_change);
-            left = standby_count;
-            need = standby_core_count;
-        }
+    var combination = stdx.PRNG.Combination.init(.{
+        .total = replica_count,
+        .sample = replica_core_count,
+    });
+    for (0..replica_count) |replica| {
+        if (combination.take(prng)) result.set(replica);
     }
-    assert(left == 0);
-    assert(need == 0);
+    assert(combination.done());
+
+    combination = stdx.PRNG.Combination.init(.{
+        .total = standby_count,
+        .sample = standby_core_count,
+    });
+    for (replica_count..replica_count + standby_count) |replica| {
+        if (combination.take(prng)) result.set(replica);
+    }
+    assert(combination.done());
+
     assert(result.count() == replica_core_count + standby_core_count);
 
     return result;

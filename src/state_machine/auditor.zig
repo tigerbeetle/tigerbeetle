@@ -3,6 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
@@ -146,7 +147,7 @@ pub const AccountingAuditor = struct {
         timestamp_max: u64 = 0,
     };
 
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     options: Options,
 
     /// The timestamp of the last processed reply.
@@ -191,7 +192,7 @@ pub const AccountingAuditor = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
     ) !AccountingAuditor {
         assert(options.accounts_max >= 2);
@@ -244,7 +245,7 @@ pub const AccountingAuditor = struct {
         @memset(creates_delivered, 0);
 
         return .{
-            .random = random,
+            .prng = prng,
             .options = options,
             .accounts = accounts,
             .accounts_state = accounts_state,
@@ -590,7 +591,7 @@ pub const AccountingAuditor = struct {
             exclude: ?u128 = null,
         },
     ) ?*const tb.Account {
-        const offset = self.random.uintLessThanBiased(usize, self.accounts.len);
+        const offset = self.prng.int_inclusive(usize, self.accounts.len - 1);
         var i: usize = 0;
         // Iterate `accounts`, starting from a random offset.
         while (i < self.accounts.len) : (i += 1) {

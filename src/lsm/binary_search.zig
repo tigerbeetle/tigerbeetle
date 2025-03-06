@@ -432,26 +432,26 @@ const test_binary_search = struct {
 
     fn random_sequence(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         iter: usize,
     ) ![]const u32 {
         const keys_count = @min(
             @as(usize, 1E6),
-            fuzz.random_int_exponential(random, usize, iter),
+            fuzz.random_int_exponential(prng, usize, iter),
         );
 
         const keys = try allocator.alloc(u32, keys_count);
-        for (keys) |*key| key.* = fuzz.random_int_exponential(random, u32, 100);
+        for (keys) |*key| key.* = fuzz.random_int_exponential(prng, u32, 100);
         std.mem.sort(u32, keys, {}, less_than_key);
 
         return keys;
     }
 
-    fn random_search(random: std.rand.Random, iter: usize, comptime mode: anytype) !void {
-        const keys = try random_sequence(std.testing.allocator, random, iter);
+    fn random_search(prng: *stdx.PRNG, iter: usize, comptime mode: anytype) !void {
+        const keys = try random_sequence(std.testing.allocator, prng, iter);
         defer std.testing.allocator.free(keys);
 
-        const target_key = fuzz.random_int_exponential(random, u32, 100);
+        const target_key = fuzz.random_int_exponential(prng, u32, 100);
 
         var expect: BinarySearchResult = .{ .index = 0, .exact = false };
         for (keys, 0..) |key, i| {
@@ -500,23 +500,23 @@ const test_binary_search = struct {
         try std.testing.expectEqualSlices(u32, expected_slice, actual_slice);
     }
 
-    fn random_range_search(random: std.rand.Random, iter: usize) !void {
-        const keys = try random_sequence(std.testing.allocator, random, iter);
+    fn random_range_search(prng: *stdx.PRNG, iter: usize) !void {
+        const keys = try random_sequence(std.testing.allocator, prng, iter);
         defer std.testing.allocator.free(keys);
 
         const target_range = blk: {
             // Cover many combinations of key_min, key_max:
-            var key_min = if (keys.len > 0 and random.boolean())
-                random.intRangeAtMostBiased(u32, keys[0], keys[keys.len - 1])
+            var key_min = if (keys.len > 0 and prng.boolean())
+                prng.range_inclusive(u32, keys[0], keys[keys.len - 1])
             else
-                fuzz.random_int_exponential(random, u32, 100);
+                fuzz.random_int_exponential(prng, u32, 100);
 
-            var key_max = if (keys.len > 0 and random.boolean())
-                random.intRangeAtMostBiased(u32, keys[0], keys[keys.len - 1])
-            else if (random.boolean())
+            var key_max = if (keys.len > 0 and prng.boolean())
+                prng.range_inclusive(u32, keys[0], keys[keys.len - 1])
+            else if (prng.boolean())
                 key_min
             else
-                fuzz.random_int_exponential(random, u32, 100);
+                fuzz.random_int_exponential(prng, u32, 100);
 
             if (key_max < key_min) std.mem.swap(u32, &key_min, &key_max);
             assert(key_min <= key_max);
@@ -685,11 +685,11 @@ test "binary search: duplicates" {
 }
 
 test "binary search: random" {
-    var rng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
     inline for (.{ .lower_bound, .upper_bound }) |mode| {
         var i: usize = 0;
         while (i < 2048) : (i += 1) {
-            try test_binary_search.random_search(rng.random(), i, mode);
+            try test_binary_search.random_search(&prng, i, mode);
         }
     }
 }
@@ -842,9 +842,9 @@ test "binary search: duplicated range" {
 }
 
 test "binary search: random range" {
-    var rng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
     var i: usize = 0;
     while (i < 2048) : (i += 1) {
-        try test_binary_search.random_range_search(rng.random(), i);
+        try test_binary_search.random_range_search(&prng, i);
     }
 }

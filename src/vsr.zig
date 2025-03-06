@@ -671,14 +671,14 @@ pub const Timeout = struct {
     /// Allows the attempts counter to wrap from time to time.
     /// The overflow period is kept short to surface any related bugs sooner rather than later.
     /// We do not saturate the counter as this would cause round-robin retries to get stuck.
-    pub fn backoff(self: *Timeout, random: std.rand.Random) void {
+    pub fn backoff(self: *Timeout, prng: *stdx.PRNG) void {
         assert(self.ticking);
 
         self.ticks = 0;
         self.attempts +%= 1;
 
         log.debug("{}: {s} backing off", .{ self.id, self.name });
-        self.set_after_for_rtt_and_attempts(random);
+        self.set_after_for_rtt_and_attempts(prng);
     }
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
@@ -707,13 +707,13 @@ pub const Timeout = struct {
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
-    fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
+    fn set_after_for_rtt_and_attempts(self: *Timeout, prng: *stdx.PRNG) void {
         // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
         assert(self.ticks == 0);
         assert(self.rtt > 0);
 
         const after = (self.rtt * self.rtt_multiple) + exponential_backoff_with_jitter(
-            random,
+            prng,
             constants.backoff_min_ticks,
             constants.backoff_max_ticks,
             self.attempts,
@@ -779,13 +779,12 @@ pub const Timeout = struct {
 
 /// Calculates exponential backoff with jitter to prevent cascading failure due to thundering herds.
 pub fn exponential_backoff_with_jitter(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     min: u64,
     max: u64,
     attempt: u64,
 ) u64 {
-    const range = max - min;
-    assert(range > 0);
+    assert(max > min);
 
     // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
     // We want a saturating exponent here instead.
@@ -802,8 +801,8 @@ pub fn exponential_backoff_with_jitter(
     assert(power > 0);
 
     // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
-    const backoff = @min(range, min_non_zero * power);
-    const jitter = random.uintAtMostBiased(u64, backoff);
+    const backoff = @min(max - min, min_non_zero * power);
+    const jitter = prng.int_inclusive(u64, backoff);
 
     const result: u64 = @intCast(min + jitter);
     assert(result >= min);
@@ -813,8 +812,7 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    var prng = std.rand.DefaultPrng.init(0);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     const attempts = 1000;
     const max: u64 = std.math.maxInt(u64);
@@ -822,7 +820,7 @@ test "exponential_backoff_with_jitter" {
 
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
-        const ebwj = exponential_backoff_with_jitter(random, min, max, attempt);
+        const ebwj = exponential_backoff_with_jitter(&prng, min, max, attempt);
         try std.testing.expect(ebwj >= min);
         try std.testing.expect(ebwj <= max);
     }

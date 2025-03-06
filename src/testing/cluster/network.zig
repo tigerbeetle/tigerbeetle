@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 const stdx = @import("../../stdx.zig");
+const ratio = stdx.PRNG.ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -129,10 +130,10 @@ pub const Network = struct {
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
         assert(core.count() > 0);
 
-        network.packet_simulator.options.packet_loss_probability = 0;
-        network.packet_simulator.options.packet_replay_probability = 0;
-        network.packet_simulator.options.partition_probability = 0;
-        network.packet_simulator.options.unpartition_probability = 0;
+        network.packet_simulator.options.packet_loss_probability = ratio(0, 100);
+        network.packet_simulator.options.packet_replay_probability = ratio(0, 100);
+        network.packet_simulator.options.partition_probability = ratio(0, 100);
+        network.packet_simulator.options.unpartition_probability = ratio(0, 100);
 
         var it_source = core.iterator(.{});
         while (it_source.next()) |replica_source| {

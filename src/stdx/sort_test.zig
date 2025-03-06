@@ -2,6 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
+const ratio = stdx.PRNG.ratio;
 
 test "sort_stable" {
     const Value = struct {
@@ -27,8 +28,7 @@ test "sort_stable" {
 
     const allocator = std.testing.allocator;
 
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     const values_max = 1 << 15;
     const values_all = try allocator.alloc(Value, values_max);
@@ -38,7 +38,7 @@ test "sort_stable" {
     defer allocator.free(values_all_expected);
 
     for (0..256) |_| {
-        const values_count = random.intRangeAtMost(u32, 2, values_max);
+        const values_count = prng.range_inclusive(u32, 2, values_max);
         const values_expected = values_all_expected[0..values_count];
         const values = values_all[0..values_count];
 
@@ -47,18 +47,18 @@ test "sort_stable" {
 
             for (values) |*value| {
                 value.* = .{
-                    .x = random.uintLessThan(u32, values_count * 2),
+                    .x = prng.int_inclusive(u32, values_count * 2 - 1),
                     .y = undefined,
                 };
             }
 
             // Sort algorithms often optimize the case of already-sorted (or already-reverse-sorted)
             // sub-arrays.
-            const partitions_count = random.intRangeLessThan(u32, 1, @max(values_count, 64));
-            // The `partition_reverse_percent` is a subset of the partitions sorted by
+            const partitions_count = prng.range_inclusive(u32, 1, @max(values_count, 64) - 1);
+            // The `partition_reverse_probability` is a subset of the partitions sorted by
             // `partition_sort_percent`.
-            const partition_sort_percent = random.uintAtMost(u8, 100);
-            const partition_reverse_percent = random.uintAtMost(u8, 100);
+            const partition_sort_probability = ratio(prng.int_inclusive(u8, 100), 100);
+            const partition_reverse_probability = ratio(prng.int_inclusive(u8, 100), 100);
 
             var partitions_remaining: u32 = partitions_count;
             var partition_offset: u32 = 0;
@@ -67,13 +67,13 @@ test "sort_stable" {
                     if (partitions_remaining == 1) {
                         break :size values_count - partition_offset;
                     } else {
-                        break :size random.intRangeAtMost(u32, 1, values_count - partition_offset);
+                        break :size prng.range_inclusive(u32, 1, values_count - partition_offset);
                     }
                 };
 
-                if (random.uintLessThan(u8, 100) < partition_sort_percent) {
+                if (prng.chance(partition_sort_probability)) {
                     const partition = values[partition_offset..][0..partition_size];
-                    if (random.uintLessThan(u8, 100) < partition_reverse_percent) {
+                    if (prng.chance(partition_reverse_probability)) {
                         std.mem.sortUnstable(Value, partition, {}, Value.compare_x_descending);
                     } else {
                         std.mem.sortUnstable(Value, partition, {}, Value.compare_x_ascending);
