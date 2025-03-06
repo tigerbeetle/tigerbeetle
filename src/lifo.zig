@@ -67,14 +67,13 @@ pub fn LIFOType(comptime T: type) type {
 
         /// Returns whether the linked list contains the given *exact element* (pointer comparison).
         fn contains(self: *const LIFO, needle: *const T) bool {
-            var iterator = self.head;
-            var count: u64 = 1;
-            while (iterator) |node| : (iterator = node.next) {
+            assert(self.count <= self.count_max);
+            var next = self.head;
+            for (0..self.count + 1) |_| {
+                const node = next orelse return false;
                 if (node == needle) return true;
-                count += 1;
-                assert(count <= self.count_max);
-            }
-            return false;
+                next = node.next;
+            } else unreachable;
         }
 
         /// Resets the state.
