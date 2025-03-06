@@ -19,11 +19,17 @@ const log = std.log;
 
 pub const CLIArgs = struct {
     sha: []const u8,
+    skip_kcov: bool = false,
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
-    try devhub_coverage(shell);
+
+    if (!cli_args.skip_kcov) {
+        try devhub_coverage(shell);
+    } else {
+        log.info("--skip-kcov enabled, not computing coverage.", .{});
+    }
 }
 
 fn devhub_coverage(shell: *Shell) !void {

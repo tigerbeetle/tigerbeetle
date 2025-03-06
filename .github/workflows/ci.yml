@@ -178,27 +178,9 @@ jobs:
       - run: ./zig/download.${{ matrix.os == 'windows-latest' && 'bat' || 'sh' }}
       - run: ./zig/zig build scripts -- ci --language=${{ matrix.language }}
 
-  devhub_dry_run:
-    if: github.ref != 'refs/heads/main'
-    runs-on: ubuntu-22.04
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2147483647
-      - run: sudo apt-get update && sudo apt-get install -y kcov
-      - run: ./zig/download.sh
-      # Run under sudo to enable memory locking for accurate RSS stats.
-      - run: sudo -E ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Not providing DEVHUBDB_PAT and NYRKIO_TOKEN stops devhub from uploading its results, but
-          # it still runs everything.
-
   devhub:
-    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
-    environment: devhub
+    environment: ${{ github.ref == 'refs/heads/main' && 'devhub' || '' }}
     permissions:
       pages: write
       id-token: write
@@ -209,17 +191,31 @@ jobs:
           fetch-depth: 2147483647
       - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: ./zig/download.sh
+
+      # Dummy devhub run - checks that all the devhub tests pass in CI. They are run again, in main
+      # once merged. Kcov is skipped to avoid adding to the pipeline time.
+      - run: sudo -E ./zig/zig build scripts -- devhub --sha=${{ github.sha }} --skip-kcov
+        if: github.ref != 'refs/heads/main'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Not providing DEVHUBDB_PAT and NYRKIO_TOKEN stops devhub from uploading its results, but
+          # it still runs everything.
+
       # Run under sudo to enable memory locking for accurate RSS stats.
       - run: sudo -E ./zig/zig build scripts -- devhub --sha=${{ github.sha }}
+        if: github.ref == 'refs/heads/main'
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
         with:
           path: ./src/devhub
+
       - uses: actions/deploy-pages@v4
+        if: github.ref == 'refs/heads/main'
 
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
   # See also:
