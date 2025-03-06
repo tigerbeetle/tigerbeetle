@@ -155,7 +155,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         }
                     },
                     .ctrlc => {
-                        // move to end of line, print "^C" and abort the command
+                        // Move to end of line, print "^C" and abort the command.
                         const position_end_diff = @as(
                             isize,
                             @intCast(repl.buffer.count() - buffer_index),
@@ -170,7 +170,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         return &.{};
                     },
                     .newline => {
-                        // move to end of buffer then return
+                        // Move to end of buffer, then return.
                         const position_end_diff = @as(
                             isize,
                             @intCast(repl.buffer.count() - buffer_index),
@@ -227,9 +227,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     },
                     .backspace => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
-                        // move to new position, write the remaining buffer,
+                        // Move to new position, write the remaining buffer,
                         // write a space (\x20) to overwrite the last character,
-                        // move back to the new position.
+                        // then move back to the new position.
                         try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
@@ -475,7 +475,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         buffer_index = backward;
                     },
                     .ctrla => {
-                        // move to start of line
+                        // Move to start of line.
                         const position_start_diff = -@as(isize, @intCast(buffer_index));
                         terminal_screen.update_cursor_position(position_start_diff);
                         try repl.terminal.print("\x1b[{};{}H", .{
@@ -485,7 +485,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         buffer_index = 0;
                     },
                     .ctrle => {
-                        // move to end of line
+                        // Move to end of line.
                         const position_end_diff = @as(
                             isize,
                             @intCast(repl.buffer.count() - buffer_index),
@@ -498,19 +498,18 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         buffer_index = repl.buffer.count();
                     },
                     .ctrlk => {
-                        // clear screen from cursor
+                        // Clear screen from cursor.
                         try repl.terminal.print("\x1b[J", .{});
                         repl.buffer.resize(buffer_index) catch unreachable;
                     },
                     .ctrll => {
-                        // move to 0,0 and clear the screen from cursor,
-                        // print the prompt, then ask the terminal for the new position
+                        // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
+                        // the terminal for the new position.
                         try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
                         try repl.terminal.print(prompt, .{});
                         terminal_screen = try repl.terminal.get_screen();
 
-                        // print whatever is in the buffer and move cursor
-                        // back to buffer_index
+                        // Print whatever is in the buffer and move the cursor back to buffer_index.
                         terminal_screen.update_cursor_position(
                             @as(isize, @intCast(buffer_index)),
                         );

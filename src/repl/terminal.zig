@@ -91,8 +91,8 @@ pub const Terminal = struct {
         assert(self.mode_start != null);
         const stdin = self.stdin.reader();
 
-        // nb many control codes have names unrelated to their modern function
-        // cc https://en.wikipedia.org/wiki/C0_and_C1_control_codes
+        // NB: Many control codes have names unrelated to their modern function.
+        // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return .ctrld,
             std.ascii.control_code.etx => return .ctrlc,
@@ -108,10 +108,9 @@ pub const Terminal = struct {
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
             std.ascii.control_code.ht => return .tab,
             std.ascii.control_code.esc => {
-                // todo: it would be nice fully parse unhandled escape codes,
-                // not just give up partway through and return `.unhandled`;
-                // but ansi escape codes are extremely complicated, so that
-                // may not be completely possible.
+                // TODO: It would be nice to fully parse unhandled escape codes, and not just give
+                // up partway through and return `.unhandled` - but ansi escape codes are extremely
+                // complicated, so that may not be completely possible.
                 const second_byte = try stdin.readByte();
                 switch (second_byte) {
                     '[' => {
@@ -125,8 +124,8 @@ pub const Terminal = struct {
                                 const fourth_byte = try stdin.readByte();
                                 switch (fourth_byte) {
                                     '~' => {
-                                        // this is just one of multiple non-standard
-                                        // escape codes for delete. wfm
+                                        // This is just one of multiple non-standard escape codes
+                                        // for delete.
                                         return .delete;
                                     },
                                     else => return .unhandled,
