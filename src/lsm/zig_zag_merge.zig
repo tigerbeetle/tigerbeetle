@@ -420,7 +420,7 @@ fn TestContextType(comptime streams_max: u32) type {
             // random values:
             for (streams) |stream| {
                 assert(intersection.len <= stream.len);
-                @memcpy(stream[0..intersection.len], intersection);
+                stdx.copy_disjoint(.exact, Value, stream[0..intersection.len], intersection);
                 if (stream.len > intersection.len) {
                     random.bytes(mem.sliceAsBytes(stream[intersection.len..]));
                 }

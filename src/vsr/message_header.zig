@@ -506,7 +506,7 @@ pub const Header = extern struct {
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
         /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of
-        ///   the preceding request.
+        ///   the preceding reply.
         parent: u128 = 0,
         parent_padding: u128 = 0,
         /// Each client process generates a unique, random and ephemeral client ID at

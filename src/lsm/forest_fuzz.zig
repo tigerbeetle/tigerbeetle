@@ -705,14 +705,14 @@ const Environment = struct {
                         }
 
                         // There are strict limits around how many values can be prefetched by one
-                        // commit, see `map_value_count_max` in groove.zig. Thus, we need to make
+                        // commit, see `stash_value_count_max` in groove.zig. Thus, we need to make
                         // sure we manually call groove.objects_cache.compact() every
-                        // `map_value_count_max` operations here. This is specific to this fuzzing
+                        // `stash_value_count_max` operations here. This is specific to this fuzzing
                         // code.
-                        const groove_map_value_count_max =
-                            env.forest.grooves.accounts.objects_cache.options.map_value_count_max;
+                        const groove_stash_value_count_max =
+                            env.forest.grooves.accounts.objects_cache.options.stash_value_count_max;
 
-                        if (log_index % groove_map_value_count_max == 0) {
+                        if (log_index % groove_stash_value_count_max == 0) {
                             env.forest.grooves.accounts.objects_cache.compact();
                         }
                     }

@@ -27,8 +27,9 @@ performance under extreme contention.
 ## Overview
 
 TigerBeetle is a distributed system. It is a cluster of six replicas. The state of each replica is
-a single file on disk, called the data file. Replicas use a consensus protocol to ensure that their
-respective data files store identical data.
+a single file on disk, called the data file (see [./data_file.md](./data_file.md)). Replicas use a
+consensus protocol (see [./vsr.md](./vsr.md)) to ensure that their respective data files store
+identical data.
 
 Specifically, TigerBeetle is a replicated state machine. The ground state of the system is an
 immutable, hash-chained, append-only log of prepares. Each prepare is a batch of 8 thousand
@@ -54,13 +55,14 @@ If a primary fails, the consensus algorithm proper ensures that a different repl
 primary. The new primary correctly reconstructs the latest state of the log.
 
 The derived state of the system is the append-only log of immutable transfers and the current
-balances of all accounts. Past transfers are stored for idempotence. Physically on disk, the state is
-stored as a collection (forest) of LSM trees. Each LSM tree is a sorted collection of objects.
-For example, transfer objects are stored in a tree sorted by a unique timestamp which allows for
-efficient lookup. Auxiliary index trees are used to speed up other kinds of lookups. For example,
-there's a tree which stores a tuple of each transfer's debit account id and transfer's timestamp
-sorted by account id. This tree allows looking up all the timestamps for transfers from a specific
-account. Knowing the timestamp, it is then possible to retrieve the transfer object itself.
+balances of all accounts. Past transfers are stored for idempotence. Physically on disk, the state
+is stored as a collection (forest) of LSM trees ([./lsm.md](./lsm.md)). Each LSM tree is a sorted
+collection of objects. For example, transfer objects are stored in a tree sorted by a unique
+timestamp which allows for efficient lookup. Auxiliary index trees are used to speed up other kinds
+of lookups. For example, there's a tree which stores a tuple of each transfer's debit account id and
+transfer's timestamp sorted by account id. This tree allows looking up all the timestamps for
+transfers from a specific account. Knowing the timestamp, it is then possible to retrieve the
+transfer object itself.
 
 The forest of LSM trees is implemented as an on-disk functional data structure. The data is
 organized as a tree of on-disk blocks (a block is 0.5 MiB in size). Blocks refer to other blocks by
@@ -90,7 +92,7 @@ software, judge the results and then revert or double down. For TigerBeetle, we 
 different. We think from the first principles what the right solution _should_ be then use
 "experiments" to confirm or disprove the mental model.
 
-For example, our [TIGER_STYLE](./TIGER_STYLE.md) is an explicitly engineered engineering process.
+For example, our [TigerStyle](../TIGER_STYLE.md) is an explicitly engineered engineering process.
 
 ### As Fast as a Hash Table
 
@@ -120,8 +122,9 @@ equivalent data from other replicas in the cluster.
 
 ### Non-Interactive Transactions
 
-The primary paradigm for OLGP is interactive transactions. To implement a bank transfer in a
-general-purpose relational database, the application:
+The primary paradigm for OLGP databases ([Online General Purpose](https://docs.tigerbeetle.com/concepts/oltp/))
+is interactive transactions. To implement a bank transfer in a general-purpose relational database,
+the application:
 
 1. Opens a transaction
 2. Fetches balances from the database
@@ -153,7 +156,7 @@ of Moore's Law demise are somewhat overstated. A single core can easily scale to
 
 - use the core efficiently, keep it busy with useful work and move everything else off the hot path
 - do your homework: cache line aligned data structures, memory prefetching, SIMD and other
-boring performance engineering 101.
+  performance engineering 101.
 
 Additionally, keeping the system single threaded greatly simplifies the programming model and makes
 testing much more efficient.
@@ -179,7 +182,7 @@ memory used is a consequence of everything having an explicit upper bound.
 
 Knowing the limits ensures that the system continues to function correctly even when overloaded. For
 example, TigerBeetle doesn't need to have _explicit_ code for handling backpressure. If everything
-has a limit, there's nothing to grow without bound to begin with. Backpressure arsis from the entire
+has a limit, there's nothing to grow without bound to begin with. Backpressure arises from the entire
 system of components needing to honor each-other's limits.
 
 Another interesting consequence of static limits is runway concurrency. In highly concurrent
@@ -230,7 +233,7 @@ close contender.
 
 Both Zig and Rust provide spatial memory safety. Rust has better temporal and thread safety but
 static allocation and single-threaded execution reduce the relative importance of these benefits.
-Additionally, mere memory safety would a low bar for TigerBeetle. General correctness is table
+Additionally, mere memory safety would be a low bar for TigerBeetle. General correctness is table
 stakes. Requiring a comprehensive testing strategy leaves little space for bugs to escape testing
 but be caught by Rust-style type system.
 
@@ -284,9 +287,10 @@ TigerBeetle uses a variety of techniques to ensure that the code is correct – 
 tests to strict style guides. The most important technique deployed is simulation testing, as seen
 on [Sim TigerBeetle](https://sim.tigerbeetle.com).
 
-TigerBeetle's simulator, the VOPR, can run an entire cluster on a single thread, injecting various storage
-faults and infinitely speeding up time. VOPR combines a smart workload generator, swarm testing and
-a thousand CPU cores. It makes is easy to exercise all the possible behaviors of the system.
+TigerBeetle's simulator, the VOPR ([./vopr.md](./vopr.md)), can run an entire cluster on a single
+thread, injecting various storage faults and infinitely speeding up time. VOPR combines a smart
+workload generator, swarm testing and a thousand CPU cores. It makes it easy to exercise all the
+possible behaviors of the system.
 
 Crucially, unlike formal proofs and model checking, the simulation testing exercises a specific
 implementation. Tools like TLA are invaluable to debug an algorithm. They are of little help if you
@@ -307,7 +311,7 @@ In the context of TigerBeetle, mechanical sympathy spans all four primary colors
 - CPU
 
 **Network** has limited bandwidth. This means that if one node in the network requires much higher
-bandwidth then the rest, the network will be underutilized. When the primary needs to replicate a
+bandwidth than the rest, the network will be underutilized. When the primary needs to replicate a
 prepare across the cluster, a ring topology is used: the primary doesn't broadcast the prepare to every
 other replica. It sends it to just one other replica, relying on that replica to forward on the prepare.
 
@@ -507,6 +511,49 @@ prepare requires special handling. The solution is to use the NACK protocol.
 During a view change, participating replicas can positively state that they _never_ accepted a particular
 prepare. If at least `4` out of `6` replicas NACK the prepare then it can be inferred that the prepare
 was never replicated fully and it can be safely discarded _even if it is corrupted_.
+
+### Hash-Chaining
+
+Similar to how batching tends to improve performance across the board, a universal improvement for
+safety is the idea of hash-chaining:
+
+- compute a checksum for each data unit
+- include this checksum with some parent data, which is also checksummed.
+
+This is the same structure as in git commits, but applied more generally.
+
+Hash chaining **binds intent**: if you know the checksum, then, on receiving any data, you get
+strong guarantees that this is exactly the data you were looking for. You get protection both from
+hardware errors and corruption, as well as programming errors that lead to value confusion.
+TigerBeetle hash-chains:
+
+**Blocks**. LSM is a functional tree of blocks. Parent blocks (index blocks) contain "pointers" to
+child blocks (value blocks). A block "pointer" is a pair of an `u64` block address and an `u128`
+checksum. On disk, an array of child pointers is stored as Struct-of-Arrays (SoA). Pointers to the
+index blocks themselves are stored in manifest log blocks (see [./data_file.md](./data_file.md) for
+a more thorough overview). Whenever a replica reads a block from disk, it already knows its
+checksum: checksums are stored outside of blocks themselves. This is important to protect from
+misdirected IO: one failure mode for disks is to store correct data at a wrong offset, a failure
+which cannot be detected using only internal checksums. External checksums also make transparent
+repair possible: if a replica fails to read a block from its local storage, it doesn't report an
+error and instead automatically requests other replicas to send the block, using the checksum as an
+identifier. The root checksum is stored on disk in the superblock, where the hash-chain starts. To
+protect the integrity of the superblock itself, it is physically duplicated across four copies on disk.
+Superblock changes over time, and each _version_ of a superblock includes a checksum of the previous
+version --- if two versions co-exist on disk at the same time, their ordering is constrained weakly
+by a sequence number and strongly by hash-chaining.
+
+**Prepares**. Prepare message (units of replication, Write Ahead Log (WAL) and consensus) are hash
+chained. This gives strong ordering guarantees for two adjacent prepares, and, via a transitive
+closure, gives a global consistency guarantee, that the entire sequence of prepares from the
+beginning of history to the latest prepare is valid. Hash-chaining improves WAL repair. Backups need
+extra care (and, during rare view change, an extra message from the primary) to ensure that the
+latest prepare in their log is correct, but any prepares before that can be repaired by following
+the hash chain.
+
+**Requests**. Each client request includes a checksum of the reply to the previous request. While
+these checksums are not as crucial for data validation, they provide a strong proof that the proper
+ordering of requests is observed.
 
 ## Conclusion
 

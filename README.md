@@ -1,6 +1,6 @@
 # tigerbeetle
 
-*TigerBeetle is the financial transactions database designed for mission critical safety and performance to power the next 30 years of [OLTP](https://docs.tigerbeetle.com/about/oltp).*
+*TigerBeetle is the financial transactions database designed for mission critical safety and performance to power the next 30 years of [OLTP](https://docs.tigerbeetle.com/concepts/oltp).*
 
 ## Documentation
 
@@ -10,7 +10,7 @@
 * [Redesigning OLTP for a New Order of Magnitude (QCon SF)](https://www.infoq.com/presentations/redesign-oltp/)
   talk with a deeper dive into TigerBeetle’s local storage engine and global consensus protocol.
 * [TIGER_STYLE.md](./docs/TIGER_STYLE.md), the engineering methodology behind TigerBeetle.
-* [Slack](https://join.slack.com/t/tigerbeetle/shared_invite/zt-2zja1sjtx-hUwPqHCo7_nqy6jItyYZKg), say hello!
+* [Slack](https://slack.tigerbeetle.com/join), say hello!
 
 ## Start
 

@@ -17,8 +17,6 @@ document.addEventListener("keydown", event => {
     document.body.classList.remove("sidenav-collapsed");
     searchInput.focus();
     event.preventDefault();
-  } else if (event.key === "m" && searchInput !== document.activeElement) {
-    document.body.classList.toggle("sidenav-collapsed");
   } else if (event.key === "Escape") {
     if (searchInput === document.activeElement || searchInput.value !== "") {
       closeSearch();
@@ -44,6 +42,7 @@ document.addEventListener("keydown", event => {
         } else {
           closeSearch();
           searchPreviewUsed = false;
+          document.querySelector("article").focus();
         }
         event.preventDefault();
       }
@@ -350,7 +349,7 @@ function highlightText(term, container) {
       if (lastIndex < node.nodeValue.length) {
         fragment.appendChild(document.createTextNode(node.nodeValue.slice(lastIndex)));
       }
-      replacements.push({parent, fragment, node});
+      replacements.push({ parent, fragment, node });
     }
   }
   replacements.forEach(r => r.parent.replaceChild(r.fragment, r.node));
@@ -358,10 +357,6 @@ function highlightText(term, container) {
 
 function removeTextHighlight(container) {
   container.querySelectorAll(".highlight").forEach(h => h.classList.remove("highlight"));
-}
-
-function escapeHtml(unsafe) {
-  return unsafe.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
 
 function isMobileView() {
