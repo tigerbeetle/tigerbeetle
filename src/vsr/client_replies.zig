@@ -242,11 +242,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const destination_replica = read.destination_replica;
 
             client_replies.reads.release(read);
-
-            defer {
-                client_replies.message_pool.unref(message);
-                client_replies.write_reply_next();
-            }
+            defer client_replies.message_pool.unref(message);
 
             const callback = callback_or_null orelse {
                 log.debug("{}: read_reply: already resolved (client={} reply={})", .{
