@@ -155,12 +155,31 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         }
                     },
                     .ctrlc => {
-                        // Erase everything below the current cursor's position in case Ctrl-C was
-                        // pressed somewhere inside the buffer.
-                        try repl.terminal.print("^C\x1b[J\n", .{});
+                        // Move to end of line, print "^C" and abort the command.
+                        const position_end_diff = @as(
+                            isize,
+                            @intCast(repl.buffer.count() - buffer_index),
+                        );
+                        terminal_screen.update_cursor_position(position_end_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        try repl.terminal.print("^C\n", .{});
+                        repl.buffer.clear();
                         return &.{};
                     },
                     .newline => {
+                        // Move to end of buffer, then return.
+                        const position_end_diff = @as(
+                            isize,
+                            @intCast(repl.buffer.count() - buffer_index),
+                        );
+                        terminal_screen.update_cursor_position(position_end_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
                         try repl.terminal.print("\n", .{});
                         return repl.buffer.const_slice();
                     },
@@ -208,6 +227,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     },
                     .backspace => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
+                        // Move to new position, write the remaining buffer,
+                        // write a space (\x20) to overwrite the last character,
+                        // then move back to the new position.
                         try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
                             terminal_screen.cursor_column,
@@ -221,6 +243,16 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                             terminal_screen.cursor_column,
                         });
                         buffer_index -= 1;
+                        _ = repl.buffer.ordered_remove(buffer_index);
+                    },
+                    .delete => if (buffer_index < repl.buffer.count()) {
+                        try repl.terminal.print("\x1b[{};{}H{s}\x20\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                            repl.buffer.const_slice()[buffer_index + 1 ..],
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
                         _ = repl.buffer.ordered_remove(buffer_index);
                     },
                     .tab => {
@@ -330,7 +362,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         repl.buffer.append_slice_assume_capacity(repl.completion.suffix.slice());
                         buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
-                    .left => if (buffer_index > 0) {
+                    .left, .ctrlb => if (buffer_index > 0) {
                         terminal_screen.update_cursor_position(-1);
                         try repl.terminal.print("\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
@@ -338,7 +370,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index -= 1;
                     },
-                    .right => if (buffer_index < repl.buffer.count()) {
+                    .right, .ctrlf => if (buffer_index < repl.buffer.count()) {
                         terminal_screen.update_cursor_position(1);
                         try repl.terminal.print("\x1b[{};{}H", .{
                             terminal_screen.cursor_row,
@@ -346,7 +378,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index += 1;
                     },
-                    .up => if (history_index > 0) {
+                    .up, .ctrlp => if (history_index > 0) {
                         const history_index_next = history_index - 1;
                         const buffer_next_full = repl.history.get_ptr(history_index_next).?;
                         const buffer_next = std.mem.sliceTo(buffer_next_full, '\x00');
@@ -383,7 +415,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         repl.buffer.append_slice_assume_capacity(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
-                    .down => if (history_index < repl.history.count) {
+                    .down, .ctrln => if (history_index < repl.history.count) {
                         const history_index_next = history_index + 1;
 
                         const buffer_next = if (history_index_next == repl.history.count)
@@ -420,7 +452,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         repl.buffer.append_slice_assume_capacity(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
-                    .altf => {
+                    .altf, .ctrlright => {
                         const forward = move_forward_by_word(repl.buffer.slice(), buffer_index);
                         terminal_screen.update_cursor_position(
                             @as(isize, @intCast(forward - buffer_index)),
@@ -431,7 +463,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
                         buffer_index = forward;
                     },
-                    .altb => {
+                    .altb, .ctrlleft => {
                         const backward = move_backward_by_word(repl.buffer.slice(), buffer_index);
                         terminal_screen.update_cursor_position(
                             -@as(isize, @intCast(buffer_index - backward)),
@@ -441,6 +473,52 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                             terminal_screen.cursor_column,
                         });
                         buffer_index = backward;
+                    },
+                    .ctrla, .home => {
+                        // Move to start of line.
+                        const position_start_diff = -@as(isize, @intCast(buffer_index));
+                        terminal_screen.update_cursor_position(position_start_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index = 0;
+                    },
+                    .ctrle, .end => {
+                        // Move to end of line.
+                        const position_end_diff = @as(
+                            isize,
+                            @intCast(repl.buffer.count() - buffer_index),
+                        );
+                        terminal_screen.update_cursor_position(position_end_diff);
+                        try repl.terminal.print("\x1b[{};{}H", .{
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
+                        buffer_index = repl.buffer.count();
+                    },
+                    .ctrlk => {
+                        // Clear screen from cursor.
+                        try repl.terminal.print("\x1b[J", .{});
+                        repl.buffer.resize(buffer_index) catch unreachable;
+                    },
+                    .ctrll => {
+                        // Move to 0,0 and clear the screen from cursor, print the prompt, then ask
+                        // the terminal for the new position.
+                        try repl.terminal.print("\x1b[0;0H\x1b[J", .{});
+                        try repl.terminal.print(prompt, .{});
+                        terminal_screen = try repl.terminal.get_screen();
+
+                        // Print whatever is in the buffer and move the cursor back to buffer_index.
+                        terminal_screen.update_cursor_position(
+                            @as(isize, @intCast(buffer_index)),
+                        );
+
+                        try repl.terminal.print("{s}\x1b[{};{}H", .{
+                            repl.buffer.const_slice(),
+                            terminal_screen.cursor_row,
+                            terminal_screen.cursor_column,
+                        });
                     },
                     .unhandled => {},
                 }
@@ -486,9 +564,13 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             };
 
             if (input.len > 0) {
-                if (repl.history.empty() or
-                    !std.mem.eql(u8, repl.history.tail_ptr_const().?[0..input.len], input))
-                {
+                const add_to_history = brk: {
+                    const last_entry = repl.history.tail_ptr_const() orelse break :brk true;
+                    const last_entry_str = std.mem.sliceTo(last_entry, '\x00');
+                    break :brk !std.mem.eql(u8, last_entry_str, input);
+                };
+
+                if (add_to_history) {
                     // NB: Avoiding big stack allocations below.
 
                     assert(input.len < repl_history_entry_bytes_with_nul);
