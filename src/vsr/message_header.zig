@@ -877,7 +877,9 @@ pub const Header = extern struct {
         /// The checksum of the corresponding Request.
         request_checksum: u128,
         request_checksum_padding: u128 = 0,
-        /// The checksum of the prepare message to which this message refers.
+        /// The checksum to be included with the next request as parent checksum.
+        /// It's almost exactly the same as entire header's checksum, except that it is computed
+        /// with a fixed view and remains stable if reply is retransmitted in a newer view.
         /// This allows for strong guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
         context: u128 = 0,
