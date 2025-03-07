@@ -43,7 +43,7 @@ const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const vsr = @import("../vsr.zig");
 const trace = @import("../trace.zig");
-const LIFOType = @import("../lifo.zig").LIFOType;
+const StackType = @import("../stack.zig").StackType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
@@ -86,7 +86,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         reads: IOPSType(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
         writes: IOPSType(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
         cpus: IOPSType(CPU, 1) = .{},
-        blocks: LIFOType(Block),
+        blocks: StackType(Block),
         blocks_backing_storage: []Block,
 
         const ResourcePool = @This();
@@ -153,7 +153,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             // to the next index block.
             last_block_in_the_table: bool,
 
-            next: ?*Block, // For LIFO.
+            next: ?*Block, // For Stack.
         };
 
         pub fn init(allocator: mem.Allocator, block_count: u32) !ResourcePool {
@@ -177,7 +177,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             }
             assert(blocks_allocated == block_count);
 
-            var blocks = LIFOType(Block).init(.{
+            var blocks = StackType(Block).init(.{
                 .capacity = blocks_allocated,
                 .name = "compaction_blocks",
                 .verify_push = false,

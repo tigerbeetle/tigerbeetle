@@ -3,11 +3,11 @@ const assert = std.debug.assert;
 
 const constants = @import("./constants.zig");
 
-/// An intrusive last in/first out (LIFO, stack) linked list.
+/// An intrusive last in/first out linked list (Stack).
 /// The element type T must have a field called "next" of type ?*T.
-pub fn LIFOType(comptime T: type) type {
+pub fn StackType(comptime T: type) type {
     return struct {
-        const LIFO = @This();
+        const Stack = @This();
 
         head: ?*T = null,
 
@@ -25,16 +25,16 @@ pub fn LIFOType(comptime T: type) type {
             capacity: u64,
             verify_push: bool,
             name: ?[]const u8,
-        }) LIFO {
-            return LIFO{
+        }) Stack {
+            return Stack{
                 .name = options.name,
                 .count_max = options.capacity,
                 .verify_push = options.verify_push,
             };
         }
 
-        /// Pushes a new node to the first position of the LIFO.
-        pub fn push(self: *LIFO, node: *T) void {
+        /// Pushes a new node to the first position of the Stack.
+        pub fn push(self: *Stack, node: *T) void {
             if (constants.verify and self.verify_push) assert(!self.contains(node));
 
             assert((self.count == 0) == (self.head == null));
@@ -47,8 +47,8 @@ pub fn LIFOType(comptime T: type) type {
             self.count += 1;
         }
 
-        /// Returns the first element of the LIFO list, and removes it.
-        pub fn pop(self: *LIFO) ?*T {
+        /// Returns the first element of the Stack list, and removes it.
+        pub fn pop(self: *Stack) ?*T {
             assert((self.count == 0) == (self.head == null));
 
             const node = self.head orelse return null;
@@ -58,19 +58,19 @@ pub fn LIFOType(comptime T: type) type {
             return node;
         }
 
-        /// Returns the first element of the LIFO list, but does not remove it.
-        pub fn peek(self: LIFO) ?*T {
+        /// Returns the first element of the Stack list, but does not remove it.
+        pub fn peek(self: Stack) ?*T {
             return self.head;
         }
 
-        /// Checks if the LIFO is empty.
-        pub fn empty(self: LIFO) bool {
+        /// Checks if the Stack is empty.
+        pub fn empty(self: Stack) bool {
             assert((self.count == 0) == (self.head == null));
             return self.head == null;
         }
 
         /// Returns whether the linked list contains the given *exact element* (pointer comparison).
-        fn contains(self: *const LIFO, needle: *const T) bool {
+        fn contains(self: *const Stack, needle: *const T) bool {
             assert(self.count <= self.count_max);
             var next = self.head;
             for (0..self.count + 1) |_| {
@@ -81,7 +81,7 @@ pub fn LIFOType(comptime T: type) type {
         }
 
         /// Resets the state.
-        pub fn reset(self: *LIFO) void {
+        pub fn reset(self: *Stack) void {
             self.* = .{
                 .name = self.name,
                 .count_max = self.count_max,
@@ -91,8 +91,8 @@ pub fn LIFOType(comptime T: type) type {
     };
 }
 
-test "LIFO: fuzz" {
-    // Fuzzy test to compare behavior of LIFO against std.ArrayList (reference model).
+test "Stack: fuzz" {
+    // Fuzzy test to compare behavior of Stack against std.ArrayList (reference model).
     comptime assert(constants.verify);
 
     const fuzz = @import("testing/fuzz.zig");
@@ -105,7 +105,7 @@ test "LIFO: fuzz" {
         id: u32,
         next: ?*@This() = null,
     };
-    const LIFO = LIFOType(Node);
+    const Stack = StackType(Node);
 
     const node_count_max = 1024;
     const events_max = 1 << 10;
@@ -127,21 +127,21 @@ test "LIFO: fuzz" {
     var nodes_free = try std.DynamicBitSetUnmanaged.initFull(allocator, node_count_max);
     defer nodes_free.deinit(allocator);
 
-    var lifo = LIFO.init(.{
+    var stack = Stack.init(.{
         .capacity = node_count_max,
         .name = "fuzz",
         .verify_push = true,
     });
 
-    // Reference model: a dynamic array of node IDs in LIFO order (last is the top).
+    // Reference model: a dynamic array of node IDs in Stack order (last is the top).
     var model = try std.ArrayList(u32).initCapacity(allocator, node_count_max);
     defer model.deinit();
 
     // Run a sequence of randomized events.
     for (0..events_max) |_| {
         assert(model.items.len <= node_count_max);
-        assert(model.items.len == lifo.count);
-        assert(model.items.len == 0 or !lifo.empty());
+        assert(model.items.len == stack.count);
+        assert(model.items.len == 0 or !stack.empty());
 
         const event = fuzz.random_enum(random, Event, event_distribution);
         switch (event) {
@@ -149,12 +149,12 @@ test "LIFO: fuzz" {
                 // Only push if a free node is available.
                 const free_index = nodes_free.findFirstSet() orelse continue;
                 const node = &nodes[free_index];
-                lifo.push(node);
+                stack.push(node);
                 try model.append(node.id);
                 nodes_free.unset(node.id);
             },
             .pop => {
-                if (lifo.pop()) |node| {
+                if (stack.pop()) |node| {
                     // The reference model should have the same node at the top.
                     const id = node.id;
                     const expected = model.pop();
@@ -162,39 +162,39 @@ test "LIFO: fuzz" {
                     nodes_free.set(id);
                 } else {
                     assert(model.items.len == 0);
-                    assert(lifo.empty());
-                    assert(lifo.count == 0);
-                    assert(lifo.peek() == null);
+                    assert(stack.empty());
+                    assert(stack.count == 0);
+                    assert(stack.peek() == null);
                 }
             },
         }
         // Verify that peek() returns the same as the last element in our model.
         if (model.items.len > 0) {
-            const top = lifo.peek() orelse unreachable;
+            const top = stack.peek() orelse unreachable;
             const top_ref = model.pop();
             assert(top.id == top_ref);
             try model.append(top_ref);
         } else {
-            assert(lifo.empty());
-            assert(lifo.count == 0);
-            assert(lifo.peek() == null);
+            assert(stack.empty());
+            assert(stack.count == 0);
+            assert(stack.peek() == null);
         }
     }
 
-    // Finally, empty the LIFO and ensure our reference model agrees.
-    while (lifo.pop()) |node| {
+    // Finally, empty the Stack and ensure our reference model agrees.
+    while (stack.pop()) |node| {
         const id = node.id;
         const expected = model.pop();
         assert(id == expected);
         nodes_free.set(id);
     }
     assert(model.items.len == 0);
-    assert(lifo.empty());
-    assert(lifo.count == 0);
-    assert(lifo.peek() == null);
+    assert(stack.empty());
+    assert(stack.count == 0);
+    assert(stack.peek() == null);
 }
 
-test "LIFO: push/pop/peek/empty" {
+test "Stack: push/pop/peek/empty" {
     const testing = @import("std").testing;
     const Foo = struct { next: ?*@This() = null };
 
@@ -202,35 +202,35 @@ test "LIFO: push/pop/peek/empty" {
     var two: Foo = .{};
     var three: Foo = .{};
 
-    var lifo: LIFOType(Foo) = LIFOType(Foo).init(.{
+    var stack: StackType(Foo) = StackType(Foo).init(.{
         .capacity = 3,
         .name = "fuzz",
         .verify_push = true,
     });
 
-    try testing.expect(lifo.empty());
+    try testing.expect(stack.empty());
 
     // Push one element and verify
-    lifo.push(&one);
-    try testing.expect(!lifo.empty());
-    try testing.expectEqual(@as(?*Foo, &one), lifo.peek());
-    try testing.expect(lifo.contains(&one));
-    try testing.expect(!lifo.contains(&two));
-    try testing.expect(!lifo.contains(&three));
+    stack.push(&one);
+    try testing.expect(!stack.empty());
+    try testing.expectEqual(@as(?*Foo, &one), stack.peek());
+    try testing.expect(stack.contains(&one));
+    try testing.expect(!stack.contains(&two));
+    try testing.expect(!stack.contains(&three));
 
     // Push two more elements
-    lifo.push(&two);
-    lifo.push(&three);
-    try testing.expect(!lifo.empty());
-    try testing.expectEqual(@as(?*Foo, &three), lifo.peek());
-    try testing.expect(lifo.contains(&one));
-    try testing.expect(lifo.contains(&two));
-    try testing.expect(lifo.contains(&three));
+    stack.push(&two);
+    stack.push(&three);
+    try testing.expect(!stack.empty());
+    try testing.expectEqual(@as(?*Foo, &three), stack.peek());
+    try testing.expect(stack.contains(&one));
+    try testing.expect(stack.contains(&two));
+    try testing.expect(stack.contains(&three));
 
-    // Pop elements and check LIFO order
-    try testing.expectEqual(@as(?*Foo, &three), lifo.pop());
-    try testing.expectEqual(@as(?*Foo, &two), lifo.pop());
-    try testing.expectEqual(@as(?*Foo, &one), lifo.pop());
-    try testing.expect(lifo.empty());
-    try testing.expectEqual(@as(?*Foo, null), lifo.pop());
+    // Pop elements and check Stack order
+    try testing.expectEqual(@as(?*Foo, &three), stack.pop());
+    try testing.expectEqual(@as(?*Foo, &two), stack.pop());
+    try testing.expectEqual(@as(?*Foo, &one), stack.pop());
+    try testing.expect(stack.empty());
+    try testing.expectEqual(@as(?*Foo, null), stack.pop());
 }
