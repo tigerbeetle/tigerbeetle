@@ -1115,16 +1115,6 @@ pub fn ReplicaType(
             });
             errdefer client_replies.deinit();
 
-            self.message_bus = try MessageBus.init(
-                allocator,
-                options.cluster,
-                .{ .replica = options.replica_index },
-                options.message_pool,
-                Replica.on_message_from_bus,
-                options.message_bus_options,
-            );
-            errdefer self.message_bus.deinit(allocator);
-
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = &self.trace,
@@ -1157,6 +1147,22 @@ pub fn ReplicaType(
                 &self.client_sessions_checkpoint,
             );
             errdefer self.grid_scrubber.deinit(allocator);
+
+            // Initialize the MessageBus last. This brings the time when the replica can be
+            // externally spoken to (ie, MessageBus will accept TCP connections) closer to the time
+            // when Replica is actually listening for messages and won't simply drop them.
+            //
+            // Specifically, the grid cache in Grid.init above can take a long period of time while
+            // faulting in.
+            self.message_bus = try MessageBus.init(
+                allocator,
+                options.cluster,
+                .{ .replica = options.replica_index },
+                options.message_pool,
+                Replica.on_message_from_bus,
+                options.message_bus_options,
+            );
+            errdefer self.message_bus.deinit(allocator);
 
             self.* = .{
                 .static_allocator = self.static_allocator,
@@ -5306,12 +5312,42 @@ pub fn ReplicaType(
             assert(self.loopback_queue == null);
         }
 
-        fn ignore_ping_client(self: *const Replica, message: *const Message.PingClient) bool {
+        fn ignore_ping_client(self: *Replica, message: *const Message.PingClient) bool {
             assert(message.header.command == .ping_client);
             assert(message.header.client != 0);
 
             if (self.standby()) {
                 log.warn("{}: on_ping_client: misdirected message (standby)", .{self.replica});
+                return true;
+            }
+
+            if (message.header.release.value < self.release_client_min.value) {
+                log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
+                    " (client={} version={}<{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release_client_min,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .client_release_too_low,
+                );
+                return true;
+            }
+
+            if (message.header.release.value > self.release.value) {
+                log.warn("{}: on_ping_client: ignoring unsupported client version; too high " ++
+                    "(client={} version={}>{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .client_release_too_high,
+                );
                 return true;
             }
 
