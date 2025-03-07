@@ -9,6 +9,7 @@
 //! - The key part: this JSON is then stored in a "distributed database" for our visualization
 //!   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
 const std = @import("std");
+const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -159,7 +160,12 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             "./tigerbeetle start --addresses=0 --cache-grid=8GiB datafile-devhub",
             .{},
         );
-        errdefer _ = process.kill() catch unreachable;
+
+        defer {
+            process.stdin.?.close();
+            process.stdin = null;
+            _ = process.wait() catch {};
+        }
 
         var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
         const port_buf_len = try process.stdout.?.readAll(&port_buf);
@@ -197,9 +203,9 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         const reader = stream.reader();
         _ = try reader.readAll(std.mem.asBytes(&eviction)[0..@sizeOf(Header)]);
 
-        std.debug.assert(eviction.command == .eviction);
-        std.debug.assert(eviction.valid_checksum());
-        std.debug.assert(eviction.valid_checksum_body(&[0]u8{}));
+        assert(eviction.command == .eviction);
+        assert(eviction.valid_checksum());
+        assert(eviction.valid_checksum_body(&[0]u8{}));
 
         break :blk timer.read() / std.time.ns_per_ms;
     };
