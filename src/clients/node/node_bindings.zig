@@ -97,7 +97,7 @@ fn typescript_type(comptime Type: type) []const u8 {
             ),
         },
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 16 => "number",
                 32 => "number",

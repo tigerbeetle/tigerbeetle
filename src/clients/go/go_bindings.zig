@@ -32,7 +32,7 @@ fn go_type(comptime Type: type) []const u8 {
                 @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 1 => "bool",
                 8 => "uint8",

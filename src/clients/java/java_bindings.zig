@@ -175,7 +175,7 @@ fn java_type(
             // For better API ergonomy,
             // we expose 16-bit unsigned integers in Java as "int" instead of "short".
             // Even though, the backing fields are always stored as "short".
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 1 => "byte",
                 8 => "byte",
@@ -382,7 +382,7 @@ fn emit_packed_enum(
 fn batch_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             switch (info.bits) {
                 16 => return "UInt16",
                 32 => return "UInt32",

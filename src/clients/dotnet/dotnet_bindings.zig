@@ -152,7 +152,7 @@ fn dotnet_type(comptime Type: type) []const u8 {
             @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         .Bool => return "byte",
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "byte",
                 16 => "ushort",
@@ -167,8 +167,8 @@ fn dotnet_type(comptime Type: type) []const u8 {
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
         .Pointer => |info| {
-            std.debug.assert(info.size != .Slice);
-            std.debug.assert(!info.is_allowzero);
+            assert(info.size != .Slice);
+            assert(!info.is_allowzero);
 
             return if (comptime get_mapped_type_name(info.child)) |name|
                 name ++ "*"
