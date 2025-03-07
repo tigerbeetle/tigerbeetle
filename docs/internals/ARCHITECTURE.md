@@ -296,6 +296,11 @@ Crucially, unlike formal proofs and model checking, the simulation testing exerc
 implementation. Tools like TLA are invaluable to debug an algorithm. They are of little help if you
 want to check if your code implements the algorithm correctly or verify underlying _assumptions_.
 
+_The VOPR_ stands for _The Viewstamped Operation Replicator_ and was inspired by the movie WarGames,
+by our love of fuzzing over the years, by
+[Dropbox's Nucleus testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine),
+and by [FoundationDB's deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
+
 ### Mechanical Sympathy
 
 Mechanical Sympathy is the idea that although a CPU is a general purpose device and can execute
