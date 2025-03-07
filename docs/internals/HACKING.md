@@ -15,69 +15,58 @@ cd tigerbeetle
 ./tigerbeetle version
 ```
 
-See the [Quick Start](./start.md) for how to use a freshly-built TigerBeetle.
+See the [Quick Start](/docs/start.md) for how to use a freshly-built TigerBeetle and
+[docs.tigerbeetle.com](https://docs.tigerbeetle.com) for the rest of user-facing documentation.
 
 ## Testing
 
-TigerBeetle has several layers of tests. The Zig unit tests can be run as:
+All database tests:
 
 ```console
 ./zig/zig build test
 ```
 
-To run a single test, pass its name after `--`:
+A specific test:
 
 ```console
 ./zig/zig build test -- parse_addresses
 ```
 
-The entry point for various "minor" fuzzers is:
+Fuzzing ([/src/fuzz_tests.zig](/src/fuzz_tests.zig)):
 
 ```console
 ./zig/zig build fuzz -- smoke
+./zig/zig build fuzz -- lsm_tree
 ```
 
-See [/src/fuzz_tests.zig](/src/fuzz_tests.zig) for the menu of available fuzzers.
+## Simulation
 
-### Simulation Tests
-
-To run TigerBeetle's long-running simulation, called *The VOPR*:
+The bulk of testing happens via our deterministic simulator:
 
 ```console
-zig/zig build vopr
+./zig/zig build vopr
 ```
 
-To run the VOPR using a specific seed:
+To run the VOPR using a specific seed (this gives fully deterministic, reproducible outcome):
 
 ```console
-zig/zig build vopr -- 123
+./zig/zig build vopr -- 123
 ```
 
-*The VOPR* stands for *The Viewstamped Operation Replicator* and was inspired by the movie WarGames,
-by our love of fuzzing over the years, by [Dropbox's Nucleus
-testing](https://dropbox.tech/infrastructure/-testing-our-new-sync-engine), and by [FoundationDB's
-deterministic simulation testing](https://www.youtube.com/watch?v=OJb8A6h9jQQ).
+See [./testing.md](./testing.md) for the explanation of the output format.
 
-*The VOPR* is [a deterministic simulator](/src/vopr.zig) that can fuzz many clusters of
-TigerBeetle servers and clients interacting through TigerBeetle's Viewstamped Replication consensus
-protocol, but all within a single developer machine process, with [a network
-simulator](/src/testing/packet_simulator.zig) to simulate all kinds of network faults, and with an
-in-memory [storage simulator](/src/testing/storage.zig) to simulate all kinds of storage faults, to
-explore and test TigerBeetle against huge state spaces in a short amount of time, by literally
-speeding up the passing of time within the simulation itself.
+## CFO
 
-Beyond being a deterministic simulator, *The VOPR* also features [a state
-checker](/src/testing/cluster/state_checker.zig) that can hook into all the replicas, and check all
-their state transitions the instant they take place, using hash chaining to prove
-causality and check that all interim state transitions are valid, based on any of the set of
-inflight client requests at the time, without divergent states, and then check for convergence to
-the highest state at the end of the simulation, to distinguish between correctness or liveness bugs.
+In addition to the standard GitHub CI infrastructure that is used for tests and merge queue, we
+employ a cluster of machines for continuous fuzzing, via Continuous Fuzzing Orchestrator
+([/src/scripts/cfo.zig](/src/scripts/cfo.zig)). You can see the results on devhub:
 
-Check out TigerBeetle's [Viewstamped Replication Made
-Famous](https://github.com/coilhq/viewstamped-replication-made-famous#how-can-i-run-the-implementation-how-many-batteries-are-included-do-you-mean-i-can-even-run-the-vopr)
-bug bounty challenge repository for more details on how to run *The VOPR* and interpret its output.
+<https://devhub.tigerbeetle.com>
 
-## Hacking on Clients
+To direct CFO's eye of Sauron towards your PR, apply one of `fuzz` labels, e.g.,
+[`fuzz vopr`](https://github.com/tigerbeetle/tigerbeetle/labels/fuzz%20vopr).
+
+## Clients
 
 Each client is built using language-specific tooling (`npm`, `maven`, `dotnet`, and `go`), and links
 to a native library built with Zig. The general pattern is
@@ -136,15 +125,6 @@ See comments at the top of
 [/src/tigerbeetle/benchmark_load.zig](/src/tigerbeetle/benchmark_load.zig)
 for details of benchmarking.
 
-## Docs
-
-Developer-oriented documentation is at
-[/docs/about/internals/README.md](/docs/about/internals/README.md)
-
-## Getting In Touch
-
-Say hello in our [Slack](https://slack.tigerbeetle.com/join)!
-
 ## Pull Requests
 
 When submitting pull request, _assign_ a single person to be its reviewer. Unpacking:
@@ -165,3 +145,7 @@ After pull request is approved, the author makes the final call to merge by clic
 ready" button on GitHub. To reduce the number of round-trips, "merge when ready" can be engaged
 before the review is completed: a PR will then be merged automatically once an approving review is
 submitted.
+
+To synchronize the state of the pull request, rebase the pull request on top of main branch. You
+don't need to proactively synchronize pull requests with main: merge queue runs the tests on the
+merge commit from the PR branch into main.

@@ -249,6 +249,7 @@ READMEs
 realised
 realtime
 rebalances
+rebase
 Recurse
 Redpanda
 refactorings
@@ -266,6 +267,7 @@ rollout
 ronomon
 roundtrips
 RTTs
+Sauron
 Scatman
 screencast
 scrollbar
