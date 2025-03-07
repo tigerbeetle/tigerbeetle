@@ -1,4 +1,6 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 
@@ -43,7 +45,7 @@ fn resolve_c_type(comptime Type: type) []const u8 {
         .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
         .Bool => return "uint8_t",
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "uint8_t",
                 16 => "uint16_t",
@@ -58,8 +60,8 @@ fn resolve_c_type(comptime Type: type) []const u8 {
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
         .Pointer => |info| {
-            std.debug.assert(info.size != .Slice);
-            std.debug.assert(!info.is_allowzero);
+            assert(info.size != .Slice);
+            assert(!info.is_allowzero);
 
             inline for (type_mappings) |type_mapping| {
                 const ZigType = type_mapping[0];

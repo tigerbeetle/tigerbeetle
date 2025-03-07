@@ -1,6 +1,7 @@
 ///! This test hosts an in-process JVM
 ///! using the JNI Invocation API.
 const std = @import("std");
+const assert = std.debug.assert;
 const jni = @import("jni.zig");
 const testing = std.testing;
 
@@ -1688,7 +1689,7 @@ const get_testing_env = struct {
             .ignore_unrecognized = .jni_true,
         };
         const jni_result = JavaVM.create_java_vm(&jvm, &env, &args);
-        std.debug.assert(jni_result == .ok);
+        assert(jni_result == .ok);
     }
 
     pub fn get_env() *JNIEnv {

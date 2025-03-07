@@ -185,6 +185,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use ! inside comptime";
     }
 
+    if (std.mem.indexOf(u8, source, "debug." ++ "assert(") != null) {
+        return "use unqualified assert()";
+    }
+
     return null;
 }
 
