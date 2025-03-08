@@ -1,7 +1,9 @@
 //! Utils functions for writing fuzzers.
 
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
+const PRNG = stdx.PRNG;
 
 // Use our own allocator in the global scope instead of testing.allocator
 // as the latter now @compileError()'s if referenced outside a `test` block.
@@ -10,58 +12,45 @@ pub const allocator = gpa.allocator();
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
-pub fn random_int_exponential(random: std.rand.Random, comptime T: type, avg: T) T {
+pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
         assert(info == .Int);
         assert(info.Int.signedness == .unsigned);
     }
+    // Note: we use floats and rely on std implementaion. Ideally, we should do neither, but I
+    // wasn't able to find a quick way to generate geometrically distributed integers using only
+    // integer arithmetic.
+    const random = std.Random.init(prng, stdx.PRNG.fill);
     const exp = random.floatExp(f64) * @as(f64, @floatFromInt(avg));
     return std.math.lossyCast(T, exp);
 }
 
-pub fn DistributionType(comptime Enum: type) type {
-    return std.enums.EnumFieldStruct(Enum, f64, null);
-}
-
 /// Return a distribution for use with `random_enum`.
-pub fn random_enum_distribution(
-    random: std.rand.Random,
+///
+/// This is swarm testing: sm   ome variants are disabled completely,
+/// and the rest have wildly different probabilites.
+pub fn random_enum_weights(
+    prng: *stdx.PRNG,
     comptime Enum: type,
-) DistributionType(Enum) {
-    const fields = @typeInfo(DistributionType(Enum)).Struct.fields;
-    var distribution: DistributionType(Enum) = undefined;
-    var total: f64 = 0;
-    inline for (fields) |field| {
-        const p = @as(f64, @floatFromInt(random.uintLessThan(u8, 10)));
-        @field(distribution, field.name) = p;
-        total += p;
-    }
-    // Ensure that at least one field has non-zero probability.
-    if (total == 0) {
-        @field(distribution, fields[0].name) = 1;
-    }
-    return distribution;
-}
+) stdx.PRNG.EnumWeightsType(Enum) {
+    const fields = std.meta.fieldNames(Enum);
 
-/// Generate a random `Enum`, given a distribution over the fields of the enum.
-pub fn random_enum(
-    random: std.rand.Random,
-    comptime Enum: type,
-    distribution: DistributionType(Enum),
-) Enum {
-    const fields = @typeInfo(Enum).Enum.fields;
-    var total: f64 = 0;
+    var combination = stdx.PRNG.Combination.init(.{
+        .total_count = fields.len,
+        .sample_count = prng.range_inclusive(u32, 1, fields.len),
+    });
+    defer assert(combination.done());
+
+    var weights: PRNG.EnumWeightsType(Enum) = undefined;
     inline for (fields) |field| {
-        total += @field(distribution, field.name);
+        @field(weights, field) = if (combination.take(prng))
+            prng.int_inclusive(u64, 100)
+        else
+            0;
     }
-    assert(total > 0);
-    var choice = random.float(f64) * total;
-    inline for (fields) |field| {
-        choice -= @field(distribution, field.name);
-        if (choice < 0) return @as(Enum, @enumFromInt(field.value));
-    }
-    unreachable;
+
+    return weights;
 }
 
 pub const FuzzArgs = struct {

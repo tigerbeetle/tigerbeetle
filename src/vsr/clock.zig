@@ -82,6 +82,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
+const ratio = stdx.ratio;
 
 const stdx = @import("../stdx.zig");
 const log = stdx.log.scoped(.clock);
@@ -960,15 +961,15 @@ test "clock: fuzz test" {
 
             .one_way_delay_mean = 25,
             .one_way_delay_min = 10,
-            .packet_loss_probability = 10,
+            .packet_loss_probability = ratio(10, 100),
             .path_maximum_capacity = 20,
             .path_clog_duration_mean = 200,
-            .path_clog_probability = 2,
-            .packet_replay_probability = 2,
+            .path_clog_probability = ratio(2, 100),
+            .packet_replay_probability = ratio(2, 100),
 
             .partition_mode = .isolate_single,
-            .partition_probability = 25,
-            .unpartition_probability = 5,
+            .partition_probability = ratio(25, 100),
+            .unpartition_probability = ratio(5, 100),
             .partition_stability = 100,
             .unpartition_stability = 10,
         },

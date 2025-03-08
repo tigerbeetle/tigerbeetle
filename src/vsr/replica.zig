@@ -558,7 +558,7 @@ pub fn ReplicaType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
 
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque,
@@ -970,7 +970,7 @@ pub fn ReplicaType(
             self.state_machine_opened = true;
             if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
-            self.grid_scrubber.open(self.prng.random());
+            self.grid_scrubber.open(&self.prng);
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
             }
@@ -1297,7 +1297,7 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 1000,
                 },
-                .prng = std.rand.DefaultPrng.init(replica_index),
+                .prng = stdx.PRNG.from_seed(replica_index),
 
                 .trace = self.trace,
                 .test_context = options.test_context,
@@ -3174,7 +3174,7 @@ pub fn ReplicaType(
 
                 if (self.primary_pipeline_pending()) |prepare_pending| {
                     if (prepare_pending == prepare) {
-                        self.prepare_timeout.backoff(self.prng.random());
+                        self.prepare_timeout.backoff(&self.prng);
                     } else {
                         self.prepare_timeout.reset();
                     }
@@ -3231,7 +3231,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.prepare_timeout.backoff(self.prng.random());
+            self.prepare_timeout.backoff(&self.prng);
 
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
@@ -3803,8 +3803,9 @@ pub fn ReplicaType(
 
             // Carefully select any replica if we are a standby,
             // and any different replica if we are active.
-            const pool = if (self.standby()) self.replica_count else self.replica_count - 1;
-            const shift = self.prng.random().intRangeAtMost(u8, 1, pool);
+            const pool_count = if (self.standby()) self.replica_count else self.replica_count - 1;
+            assert(pool_count > 0);
+            const shift = 1 + self.prng.int_inclusive(u8, pool_count - 1);
             const other_replica = @mod(self.replica + shift, self.replica_count);
             assert(other_replica != self.replica);
             return other_replica;

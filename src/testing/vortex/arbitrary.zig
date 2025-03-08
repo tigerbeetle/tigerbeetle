@@ -1,20 +1,17 @@
 //! Utilities for generating random values, as extensions to what's already in `std.rand.Random`.
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 
 const assert = std.debug.assert;
 
-/// Pick a random element from the slice.
-pub fn element(random: std.rand.Random, comptime T: type, values: []T) T {
-    return values[random.uintLessThan(usize, values.len)];
-}
 
 /// Pick a random element from the set (hashmap with void values).
 pub fn set_element(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     comptime K: type,
     set: std.AutoHashMapUnmanaged(K, void),
 ) K {
-    const pick = random.uintLessThan(usize, set.count());
+    const pick = prng.int_inclusive(usize, set.count() - 1);
     var it = set.keyIterator();
     var i: usize = 0;
     while (it.next()) |value| {

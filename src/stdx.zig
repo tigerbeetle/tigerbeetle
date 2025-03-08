@@ -14,6 +14,8 @@ pub const memory_lock_allocated = @import("./stdx/mlock.zig").memory_lock_alloca
 pub const timeit = @import("./stdx/debug.zig").timeit;
 pub const dbg = @import("./stdx/debug.zig").dbg;
 
+pub const PRNG = @import("./stdx/prng.zig");
+
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {

@@ -7,6 +7,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const allocator = fuzz.allocator;
+const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_scan_fuzz);
 const lsm = @import("tree.zig");
@@ -260,27 +261,27 @@ const QuerySpec = struct {
 /// - Cannot repeat fields, while `(a=1 OR a=2)` is valid, this limitation avoids
 ///   always false conditions such as `(a=1 AND a=2)`.
 const QuerySpecFuzzer = struct {
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     index_cardinality: [thing_index_count]u64,
     indexes_used: std.EnumSet(Index) = std.EnumSet(Index).initEmpty(),
 
     fn generate_fuzz_query_specs(
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         index_cardinality: [thing_index_count]u64,
     ) [query_spec_max]QuerySpec {
         var query_specs: [query_spec_max]QuerySpec = undefined;
         for (&query_specs) |*query_spec| {
             var fuzzer = QuerySpecFuzzer{
-                .random = random,
+                .prng = prng,
                 .index_cardinality = index_cardinality,
             };
 
-            const query_field_max = random.intRangeAtMost(u32, 1, query_scans_max);
+            const query_field_max = prng.range_inclusive(u32, 1, query_scans_max);
             const query = fuzzer.generate_query(query_field_max);
 
             query_spec.* = .{
                 .query = query,
-                .direction = if (random.boolean()) .ascending else .descending,
+                .direction = if (prng.boolean()) .ascending else .descending,
             };
         }
         return query_specs;
@@ -324,7 +325,7 @@ const QuerySpecFuzzer = struct {
 
         query.append_assume_capacity(.{
             .merge = .{
-                .operator = self.random.enumValue(QueryOperator),
+                .operator = self.prng.enum_uniform(QueryOperator),
                 .operand_count = 0,
             },
         });
@@ -332,7 +333,7 @@ const QuerySpecFuzzer = struct {
         // Limiting the maximum number of merges upfront produces both simple and complex
         // queries with the same probability.
         // Otherwise, simple queries would be rare or limited to have few fields.
-        const merge_max = self.random.intRangeAtMost(u32, 1, field_max - 1);
+        const merge_max = self.prng.range_inclusive(u32, 1, field_max - 1);
 
         var field_remain: u32 = field_max;
         while (field_remain > 0) {
@@ -344,7 +345,7 @@ const QuerySpecFuzzer = struct {
                 const nested_merge_field_max = stack_top.nested_merge_field_max();
                 stdx.maybe(nested_merge_field_max == 0);
                 break :tag if (nested_merge_field_max > 1)
-                    self.random.enumValue(QueryPartTag)
+                    self.prng.enum_uniform(QueryPartTag)
                 else
                     .field;
             };
@@ -372,7 +373,7 @@ const QuerySpecFuzzer = struct {
                 },
                 .merge => merge: {
                     assert(field_remain > 1);
-                    const merge_field_remain = self.random.intRangeAtMost(
+                    const merge_field_remain = self.prng.range_inclusive(
                         u32,
                         // Merge must contain at least two fields, and at most the
                         // number of remaining field for the current merge.
@@ -422,7 +423,7 @@ const QuerySpecFuzzer = struct {
         assert(self.indexes_used.count() < thing_index_count);
 
         const index = while (true) {
-            const index = self.random.enumValue(Index);
+            const index = self.prng.enum_uniform(Index);
             if (!self.indexes_used.contains(index)) {
                 self.indexes_used.insert(index);
                 break index;
@@ -433,7 +434,7 @@ const QuerySpecFuzzer = struct {
 
         return QueryPart.Field{
             .index = index,
-            .value = self.random.intRangeAtMostBiased(u64, 1, index_cardinality),
+            .value = self.prng.range_inclusive(u64, 1, index_cardinality),
         };
     }
 };
@@ -488,7 +489,7 @@ const Environment = struct {
         grid_checkpoint_durable,
     };
 
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     state: State,
 
     storage: *Storage,
@@ -511,14 +512,14 @@ const Environment = struct {
     fn init(
         env: *Environment,
         storage: *Storage,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
     ) !void {
         env.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer env.trace.deinit(allocator);
 
         env.* = .{
             .storage = storage,
-            .random = random,
+            .prng = prng,
             .state = .init,
             .trace = env.trace,
 
@@ -558,14 +559,14 @@ const Environment = struct {
 
     pub fn run(
         storage: *Storage,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         commits_max: u32,
     ) !void {
         assert(commits_max > 0);
         log.info("commits = {}", .{commits_max});
 
         var env: Environment = undefined;
-        try env.init(storage, random);
+        try env.init(storage, prng);
         defer env.deinit();
 
         env.change_state(.init, .superblock_format);
@@ -582,10 +583,10 @@ const Environment = struct {
 
         var index_cardinality: [thing_index_count]u64 = undefined;
         for (&index_cardinality) |*cardinality| {
-            cardinality.* = 1 +| fuzz.random_int_exponential(env.random, u64, 32);
+            cardinality.* = 1 +| fuzz.random_int_exponential(env.prng, u64, 32);
         }
 
-        const query_specs = QuerySpecFuzzer.generate_fuzz_query_specs(random, index_cardinality);
+        const query_specs = QuerySpecFuzzer.generate_fuzz_query_specs(env.prng, index_cardinality);
         for (&query_specs, 0..) |*query_spec, i| {
             log.info("query_specs[{}]: {} {s}", .{ i, query_spec, @tagName(query_spec.direction) });
         }
@@ -594,10 +595,10 @@ const Environment = struct {
             assert(env.state == .fuzzing);
 
             // Often insert full batches, to fill the database.
-            const batch_objects = if (random.boolean())
+            const batch_objects = if (prng.boolean())
                 batch_objects_max
             else
-                random.intRangeAtMost(u32, 1, batch_objects_max);
+                prng.range_inclusive(u32, 1, batch_objects_max);
             try env.model.ensureUnusedCapacity(allocator, batch_objects);
             for (&env.model_matches) |*query_matches| {
                 try query_matches.resize(allocator, env.model.items.len + batch_objects, false);
@@ -607,20 +608,20 @@ const Environment = struct {
                 // TODO: sometimes update and delete things.
                 const thing_index = env.model.items.len;
                 const thing = Thing{
-                    .id = env.random.int(u128),
-                    .index_01 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[0]),
-                    .index_02 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[1]),
-                    .index_03 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[2]),
-                    .index_04 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[3]),
-                    .index_05 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[4]),
-                    .index_06 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[5]),
-                    .index_07 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[6]),
-                    .index_08 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[7]),
-                    .index_09 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[8]),
-                    .index_10 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[9]),
-                    .index_11 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[10]),
-                    .index_12 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[11]),
-                    .index_13 = env.random.intRangeAtMostBiased(u64, 1, index_cardinality[12]),
+                    .id = env.prng.bytes(u128),
+                    .index_01 = env.prng.range_inclusive(u64, 1, index_cardinality[0]),
+                    .index_02 = env.prng.range_inclusive(u64, 1, index_cardinality[1]),
+                    .index_03 = env.prng.range_inclusive(u64, 1, index_cardinality[2]),
+                    .index_04 = env.prng.range_inclusive(u64, 1, index_cardinality[3]),
+                    .index_05 = env.prng.range_inclusive(u64, 1, index_cardinality[4]),
+                    .index_06 = env.prng.range_inclusive(u64, 1, index_cardinality[5]),
+                    .index_07 = env.prng.range_inclusive(u64, 1, index_cardinality[6]),
+                    .index_08 = env.prng.range_inclusive(u64, 1, index_cardinality[7]),
+                    .index_09 = env.prng.range_inclusive(u64, 1, index_cardinality[8]),
+                    .index_10 = env.prng.range_inclusive(u64, 1, index_cardinality[9]),
+                    .index_11 = env.prng.range_inclusive(u64, 1, index_cardinality[10]),
+                    .index_12 = env.prng.range_inclusive(u64, 1, index_cardinality[11]),
+                    .index_13 = env.prng.range_inclusive(u64, 1, index_cardinality[12]),
                     .timestamp = thing_index + 1,
                 };
 
@@ -664,7 +665,7 @@ const Environment = struct {
             }
 
             const query_results_max =
-                env.random.intRangeAtMost(usize, 1, env.scan_lookup_buffer.len);
+                env.prng.range_inclusive(usize, 1, env.scan_lookup_buffer.len);
             const query_results = results: {
                 const scan = env.scan_from_condition(query_spec, timestamp_previous);
                 env.scan_lookup = ScanLookup.init(&env.forest.grooves.things, scan);
@@ -923,30 +924,28 @@ const Environment = struct {
 };
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
-    const random = rng.random();
+    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     // Init mocked storage.
     var storage = try Storage.init(
         allocator,
         constants.storage_size_limit_default,
         Storage.Options{
-            .seed = random.int(u64),
+            .seed = prng.bytes(u64),
             .read_latency_min = 0,
             .read_latency_mean = 0,
             .write_latency_min = 0,
             .write_latency_mean = 0,
-            .crash_fault_probability = 0,
+            .crash_fault_probability = ratio(0, 100),
         },
     );
     defer storage.deinit(allocator);
 
     const commits_max: u32 = @intCast(
-        fuzz_args.events_max orelse
-            random.intRangeAtMost(u32, 1, 1024),
+        fuzz_args.events_max orelse prng.range_inclusive(u32, 1, 1024),
     );
 
-    try Environment.run(&storage, random, commits_max);
+    try Environment.run(&storage, &prng, commits_max);
 
     log.info("Passed!", .{});
 }

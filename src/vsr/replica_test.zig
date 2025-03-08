@@ -5,6 +5,7 @@ const log = std.log.scoped(.test_replica);
 const expectEqual = std.testing.expectEqual;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
+const ratio = stdx.ratio;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
@@ -1449,8 +1450,8 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
     // Disable new read/write faults so that we can use `storage.faults` to track repairs.
     // (That is, as the scrubber runs, the number of faults will monotonically decrease.)
-    b2_storage.options.read_fault_probability = 0;
-    b2_storage.options.write_fault_probability = 0;
+    b2_storage.options.read_fault_probability = ratio(0, 100);
+    b2_storage.options.write_fault_probability = ratio(0, 100);
 
     // Tick until B2's grid repair stops making progress.
     {
@@ -1873,7 +1874,7 @@ const TestContext = struct {
 
                 .path_maximum_capacity = 128,
                 .path_clog_duration_mean = 0,
-                .path_clog_probability = 0,
+                .path_clog_probability = ratio(0, 100),
                 .recorded_count_max = 16,
             },
             .storage = .{
