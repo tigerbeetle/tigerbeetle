@@ -2408,9 +2408,9 @@ pub fn StateMachineType(
             // 2. standing for debit record and credit record, or
             // 3. relating to debtor and creditor.
             // We use them to distinguish between `cr` (credit account), and `c` (commit).
-            const dr_account = self.get_account(t.debit_account_id) orelse
+            var dr_account = self.get_account(t.debit_account_id) orelse
                 return .debit_account_not_found;
-            const cr_account = self.get_account(t.credit_account_id) orelse
+            var cr_account = self.get_account(t.credit_account_id) orelse
                 return .credit_account_not_found;
             assert(dr_account.id == t.debit_account_id);
             assert(cr_account.id == t.credit_account_id);
@@ -2538,49 +2538,43 @@ pub fn StateMachineType(
             t2.amount = amount;
             self.forest.grooves.transfers.insert(&t2);
 
-            var dr_account_new = dr_account;
-            var cr_account_new = cr_account;
             if (t.flags.pending) {
-                dr_account_new.debits_pending += amount;
-                cr_account_new.credits_pending += amount;
+                dr_account.debits_pending += amount;
+                cr_account.credits_pending += amount;
 
                 self.forest.grooves.transfers_pending.insert(&.{
                     .timestamp = t2.timestamp,
                     .status = .pending,
                 });
             } else {
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                dr_account.debits_posted += amount;
+                cr_account.credits_posted += amount;
             }
 
             // Closing accounts:
-            assert(!dr_account_new.flags.closed);
-            assert(!cr_account_new.flags.closed);
-            if (t2.flags.closing_debit) dr_account_new.flags.closed = true;
-            if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
+            assert(!dr_account.flags.closed);
+            assert(!cr_account.flags.closed);
+            if (t2.flags.closing_debit) dr_account.flags.closed = true;
+            if (t2.flags.closing_credit) cr_account.flags.closed = true;
 
-            const dr_updated = amount > 0 or dr_account_new.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
+            const dr_updated = amount > 0 or dr_account.flags.closed;
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{
-                    .old = &dr_account,
-                    .new = &dr_account_new,
-                });
+                // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                self.forest.grooves.accounts.objects_cache.upsert(&dr_account);
+                self.forest.grooves.accounts.objects.put(&dr_account);
             }
 
-            const cr_updated = amount > 0 or cr_account_new.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
+            const cr_updated = amount > 0 or cr_account.flags.closed;
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{
-                    .old = &cr_account,
-                    .new = &cr_account_new,
-                });
+                // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                self.forest.grooves.accounts.objects_cache.upsert(&cr_account);
+                self.forest.grooves.accounts.objects.put(&cr_account);
             }
 
             self.account_event(.{
                 .event_timestamp = t2.timestamp,
-                .dr_account = &dr_account_new,
-                .cr_account = &cr_account_new,
+                .dr_account = &dr_account,
+                .cr_account = &cr_account,
                 .transfer_flags = t2.flags,
                 .transfer_pending_status = if (t2.flags.pending) .pending else .none,
                 .transfer_pending = null,
@@ -2707,8 +2701,8 @@ pub fn StateMachineType(
             assert(p.timestamp < t.timestamp);
             if (!p.flags.pending) return .pending_transfer_not_pending;
 
-            const dr_account = self.get_account(p.debit_account_id).?;
-            const cr_account = self.get_account(p.credit_account_id).?;
+            var dr_account = self.get_account(p.debit_account_id).?;
+            var cr_account = self.get_account(p.credit_account_id).?;
             assert(dr_account.id == p.debit_account_id);
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
@@ -2842,10 +2836,8 @@ pub fn StateMachineType(
             };
             self.transfer_update_pending_status(&transfer_pending, transfer_pending_status);
 
-            var dr_account_new = dr_account;
-            var cr_account_new = cr_account;
-            dr_account_new.debits_pending -= p.amount;
-            cr_account_new.credits_pending -= p.amount;
+            dr_account.debits_pending -= p.amount;
+            cr_account.credits_pending -= p.amount;
 
             if (t2.flags.post_pending_transfer) {
                 assert(!p.flags.closing_debit);
@@ -2854,45 +2846,42 @@ pub fn StateMachineType(
                     assert(amount > 0);
                 }
                 assert(amount <= p.amount);
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                dr_account.debits_posted += amount;
+                cr_account.credits_posted += amount;
             }
             if (t2.flags.void_pending_transfer) {
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
-                    dr_account_new.flags.closed = false;
+                    dr_account.flags.closed = false;
                 }
                 if (p.flags.closing_credit) {
                     assert(cr_account.flags.closed);
-                    cr_account_new.flags.closed = false;
+                    cr_account.flags.closed = false;
                 }
             }
 
             const dr_updated = amount > 0 or p.amount > 0 or
-                dr_account_new.flags.closed != dr_account.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
+                dr_account.flags.closed != dr_account.flags.closed;
+
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{
-                    .old = &dr_account,
-                    .new = &dr_account_new,
-                });
+                // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                self.forest.grooves.accounts.objects_cache.upsert(&dr_account);
+                self.forest.grooves.accounts.objects.put(&dr_account);
             }
 
             const cr_updated = amount > 0 or p.amount > 0 or
-                cr_account_new.flags.closed != cr_account.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
+                cr_account.flags.closed != cr_account.flags.closed;
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{
-                    .old = &cr_account,
-                    .new = &cr_account_new,
-                });
+                // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                self.forest.grooves.accounts.objects_cache.upsert(&cr_account);
+                self.forest.grooves.accounts.objects.put(&cr_account);
             }
 
             self.account_event(.{
                 .event_timestamp = t2.timestamp,
-                .dr_account = &dr_account_new,
-                .cr_account = &cr_account_new,
+                .dr_account = &dr_account,
+                .cr_account = &cr_account,
                 .transfer_flags = t2.flags,
                 .transfer_pending_status = transfer_pending_status,
                 .transfer_pending = &p,
@@ -3151,50 +3140,46 @@ pub fn StateMachineType(
                 const expires_at = p.timestamp + p.timeout_ns();
                 assert(expires_at <= event_timestamp);
 
-                const dr_account = self.get_account(
+                var dr_account = self.get_account(
                     p.debit_account_id,
                 ).?;
                 assert(dr_account.debits_pending >= p.amount);
 
-                const cr_account = self.get_account(
+                var cr_account = self.get_account(
                     p.credit_account_id,
                 ).?;
                 assert(cr_account.credits_pending >= p.amount);
 
-                var dr_account_new = dr_account;
-                var cr_account_new = cr_account;
-                dr_account_new.debits_pending -= p.amount;
-                cr_account_new.credits_pending -= p.amount;
+                dr_account.debits_pending -= p.amount;
+                cr_account.credits_pending -= p.amount;
 
                 if (p.flags.closing_debit) {
-                    assert(dr_account_new.flags.closed);
-                    dr_account_new.flags.closed = false;
+                    assert(dr_account.flags.closed);
+                    dr_account.flags.closed = false;
                 }
                 if (p.flags.closing_credit) {
-                    assert(cr_account_new.flags.closed);
-                    cr_account_new.flags.closed = false;
+                    assert(cr_account.flags.closed);
+                    cr_account.flags.closed = false;
                 }
 
                 // Pending transfers can expire in closed accounts.
-                maybe(dr_account_new.flags.closed);
-                maybe(cr_account_new.flags.closed);
+                maybe(dr_account.flags.closed);
+                maybe(cr_account.flags.closed);
 
                 const dr_updated = p.amount > 0 or
-                    dr_account_new.flags.closed != dr_account.flags.closed;
+                    dr_account.flags.closed != dr_account.flags.closed;
                 if (dr_updated) {
-                    self.forest.grooves.accounts.update(.{
-                        .old = &dr_account,
-                        .new = &dr_account_new,
-                    });
+                    // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                    self.forest.grooves.accounts.objects_cache.upsert(&dr_account);
+                    self.forest.grooves.accounts.objects.put(&dr_account);
                 }
 
                 const cr_updated = p.amount > 0 or
-                    cr_account_new.flags.closed != cr_account.flags.closed;
+                    cr_account.flags.closed != cr_account.flags.closed;
                 if (cr_updated) {
-                    self.forest.grooves.accounts.update(.{
-                        .old = &cr_account,
-                        .new = &cr_account_new,
-                    });
+                    // Do not use `grooves.accounts.update()` to avoid checking for index changes.
+                    self.forest.grooves.accounts.objects_cache.upsert(&cr_account);
+                    self.forest.grooves.accounts.objects.put(&cr_account);
                 }
 
                 const transfer_pending = self.get_transfer_pending(p.timestamp).?;
@@ -3210,8 +3195,8 @@ pub fn StateMachineType(
 
                 self.account_event(.{
                     .event_timestamp = event_timestamp,
-                    .dr_account = &dr_account_new,
-                    .cr_account = &cr_account_new,
+                    .dr_account = &dr_account,
+                    .cr_account = &cr_account,
                     .transfer_flags = null,
                     .transfer_pending_status = .expired,
                     .transfer_pending = p,
