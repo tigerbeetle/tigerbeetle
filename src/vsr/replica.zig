@@ -4671,7 +4671,7 @@ pub fn ReplicaType(
                 std.time.ns_per_ms,
             );
             if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
-                log.warn("{}: commit_dispatch: request={} size={} {s} time={}ms", .{
+                log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.replica,
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
