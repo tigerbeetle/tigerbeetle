@@ -26,7 +26,7 @@ const PRNG = @This();
 
 /// A less than one rational number, used to specify probabilities.
 pub const Ratio = struct {
-    // Invariant: numerator < denomitator.
+    // Invariant: numerator ≤ denomitator.
     numerator: u64,
     // Invariant: denomitator ≠ 0.
     denominator: u64,
@@ -111,7 +111,7 @@ pub fn fill(prng: *PRNG, target: []u8) void {
         }
     }
 
-    // Remaining. (cuts the stream)
+    // Remaining (cuts the stream).
     if (i != target.len) {
         var n = prng.next();
         while (i < target.len) : (i += 1) {
@@ -226,7 +226,7 @@ test int_inclusive {
 // - passing zero is not a subtle error
 // - passing intMax allows generating any integer
 // - at the call-site, inclusive is usually somewhat more obvious.
-pub const int_exclusive = void;
+pub const int_exclusive = @compileError("intentionally not implemented");
 
 /// Given a slice, generates a random valid index for the slice.
 pub fn index(prng: *PRNG, slice: anytype) usize {
@@ -344,7 +344,7 @@ pub fn enum_uniform(prng: *PRNG, Enum: type) Enum {
 }
 
 test enum_uniform {
-    const E = enum(u8) { a, b, c = 8 };
+    const E = enum(u8) { a, b, c = 8 }; // 8 tests that the discriminant is used properly.
 
     var prng = from_seed(92);
     var count: struct { a: u32 = 0, b: u32 = 0, c: u32 = 0 } = .{};
@@ -381,7 +381,7 @@ pub fn enum_weighted(prng: *PRNG, Enum: type, weights: EnumWeightsType(Enum)) En
 }
 
 test enum_weighted {
-    const E = enum(u8) { a, b, c = 8 };
+    const E = enum(u8) { a, b, c = 8 }; // 8 tests that the discriminant is used properly.
 
     var prng = from_seed(92);
     var count: struct { a: u32 = 0, b: u32 = 0, c: u32 = 0 } = .{};
