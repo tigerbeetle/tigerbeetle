@@ -47,7 +47,7 @@ The bulk of testing happens via our deterministic simulator:
 ./zig/zig build vopr
 ```
 
-To run the VOPR using a specific seed (this gives fully deterministic, reproducible outcome):
+To run the VOPR using a specific seed (this produces a fully deterministic, reproducible outcome):
 
 ```console
 ./zig/zig build vopr -- 123
@@ -58,7 +58,7 @@ See [./testing.md](./testing.md) for the explanation of the output format.
 ## CFO
 
 In addition to the standard GitHub CI infrastructure that is used for tests and merge queue, we
-employ a cluster of machines for continuous fuzzing, via Continuous Fuzzing Orchestrator
+employ a cluster of machines for continuous fuzzing, via the Continuous Fuzzing Orchestrator
 ([/src/scripts/cfo.zig](/src/scripts/cfo.zig)). You can see the results on devhub:
 
 <https://devhub.tigerbeetle.com>
