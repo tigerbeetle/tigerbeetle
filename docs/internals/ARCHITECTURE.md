@@ -169,7 +169,7 @@ does not do.
 
 When TigerBeetle starts, for every "object type" in the system it computes the worst-case upper
 bound for the number of objects needed, based on CLI arguments. Then TigerBeetle allocates exactly
-that number of objects and enters the main even loop. After startup, no new objects are created.
+that number of objects and enters the main event loop. After startup, no new objects are created.
 Therefore no dynamic memory allocation or deallocation is needed.
 
 This is different form truly static allocation of some embedded systems. TigerBeetle doesn't use
@@ -299,7 +299,7 @@ want to check if your code implements the algorithm correctly or verify underlyi
 ### Mechanical Sympathy
 
 Mechanical Sympathy is the idea that although a CPU is a general purpose device and can execute
-anything it is often possible to re-formulate a particular algorithm in a CPU-friendly manner. This
+anything, it is often possible to re-formulate a particular algorithm in a CPU-friendly manner. This
 makes it much faster to run. Small details matter a lot for speed and sometimes these small
 details guide larger architecture.
 
