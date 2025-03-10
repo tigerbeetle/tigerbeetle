@@ -112,6 +112,7 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
+        create_transfers_with_balance: bool = false,
         account_batch_size: usize = @divExact(
             constants.message_size_max - @sizeOf(vsr.Header),
             @sizeOf(tigerbeetle.Account),
@@ -467,6 +468,7 @@ pub const Command = union(enum) {
         account_distribution: Distribution,
         flag_history: bool,
         flag_imported: bool,
+        create_transfers_with_balance: bool,
         account_batch_size: usize,
         transfer_count: usize,
         transfer_hot_percent: usize,
@@ -889,6 +891,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .account_distribution = benchmark.account_distribution,
         .flag_history = benchmark.flag_history,
         .flag_imported = benchmark.flag_imported,
+        .create_transfers_with_balance = benchmark.create_transfers_with_balance,
         .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,

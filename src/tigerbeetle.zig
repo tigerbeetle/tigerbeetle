@@ -446,8 +446,8 @@ pub const CreateAccountsResult = extern struct {
     result: CreateAccountResult,
 
     comptime {
-        assert(@sizeOf(CreateAccountsResult) == 8);
         assert(stdx.no_padding(CreateAccountsResult));
+        assert(@sizeOf(CreateAccountsResult) == 8);
     }
 };
 
@@ -456,9 +456,64 @@ pub const CreateTransfersResult = extern struct {
     result: CreateTransferResult,
 
     comptime {
-        assert(@sizeOf(CreateTransfersResult) == 8);
         assert(stdx.no_padding(CreateTransfersResult));
+        assert(@sizeOf(CreateTransfersResult) == 8);
     }
+};
+
+pub const CreateTransfersWithBalanceResult = extern struct {
+    result: CreateTransferResult,
+
+    /// Flags indicating which fields are present in this result.
+    /// Some fields are returned only in specific circumstances.
+    flags: CreateTransfersWithBalanceResultFlags,
+
+    /// The transfer's timestamp.
+    /// Check `flags.transfer_set` to verify if this field is present in the result.
+    /// Always set when the transfer was successfully created (`result == .ok`)
+    /// or when the transfer already existed (e.g., `result == .exists`).
+    timestamp: u64,
+
+    /// The transfer's amount.
+    /// Check `flags.transfer_set` to verify if this field is present in the result.
+    /// Always set when the transfer was successfully created (`result == .ok`)
+    /// or when the transfer already existed (e.g., `result == .exists`).
+    /// The actual transfer amount may differ from the requested amount in cases such as
+    /// posting pending transfers or balancing accounts.
+    amount: u128,
+
+    /// The debit's account balance.
+    /// Check `flags.account_balances_set` to verify if these fields are present in the result.
+    /// Always present when the transfer was successfully created (`result == .ok`)
+    /// or when it failed due to balance checks (e.g., `result == .exceeds_debits`
+    /// or `result == .exceeds_credits`).
+    debit_account_balance_debits_pending: u128,
+    debit_account_balance_debits_posted: u128,
+    debit_account_balance_credits_pending: u128,
+    debit_account_balance_credits_posted: u128,
+
+    /// The credit's account balance.
+    /// Check `flags.account_balances_set` to verify if these fields are present in the result.
+    /// Always present when the transfer was successfully created (`result == .ok`)
+    /// or when it failed due to balance checks (e.g., `result == .exceeds_debits`
+    /// or `result == .exceeds_credits`).
+    credit_account_balance_debits_pending: u128,
+    credit_account_balance_debits_posted: u128,
+    credit_account_balance_credits_pending: u128,
+    credit_account_balance_credits_posted: u128,
+
+    comptime {
+        assert(stdx.no_padding(CreateTransfersWithBalanceResult));
+        // No need for `@sizeOf` to be a power of two.
+        assert(@sizeOf(CreateTransfersWithBalanceResult) == 160);
+        assert(@alignOf(CreateTransfersWithBalanceResult) == 16);
+    }
+};
+
+const CreateTransfersWithBalanceResultFlags = packed struct(u32) {
+    transfer_set: bool,
+    account_balances_set: bool,
+    padding: u30 = 0,
 };
 
 pub const QueryFilter = extern struct {
@@ -491,8 +546,9 @@ pub const QueryFilter = extern struct {
     flags: QueryFilterFlags,
 
     comptime {
-        assert(@sizeOf(QueryFilter) == 64);
         assert(stdx.no_padding(QueryFilter));
+        assert(@sizeOf(QueryFilter) == 64);
+        assert(@alignOf(QueryFilter) == 16);
     }
 };
 
@@ -538,8 +594,9 @@ pub const AccountFilter = extern struct {
     flags: AccountFilterFlags,
 
     comptime {
-        assert(@sizeOf(AccountFilter) == 128);
         assert(stdx.no_padding(AccountFilter));
+        assert(@sizeOf(AccountFilter) == 128);
+        assert(@alignOf(AccountFilter) == 16);
     }
 };
 

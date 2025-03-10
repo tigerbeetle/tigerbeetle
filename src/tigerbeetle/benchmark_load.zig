@@ -172,7 +172,13 @@ pub fn main(
         .account_generator = account_generator,
         .account_generator_hot = account_generator_hot,
         .transfer_id_permutation = account_id_permutation,
-        .transfer_batch_size = cli_args.transfer_batch_size,
+        .transfer_batch_size = @min(
+            cli_args.transfer_batch_size,
+            @divExact(
+                constants.message_body_size_max,
+                @sizeOf(tb.CreateTransfersWithBalanceResult),
+            ),
+        ),
         .transfer_batch_delay_us = cli_args.transfer_batch_delay_us,
         .transfer_count = cli_args.transfer_count,
         .transfer_hot_percent = cli_args.transfer_hot_percent,
@@ -180,6 +186,7 @@ pub fn main(
         .query_count = cli_args.query_count,
         .flag_history = cli_args.flag_history,
         .flag_imported = cli_args.flag_imported,
+        .create_transfers_with_balance = cli_args.create_transfers_with_balance,
         .validate = cli_args.validate,
         .print_batch_timings = cli_args.print_batch_timings,
     };
@@ -263,6 +270,7 @@ const Benchmark = struct {
     query_count: usize,
     flag_history: bool,
     flag_imported: bool,
+    create_transfers_with_balance: bool,
     validate: bool,
     print_batch_timings: bool,
 
@@ -397,14 +405,51 @@ const Benchmark = struct {
             const transfers =
                 std.mem.bytesAsSlice(tb.Transfer, transfers_bytes)[0..transfers_count];
             b.build_transfers(transfers);
-            b.request(client_index, .create_transfers, std.mem.sliceAsBytes(transfers));
+            b.request(
+                client_index,
+                if (b.create_transfers_with_balance)
+                    .create_transfers_with_balance
+                else
+                    .create_transfers,
+                std.mem.sliceAsBytes(transfers),
+            );
         }
     }
 
     fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(!b.create_transfers_with_balance);
         const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, result);
         if (create_transfers_results.len > 0) {
             panic("CreateTransfersResults: {any}", .{create_transfers_results});
+        }
+
+        const requests_complete = b.request_index - b.clients_busy.count();
+        const request_duration_ns = b.timer.read() - b.clients_request_ns[client_index];
+        const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
+        const transfers_created = @min(b.transfer_count, b.transfer_batch_size);
+        b.transfers_created += transfers_created;
+
+        if (b.print_batch_timings) {
+            log.info("batch {}: {} tx in {} ms", .{
+                requests_complete,
+                b.transfer_batch_size,
+                request_duration_ms,
+            });
+        }
+
+        std.time.sleep(b.transfer_batch_delay_us * std.time.ns_per_us);
+        b.create_transfers(client_index);
+    }
+
+    fn create_transfers_with_balance_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(b.create_transfers_with_balance);
+        const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersWithBalanceResult, result);
+        assert(create_transfers_results.len > 0);
+
+        for (create_transfers_results) |*create_transfers_result| {
+            if (create_transfers_result.result != .ok) {
+                panic("CreateTransfersWithBalanceResult: {any}", .{create_transfers_result});
+            }
         }
 
         const requests_complete = b.request_index - b.clients_busy.count();
@@ -674,6 +719,10 @@ const Benchmark = struct {
         switch (operation) {
             .create_accounts => b.create_accounts_callback(client, result),
             .create_transfers => b.create_transfers_callback(client, result),
+            .create_transfers_with_balance => b.create_transfers_with_balance_callback(
+                client,
+                result,
+            ),
             .lookup_accounts => b.validate_accounts_callback(client, @alignCast(result)),
             .lookup_transfers => b.validate_transfers_callback(client, @alignCast(result)),
             .get_account_transfers => b.get_account_transfers_callback(client, result),
