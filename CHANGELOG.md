@@ -3,6 +3,70 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.31
+
+Released: 2025-03-09
+
+### Safety And Performance
+
+- [#2790](https://github.com/tigerbeetle/tigerbeetle/pull/2790)
+
+  Use LIFO instead of FIFO for free blocks during compaction for better temporal locality.
+
+- [#2799](https://github.com/tigerbeetle/tigerbeetle/pull/2799)
+
+  Disallow converting negative big integers to `UInt128` in the Java and Go clients, as they
+  would be incorrectly interpreted as unsigned big integers when converted back.
+
+- [#2801](https://github.com/tigerbeetle/tigerbeetle/pull/2801)
+
+  Remove spurious `write_reply_next()` after read completes in `client_replies`,
+  as reads and writes can happen concurrently.
+
+- [#2783](https://github.com/tigerbeetle/tigerbeetle/pull/2783)
+
+  Assert that `cache_map.stash` is not using any element beyond its defined capacity.
+
+### Features
+
+- [#2725](https://github.com/tigerbeetle/tigerbeetle/pull/2725)
+
+  Various REPL fixes and improvements.
+
+- [#2773](https://github.com/tigerbeetle/tigerbeetle/pull/2773)
+
+  Add single-page mode to the documentation website.
+
+### Internals
+
+- [#2791](https://github.com/tigerbeetle/tigerbeetle/pull/2791),
+  [#2792](https://github.com/tigerbeetle/tigerbeetle/pull/2792),
+  [#2793](https://github.com/tigerbeetle/tigerbeetle/pull/2793),
+  [#2794](https://github.com/tigerbeetle/tigerbeetle/pull/2794),
+  [#2795](https://github.com/tigerbeetle/tigerbeetle/pull/2795),
+  [#2796](https://github.com/tigerbeetle/tigerbeetle/pull/2796),
+  [#2807](https://github.com/tigerbeetle/tigerbeetle/pull/2807)
+
+  Miscellaneous documentation typo fixes, clarifications, and references.
+
+- [#2788](https://github.com/tigerbeetle/tigerbeetle/pull/2788),
+  [#2802](https://github.com/tigerbeetle/tigerbeetle/pull/2802)
+
+  Ban qualified `std.debug.assert` and `@memcpy`.
+
+- [#2776](https://github.com/tigerbeetle/tigerbeetle/pull/2776),
+  [#2800](https://github.com/tigerbeetle/tigerbeetle/pull/2800)
+
+  Fix code comment typos.
+
+- [#2595](https://github.com/tigerbeetle/tigerbeetle/pull/2595)
+
+  Add tracking of format time and startup time to the [devhub](https://devhub.tigerbeetle.com/).
+
+### TigerTracks 🎧
+
+- [The Hardest Button To Button](https://www.youtube.com/watch?v=K4dx42YzQCE)
+
 ## TigerBeetle 0.16.30
 
 Released: 2025-03-03
