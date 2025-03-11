@@ -188,7 +188,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         fn release(context: *TestContext) !void {
             if (context.node_map.count() == 0) return;
 
-            const index = context.prng.int_inclusive(usize, context.node_map.count() - 1);
+            const index = context.prng.index(context.node_map.keys());
             const node = context.node_map.keys()[index];
             const id = context.node_map.values()[index];
 

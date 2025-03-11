@@ -7,6 +7,7 @@ const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
 const Storage = @import("storage.zig").StorageType(IO);
 const fuzz = @import("testing/fuzz.zig");
+const ratio = stdx.PRNG.ratio;
 
 pub fn main(args: fuzz.FuzzArgs) !void {
     const zones: []const vsr.Zone = &.{
@@ -68,7 +69,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
             },
         }, .{
             .seed = args.seed,
-            .larger_than_logical_sector_read_fault_probability = 10,
+            .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });
 
         var storage = try Storage.init(&io, 0);
