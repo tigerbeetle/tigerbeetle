@@ -36,7 +36,7 @@ const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmente
 const Value = packed struct(u128) {
     id: u64,
     value: u63,
-    tombstone: u1 = 0,
+    tombstone_bit: u1 = 0,
 
     comptime {
         assert(@bitSizeOf(Value) == @sizeOf(Value) * 8);
@@ -49,14 +49,14 @@ const Value = packed struct(u128) {
     const sentinel_key = std.math.maxInt(u64);
 
     inline fn tombstone(value: *const Value) bool {
-        return value.tombstone != 0;
+        return value.tombstone_bit != 0;
     }
 
     inline fn tombstone_from_key(key: u64) Value {
         return Value{
             .id = key,
             .value = 0,
-            .tombstone = 1,
+            .tombstone_bit = 1,
         };
     }
 };
@@ -553,7 +553,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                             const canonical_value: Value = .{
                                 .id = value.id,
                                 .value = 0,
-                                .tombstone = value.tombstone,
+                                .tombstone_bit = value.tombstone_bit,
                             };
                             if (model.contains(&canonical_value)) {
                                 env.tree.remove(&canonical_value);
