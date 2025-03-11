@@ -145,14 +145,14 @@ pub fn main() !void {
         .standby_count = standby_count,
         .client_count = client_count,
         .storage_size_limit = storage_size_limit,
-        .seed = prng.bytes(u64),
+        .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
         .network = .{
             .node_count = node_count,
             .client_count = client_count,
 
-            .seed = prng.bytes(u64),
+            .seed = prng.int(u64),
 
             .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
             .one_way_delay_min = prng.int_inclusive(u16, 3),
@@ -170,7 +170,7 @@ pub fn main() !void {
             .unpartition_stability = prng.int_inclusive(u32, 20),
         },
         .storage = .{
-            .seed = prng.bytes(u64),
+            .seed = prng.int(u64),
             .read_latency_min = prng.range_inclusive(u16, 0, 3),
             .read_latency_mean = prng.range_inclusive(u16, 3, 10),
             .write_latency_min = prng.range_inclusive(u16, 0, 3),

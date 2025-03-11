@@ -273,7 +273,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .prng = prng,
                 .auditor = auditor,
                 .options = options,
-                .transfer_plan_seed = prng.bytes(u64),
+                .transfer_plan_seed = prng.int(u64),
                 .transfers_delivered_recently = transfers_delivered_recently,
                 .transient_errors = transient_errors,
             };
@@ -576,7 +576,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 if (self.prng.chance(self.options.lookup_account_invalid_probability)) {
                     // Pick an account with valid index (rather than "random.int(u128)") because the
                     // Auditor must decode the id to check for a matching account.
-                    id.* = self.auditor.account_index_to_id(self.prng.bytes(usize));
+                    id.* = self.auditor.account_index_to_id(self.prng.int(usize));
                 } else {
                     const account_index = self.prng.index(self.auditor.accounts);
                     id.* = self.auditor.accounts[account_index].id;
@@ -642,7 +642,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             })) |account| account.id else
             // Pick an account with valid index (rather than "random.int(u128)") because the
             // Auditor must decode the id to check for a matching account.
-            self.auditor.account_index_to_id(self.prng.bytes(usize));
+            self.auditor.account_index_to_id(self.prng.int(usize));
 
             // It may be an invalid account.
             const account_state: ?*const Auditor.AccountState = self.auditor.get_account_state(
@@ -741,7 +741,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = query_intersection.user_data_32,
                     .code = query_intersection.code,
                     .ledger = 0,
-                    .limit = self.prng.bytes(u32),
+                    .limit = self.prng.int(u32),
                     .flags = .{
                         .reversed = self.prng.boolean(),
                     },
@@ -869,7 +869,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .post_pending, .void_pending => {
                     // Don't depend on `HashMap.keyIterator()` being deterministic.
                     // Pick a random "target" key, then post/void the id it is nearest to.
-                    const target = self.prng.bytes(u128);
+                    const target = self.prng.int(u128);
                     var previous: ?u128 = null;
                     var iterator = self.auditor.pending_transfers.keyIterator();
                     while (iterator.next()) |id| {

@@ -401,7 +401,7 @@ fn TestContextType(comptime streams_max: u32) type {
             const Key = enum { all_same, random };
             switch (prng.enum_weighted(Key, .{ .all_same = 5, .random = 95 })) {
                 .all_same => {
-                    @memset(stream, prng.bytes(u32));
+                    @memset(stream, prng.int(u32));
                 },
                 .random => {
                     prng.fill(mem.sliceAsBytes(stream));

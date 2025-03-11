@@ -739,7 +739,7 @@ fn ContextType(comptime UInt: type) type {
             var iterations: usize = 0;
             while (iterations < 10_000) : (iterations += 1) {
                 const index = context.prng.index(context.reference);
-                const value = context.prng.bytes(UInt);
+                const value = context.prng.int(UInt);
 
                 context.array.set(index, value);
                 context.reference[index] = value;
@@ -851,7 +851,7 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
                 var tags: [layout.ways]SAC.Tag = undefined;
                 prng.fill(mem.asBytes(&tags));
 
-                const tag = prng.bytes(SAC.Tag);
+                const tag = prng.int(SAC.Tag);
 
                 var indexes: [layout.ways]usize = undefined;
                 for (&indexes, 0..) |*x, i| x.* = i;

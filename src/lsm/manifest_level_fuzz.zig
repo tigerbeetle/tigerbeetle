@@ -356,9 +356,9 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             const new_key_max = new_key_min + env.prng.int_inclusive(Key, max_delta);
 
             return .{
-                .checksum = env.prng.bytes(u128),
+                .checksum = env.prng.int(u128),
                 // Zero addresses are used to indicate the table being removed.
-                .address = env.prng.bytes(u64) +| 1,
+                .address = env.prng.int(u64) +| 1,
                 .snapshot_min = env.snapshot,
                 .key_min = new_key_min,
                 .key_max = new_key_max,

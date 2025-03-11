@@ -136,7 +136,7 @@ pub fn main(
     var prng = stdx.PRNG.from_seed(seed);
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
         .sequential => .{ .identity = {} },
-        .random => .{ .random = prng.bytes(u64) },
+        .random => .{ .random = prng.int(u64) },
         .reversed => .{ .inversion = {} },
     };
 
@@ -686,9 +686,9 @@ const Benchmark = struct {
         for (accounts) |*account| {
             account.* = .{
                 .id = b.account_id_permutation.encode(b.account_index + 1),
-                .user_data_128 = b.prng.bytes(u128),
-                .user_data_64 = b.prng.bytes(u64),
-                .user_data_32 = b.prng.bytes(u32),
+                .user_data_128 = b.prng.int(u128),
+                .user_data_64 = b.prng.int(u64),
+                .user_data_32 = b.prng.int(u32),
                 .reserved = 0,
                 .ledger = 2,
                 .code = 1,
@@ -742,13 +742,13 @@ const Benchmark = struct {
                 .id = b.transfer_id_permutation.encode(b.transfer_index + 1),
                 .debit_account_id = debit_account_id,
                 .credit_account_id = credit_account_id,
-                .user_data_128 = b.prng.bytes(u128),
-                .user_data_64 = b.prng.bytes(u64),
-                .user_data_32 = b.prng.bytes(u32),
+                .user_data_128 = b.prng.int(u128),
+                .user_data_64 = b.prng.int(u64),
+                .user_data_32 = b.prng.int(u32),
                 // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
                 .ledger = 2,
-                .code = b.prng.bytes(u16) +| 1,
+                .code = b.prng.int(u16) +| 1,
                 .flags = .{
                     .pending = pending,
                     .imported = b.flag_imported,

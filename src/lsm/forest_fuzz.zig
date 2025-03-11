@@ -1085,10 +1085,10 @@ fn generate_put_account(
     };
 
     // These are the only fields we are allowed to change on existing accounts.
-    account.debits_pending = prng.bytes(u64);
-    account.debits_posted = prng.bytes(u64);
-    account.credits_pending = prng.bytes(u64);
-    account.credits_posted = prng.bytes(u64);
+    account.debits_pending = prng.int(u64);
+    account.debits_posted = prng.int(u64);
+    account.credits_pending = prng.int(u64);
+    account.credits_posted = prng.int(u64);
     return FuzzOpAction{ .put_account = .{
         .op = options.op,
         .account = account,
@@ -1109,7 +1109,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer allocator.free(fuzz_ops);
 
     try run_fuzz_ops(Storage.Options{
-        .seed = prng.bytes(u64),
+        .seed = prng.int(u64),
         .read_latency_min = 0,
         .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),
         .write_latency_min = 0,

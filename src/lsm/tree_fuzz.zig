@@ -819,11 +819,11 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
             },
             .put => FuzzOp{ .put = .{
                 .id = random_id(prng, u64),
-                .value = prng.bytes(u63),
+                .value = prng.int(u63),
             } },
             .remove => FuzzOp{ .remove = .{
                 .id = random_id(prng, u64),
-                .value = prng.bytes(u63),
+                .value = prng.int(u63),
             } },
             .get => FuzzOp{ .get = random_id(prng, u64) },
             .scan => blk: {
@@ -888,7 +888,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer storage_fault_atlas.deinit(allocator);
 
     const storage_options = .{
-        .seed = prng.bytes(u64),
+        .seed = prng.int(u64),
         .replica_index = 0,
         .read_latency_min = 0,
         .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, 20),

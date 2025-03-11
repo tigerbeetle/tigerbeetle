@@ -356,7 +356,7 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
 
                 break :blk FuzzOp{ .upsert = .{
                     .key = random_id(prng, u32),
-                    .value = prng.bytes(u32),
+                    .value = prng.int(u32),
                 } };
             },
             .remove => blk: {

@@ -110,11 +110,11 @@ fn test_quorums_working(
     var quorums: Quorums = undefined;
     var headers: [4]SuperBlockHeader = undefined;
     var checksums: [6]u128 = undefined;
-    for (&checksums) |*c| c.* = prng.bytes(u128);
+    for (&checksums) |*c| c.* = prng.int(u128);
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
-        member.* = prng.bytes(u128);
+        member.* = prng.int(u128);
     }
 
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
@@ -157,10 +157,10 @@ fn test_quorums_working(
                 if (prng.boolean() and i > 0) {
                     // Error: duplicate header (if available).
                     header.* = headers[prng.int_inclusive(usize, i - 1)];
-                    checksum = prng.bytes(u128);
+                    checksum = prng.int(u128);
                 } else {
                     // Error: invalid checksum.
-                    checksum = prng.bytes(u128);
+                    checksum = prng.int(u128);
                 }
             },
             // Ensure we have a different checksum.
@@ -273,7 +273,7 @@ pub fn fuzz_quorum_repairs(
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
-        member.* = prng.bytes(u128);
+        member.* = prng.int(u128);
     }
 
     const headers_valid = blk: {

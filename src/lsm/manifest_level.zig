@@ -972,12 +972,12 @@ pub fn TestContextType(
             const new_key_max = new_key_min + context.prng.int_inclusive(Key, max_delta);
 
             return .{
-                .checksum = context.prng.bytes(u128),
-                .address = context.prng.bytes(u64),
+                .checksum = context.prng.int(u128),
+                .address = context.prng.int(u64),
                 .snapshot_min = context.take_snapshot(),
                 .key_min = new_key_min,
                 .key_max = new_key_max,
-                .value_count = context.prng.bytes(u32),
+                .value_count = context.prng.int(u32),
             };
         }
 

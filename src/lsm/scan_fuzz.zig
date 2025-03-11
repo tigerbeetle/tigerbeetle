@@ -608,7 +608,7 @@ const Environment = struct {
                 // TODO: sometimes update and delete things.
                 const thing_index = env.model.items.len;
                 const thing = Thing{
-                    .id = env.prng.bytes(u128),
+                    .id = env.prng.int(u128),
                     .index_01 = env.prng.range_inclusive(u64, 1, index_cardinality[0]),
                     .index_02 = env.prng.range_inclusive(u64, 1, index_cardinality[1]),
                     .index_03 = env.prng.range_inclusive(u64, 1, index_cardinality[2]),
@@ -931,7 +931,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         allocator,
         constants.storage_size_limit_default,
         Storage.Options{
-            .seed = prng.bytes(u64),
+            .seed = prng.int(u64),
             .read_latency_min = 0,
             .read_latency_mean = 0,
             .write_latency_min = 0,

@@ -149,9 +149,9 @@ fn generate_events(allocator: std.mem.Allocator, prng: *stdx.PRNG, options: stru
                 .blocks = 1 + fuzz.random_int_exponential(prng, usize, reservation_blocks_mean),
             } },
             .forfeit => FreeSetEvent{ .forfeit = {} },
-            .acquire => FreeSetEvent{ .acquire = .{ .reservation = prng.bytes(usize) } },
+            .acquire => FreeSetEvent{ .acquire = .{ .reservation = prng.int(usize) } },
             .release => FreeSetEvent{ .release = .{
-                .address = prng.bytes(usize),
+                .address = prng.int(usize),
             } },
             .checkpoint => FreeSetEvent{ .checkpoint = {} },
         };

@@ -60,7 +60,7 @@ fn run_fuzz(
     events: []const ManifestEvent,
 ) !void {
     const storage_options = .{
-        .seed = prng.bytes(u64),
+        .seed = prng.int(u64),
         .read_latency_min = 1,
         .read_latency_mean = 1 + prng.int_inclusive(u64, 40),
         .write_latency_min = 1,

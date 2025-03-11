@@ -1861,13 +1861,13 @@ const TestContext = struct {
             .standby_count = options.standby_count,
             .client_count = options.client_count,
             .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
-            .seed = prng.bytes(u64),
+            .seed = prng.int(u64),
             .releases = &releases,
             .client_release = options.client_release,
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
-                .seed = prng.bytes(u64),
+                .seed = prng.int(u64),
                 .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
                 .one_way_delay_min = prng.int_inclusive(u16, 2),
 

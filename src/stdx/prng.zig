@@ -155,7 +155,7 @@ test fill {
 pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
     comptime assert(@typeInfo(T).Int.signedness == .unsigned);
     if (max == std.math.maxInt(T)) {
-        return prng.bytes(T);
+        return prng.int(T);
     }
 
     comptime assert(@typeInfo(T).Int.signedness == .unsigned);
@@ -165,7 +165,7 @@ pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
     // adapted from:
     //   http://www.pcg-random.org/posts/bounded-rands.html
     //   "Lemire's (with an extra tweak from Zig)"
-    var x = prng.bytes(T);
+    var x = prng.int(T);
     var m = math.mulWide(T, x, less_than);
     var l: T = @truncate(m);
     if (l < less_than) {
@@ -178,7 +178,7 @@ pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
             }
         }
         while (l < t) {
-            x = prng.bytes(T);
+            x = prng.int(T);
             m = math.mulWide(T, x, less_than);
             l = @truncate(m);
         }
@@ -271,7 +271,7 @@ test range_inclusive {
 /// Returns a uniformly distributed integer of type T.
 ///
 /// That is, fills @sizeOf(T) bytes with random bits.
-pub fn bytes(prng: *PRNG, T: anytype) T {
+pub fn int(prng: *PRNG, T: anytype) T {
     comptime assert(@typeInfo(T).Int.signedness == .unsigned);
     if (T == u64) return prng.next();
     if (@sizeOf(T) < @sizeOf(u64)) return @truncate(prng.next());
@@ -280,7 +280,7 @@ pub fn bytes(prng: *PRNG, T: anytype) T {
     return result;
 }
 
-test bytes {
+test int {
     try test_bytes_T(u8, snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ));
@@ -296,7 +296,7 @@ fn test_bytes_T(T: type, want: Snap) !void {
     var prng = PRNG.from_seed(92);
     var distribution: [8]u32 = .{0} ** 8;
     for (0..1000) |_| {
-        distribution[@intCast(prng.bytes(T) % 8)] += 1;
+        distribution[@intCast(prng.int(T) % 8)] += 1;
     }
     try want.diff_fmt("{d}", .{distribution});
 }

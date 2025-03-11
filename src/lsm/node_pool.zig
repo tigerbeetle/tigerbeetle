@@ -114,7 +114,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
             context.* = .{
                 .node_count = node_count,
                 .prng = prng,
-                .sentinel = prng.bytes(u64),
+                .sentinel = prng.int(u64),
 
                 .node_pool = undefined,
                 .node_map = undefined,
@@ -178,7 +178,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
             try testing.expect(!gop.found_existing);
 
             // Write unique data into the node so we can test that it doesn't get overwritten.
-            const id = context.prng.bytes(u64);
+            const id = context.prng.int(u64);
             @memset(mem.bytesAsSlice(u64, node), id);
             gop.value_ptr.* = id;
 

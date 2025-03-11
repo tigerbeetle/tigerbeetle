@@ -55,7 +55,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 
     const storage_options = .{
         .replica_index = 0,
-        .seed = prng.bytes(u64),
+        .seed = prng.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = 1,
         .read_latency_mean = 1,
