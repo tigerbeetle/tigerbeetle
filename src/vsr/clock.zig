@@ -820,7 +820,7 @@ const ClockSimulator = struct {
     network: PacketSimulatorType(Packet),
     times: []DeterministicTime,
     clocks: []DeterministicClock,
-    prng: std.rand.DefaultPrng,
+    prng: stdx.PRNG,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
         var network = try PacketSimulatorType(Packet).init(allocator, options.network_options);
@@ -832,14 +832,15 @@ const ClockSimulator = struct {
         var clocks = try allocator.alloc(DeterministicClock, options.clock_count);
         errdefer allocator.free(clocks);
 
-        var prng = std.rand.DefaultPrng.init(options.network_options.seed);
+        var prng = stdx.PRNG.from_seed(options.network_options.seed);
 
         for (clocks, 0..) |*clock, replica| {
             errdefer for (clocks[0..replica]) |*c| c.deinit(allocator);
 
-            const amplitude = prng.random().intRangeAtMost(i64, -10, 10) * std.time.ns_per_s;
-            const phase = prng.random().intRangeAtMost(i64, 100, 1000) +
-                @as(i64, @intFromFloat(prng.random().floatNorm(f64) * 50));
+            const amplitude = (@as(i64, @intCast(prng.int_inclusive(u64, 10))) - 10) *
+                std.time.ns_per_s;
+            const phase = @as(i64, @intCast(prng.range_inclusive(u64, 100, 1000))) +
+                @as(i64, @intFromFloat(std.Random.init(&prng, stdx.PRNG.fill).floatNorm(f64) * 50));
             times[replica] = .{
                 .resolution = std.time.ns_per_s / 2, // delta_t = 0.5s
                 .offset_type = OffsetType.non_ideal,

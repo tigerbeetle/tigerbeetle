@@ -98,7 +98,7 @@ pub const ZipfianGenerator = struct {
 
     /// Note that the variables in this function are mostly named
     /// as in the reference paper and do not follow TigerStyle.
-    pub fn next(self: *const ZipfianGenerator, rng: Random) u64 {
+    pub fn next(self: *const ZipfianGenerator, prng: *stdx.PRNG) u64 {
         assert(self.n > 0);
 
         // Math voodoo, copied from the paper,
@@ -113,7 +113,7 @@ pub const ZipfianGenerator = struct {
         )) /
             (1.0 - zeta(2.0, self.theta) / self.zetan);
 
-        const u = rng.float(f64);
+        const u = random_f64(prng);
         const uz = u * self.zetan;
 
         if (uz < 1.0) {
@@ -244,25 +244,25 @@ pub const ZipfianShuffled = struct {
     gen: ZipfianGenerator,
     hot_items: HotArray,
 
-    pub fn init(items: u64, rng: Random) ZipfianShuffled {
-        return ZipfianShuffled.init_theta(items, theta_default, rng);
+    pub fn init(items: u64, prng: *stdx.PRNG) ZipfianShuffled {
+        return ZipfianShuffled.init_theta(items, theta_default, prng);
     }
 
-    pub fn init_theta(items: u64, theta: f64, rng: Random) ZipfianShuffled {
+    pub fn init_theta(items: u64, theta: f64, prng: *stdx.PRNG) ZipfianShuffled {
         var zipf = ZipfianShuffled{
             .gen = ZipfianGenerator.init_theta(0, theta),
             .hot_items = HotArray{},
         };
 
-        zipf.grow(items, rng);
+        zipf.grow(items, prng);
 
         return zipf;
     }
 
-    pub fn next(self: *const ZipfianShuffled, rng: Random) u64 {
+    pub fn next(self: *const ZipfianShuffled, prng: *stdx.PRNG) u64 {
         // First try to pick from a zipfian distribution
         // of hot items.
-        const zipf_index = self.gen.next(rng);
+        const zipf_index = self.gen.next(prng);
         if (zipf_index < self.hot_items.count()) {
             const item = self.hot_items.get(zipf_index);
             assert(item < self.gen.n);
@@ -270,12 +270,12 @@ pub const ZipfianShuffled = struct {
         }
 
         // Next pick from uniform distribution of all items.
-        const uni_index = rng.intRangeLessThan(u64, 0, self.gen.n);
+        const uni_index = prng.int_inclusive(u64, self.gen.n - 1);
         return uni_index;
     }
 
     /// Grow the size of the random set.
-    pub fn grow(self: *ZipfianShuffled, new_items: u64, rng: Random) void {
+    pub fn grow(self: *ZipfianShuffled, new_items: u64, prng: *stdx.PRNG) void {
         if (new_items == 0) {
             return;
         }
@@ -299,15 +299,15 @@ pub const ZipfianShuffled = struct {
         var index = start_index;
         while (index < end_index) : (index += 1) {
             if (self.hot_items.count() < hot_items_count_max) {
-                const pos_actual = rng.intRangeAtMost(u64, 0, self.hot_items.count());
+                const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
                 self.hot_items.insert_assume_capacity(pos_actual, index);
             } else {
                 // NB: I believe this is biased as to which new items become hot items,
                 // but it probably doesn't matter for our purposes.
-                const pos_init = rng.intRangeLessThan(u64, 0, new_n);
+                const pos_init = prng.int_inclusive(u64, new_n - 1);
                 if (pos_init < hot_items_count_max) {
                     self.hot_items.truncate(hot_items_count_max - 1);
-                    const pos_actual = rng.intRangeAtMost(u64, 0, self.hot_items.count());
+                    const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
                     self.hot_items.insert_assume_capacity(pos_actual, index);
                 }
             }
@@ -350,6 +350,12 @@ pub const ZipfianShuffled = struct {
         return max;
     }
 };
+
+/// stdx.PRNG intentionally doesn't support generating floats, to ensure determinism. For
+/// benchmarking purposes, using floats is OK though, so we fall back to std implementation here.
+fn random_f64(prng: *stdx.PRNG) f64 {
+    return std.Random.init(prng, stdx.PRNG.fill).float(f64);
+}
 
 test "zeta_incremental" {
     const Case = struct {
@@ -396,17 +402,15 @@ test "zipfian-grow" {
     var i: u64 = 10;
     while (i < 100) : (i += 1) {
         const expected = brk: {
-            var rng = std.Random.Pcg.init(0);
-            const rand = rng.random();
+            var prng = stdx.PRNG.from_seed(0);
             var zipf = ZipfianGenerator.init_theta(i, 0.9);
-            break :brk zipf.next(rand);
+            break :brk zipf.next(&prng);
         };
         const actual = brk: {
-            var rng = std.Random.Pcg.init(0);
-            const rand = rng.random();
+            var prng = stdx.PRNG.from_seed(0);
             var zipf = ZipfianGenerator.init_theta(1, 0.9);
             zipf.grow(i - 1);
-            break :brk zipf.next(rand);
+            break :brk zipf.next(&prng);
         };
         assert(expected == actual);
     }
@@ -414,15 +418,14 @@ test "zipfian-grow" {
 
 // Test that ctors are all doing the same thing.
 test "zipfian-ctors" {
-    var rng = std.Random.Pcg.init(0);
-    const rand = rng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     for ([_]u64{ 0, 1, 10, 999 }) |i| {
         {
             const zipf1 = ZipfianGenerator.init(i);
             const zipf2 = ZipfianGenerator.init_theta(i, theta_default);
-            const szipf1 = ZipfianShuffled.init(i, rand);
-            const szipf2 = ZipfianShuffled.init_theta(i, theta_default, rand);
+            const szipf1 = ZipfianShuffled.init(i, &prng);
+            const szipf2 = ZipfianShuffled.init_theta(i, theta_default, &prng);
 
             assert(zipf1.n == zipf2.n);
             assert(zipf1.n == szipf1.gen.n);
@@ -435,7 +438,7 @@ test "zipfian-ctors" {
 
         {
             const zipf1 = ZipfianGenerator.init_theta(i, 0.89);
-            const szipf1 = ZipfianShuffled.init_theta(i, 0.89, rand);
+            const szipf1 = ZipfianShuffled.init_theta(i, 0.89, &prng);
 
             assert(zipf1.n == szipf1.gen.n);
             assert(zipf1.zetan == szipf1.gen.zetan);
@@ -446,26 +449,25 @@ test "zipfian-ctors" {
 // Non-statistical smoke tests related to the shuffled hot items optimization.
 // These could fail if that optimization is tweaked or if the prng changes.
 test "zipfian-hot-items" {
-    var rng = std.Random.Pcg.init(0);
-    const rand = rng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     {
-        const szipf = ZipfianShuffled.init(0, rand);
+        const szipf = ZipfianShuffled.init(0, &prng);
         assert(szipf.hot_items.count() == 0);
     }
 
     {
-        const szipf = ZipfianShuffled.init(1, rand);
+        const szipf = ZipfianShuffled.init(1, &prng);
         assert(szipf.hot_items.count() == 1);
     }
 
     {
-        const szipf = ZipfianShuffled.init(2, rand);
+        const szipf = ZipfianShuffled.init(2, &prng);
         assert(szipf.hot_items.count() == 2);
     }
 
     for ([_]u64{ 3, 10, 999, 1_000_000 }) |i| {
-        const szipf = ZipfianShuffled.init(i, rand);
+        const szipf = ZipfianShuffled.init(i, &prng);
         assert(szipf.hot_items.count() >= 1);
         assert(szipf.hot_items.count() < i);
 
@@ -484,7 +486,7 @@ test "zipfian-hot-items" {
         var j: u64 = 0;
         var hot: u64 = 0;
         while (j < 100) : (j += 1) {
-            const n = szipf.next(rand);
+            const n = szipf.next(&prng);
             for (szipf.hot_items.const_slice()) |hot_item| {
                 if (n == hot_item) {
                     hot += 1;

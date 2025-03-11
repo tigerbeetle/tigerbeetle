@@ -234,10 +234,7 @@ const Generator = union(enum) {
         prng: *stdx.PRNG,
     ) Generator {
         return switch (distribution) {
-            .zipfian => .{ .zipfian = ZipfianShuffled.init(
-                count,
-                std.Random.init(prng, stdx.PRNG.fill),
-            ) },
+            .zipfian => .{ .zipfian = ZipfianShuffled.init(count, prng) },
             .latest => .{ .latest = ZipfianGenerator.init(count) },
             .uniform => .{ .uniform = count },
         };
@@ -788,13 +785,13 @@ const Benchmark = struct {
             .zipfian => |gen| index: {
                 // zipfian set size must be same as account set size
                 assert(account_count == gen.gen.n);
-                const index = gen.next(std.Random.init(b.prng, stdx.PRNG.fill));
+                const index = gen.next(b.prng);
                 assert(index < account_count);
                 break :index index;
             },
             .latest => |gen| index: {
                 assert(account_count == gen.n);
-                const index_rev = gen.next(std.Random.init(b.prng, stdx.PRNG.fill));
+                const index_rev = gen.next(b.prng);
                 assert(index_rev < account_count);
                 break :index account_count - index_rev - 1;
             },

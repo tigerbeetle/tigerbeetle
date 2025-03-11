@@ -162,6 +162,14 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.unexpected_errno instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "uint" ++ "LessThan") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeLessThan") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeAtMost") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeAtMostBiased") != null)
+    {
+        return "use stdx.PRNG instead of std.Random";
+    }
+
     // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
     // larger pull requests, it is often helpful to leave fixme comments as a reminder to oneself.
     // This tidy rule ensures that the reminder is acted upon before code gets into main. That is:
