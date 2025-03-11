@@ -242,7 +242,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         BATCH_SIZE = 8190 #FIXME
         for i in range(0, len(batch), BATCH_SIZE):
             transfer_errors = client.create_transfers(
-                batch[i:min(len(batch), BATCH_SIZE)],
+                batch[i:min(len(batch), i + BATCH_SIZE)],
             )
             # Error handling omitted.
         # endsection:batch
