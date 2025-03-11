@@ -61,7 +61,7 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
     return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
-        var iterator = std.mem.tokenize(u8, input, "_");
+        var iterator = std.mem.tokenizeScalar(u8, input, '_');
         while (iterator.next()) |word| {
             if (is_upper_case(word)) {
                 _ = std.ascii.upperString(output[len..], word);

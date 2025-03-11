@@ -539,7 +539,7 @@ fn exec_inner(
 
     if (options.capture_stdout) |destination| {
         const stdout = poller.?.fifo(.stdout).readableSlice(0);
-        const trailing_newline = if (std.mem.indexOf(u8, stdout, "\n")) |first_newline|
+        const trailing_newline = if (std.mem.indexOfScalar(u8, stdout, '\n')) |first_newline|
             first_newline == stdout.len - 1
         else
             false;
@@ -694,8 +694,8 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     const arg_count = std.meta.fields(@TypeOf(cmd_args)).len;
     comptime var args_used = std.StaticBitSet(arg_count).initEmpty();
-    comptime assert(std.mem.indexOf(u8, cmd, "'") == null); // Quoting isn't supported yet.
-    comptime assert(std.mem.indexOf(u8, cmd, "\"") == null);
+    comptime assert(std.mem.indexOfScalar(u8, cmd, '\'') == null); // Quoting isn't supported yet.
+    comptime assert(std.mem.indexOfScalar(u8, cmd, '"') == null);
     inline while (pos < cmd.len) {
         inline while (pos < cmd.len and (cmd[pos] == ' ' or cmd[pos] == '\n')) {
             pos += 1;

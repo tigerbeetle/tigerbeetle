@@ -62,7 +62,7 @@ pub const Parser = struct {
         const target = target: {
             var position_cursor: usize = 0;
             var position_line: usize = 1;
-            var lines = std.mem.split(u8, parser.input, "\n");
+            var lines = std.mem.splitScalar(u8, parser.input, '\n');
             while (lines.next()) |line| {
                 if (position_cursor + line.len >= parser.offset) {
                     break :target .{
@@ -197,7 +197,7 @@ pub const Parser = struct {
                         if (comptime std.mem.eql(u8, active_value_field.name, "flags") and
                             @hasField(ActiveValue, "flags"))
                         {
-                            var flags_to_validate = std.mem.split(u8, value_to_validate, "|");
+                            var flags_to_validate = std.mem.splitScalar(u8, value_to_validate, '|');
                             var validated_flags =
                                 std.mem.zeroInit(active_value_field.type, .{});
                             while (flags_to_validate.next()) |flag_to_validate| {

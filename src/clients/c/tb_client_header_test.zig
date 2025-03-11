@@ -57,7 +57,7 @@ test "valid tb_client.h" {
             .Int => assert(ty == c_type),
             .Pointer => assert(@sizeOf(ty) == @sizeOf(c_type)),
             .Enum => {
-                const prefix_offset = std.mem.lastIndexOf(u8, c_type_name, "_").?;
+                const prefix_offset = std.mem.lastIndexOfScalar(u8, c_type_name, '_').?;
                 var c_enum_prefix: []const u8 = c_type_name[0 .. prefix_offset + 1];
                 assert(c_type == c_uint);
 
@@ -80,7 +80,7 @@ test "valid tb_client.h" {
             .Struct => |type_info| switch (type_info.layout) {
                 .auto => @compileError("struct must be extern or packed to be used in C"),
                 .@"packed" => {
-                    const prefix_offset = std.mem.lastIndexOf(u8, c_type_name, "_").?;
+                    const prefix_offset = std.mem.lastIndexOfScalar(u8, c_type_name, '_').?;
                     const c_enum_prefix = c_type_name[0 .. prefix_offset + 1];
                     assert(c_type == c_uint);
 

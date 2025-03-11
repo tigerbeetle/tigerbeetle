@@ -209,7 +209,7 @@ fn to_case(
             break :blk stdx.comptime_slice(&output, len);
         } else {
             var len: usize = 0;
-            var iterator = std.mem.tokenize(u8, input, "_");
+            var iterator = std.mem.tokenizeScalar(u8, input, '_');
             while (iterator.next()) |word| {
                 _ = std.ascii.lowerString(output[len..], word);
                 output[len] = std.ascii.toUpper(output[len]);
