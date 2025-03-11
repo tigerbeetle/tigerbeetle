@@ -33,12 +33,13 @@ const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const RingBufferType = stdx.RingBufferType;
+const TestingStorage = @import("../storage.zig").Storage;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
 const testing = std.testing;
-const StateMachine = StateMachineType(void, constants.state_machine_config);
+const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
 
 const events_count_max = 8190;
 const pending_transfers_count_max = 1024;

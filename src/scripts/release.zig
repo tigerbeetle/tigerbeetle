@@ -363,7 +363,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     });
 
     const files = try shell.exec_stdout("git ls-files", .{});
-    var files_lines = std.mem.tokenize(u8, files, "\n");
+    var files_lines = std.mem.tokenizeScalar(u8, files, '\n');
     var copied_count: u32 = 0;
     while (files_lines.next()) |file| {
         assert(file.len > 3);
@@ -551,7 +551,7 @@ fn publish(
             "gh release list --json tagName --jq {query}",
             .{ .query = ".[].tagName" },
         );
-        var it = std.mem.split(u8, tags_exiting, "\n");
+        var it = std.mem.splitScalar(u8, tags_exiting, '\n');
         while (it.next()) |tag_existing| {
             assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
             if (std.mem.eql(u8, tag_existing, info.release_triple)) {

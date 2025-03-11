@@ -572,10 +572,10 @@ const Context = struct {
             text = section_cut.suffix;
 
             var section = section_cut.prefix;
-            section = section[0..std.mem.lastIndexOf(u8, section, "\n").?];
+            section = section[0..std.mem.lastIndexOfScalar(u8, section, '\n').?];
 
             var indent_min: usize = std.math.maxInt(usize);
-            var lines = std.mem.split(u8, section, "\n");
+            var lines = std.mem.splitScalar(u8, section, '\n');
             while (lines.next()) |line| {
                 if (line.len == 0) continue;
                 var indent_line: usize = 0;
@@ -584,7 +584,7 @@ const Context = struct {
             }
             assert(indent_min < 18);
 
-            lines = std.mem.split(u8, section, "\n");
+            lines = std.mem.splitScalar(u8, section, '\n');
             while (lines.next()) |line| {
                 if (line.len > 0) {
                     assert(line.len > indent_min);

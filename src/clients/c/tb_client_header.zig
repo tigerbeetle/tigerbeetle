@@ -96,7 +96,7 @@ fn emit_enum(
     comptime c_name: []const u8,
     comptime skip_fields: []const []const u8,
 ) !void {
-    var suffix_pos = std.mem.lastIndexOf(u8, c_name, "_").?;
+    var suffix_pos = std.mem.lastIndexOfScalar(u8, c_name, '_').?;
     if (std.mem.count(u8, c_name, "_") == 1) suffix_pos = c_name.len;
 
     try buffer.writer().print("typedef enum {s} {{\n", .{c_name});

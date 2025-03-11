@@ -316,7 +316,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         var match_itr = repl.completion.matches.iterator();
 
                         while (match_itr.next()) |match| {
-                            const match_len = std.mem.indexOf(u8, match[0..], &[_]u8{'\x00'}).?;
+                            const match_len = std.mem.indexOfScalar(u8, match[0..], '\x00').?;
                             menu_width += match_len + 2;
 
                             // \x1b[7m - Highlights the text by inverting the color. Inverts
@@ -744,7 +744,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             }
 
             var statements_iterator = if (statements.len > 0)
-                std.mem.split(u8, statements, ";")
+                std.mem.splitScalar(u8, statements, ';')
             else
                 null;
 

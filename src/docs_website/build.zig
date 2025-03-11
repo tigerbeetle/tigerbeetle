@@ -26,7 +26,7 @@ pub fn build(b: *std.Build) !void {
     const check_spelling = std.Build.Step.Run.create(b, "run vale");
     check_spelling.addFileArg(vale_bin);
     const md_files = b.run(&.{ "git", "ls-files", "../../**/*.md" });
-    var md_files_iter = std.mem.tokenize(u8, md_files, "\n");
+    var md_files_iter = std.mem.tokenizeScalar(u8, md_files, '\n');
     while (md_files_iter.next()) |md_file| {
         check_spelling.addFileArg(b.path(md_file));
     }

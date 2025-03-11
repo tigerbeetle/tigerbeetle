@@ -110,9 +110,9 @@ pub const Time = struct {
     }
 
     fn realtime_windows() i64 {
+        // TODO(zig): Maybe use `std.time.nanoTimestamp()`.
+        // https://github.com/ziglang/zig/pull/22871
         assert(is_windows);
-        // Declaring the function with an alternative name because `CamelCase` functions are
-        // by convention, used for building generic types.
         const get_system_time_precise_as_file_time = @extern(
             *const fn (
                 lpFileTime: *os.windows.FILETIME,

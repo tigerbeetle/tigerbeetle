@@ -841,7 +841,7 @@ pub fn parse_addresses(
     if (address_count > out_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
-    var comma_iterator = std.mem.split(u8, raw, ",");
+    var comma_iterator = std.mem.splitScalar(u8, raw, ',');
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;

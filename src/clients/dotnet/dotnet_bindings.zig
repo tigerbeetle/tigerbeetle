@@ -194,7 +194,7 @@ fn to_case(comptime input: []const u8, comptime case: enum { camel, pascal }) []
     return comptime blk: {
         var len: usize = 0;
         var output: [input.len]u8 = undefined;
-        var iterator = std.mem.tokenize(u8, input, "_");
+        var iterator = std.mem.tokenizeScalar(u8, input, '_');
         while (iterator.next()) |word| {
             _ = std.ascii.lowerString(output[len..], word);
             output[len] = std.ascii.toUpper(output[len]);

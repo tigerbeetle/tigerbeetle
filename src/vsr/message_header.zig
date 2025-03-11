@@ -721,7 +721,7 @@ pub const Header = extern struct {
             return null;
         }
 
-        pub fn reserved(cluster: u128, slot: u64) Prepare {
+        pub fn reserve(cluster: u128, slot: u64) Prepare {
             assert(slot < constants.journal_slot_count);
 
             var header = Prepare{

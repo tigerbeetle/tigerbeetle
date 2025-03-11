@@ -1283,12 +1283,12 @@ pub const Multiversion = struct {
                 unreachable;
             },
             .windows => {
-                // Includes the null byte, that utf8ToUtf16LeWithNull needs.
+                // Includes the null byte, that utf8ToUtf16LeAllocZ needs.
                 var buffer: [std.fs.max_path_bytes]u8 = undefined;
                 var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
                 const allocator = fixed_allocator.allocator();
 
-                const target_path_w = std.unicode.utf8ToUtf16LeWithNull(
+                const target_path_w = std.unicode.utf8ToUtf16LeAllocZ(
                     allocator,
                     self.target_path,
                 ) catch unreachable;
@@ -1302,7 +1302,14 @@ pub const Multiversion = struct {
                 // That said, with how CreateProcessW is called, this should _never_ happen, since
                 // its both provided a full lpApplicationName, and because GetCommandLineW actually
                 // points to a copy of memory from the PEB.
-                const cmd_line_w = os.windows.kernel32.GetCommandLineW();
+                const get_command_line_w = @extern(
+                    *const fn () callconv(.C) std.os.windows.LPWSTR,
+                    .{
+                        .library_name = "kernel32",
+                        .name = "GetCommandLineW",
+                    },
+                );
+                const cmd_line_w = get_command_line_w();
 
                 var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
                 lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
