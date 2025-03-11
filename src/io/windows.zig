@@ -1394,8 +1394,17 @@ pub const IO = struct {
             };
         }
 
+        const set_end_of_file = @extern(
+            *const fn (
+                hFile: os.windows.HANDLE,
+            ) callconv(os.windows.WINAPI) std.os.windows.BOOL,
+            .{
+                .library_name = "kernel32",
+                .name = "SetEndOfFile",
+            },
+        );
         // Mark the moved file pointer (start + size) as the physical EOF.
-        const allocated = os.windows.kernel32.SetEndOfFile(handle);
+        const allocated = set_end_of_file(handle);
         if (allocated == os.windows.FALSE) {
             const err = os.windows.kernel32.GetLastError();
             return os.windows.unexpectedError(err);
