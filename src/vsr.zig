@@ -1024,16 +1024,15 @@ test "parse_addresses: fuzz" {
 
     const seed = std.crypto.random.int(u64);
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     var input_max: [len_max]u8 = .{0} ** len_max;
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
-        const len = random.uintAtMost(usize, len_max);
+        const len = prng.int_inclusive(usize, len_max);
         const input = input_max[0..len];
         for (input) |*c| {
-            c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
+            c.* = alphabet[prng.index(alphabet)];
         }
         if (parse_addresses(input, &buffer)) |addresses| {
             assert(addresses.len > 0);

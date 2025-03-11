@@ -39,10 +39,9 @@ pub const IdPermutation = union(enum) {
                 }
             },
             .random => |seed| {
-                var prng = std.rand.DefaultPrng.init(seed +% data);
-                const random = prng.random();
+                var prng = stdx.PRNG.from_seed(seed +% data);
                 const random_mask = ~@as(u128, std.math.maxInt(u64) << 32);
-                const random_bits = random_mask & random.int(u128);
+                const random_bits = random_mask & prng.bytes(u128);
                 return @as(u128, data) << 32 | random_bits;
             },
         };
@@ -75,18 +74,17 @@ pub const IdPermutation = union(enum) {
 };
 
 test "IdPermutation" {
-    var prng = std.rand.DefaultPrng.init(123);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(123);
 
     for ([_]IdPermutation{
         .{ .identity = {} },
         .{ .inversion = {} },
         .{ .zigzag = {} },
-        .{ .random = random.int(u64) },
+        .{ .random = prng.bytes(u64) },
     }) |permutation| {
         var i: usize = 0;
         while (i < 20) : (i += 1) {
-            const r = random.int(usize);
+            const r = prng.bytes(usize);
             try test_id_permutation(permutation, r);
             try test_id_permutation(permutation, i);
             try test_id_permutation(permutation, std.math.maxInt(usize) - i);

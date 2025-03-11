@@ -131,7 +131,7 @@ test "tb_client echo" {
     );
 
     defer client.deinit() catch unreachable;
-    var prng = std.rand.DefaultPrng.init(tb_context);
+    var prng = stdx.PRNG.from_seed(tb_context);
 
     const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
     defer testing.allocator.free(requests);
@@ -148,13 +148,13 @@ test "tb_client echo" {
             request.* = .{
                 .packet = undefined,
                 .completion = &completion,
-                .sent_data_size = prng.random().intRangeAtMost(
+                .sent_data_size = prng.range_inclusive(
                     u32,
                     1,
                     event_request_max,
                 ) * event_size,
             };
-            prng.random().bytes(request.sent_data[0..request.sent_data_size]);
+            prng.fill(request.sent_data[0..request.sent_data_size]);
 
             const packet = &request.packet;
             packet.operation = create_accounts_operation;

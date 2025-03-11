@@ -16,6 +16,9 @@ const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
+const stdx = @import("stdx.zig");
+const ratio = stdx.PRNG.ratio;
+
 const vortex_exe: []const u8 = @import("test_options").vortex_exe;
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
@@ -321,7 +324,7 @@ test "in-place upgrade" {
         shell: *Shell,
         tmp: []const u8,
 
-        rng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
         replicas: [replica_count]?std.process.Child = .{null} ** replica_count,
         replica_exe: [replica_count][]const u8,
         replica_datafile: [replica_count][]const u8,
@@ -352,11 +355,11 @@ test "in-place upgrade" {
                 });
             }
 
-            const rng = std.rand.DefaultPrng.init(options.seed);
+            const prng = stdx.PRNG.from_seed(options.seed);
             return .{
                 .shell = shell,
                 .tmp = tmp,
-                .rng = rng,
+                .prng = prng,
                 .replica_exe = replica_exe,
                 .replica_datafile = replica_datafile,
             };
@@ -375,8 +378,6 @@ test "in-place upgrade" {
         }
 
         fn run(context: *Context) !void {
-            const random = context.rng.random();
-
             for (0..replica_count) |replica_index| {
                 try context.install_replica(context.replica_exe[replica_index], .past);
             }
@@ -427,7 +428,7 @@ test "in-place upgrade" {
             const ticks_max = 50;
             var upgrade_tick: [replica_count]u8 = .{0} ** replica_count;
             for (0..replica_count) |replica_index| {
-                upgrade_tick[replica_index] = random.uintLessThan(u8, ticks_max);
+                upgrade_tick[replica_index] = context.prng.int_inclusive(u8, ticks_max - 1);
             }
 
             for (0..ticks_max) |tick| {
@@ -441,9 +442,9 @@ test "in-place upgrade" {
                     }
                 }
 
-                const replica_index = random.uintLessThan(u8, replica_count);
-                const crash = random.uintLessThan(u8, 4) == 0;
-                const restart = random.uintLessThan(u8, 2) == 0;
+                const replica_index = context.prng.index(context.replicas);
+                const crash = context.prng.chance(ratio(1, 4));
+                const restart = context.prng.chance(ratio(1, 2));
 
                 if (context.replicas[replica_index] == null and restart) {
                     try context.spawn_replica(replica_index);

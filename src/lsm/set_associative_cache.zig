@@ -7,9 +7,11 @@ const mem = std.mem;
 const meta = std.meta;
 
 const constants = @import("../constants.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
-const maybe = @import("../stdx.zig").maybe;
 const verify = constants.verify;
+
+const stdx = @import("../stdx.zig");
+const div_ceil = stdx.div_ceil;
+const maybe = stdx.maybe;
 
 pub const Layout = struct {
     ways: u64 = 16,
@@ -706,12 +708,12 @@ fn ContextType(comptime UInt: type) type {
         const Context = @This();
 
         const Array = PackedUnsignedIntegerArrayType(UInt);
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
 
         array: Array,
         reference: []UInt,
 
-        fn init(random: std.rand.Random, len: usize) !Context {
+        fn init(prng: *stdx.PRNG, len: usize) !Context {
             const words = try testing.allocator.alloc(u64, @divExact(len * @bitSizeOf(UInt), 64));
             errdefer testing.allocator.free(words);
 
@@ -722,7 +724,7 @@ fn ContextType(comptime UInt: type) type {
             @memset(reference, 0);
 
             return .{
-                .random = random,
+                .prng = prng,
                 .array = Array{ .words = words },
                 .reference = reference,
             };
@@ -736,8 +738,8 @@ fn ContextType(comptime UInt: type) type {
         fn run(context: *Context) !void {
             var iterations: usize = 0;
             while (iterations < 10_000) : (iterations += 1) {
-                const index = context.random.uintLessThanBiased(usize, context.reference.len);
-                const value = context.random.int(UInt);
+                const index = context.prng.index(context.reference);
+                const value = context.prng.bytes(UInt);
 
                 context.array.set(index, value);
                 context.reference[index] = value;
@@ -756,14 +758,12 @@ fn ContextType(comptime UInt: type) type {
 
 test "PackedUnsignedIntegerArray: fuzz" {
     const seed = 42;
-
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     inline for (.{ u1, u2, u4 }) |UInt| {
         const Context = ContextType(UInt);
 
-        var context = try Context.init(random, 1024);
+        var context = try Context.init(&prng, 1024);
         defer context.deinit();
 
         try context.run();
@@ -843,21 +843,21 @@ fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: L
     };
 
     return struct {
-        fn run(random: std.rand.Random) !void {
+        fn run(prng: *stdx.PRNG) !void {
             if (log) SAC.inspect();
 
             var iterations: usize = 0;
             while (iterations < 10_000) : (iterations += 1) {
                 var tags: [layout.ways]SAC.Tag = undefined;
-                random.bytes(mem.asBytes(&tags));
+                prng.fill(mem.asBytes(&tags));
 
-                const tag = random.int(SAC.Tag);
+                const tag = prng.bytes(SAC.Tag);
 
                 var indexes: [layout.ways]usize = undefined;
                 for (&indexes, 0..) |*x, i| x.* = i;
-                random.shuffle(usize, &indexes);
+                prng.shuffle(usize, &indexes);
 
-                const matches_count_min = random.uintAtMostBiased(u32, layout.ways);
+                const matches_count_min = prng.int_inclusive(u32, layout.ways);
                 for (indexes[0..matches_count_min]) |index| {
                     tags[index] = tag;
                 }
@@ -880,8 +880,7 @@ test "SetAssociativeCache: search_tags()" {
     const Key = u64;
     const Value = u64;
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     inline for ([_]u64{ 2, 4, 16 }) |ways| {
         inline for ([_]u64{ 8, 16 }) |tag_bits| {
@@ -890,7 +889,7 @@ test "SetAssociativeCache: search_tags()" {
                 .tag_bits = tag_bits,
             });
 
-            try case.run(random);
+            try case.run(&prng);
         }
     }
 }

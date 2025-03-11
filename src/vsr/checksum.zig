@@ -35,6 +35,8 @@ const mem = std.mem;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const stdx = @import("../stdx.zig");
+
 const Aegis128LMac_128 = std.crypto.auth.aegis.Aegis128LMac_128;
 
 var seed_once = std.once(seed_init);
@@ -122,7 +124,7 @@ test "checksum test vectors" {
 }
 
 test "checksum simple fuzzing" {
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
 
     const msg_min = 1;
     const msg_max = 1 * 1024 * 1024;
@@ -135,7 +137,7 @@ test "checksum simple fuzzing" {
 
     var i: usize = 0;
     while (i < 1_000) : (i += 1) {
-        const msg_len = prng.random().intRangeAtMostBiased(usize, msg_min, msg_max);
+        const msg_len = prng.range_inclusive(usize, msg_min, msg_max);
         const msg = msg_buf[0..msg_len];
         prng.fill(msg);
 
@@ -146,7 +148,7 @@ test "checksum simple fuzzing" {
         try testing.expectEqual(msg_checksum, msg_checksum_again);
 
         // Change the message and make sure the checksum changes.
-        msg[prng.random().uintLessThan(usize, msg.len)] +%= 1;
+        msg[prng.index(msg)] +%= 1;
         const changed_checksum = checksum(msg);
         try testing.expect(changed_checksum != msg_checksum);
     }
@@ -180,7 +182,7 @@ test "checksum stability" {
     }
 
     // Pseudo-random data from a specific PRNG of various lengths.
-    var prng = std.rand.Xoshiro256.init(92);
+    var prng = stdx.PRNG.from_seed(92);
     subcase = 0;
     while (subcase < 256) : (subcase += 1) {
         const message = buf[0 .. subcase + 13];

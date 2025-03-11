@@ -3,6 +3,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const builtin = @import("builtin");
 
+const stdx = @import("../stdx.zig");
+
 const binary_search_keys_upsert_index =
     @import("./binary_search.zig").binary_search_keys_upsert_index;
 const binary_search_values_upsert_index =
@@ -32,7 +34,7 @@ test "benchmark: binary search" {
     log.info("UT: utime time/search", .{});
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
+    var prng = stdx.PRNG.from_seed(seed);
 
     // Allocate on the heap just once.
     // All page allocations reuse this buffer to speed up the run time.
@@ -49,12 +51,12 @@ test "benchmark: binary search" {
                 .value_size = kv.value_size,
                 .values_count = values_count,
                 .searches = searches,
-            }, blob, prng.random());
+            }, blob, &prng);
         }
     }
 }
 
-fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !void {
+fn run_benchmark(comptime layout: Layout, blob: []u8, prng: *stdx.PRNG) !void {
     assert(blob.len == layout.blob_size);
     const V = ValueType(layout);
     const K = V.Key;
@@ -64,13 +66,13 @@ fn run_benchmark(comptime layout: Layout, blob: []u8, random: std.rand.Random) !
     const page_count = layout.blob_size / @sizeOf(Page);
 
     // Search pages and keys in random order.
-    const page_picker = shuffled_index(page_count, random);
-    const value_picker = shuffled_index(layout.values_count, random);
+    const page_picker = shuffled_index(page_count, prng);
+    const value_picker = shuffled_index(layout.values_count, prng);
 
     // Generate 1GiB worth of 24KiB pages.
     var blob_alloc = std.heap.FixedBufferAllocator.init(blob);
     const pages = try blob_alloc.allocator().alloc(Page, page_count);
-    random.bytes(std.mem.sliceAsBytes(pages));
+    prng.fill(std.mem.sliceAsBytes(pages));
     for (pages) |*page| {
         for (&page.values, 0..) |*value, i| value.key = i;
     }
@@ -189,9 +191,9 @@ const Benchmark = struct {
 };
 
 // shuffle([0,1,…,n-1])
-fn shuffled_index(comptime n: usize, rand: std.rand.Random) [n]usize {
+fn shuffled_index(comptime n: usize, prng: *stdx.PRNG) [n]usize {
     var indices: [n]usize = undefined;
     for (&indices, 0..) |*i, j| i.* = j;
-    rand.shuffle(usize, indices[0..]);
+    prng.shuffle(usize, indices[0..]);
     return indices;
 }
