@@ -162,11 +162,9 @@ test "DoublyLinkedList fuzz" {
     // Ensure that The DoublyLinkedList's extra-verification is enabled.
     comptime assert(constants.verify);
 
-    const fuzz = @import("testing/fuzz.zig");
     const allocator = std.testing.allocator;
 
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     const Node = struct { id: u32, back: ?*@This() = null, next: ?*@This() = null };
     const List = DoublyLinkedListType(Node, .back, .next);
@@ -175,7 +173,7 @@ test "DoublyLinkedList fuzz" {
     const events_max = 1 << 15;
 
     const Event = enum { push, pop, remove };
-    const event_distribution = fuzz.DistributionType(Event){ .push = 10, .pop = 1, .remove = 8 };
+    const event_weights: stdx.PRNG.EnumWeightsType(Event) = .{ .push = 10, .pop = 1, .remove = 8 };
 
     const nodes = try allocator.alloc(Node, nodes_count);
     defer allocator.free(nodes);
@@ -192,7 +190,7 @@ test "DoublyLinkedList fuzz" {
         assert(list_model.count() == list.count);
         assert(list_model.empty() == list.empty());
 
-        const event = fuzz.random_enum(random, Event, event_distribution);
+        const event = prng.enum_weighted(Event, event_weights);
         switch (event) {
             .push => {
                 const node_free = nodes_free.findFirstSet() orelse continue;
@@ -221,7 +219,7 @@ test "DoublyLinkedList fuzz" {
             .remove => {
                 if (list_model.count() == 0) continue;
 
-                const list_index = random.uintLessThan(u32, list_model.count_as(u32));
+                const list_index = prng.index(list_model.slice());
                 const node_id = list_model.get(list_index);
                 assert(node_id == list_model.ordered_remove(list_index));
                 assert(!nodes_free.isSet(node_id));

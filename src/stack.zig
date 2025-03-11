@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const assert = std.debug.assert;
 
 const constants = @import("./constants.zig");
@@ -95,11 +96,9 @@ test "Stack: fuzz" {
     // Fuzzy test to compare behavior of Stack against std.ArrayList (reference model).
     comptime assert(constants.verify);
 
-    const fuzz = @import("testing/fuzz.zig");
     const allocator = std.testing.allocator;
 
-    var prng = std.Random.DefaultPrng.init(0);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     const Node = struct {
         id: u32,
@@ -111,7 +110,7 @@ test "Stack: fuzz" {
     const events_max = 1 << 10;
 
     const Event = enum { push, pop };
-    const event_distribution = fuzz.DistributionType(Event){
+    const event_weights = stdx.PRNG.EnumWeightsType(Event){
         .push = 2,
         .pop = 1,
     };
@@ -143,7 +142,7 @@ test "Stack: fuzz" {
         assert(model.items.len == stack.count);
         assert(model.items.len == 0 or !stack.empty());
 
-        const event = fuzz.random_enum(random, Event, event_distribution);
+        const event = prng.enum_weighted(Event, event_weights);
         switch (event) {
             .push => {
                 // Only push if a free node is available.

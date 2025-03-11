@@ -25,8 +25,7 @@ const Context = struct {
 };
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(args.seed);
     const events_max = args.events_max orelse 100;
 
     for (0..events_max) |_| {
@@ -41,7 +40,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         try Signal.init(&context.signal, &io, on_signal);
         defer context.signal.deinit();
 
-        const threads_max = random.intRangeAtMost(u32, 1, threads_limit);
+        const threads_max = prng.range_inclusive(u32, 1, threads_limit);
         var threads: Threads = .{};
         for (0..threads_max) |_| {
             const thread: *std.Thread = threads.add_one_assume_capacity();
@@ -53,7 +52,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                 // Setting a random `stop_request`.
                 _ = context.stop_request.cmpxchgStrong(
                     .none,
-                    random.enumValue(StopRequest),
+                    prng.enum_uniform(StopRequest),
                     .acquire,
                     .monotonic,
                 );

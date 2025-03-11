@@ -163,8 +163,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const node_count = options.replica_count + options.standby_count;
 
-            var prng = std.rand.DefaultPrng.init(options.seed);
-            const random = prng.random();
+            var prng = stdx.PRNG.from_seed(options.seed);
 
             // TODO(Zig) Client.init()'s MessagePool.Options require a reference to the network.
             // Use @returnAddress() instead.
@@ -183,7 +182,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             storage_fault_atlas.* = try StorageFaultAtlas.init(
                 allocator,
                 options.replica_count,
-                random,
+                &prng,
                 options.storage_fault_atlas,
             );
             errdefer storage_fault_atlas.deinit(allocator);
@@ -274,7 +273,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(client_eviction_reasons);
             @memset(client_eviction_reasons, null);
 
-            const client_id_permutation = IdPermutation.generate(random);
+            const client_id_permutation = IdPermutation.generate(&prng);
             var clients = try allocator.alloc(Client, options.client_count);
             errdefer allocator.free(clients);
 

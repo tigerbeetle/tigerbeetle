@@ -48,9 +48,9 @@ const IO = @import("../../io.zig").IO;
 const RingBufferType = stdx.RingBufferType;
 const LoggedProcess = @import("./logged_process.zig");
 const faulty_network = @import("./faulty_network.zig");
-const arbitrary = @import("./arbitrary.zig");
 const constants = @import("./constants.zig");
 const Progress = @import("./workload.zig").Progress;
+const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.supervisor);
 
@@ -140,8 +140,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     );
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     var replicas: [constants.replica_count]*Replica = undefined;
     var replicas_initialized: usize = 0;
@@ -223,7 +222,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         allocator,
         &io,
         mappings[0..],
-        random,
+        &prng,
     );
     defer network.destroy(allocator);
 
@@ -241,7 +240,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .replicas = replicas,
         .workload = workload,
         .trace = &trace,
-        .random = random,
+        .prng = &prng,
         .test_duration_minutes = args.test_duration_minutes,
         .disable_faults = args.disable_faults,
     });
@@ -256,7 +255,7 @@ const Supervisor = struct {
     replicas: [constants.replica_count]*Replica,
     workload: *Workload,
     trace: *TraceWriter,
-    random: std.Random,
+    prng: *stdx.PRNG,
     test_deadline: i128,
     disable_faults: bool,
 
@@ -270,7 +269,7 @@ const Supervisor = struct {
         replicas: [constants.replica_count]*Replica,
         workload: *Workload,
         trace: *TraceWriter,
-        random: std.Random,
+        prng: *stdx.PRNG,
         test_duration_minutes: u16,
         disable_faults: bool,
     }) !*Supervisor {
@@ -287,7 +286,7 @@ const Supervisor = struct {
             .replicas = options.replicas,
             .workload = options.workload,
             .trace = options.trace,
-            .random = options.random,
+            .prng = options.prng,
             .test_deadline = test_deadline,
             .disable_faults = options.disable_faults,
         };
@@ -416,7 +415,7 @@ const Supervisor = struct {
                     quiesce,
                 };
 
-                switch (arbitrary.weighted(supervisor.random, Action, .{
+                switch (supervisor.prng.enum_weighted(Action, .{
                     .sleep = 10,
                     .replica_terminate = if (running_replicas.len > 0) 4 else 0,
                     .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
@@ -428,19 +427,16 @@ const Supervisor = struct {
                     .network_heal = if (!supervisor.network.faults.is_healed()) 10 else 0,
                     .quiesce = if (faulty_replica_count > 0 or
                         !supervisor.network.faults.is_healed()) 1 else 0,
-                }).?) {
+                })) {
                     .sleep => {
                         const duration =
-                            supervisor.random.uintLessThan(u64, 10 * std.time.ns_per_s);
+                            supervisor.prng.int_inclusive(u64, 10 * std.time.ns_per_s);
                         log.info("sleeping for {}", .{std.fmt.fmtDuration(duration)});
                         sleep_deadline = now + duration;
                     },
                     .replica_terminate => {
-                        const pick = arbitrary.element(
-                            supervisor.random,
-                            ReplicaWithIndex,
-                            running_replicas,
-                        );
+                        const pick =
+                            running_replicas[supervisor.prng.index(running_replicas)];
                         log.info("terminating replica {d}", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
@@ -450,11 +446,8 @@ const Supervisor = struct {
                         _ = try pick.replica.terminate();
                     },
                     .replica_restart => {
-                        const pick = arbitrary.element(
-                            supervisor.random,
-                            ReplicaWithIndex,
-                            terminated_replicas,
-                        );
+                        const pick =
+                            terminated_replicas[supervisor.prng.index(terminated_replicas)];
                         log.info("restarting replica {d}", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
@@ -464,11 +457,8 @@ const Supervisor = struct {
                         _ = try pick.replica.start();
                     },
                     .replica_stop => {
-                        const pick = arbitrary.element(
-                            supervisor.random,
-                            ReplicaWithIndex,
-                            running_replicas,
-                        );
+                        const pick =
+                            running_replicas[supervisor.prng.index(running_replicas)];
                         log.info("stopping replica {d}", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
@@ -478,11 +468,8 @@ const Supervisor = struct {
                         _ = try pick.replica.stop();
                     },
                     .replica_resume => {
-                        const pick = arbitrary.element(
-                            supervisor.random,
-                            ReplicaWithIndex,
-                            stopped_replicas,
-                        );
+                        const pick =
+                            stopped_replicas[supervisor.prng.index(stopped_replicas)];
                         log.info("resuming replica {d}", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
@@ -499,7 +486,7 @@ const Supervisor = struct {
                                 .phase = .end,
                             }, .{});
                         }
-                        const time_ms = supervisor.random.intRangeAtMost(u32, 10, 500);
+                        const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
                         supervisor.network.faults.delay = .{
                             .time_ms = time_ms,
                             .jitter_ms = @min(time_ms, 50),
@@ -519,9 +506,10 @@ const Supervisor = struct {
                                 .phase = .end,
                             }, .{});
                         }
-                        supervisor.network.faults.lose = .{
-                            .percentage = supervisor.random.intRangeAtMost(u8, 1, 10),
-                        };
+                        supervisor.network.faults.lose = ratio(
+                            supervisor.prng.range_inclusive(u8, 1, 10),
+                            100,
+                        );
                         log.info("injecting network loss: {any}", .{supervisor.network.faults});
                         try supervisor.trace.write(.{
                             .name = .network_faults,
@@ -537,9 +525,10 @@ const Supervisor = struct {
                                 .phase = .end,
                             }, .{});
                         }
-                        supervisor.network.faults.corrupt = .{
-                            .percentage = supervisor.random.intRangeAtMost(u8, 1, 10),
-                        };
+                        supervisor.network.faults.corrupt = ratio(
+                            supervisor.prng.range_inclusive(u8, 1, 10),
+                            100,
+                        );
                         log.info("injecting network corruption: {any}", .{
                             supervisor.network.faults,
                         });
@@ -559,7 +548,7 @@ const Supervisor = struct {
                         }, .{});
                     },
                     .quiesce => {
-                        const duration = supervisor.random.intRangeAtMost(
+                        const duration = supervisor.prng.range_inclusive(
                             u64,
                             constants.liveness_requirement_seconds,
                             constants.liveness_requirement_seconds * 2,

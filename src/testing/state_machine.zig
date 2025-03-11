@@ -321,20 +321,20 @@ fn WorkloadType(comptime StateMachine: type) type {
         const Workload = @This();
         const constants = StateMachine.constants;
 
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            prng: *stdx.PRNG,
             options: Options,
         ) !Workload {
             _ = allocator;
 
             return Workload{
-                .random = random,
+                .prng = prng,
                 .options = options,
             };
         }
@@ -360,9 +360,8 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             workload.requests_sent += 1;
 
-            // +1 for inclusive limit.
-            const size = workload.random.uintAtMost(usize, workload.options.batch_size_limit);
-            workload.random.bytes(body[0..size]);
+            const size = workload.prng.int_inclusive(usize, workload.options.batch_size_limit);
+            workload.prng.fill(body[0..size]);
 
             return .{
                 .operation = .echo,
@@ -404,12 +403,12 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub const Options = struct {
             batch_size_limit: u32,
 
-            pub fn generate(random: std.rand.Random, options: struct {
+            pub fn generate(prng: *stdx.PRNG, options: struct {
                 batch_size_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
-                _ = random;
+                _ = prng;
 
                 return .{
                     .batch_size_limit = options.batch_size_limit,

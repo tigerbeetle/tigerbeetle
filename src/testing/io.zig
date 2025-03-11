@@ -7,6 +7,8 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
+const Ratio = stdx.PRNG.Ratio;
+const ratio = stdx.PRNG.ratio;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {
@@ -25,19 +27,19 @@ pub const IO = struct {
 
         /// Chance out of 100 that a read larger than a logical sector
         /// will return an error.InputOutput.
-        larger_than_logical_sector_read_fault_probability: u8 = 0,
+        larger_than_logical_sector_read_fault_probability: Ratio = ratio(0, 100),
     };
 
     files: []const File,
     options: Options,
-    prng: std.rand.DefaultPrng,
+    prng: stdx.PRNG,
 
     completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(files: []const File, options: Options) IO {
         return .{
             .options = options,
-            .prng = std.rand.DefaultPrng.init(options.seed),
+            .prng = stdx.PRNG.from_seed(options.seed),
             .files = files,
         };
     }
@@ -71,12 +73,6 @@ pub const IO = struct {
             offset: u64,
         },
     };
-
-    /// Return true with probability x/100.
-    fn x_in_100(io: *IO, x: u8) bool {
-        assert(x <= 100);
-        return x > io.prng.random().uintLessThan(u8, 100);
-    }
 
     fn submit(
         self: *IO,
@@ -163,8 +159,9 @@ pub const IO = struct {
                         false;
 
                     const sector_has_larger_than_logical_sector_read_fault =
-                        (op.len > constants.sector_size and
-                        io.x_in_100(io.options.larger_than_logical_sector_read_fault_probability));
+                        (op.len > constants.sector_size and io.prng.chance(
+                        io.options.larger_than_logical_sector_read_fault_probability,
+                    ));
 
                     if (sector_marked_in_fault_map or
                         sector_has_larger_than_logical_sector_read_fault)

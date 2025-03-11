@@ -8,6 +8,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 const allocator = fuzz.allocator;
+const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
@@ -761,36 +762,36 @@ const Model = struct {
     }
 };
 
-fn random_id(random: std.rand.Random, comptime Int: type) Int {
-    // We have two opposing desires for random ids:
-    const avg_int: Int = if (random.boolean())
+fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
+    // We have two opposing desires for prng ids:
+    const avg_int: Int = if (prng.boolean())
         // 1. We want to cause many collisions.
         constants.lsm_growth_factor * 2048
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
         100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(random, Int, avg_int);
+    return fuzz.random_int_exponential(prng, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const fuzz_op_distribution = fuzz.DistributionType(FuzzOpTag){
+    const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
-        .compact = if (random.boolean()) 0 else 1,
+        .compact = if (prng.boolean()) 0 else 1,
         // Always do puts, and always more puts than removes.
         .put = constants.lsm_compaction_ops * 2,
         // Maybe do some removes.
-        .remove = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .remove = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some gets.
-        .get = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .get = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .scan = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
     };
-    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_weights = {:.2}", .{fuzz_op_weights});
 
     log.info("puts_since_compact_max = {}", .{puts_since_compact_max});
 
@@ -803,10 +804,10 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             FuzzOpTag.compact
         else
             // Otherwise pick a random FuzzOp.
-            fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+            prng.enum_weighted(FuzzOpTag, fuzz_op_weights);
         fuzz_op.* = switch (fuzz_op_tag) {
             .compact => action: {
-                const action = generate_compact(random, .{
+                const action = generate_compact(prng, .{
                     .op = op,
                     .persisted_op = persisted_op,
                 });
@@ -817,18 +818,18 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 break :action action;
             },
             .put => FuzzOp{ .put = .{
-                .id = random_id(random, u64),
-                .value = random.int(u63),
+                .id = random_id(prng, u64),
+                .value = prng.int(u63),
             } },
             .remove => FuzzOp{ .remove = .{
-                .id = random_id(random, u64),
-                .value = random.int(u63),
+                .id = random_id(prng, u64),
+                .value = prng.int(u63),
             } },
-            .get => FuzzOp{ .get = random_id(random, u64) },
+            .get => FuzzOp{ .get = random_id(prng, u64) },
             .scan => blk: {
-                const min = random_id(random, u64);
-                const max = min + random_id(random, u64);
-                const direction = random.enumValue(Direction);
+                const min = random_id(prng, u64);
+                const max = min + random_id(prng, u64);
+                const direction = prng.enum_uniform(Direction);
                 assert(min <= max);
                 break :blk FuzzOp{
                     .scan = .{
@@ -851,7 +852,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
 }
 
 fn generate_compact(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     options: struct { op: u64, persisted_op: u64 },
 ) FuzzOp {
     const half_bar = @divExact(constants.lsm_compaction_ops, 2);
@@ -867,18 +868,17 @@ fn generate_compact(
     return FuzzOp{ .compact = .{
         .op = options.op,
         .checkpoint = checkpoint,
-        .beats_remaining = random.intRangeAtMost(u64, 1, half_bar - options.op % half_bar),
+        .beats_remaining = prng.range_inclusive(u64, 1, half_bar - options.op % half_bar),
     } };
 }
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
-    const random = rng.random();
+    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
-    const table_usage = random.enumValue(TableUsage);
+    const table_usage = prng.enum_uniform(TableUsage);
     log.info("table_usage={}", .{table_usage});
 
-    var storage_fault_atlas = try ClusterFaultAtlas.init(allocator, 3, random, .{
+    var storage_fault_atlas = try ClusterFaultAtlas.init(allocator, 3, &prng, .{
         .faulty_superblock = false,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
@@ -888,31 +888,31 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     defer storage_fault_atlas.deinit(allocator);
 
     const storage_options = .{
-        .seed = random.int(u64),
+        .seed = prng.int(u64),
         .replica_index = 0,
         .read_latency_min = 0,
-        .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
+        .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, 20),
         .write_latency_min = 0,
-        .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, 20),
-        .read_fault_probability = 0,
-        .write_fault_probability = 0,
+        .write_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, 20),
+        .read_fault_probability = ratio(0, 100),
+        .write_fault_probability = ratio(0, 100),
         .fault_atlas = &storage_fault_atlas,
     };
 
     const block_count_min =
         stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_bar_max +
         (compaction_block_count_beat_min - compaction_block_count_bar_max);
-    const block_count = if (random.uintAtMost(u8, 5) == 0)
+    const block_count = if (prng.chance(ratio(1, 5)))
         block_count_min
     else
-        random.intRangeAtMost(u32, block_count_min, block_count_min * 64);
+        prng.range_inclusive(u32, block_count_min, block_count_min * 64);
 
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse events_max,
-        fuzz.random_int_exponential(random, usize, 1E6),
+        fuzz.random_int_exponential(&prng, usize, 1E6),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
+    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     // Init mocked storage.

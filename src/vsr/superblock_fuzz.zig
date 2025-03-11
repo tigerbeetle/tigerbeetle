@@ -25,6 +25,8 @@ const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
 const fuzz = @import("../testing/fuzz.zig");
+const stdx = @import("../stdx.zig");
+const ratio = stdx.PRNG.ratio;
 
 const cluster = 0;
 const replica = 0;
@@ -40,10 +42,9 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 }
 
 fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
-    var storage_fault_atlas = try StorageFaultAtlas.init(allocator, 1, random, .{
+    var storage_fault_atlas = try StorageFaultAtlas.init(allocator, 1, &prng, .{
         .faulty_superblock = true,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
@@ -54,7 +55,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
 
     const storage_options = .{
         .replica_index = 0,
-        .seed = random.int(u64),
+        .seed = prng.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = 1,
         .read_latency_mean = 1,
@@ -62,9 +63,18 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .write_latency_mean = 1,
         // Storage will never inject more faults than the superblock is able to recover from,
         // so a 100% fault probability is allowed.
-        .read_fault_probability = 25 + random.uintLessThan(u8, 76),
-        .write_fault_probability = 25 + random.uintLessThan(u8, 76),
-        .crash_fault_probability = 50 + random.uintLessThan(u8, 51),
+        .read_fault_probability = ratio(
+            prng.range_inclusive(u64, 25, 100),
+            100,
+        ),
+        .write_fault_probability = ratio(
+            prng.range_inclusive(u64, 25, 100),
+            100,
+        ),
+        .crash_fault_probability = ratio(
+            prng.range_inclusive(u64, 50, 100),
+            100,
+        ),
         .fault_atlas = &storage_fault_atlas,
     };
 
@@ -149,14 +159,14 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
             // TODO bias the RNG
             if (env.pending.count() == 0) {
                 transitions += 1;
-                if (random.boolean()) {
+                if (prng.boolean()) {
                     try env.checkpoint();
                 } else {
                     try env.view_change();
                 }
             }
 
-            if (env.pending.count() == 1 and random.uintLessThan(u8, 6) == 0) {
+            if (env.pending.count() == 1 and prng.chance(ratio(1, 6))) {
                 transitions += 1;
                 if (env.pending.contains(.view_change)) {
                     try env.checkpoint();

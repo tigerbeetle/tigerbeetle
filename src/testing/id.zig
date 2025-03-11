@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 
 /// Permute indices (or other encoded data) into ids to:
 ///
@@ -38,10 +39,9 @@ pub const IdPermutation = union(enum) {
                 }
             },
             .random => |seed| {
-                var prng = std.rand.DefaultPrng.init(seed +% data);
-                const random = prng.random();
+                var prng = stdx.PRNG.from_seed(seed +% data);
                 const random_mask = ~@as(u128, std.math.maxInt(u64) << 32);
-                const random_bits = random_mask & random.int(u128);
+                const random_bits = random_mask & prng.int(u128);
                 return @as(u128, data) << 32 | random_bits;
             },
         };
@@ -63,30 +63,28 @@ pub const IdPermutation = union(enum) {
         };
     }
 
-    pub fn generate(random: std.rand.Random) IdPermutation {
-        return switch (random.uintLessThan(usize, 4)) {
-            0 => .{ .identity = {} },
-            1 => .{ .inversion = {} },
-            2 => .{ .zigzag = {} },
-            3 => .{ .random = random.int(u64) },
-            else => unreachable,
+    pub fn generate(prng: *stdx.PRNG) IdPermutation {
+        return switch (prng.enum_uniform(std.meta.Tag(IdPermutation))) {
+            .identity => .{ .identity = {} },
+            .inversion => .{ .inversion = {} },
+            .zigzag => .{ .zigzag = {} },
+            .random => .{ .random = prng.int(u64) },
         };
     }
 };
 
 test "IdPermutation" {
-    var prng = std.rand.DefaultPrng.init(123);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(123);
 
     for ([_]IdPermutation{
         .{ .identity = {} },
         .{ .inversion = {} },
         .{ .zigzag = {} },
-        .{ .random = random.int(u64) },
+        .{ .random = prng.int(u64) },
     }) |permutation| {
         var i: usize = 0;
         while (i < 20) : (i += 1) {
-            const r = random.int(usize);
+            const r = prng.int(usize);
             try test_id_permutation(permutation, r);
             try test_id_permutation(permutation, i);
             try test_id_permutation(permutation, std.math.maxInt(usize) - i);

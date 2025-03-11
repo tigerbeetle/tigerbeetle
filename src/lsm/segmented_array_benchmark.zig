@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 
 const constants = @import("../constants.zig");
 const NodePoolType = @import("node_pool.zig").NodePoolType;
@@ -64,7 +65,7 @@ const configs = [_]Options{
 };
 
 test "benchmark: segmented array" {
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
 
     inline for (configs) |options| {
         const Key = options.Key;
@@ -106,12 +107,12 @@ test "benchmark: segmented array" {
         var i: usize = 0;
         while (i < options.value_count) : (i += 1) {
             _ = array.insert_element(&node_pool, .{
-                .key = prng.random().uintLessThanBiased(u64, options.value_count),
+                .key = prng.int_inclusive(u64, options.value_count - 1),
                 .padding = [_]u8{0} ** (options.value_size - @sizeOf(Key)),
             });
         }
 
-        const queries = try alloc_shuffled_index(allocator, options.value_count, prng.random());
+        const queries = try alloc_shuffled_index(allocator, options.value_count, &prng);
         defer allocator.free(queries);
 
         var timer = try std.time.Timer.start();
@@ -138,10 +139,10 @@ test "benchmark: segmented array" {
 }
 
 // shuffle([0,1,…,n-1])
-fn alloc_shuffled_index(allocator: std.mem.Allocator, n: usize, rand: std.rand.Random) ![]usize {
+fn alloc_shuffled_index(allocator: std.mem.Allocator, n: usize, prng: *stdx.PRNG) ![]usize {
     // Allocate on the heap; the array may be too large to fit on the stack.
     var indices = try allocator.alloc(usize, n);
     for (indices, 0..) |*i, j| i.* = j;
-    rand.shuffle(usize, indices[0..]);
+    prng.shuffle(usize, indices[0..]);
     return indices;
 }

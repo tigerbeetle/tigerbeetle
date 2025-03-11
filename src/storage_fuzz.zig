@@ -2,10 +2,12 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const vsr = @import("vsr.zig");
+const stdx = vsr.stdx;
 const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
 const Storage = @import("storage.zig").StorageType(IO);
 const fuzz = @import("testing/fuzz.zig");
+const ratio = stdx.PRNG.ratio;
 
 pub fn main(args: fuzz.FuzzArgs) !void {
     const zones: []const vsr.Zone = &.{
@@ -20,24 +22,22 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     const storage_size = sector_count * sector_size;
     const iterations = args.events_max orelse 10_000;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
-    const random = prng.random();
-
+    var prng = stdx.PRNG.from_seed(args.seed);
     for (0..iterations) |_| {
         var fault_map = std.bit_set.ArrayBitSet(u8, sector_count).initEmpty();
 
-        const failed_sector_cluster_count = random.intRangeAtMost(usize, 1, 10);
-        const failed_sector_cluster_minimum_length = random.intRangeAtMost(usize, 1, 3);
+        const failed_sector_cluster_count = prng.range_inclusive(usize, 1, 10);
+        const failed_sector_cluster_minimum_length = prng.range_inclusive(usize, 1, 3);
         const failed_sector_cluster_maximum_length =
-            failed_sector_cluster_minimum_length + random.intRangeAtMost(usize, 1, 3);
+            failed_sector_cluster_minimum_length + prng.range_inclusive(usize, 1, 3);
 
         for (0..failed_sector_cluster_count) |_| {
-            const start = random.intRangeLessThan(
+            const start = prng.range_inclusive(
                 usize,
                 0,
                 sector_count - failed_sector_cluster_maximum_length,
             );
-            const end = start + random.intRangeAtMost(
+            const end = start + prng.range_inclusive(
                 usize,
                 failed_sector_cluster_minimum_length,
                 failed_sector_cluster_maximum_length,
@@ -69,7 +69,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
             },
         }, .{
             .seed = args.seed,
-            .larger_than_logical_sector_read_fault_probability = 10,
+            .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });
 
         var storage = try Storage.init(&io, 0);
@@ -107,7 +107,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
             var read_detail_length: usize = 0;
 
             while (index < zone_sector_count) : (read_detail_length += 1) {
-                const n_sectors = random.intRangeAtMost(
+                const n_sectors = prng.range_inclusive(
                     u64,
                     1,
                     @min(4, zone_sector_count - index),
@@ -121,7 +121,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                 index += n_sectors;
             }
 
-            random.shuffle(ReadDetail, read_details[0..read_detail_length]);
+            prng.shuffle(ReadDetail, read_details[0..read_detail_length]);
 
             for (read_details[0..read_detail_length]) |read_detail| {
                 const sector_offset = read_detail.offset_in_zone;

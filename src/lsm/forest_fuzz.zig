@@ -8,6 +8,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const allocator = fuzz.allocator;
+const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
@@ -865,43 +866,43 @@ pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) 
     try Environment.run(&storage, fuzz_ops);
 }
 
-fn random_id(random: std.rand.Random, comptime Int: type) Int {
+fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     // We have two opposing desires for random ids:
-    const avg_int: Int = if (random.boolean())
+    const avg_int: Int = if (prng.boolean())
         // 1. We want to cause many collisions.
         8
     else
         // 2. We want to generate enough ids that the cache can't hold them all.
         Environment.cache_entries_max;
-    return fuzz.random_int_exponential(random, Int, avg_int);
+    return fuzz.random_int_exponential(prng, Int, avg_int);
 }
 
-pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
     const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
     errdefer allocator.free(fuzz_ops);
 
-    const action_distribution = fuzz.DistributionType(FuzzOpActionTag){
+    const action_weights = stdx.PRNG.EnumWeightsType(FuzzOpActionTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
-        .compact = if (random.boolean()) 0 else 1,
+        .compact = if (prng.boolean()) 0 else 1,
         // Always do puts.
         .put_account = constants.lsm_compaction_ops * 2,
         // Maybe do some gets.
-        .get_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .get_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some exists.
-        .exists_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .exists_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
         // Maybe do some scans.
-        .scan_account = if (random.boolean()) 0 else constants.lsm_compaction_ops,
+        .scan_account = if (prng.boolean()) 0 else constants.lsm_compaction_ops,
     };
-    log.info("action_distribution = {:.2}", .{action_distribution});
+    log.info("action_weights = {:.2}", .{action_weights});
 
-    const modifier_distribution = fuzz.DistributionType(FuzzOpModifierTag){
-        .normal = 1,
+    const modifier_weights = stdx.PRNG.EnumWeightsType(FuzzOpModifierTag){
+        .normal = 100,
         // Maybe crash and recover from the last checkpoint a few times per fuzzer run.
-        .crash_after_ticks = if (random.boolean()) 0 else 1E-2,
+        .crash_after_ticks = if (prng.boolean()) 0 else 1,
     };
-    log.info("modifier_distribution = {:.2}", .{modifier_distribution});
+    log.info("modifier_weights = {:.2}", .{modifier_weights});
 
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
 
@@ -917,8 +918,8 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             // We have to compact before doing any other operations.
             .compact
         else
-            // Otherwise pick a random FuzzOp.
-            fuzz.random_enum(random, FuzzOpActionTag, action_distribution);
+            // Otherwise pick a prng FuzzOp.
+            prng.enum_weighted(FuzzOpActionTag, action_weights);
         const action = switch (action_tag) {
             .compact => action: {
                 const action = generate_compact(.{ .op = op, .persisted_op = persisted_op });
@@ -930,17 +931,17 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                 break :action action;
             },
             .put_account => action: {
-                const action = generate_put_account(random, &id_to_account, .{
+                const action = generate_put_account(prng, &id_to_account, .{
                     .op = op,
                     .timestamp = fuzz_op_index + 1, // Timestamp cannot be zero.
                 });
                 try id_to_account.put(action.put_account.account.id, action.put_account.account);
                 break :action action;
             },
-            .get_account => FuzzOpAction{ .get_account = random_id(random, u128) },
+            .get_account => FuzzOpAction{ .get_account = random_id(prng, u128) },
             .exists_account => FuzzOpAction{
                 // Not all ops generate accounts, so the timestamp may or may not be found.
-                .exists_account = random.intRangeAtMost(
+                .exists_account = prng.range_inclusive(
                     u64,
                     TimestampRange.timestamp_min,
                     fuzz_op_index + 1,
@@ -949,16 +950,16 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
             .scan_account => blk: {
                 @setEvalBranchQuota(10_000);
                 const Index = std.meta.FieldEnum(GrooveAccounts.IndexTrees);
-                const index = random.enumValue(Index);
+                const index = prng.enum_uniform(Index);
                 break :blk switch (index) {
                     inline else => |field| {
                         const Helper = GrooveAccounts.IndexTreeFieldHelperType(@tagName(field));
                         const min: u128, const max: u128 = switch (Helper.Index) {
                             void => .{ 0, 0 },
                             else => range: {
-                                var min = random_id(random, Helper.Index);
-                                var max = if (random.boolean()) min else random_id(
-                                    random,
+                                var min = random_id(prng, Helper.Index);
+                                var max = if (prng.boolean()) min else random_id(
+                                    prng,
                                     Helper.Index,
                                 );
                                 if (min > max) std.mem.swap(Helper.Index, &min, &max);
@@ -972,7 +973,7 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
                                 .index = index,
                                 .min = min,
                                 .max = max,
-                                .direction = random.enumValue(Direction),
+                                .direction = prng.enum_uniform(Direction),
                             },
                         };
                     },
@@ -996,17 +997,13 @@ pub fn generate_fuzz_ops(random: std.rand.Random, fuzz_op_count: usize) ![]const
         // * See the state from the previous checkpoint.
         // But this is difficult to test, so for now we'll avoid it.
         const modifier_tag = if (action == .compact and !action.compact.checkpoint)
-            fuzz.random_enum(
-                random,
-                FuzzOpModifierTag,
-                modifier_distribution,
-            )
+            prng.enum_weighted(FuzzOpModifierTag, modifier_weights)
         else
             FuzzOpModifierTag.normal;
         const modifier = switch (modifier_tag) {
             .normal => FuzzOpModifier{ .normal = {} },
             .crash_after_ticks => FuzzOpModifier{
-                .crash_after_ticks = fuzz.random_int_exponential(random, usize, io_latency_mean),
+                .crash_after_ticks = fuzz.random_int_exponential(prng, usize, io_latency_mean),
             },
         };
         switch (modifier) {
@@ -1060,26 +1057,26 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
 }
 
 fn generate_put_account(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     id_to_account: *const std.AutoHashMap(u128, Account),
     options: struct { op: u64, timestamp: u64 },
 ) FuzzOpAction {
-    const id = random_id(random, u128);
+    const id = random_id(prng, u128);
     var account = id_to_account.get(id) orelse Account{
         .id = id,
         // `timestamp` must be unique.
         .timestamp = options.timestamp,
-        .user_data_128 = random_id(random, u128),
-        .user_data_64 = random_id(random, u64),
-        .user_data_32 = random_id(random, u32),
+        .user_data_128 = random_id(prng, u128),
+        .user_data_64 = random_id(prng, u64),
+        .user_data_32 = random_id(prng, u32),
         .reserved = 0,
-        .ledger = random_id(random, u32),
-        .code = random_id(random, u16),
+        .ledger = random_id(prng, u32),
+        .code = random_id(prng, u16),
         .flags = .{
-            .debits_must_not_exceed_credits = random.boolean(),
-            .credits_must_not_exceed_debits = random.boolean(),
-            .imported = random.boolean(),
-            .closed = random.boolean(),
+            .debits_must_not_exceed_credits = prng.boolean(),
+            .credits_must_not_exceed_debits = prng.boolean(),
+            .imported = prng.boolean(),
+            .closed = prng.boolean(),
         },
         .debits_pending = 0,
         .debits_posted = 0,
@@ -1088,10 +1085,10 @@ fn generate_put_account(
     };
 
     // These are the only fields we are allowed to change on existing accounts.
-    account.debits_pending = random.int(u64);
-    account.debits_posted = random.int(u64);
-    account.credits_pending = random.int(u64);
-    account.credits_posted = random.int(u64);
+    account.debits_pending = prng.int(u64);
+    account.debits_posted = prng.int(u64);
+    account.credits_pending = prng.int(u64);
+    account.credits_posted = prng.int(u64);
     return FuzzOpAction{ .put_account = .{
         .op = options.op,
         .account = account,
@@ -1101,26 +1098,25 @@ fn generate_put_account(
 const io_latency_mean = 20;
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var rng = std.rand.DefaultPrng.init(fuzz_args.seed);
-    const random = rng.random();
+    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse @as(usize, 1E7),
-        fuzz.random_int_exponential(random, usize, 1E6),
+        fuzz.random_int_exponential(&prng, usize, 1E6),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(random, fuzz_op_count);
+    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     try run_fuzz_ops(Storage.Options{
-        .seed = random.int(u64),
+        .seed = prng.int(u64),
         .read_latency_min = 0,
-        .read_latency_mean = 0 + fuzz.random_int_exponential(random, u64, io_latency_mean),
+        .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),
         .write_latency_min = 0,
-        .write_latency_mean = 0 + fuzz.random_int_exponential(random, u64, io_latency_mean),
+        .write_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
-        .crash_fault_probability = 0,
+        .crash_fault_probability = ratio(0, 100),
     }, fuzz_ops);
 
     log.info("Passed!", .{});

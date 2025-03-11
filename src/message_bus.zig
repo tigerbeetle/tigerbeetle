@@ -81,7 +81,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
         /// Used to apply jitter when calculating exponential backoff:
         /// Seeded with the process' replica index or client ID.
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
 
         pub const Options = struct {
             configuration: []const std.net.Address,
@@ -152,7 +152,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
-                .prng = std.rand.DefaultPrng.init(prng_seed),
+                .prng = stdx.PRNG.from_seed(prng_seed),
             };
 
             // Pre-allocate enough memory to hold all possible connections in the client map.
@@ -457,7 +457,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 const attempts = &bus.replicas_connect_attempts[replica];
                 const ms = vsr.exponential_backoff_with_jitter(
-                    bus.prng.random(),
+                    &bus.prng,
                     constants.connection_delay_min_ms,
                     constants.connection_delay_max_ms,
                     attempts.*,
