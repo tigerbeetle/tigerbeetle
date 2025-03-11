@@ -1932,7 +1932,8 @@ pub fn ReplicaType(
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
             if (self.primary_pipeline_pending()) |prepare_pending| {
-                if (prepare_pending == prepare) {
+                assert(prepare != prepare_pending);
+                if (prepare.message.header.op < prepare_pending.message.header.op) {
                     self.prepare_timeout.reset();
                 }
             } else {
