@@ -5,6 +5,7 @@ const mem = std.mem;
 const meta = std.meta;
 
 const vsr = @import("../vsr.zig");
+const stdx = @import("../stdx.zig");
 
 pub fn NodePoolType(comptime _node_size: u32, comptime _node_alignment: u13) type {
     return struct {
@@ -101,7 +102,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         const TestContext = @This();
 
         node_count: u32,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         sentinel: u64,
         node_pool: TestPool,
         node_map: std.AutoArrayHashMap(TestPool.Node, u64),
@@ -109,11 +110,11 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         acquires: u64 = 0,
         releases: u64 = 0,
 
-        fn init(context: *TestContext, random: std.rand.Random, node_count: u32) !void {
+        fn init(context: *TestContext, prng: *stdx.PRNG, node_count: u32) !void {
             context.* = .{
                 .node_count = node_count,
-                .random = random,
-                .sentinel = random.int(u64),
+                .prng = prng,
+                .sentinel = prng.bytes(u64),
 
                 .node_pool = undefined,
                 .node_map = undefined,
@@ -133,13 +134,16 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         }
 
         fn run(context: *TestContext) !void {
+            const Action = enum { acquire, release };
             {
                 var i: usize = 0;
                 while (i < context.node_count * 4) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...59 => try context.acquire(),
-                        60...99 => try context.release(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(Action, .{
+                        .acquire = 60,
+                        .release = 40,
+                    })) {
+                        .acquire => try context.acquire(),
+                        .release => try context.release(),
                     }
                 }
             }
@@ -147,10 +151,12 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
             {
                 var i: usize = 0;
                 while (i < context.node_count * 4) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...39 => try context.acquire(),
-                        40...99 => try context.release(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(Action, .{
+                        .acquire = 40,
+                        .release = 60,
+                    })) {
+                        .acquire => try context.acquire(),
+                        .release => try context.release(),
                     }
                 }
             }
@@ -172,7 +178,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
             try testing.expect(!gop.found_existing);
 
             // Write unique data into the node so we can test that it doesn't get overwritten.
-            const id = context.random.int(u64);
+            const id = context.prng.bytes(u64);
             @memset(mem.bytesAsSlice(u64, node), id);
             gop.value_ptr.* = id;
 
@@ -182,7 +188,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
         fn release(context: *TestContext) !void {
             if (context.node_map.count() == 0) return;
 
-            const index = context.random.uintLessThanBiased(usize, context.node_map.count());
+            const index = context.prng.int_inclusive(usize, context.node_map.count() - 1);
             const node = context.node_map.keys()[index];
             const id = context.node_map.values()[index];
 
@@ -222,9 +228,7 @@ fn TestContextType(comptime node_size: usize, comptime node_alignment: u12) type
 test "NodePool" {
     const seed = 42;
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
-
+    var prng = stdx.PRNG.from_seed(seed);
     const Tuple = struct {
         node_size: u32,
         node_alignment: u12,
@@ -243,7 +247,7 @@ test "NodePool" {
         var i: u32 = 1;
         while (i < 64) : (i += 1) {
             var context: TestContext = undefined;
-            try context.init(random, i);
+            try context.init(&prng, i);
             defer context.deinit();
 
             try context.run();

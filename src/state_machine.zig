@@ -6617,7 +6617,7 @@ test "StateMachine: Demuxer" {
         global_constants.state_machine_config,
     );
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,
@@ -6632,7 +6632,7 @@ test "StateMachine: Demuxer" {
             // Generate Result errors to Events at random.
             var reply_len: u32 = 0;
             for (0..results.len) |i| {
-                if (prng.random().boolean()) {
+                if (prng.boolean()) {
                     results[reply_len] = .{ .index = @intCast(i), .result = .ok };
                     reply_len += 1;
                 }
@@ -6641,16 +6641,10 @@ test "StateMachine: Demuxer" {
             // Demux events of random strides from the generated results.
             var demuxer = StateMachine.DemuxerType(operation)
                 .init(mem.sliceAsBytes(results[0..reply_len]));
-            const event_count: u32 = @intCast(@max(
-                1,
-                prng.random().uintAtMost(usize, results.len),
-            ));
+            const event_count: u32 = prng.range_inclusive(u32, 1, results.len);
             var event_offset: u32 = 0;
             while (event_offset < event_count) {
-                const event_size = @max(
-                    1,
-                    prng.random().uintAtMost(u32, event_count - event_offset),
-                );
+                const event_size = prng.range_inclusive(u32, 1, event_count - event_offset);
                 const reply: []Result = @alignCast(
                     mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)),
                 );

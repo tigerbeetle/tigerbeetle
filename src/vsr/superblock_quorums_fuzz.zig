@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
+const stdx = @import("../stdx.zig");
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
@@ -13,20 +14,20 @@ const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
 pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(fuzz_args.seed);
+    var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     // TODO When there is a top-level fuzz.zig main(), split these fuzzers into two different
     // commands.
-    try fuzz_quorums_working(prng.random());
+    try fuzz_quorums_working(&prng);
 
-    try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 4 });
+    try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
     // TODO: Enable these once SuperBlockHeader is generic over its Constants.
-    // try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 6 });
-    // try fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 8 });
+    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
+    // try fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
 }
 
-pub fn fuzz_quorums_working(random: std.rand.Random) !void {
-    const r = random;
+pub fn fuzz_quorums_working(prng: *stdx.PRNG) !void {
+    const r = prng;
     const t = test_quorums_working;
     const o = CopyTemplate.make_valid;
     const x = CopyTemplate.make_invalid_broken;
@@ -99,21 +100,21 @@ pub fn fuzz_quorums_working(random: std.rand.Random) !void {
 }
 
 fn test_quorums_working(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     threshold_count: u8,
     initial_copies: *const [4]CopyTemplate,
     result: QuorumsType(.{ .superblock_copies = 4 }).Error!u64,
 ) !void {
     const Quorums = QuorumsType(.{ .superblock_copies = 4 });
-    const misdirect = random.boolean(); // true:cluster false:replica
+    const misdirect = prng.boolean(); // true:cluster false:replica
     var quorums: Quorums = undefined;
     var headers: [4]SuperBlockHeader = undefined;
     var checksums: [6]u128 = undefined;
-    for (&checksums) |*c| c.* = random.int(u128);
+    for (&checksums) |*c| c.* = prng.bytes(u128);
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
-        member.* = random.int(u128);
+        member.* = prng.bytes(u128);
     }
 
     // Create headers in ascending-sequence order to build the checksum/parent hash chain.
@@ -153,13 +154,13 @@ fn test_quorums_working(
             .valid => {},
             .valid_high_copy => header.copy = 4,
             .invalid_broken => {
-                if (random.boolean() and i > 0) {
+                if (prng.boolean() and i > 0) {
                     // Error: duplicate header (if available).
-                    header.* = headers[random.uintLessThanBiased(usize, i)];
-                    checksum = random.int(u128);
+                    header.* = headers[prng.int_inclusive(usize, i - 1)];
+                    checksum = prng.bytes(u128);
                 } else {
                     // Error: invalid checksum.
-                    checksum = random.int(u128);
+                    checksum = prng.bytes(u128);
                 }
             },
             // Ensure we have a different checksum.
@@ -186,7 +187,7 @@ fn test_quorums_working(
     } else {
         // Shuffling copies can only change the working quorum when we have a corrupt copy index,
         // because we guess that the true index is the slot.
-        random.shuffle(SuperBlockHeader, &headers);
+        prng.shuffle(SuperBlockHeader, &headers);
     }
 
     const threshold = switch (threshold_count) {
@@ -261,7 +262,7 @@ pub const CopyTemplate = struct {
 
 // Verify that a torn header write during repair never compromises the existing quorum.
 pub fn fuzz_quorum_repairs(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     comptime options: superblock_quorums.Options,
 ) !void {
     const superblock_copies = options.superblock_copies;
@@ -272,7 +273,7 @@ pub fn fuzz_quorum_repairs(
 
     var members = [_]u128{0} ** constants.members_max;
     for (members[0..6]) |*member| {
-        member.* = random.int(u128);
+        member.* = prng.bytes(u128);
     }
 
     const headers_valid = blk: {
@@ -314,15 +315,15 @@ pub fn fuzz_quorum_repairs(
     // 1 bits indicate valid headers.
     // 0 bits indicate invalid headers.
     var valid = std.bit_set.IntegerBitSet(superblock_copies).initEmpty();
-    while (valid.count() < Quorums.Threshold.open.count() or random.boolean()) {
-        valid.set(random.uintLessThan(usize, superblock_copies));
+    while (valid.count() < Quorums.Threshold.open.count() or prng.boolean()) {
+        valid.set(prng.int_inclusive(usize, superblock_copies - 1));
     }
 
     var working_headers: [superblock_copies]SuperBlockHeader = undefined;
     for (&working_headers, 0..) |*header, i| {
         header.* = if (valid.isSet(i)) headers_valid[i] else header_invalid;
     }
-    random.shuffle(SuperBlockHeader, &working_headers);
+    prng.shuffle(SuperBlockHeader, &working_headers);
     var repair_headers = working_headers;
 
     const working_quorum = q1.working(&working_headers, .open) catch unreachable;

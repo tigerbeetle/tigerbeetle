@@ -1,6 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const ewah = @import("ewah.zig").ewah(usize);
+const stdx = @import("stdx.zig");
 
 const log = std.log;
 
@@ -29,7 +30,7 @@ const configs = [_]BitSetConfig{
     .{ .words = 640, .run_length_e = 1, .literals_length_e = 100 },
 };
 
-var prng = std.rand.DefaultPrng.init(42);
+var prng = stdx.PRNG.from_seed(42);
 
 test "benchmark: ewah" {
     for (configs) |config| {
@@ -109,9 +110,9 @@ fn make_bitset(allocator: std.mem.Allocator, config: BitSetConfig) ![]usize {
     var w: usize = 0;
     var literal: usize = 1;
     while (w < words.len) : (w += 1) {
-        const run_length = prng.random().uintLessThan(usize, 2 * config.run_length_e);
-        const literals_length = prng.random().uintLessThan(usize, 2 * config.literals_length_e);
-        const run_bit = prng.random().boolean();
+        const run_length = prng.int_inclusive(usize, (2 * config.run_length_e) - 1);
+        const literals_length = prng.int_inclusive(usize, (2 * config.literals_length_e) - 1);
+        const run_bit = prng.boolean();
 
         const run_end = @min(w + run_length, words.len);
         while (w < run_end) : (w += 1) {

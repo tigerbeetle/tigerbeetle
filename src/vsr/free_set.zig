@@ -1007,8 +1007,7 @@ test "FreeSet encode, decode, encode" {
 
     // Random.
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
     var t: usize = 0;
@@ -1019,7 +1018,7 @@ test "FreeSet encode, decode, encode" {
         var i: usize = 0;
         while (i < shard_bits) : (i += 1) {
             try patterns.append(.{
-                .fill = fills[random.uintLessThan(usize, fills.len)],
+                .fill = fills[prng.index(fills)],
                 .words = 1,
             });
         }
@@ -1036,8 +1035,7 @@ const TestPatternFill = enum { uniform_ones, uniform_zeros, literal };
 
 fn test_encode(patterns: []const TestPattern) !void {
     const seed = std.crypto.random.int(u64);
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     var blocks_count: usize = 0;
     for (patterns) |pattern| blocks_count += pattern.words * @bitSizeOf(usize);
@@ -1061,7 +1059,7 @@ fn test_encode(patterns: []const TestPattern) !void {
                 blocks[blocks_offset] = switch (pattern.fill) {
                     .uniform_ones => ~@as(usize, 0),
                     .uniform_zeros => 0,
-                    .literal => random.intRangeLessThan(usize, 1, std.math.maxInt(usize)),
+                    .literal => prng.range_inclusive(usize, 1, std.math.maxInt(usize) - 1),
                 };
                 const index_bit = blocks_offset * @bitSizeOf(usize) / FreeSet.shard_bits;
                 if (pattern.fill != .uniform_ones) decoded_expect.index.unset(index_bit);
@@ -1231,31 +1229,30 @@ fn find_bit(
 }
 
 test "find_bit" {
-    var prng = std.rand.DefaultPrng.init(123);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(123);
 
     var bit_length: usize = 1;
     while (bit_length <= @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt) * 4) : (bit_length += 1) {
         var bit_set = try std.DynamicBitSetUnmanaged.initEmpty(std.testing.allocator, bit_length);
         defer bit_set.deinit(std.testing.allocator);
 
-        const p = random.uintLessThan(usize, 100);
+        const p = prng.int_inclusive(usize, 100);
         var b: usize = 0;
-        while (b < bit_length) : (b += 1) bit_set.setValue(b, p < random.uintLessThan(usize, 100));
+        while (b < bit_length) : (b += 1) bit_set.setValue(b, p < prng.int_inclusive(usize, 100));
 
         var i: usize = 0;
-        while (i < 20) : (i += 1) try test_find_bit(random, bit_set, .set);
-        while (i < 40) : (i += 1) try test_find_bit(random, bit_set, .unset);
+        while (i < 20) : (i += 1) try test_find_bit(&prng, bit_set, .set);
+        while (i < 40) : (i += 1) try test_find_bit(&prng, bit_set, .unset);
     }
 }
 
 fn test_find_bit(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     bit_set: DynamicBitSetUnmanaged,
     comptime bit_kind: std.bit_set.IteratorOptions.Type,
 ) !void {
-    const bit_min = random.uintLessThan(usize, bit_set.bit_length);
-    const bit_max = random.uintLessThan(usize, bit_set.bit_length - bit_min) + bit_min;
+    const bit_min = prng.int_inclusive(usize, bit_set.bit_length - 1);
+    const bit_max = prng.range_inclusive(usize, bit_min, bit_set.bit_length);
     assert(bit_max >= bit_min);
     assert(bit_max <= bit_set.bit_length);
 

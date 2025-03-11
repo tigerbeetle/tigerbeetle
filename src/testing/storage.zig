@@ -455,10 +455,9 @@ pub const Storage = struct {
                 // Inject the fault at a deterministic position (by using the pristine bytes as
                 // consistent seed) so that read-retries don't resolve the corruption.
                 const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
-                var corrupt_prng = std.rand.DefaultPrng.init(corrupt_seed);
-                const corrupt_random = corrupt_prng.random();
-                const corrupt_byte = corrupt_random.uintLessThan(u32, sector_bytes.len);
-                const corrupt_bit = corrupt_random.uintAtMost(u3, @bitSizeOf(u8) - 1);
+                var corrupt_prng = stdx.PRNG.from_seed(corrupt_seed);
+                const corrupt_byte = corrupt_prng.index(sector_bytes);
+                const corrupt_bit = corrupt_prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
                 sector_bytes[corrupt_byte] ^= @as(u8, 1) << corrupt_bit;
             }
 

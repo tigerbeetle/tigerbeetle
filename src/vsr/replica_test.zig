@@ -1853,8 +1853,7 @@ const TestContext = struct {
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
-        var prng = std.rand.DefaultPrng.init(options.seed);
-        const random = prng.random();
+        var prng = stdx.PRNG.from_seed(options.seed);
 
         const cluster = try Cluster.init(allocator, .{
             .cluster_id = 0,
@@ -1862,15 +1861,15 @@ const TestContext = struct {
             .standby_count = options.standby_count,
             .client_count = options.client_count,
             .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
-            .seed = random.int(u64),
+            .seed = prng.bytes(u64),
             .releases = &releases,
             .client_release = options.client_release,
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
-                .seed = random.int(u64),
-                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-                .one_way_delay_min = random.uintLessThan(u16, 3),
+                .seed = prng.bytes(u64),
+                .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
+                .one_way_delay_min = prng.int_inclusive(u16, 2),
 
                 .path_maximum_capacity = 128,
                 .path_clog_duration_mean = 0,

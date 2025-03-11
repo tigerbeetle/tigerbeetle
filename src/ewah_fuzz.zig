@@ -3,6 +3,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_ewah);
 
+const stdx = @import("stdx.zig");
+
 const ewah = @import("./ewah.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
@@ -10,23 +12,22 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
-        var prng = std.rand.DefaultPrng.init(args.seed);
-        const random = prng.random();
+        var prng = stdx.PRNG.from_seed(args.seed);
 
         const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
-        const decoded_size = random.intRangeAtMost(usize, 1, decoded_size_max);
+        const decoded_size = prng.range_inclusive(usize, 1, decoded_size_max);
         const decoded = try allocator.alloc(Word, decoded_size);
         defer allocator.free(decoded);
 
         const decoded_bits_total = decoded_size * @bitSizeOf(Word);
-        const decoded_bits = random.uintAtMost(usize, decoded_bits_total);
-        generate_bits(random, std.mem.sliceAsBytes(decoded[0..decoded_size]), decoded_bits);
+        const decoded_bits = prng.int_inclusive(usize, decoded_bits_total);
+        generate_bits(&prng, std.mem.sliceAsBytes(decoded[0..decoded_size]), decoded_bits);
 
         var context = try ContextType(Word).init(allocator, decoded.len);
         defer context.deinit(allocator);
 
-        const encode_chunk_words_count = random.intRangeAtMost(usize, 1, decoded_size);
-        const decode_chunk_words_count = random.intRangeAtMost(usize, 1, decoded_size);
+        const encode_chunk_words_count = prng.range_inclusive(usize, 1, decoded_size);
+        const decode_chunk_words_count = prng.range_inclusive(usize, 1, decoded_size);
 
         const encoded_size = try context.test_encode_decode(decoded, .{
             .encode_chunk_words_count = encode_chunk_words_count,
@@ -60,7 +61,7 @@ pub fn fuzz_encode_decode(
 
 /// Modify `data` such that it has exactly `bits_set_total` randomly-chosen bits set,
 /// with the remaining bits unset.
-fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) void {
+fn generate_bits(prng: *stdx.PRNG, data: []u8, bits_set_total: usize) void {
     const bits_total = data.len * @bitSizeOf(u8);
     assert(bits_set_total <= bits_total);
 
@@ -70,7 +71,7 @@ fn generate_bits(random: std.rand.Random, data: []u8, bits_set_total: usize) voi
 
     var bits_set = if (init_empty) 0 else bits_total;
     while (bits_set != bits_set_total) {
-        const bit = random.uintLessThan(usize, bits_total);
+        const bit = prng.int_inclusive(usize, bits_total - 1);
         const word = @divFloor(bit, @bitSizeOf(u8));
         const mask = @as(u8, 1) << @as(std.math.Log2Int(u8), @intCast(bit % @bitSizeOf(u8)));
 
