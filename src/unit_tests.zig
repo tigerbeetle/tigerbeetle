@@ -10,6 +10,7 @@ comptime {
     _ = @import("list.zig");
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
+    _ = @import("stdx/aegis.zig");
     _ = @import("stdx/bounded_array.zig");
     _ = @import("stdx/ring_buffer.zig");
     _ = @import("stdx/sort_test.zig");
