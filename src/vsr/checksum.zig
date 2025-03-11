@@ -37,7 +37,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 
-const Aegis128LMac_128 = std.crypto.auth.aegis.Aegis128LMac_128;
+const Aegis128LMac_128 = stdx.aegis.Aegis128LMac_128;
 
 var seed_once = std.once(seed_init);
 var seed_state: Aegis128LMac_128 = undefined;
