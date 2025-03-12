@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ZIG_RELEASE_DEFAULT="0.13.0"
+ZIG_RELEASE_DEFAULT="0.14.0"
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 ZIG_RELEASE=${1:-$ZIG_RELEASE_DEFAULT}
 if [ "$ZIG_RELEASE" = "latest" ]; then
@@ -54,9 +54,9 @@ if command -v wget > /dev/null; then
     ipv4=""
     fi
     # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
-    ZIG_URL=$(wget $ipv4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
+    ZIG_URL=$(wget $ipv4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | head -1 | awk '{print $2}' | sed 's/[",]//g')
 else
-    ZIG_URL=$(curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | awk '{print $2}' | sed 's/[",]//g')
+    ZIG_URL=$(curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | head -1 | awk '{print $2}' | sed 's/[",]//g')
 fi
 
 # Ensure that the release is actually hosted on the ziglang.org website:
