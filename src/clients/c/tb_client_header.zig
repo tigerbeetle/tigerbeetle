@@ -41,11 +41,11 @@ const type_mappings = .{
 
 fn resolve_c_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Array => |info| return resolve_c_type(info.child),
-        .Enum => |info| return resolve_c_type(info.tag_type),
-        .Struct => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-        .Bool => return "uint8_t",
-        .Int => |info| {
+        .array => |info| return resolve_c_type(info.child),
+        .@"enum" => |info| return resolve_c_type(info.tag_type),
+        .@"struct" => return resolve_c_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .bool => return "uint8_t",
+        .int => |info| {
             assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "uint8_t",
@@ -56,12 +56,12 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 else => @compileError("invalid int type"),
             };
         },
-        .Optional => |info| switch (@typeInfo(info.child)) {
-            .Pointer => return resolve_c_type(info.child),
+        .optional => |info| switch (@typeInfo(info.child)) {
+            .pointer => return resolve_c_type(info.child),
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
-        .Pointer => |info| {
-            assert(info.size != .Slice);
+        .pointer => |info| {
+            assert(info.size != .slice);
             assert(!info.is_allowzero);
 
             inline for (type_mappings) |type_mapping| {
@@ -69,14 +69,14 @@ fn resolve_c_type(comptime Type: type) []const u8 {
                 const c_name = type_mapping[1];
 
                 if (info.child == ZigType) {
-                    const prefix = if (@typeInfo(ZigType) == .Struct) "struct " else "";
+                    const prefix = if (@typeInfo(ZigType) == .@"struct") "struct " else "";
                     return prefix ++ c_name ++ "*";
                 }
             }
 
             return comptime resolve_c_type(info.child) ++ "*";
         },
-        .Void, .Opaque => return "void",
+        .void, .@"opaque" => return "void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
     }
 }
@@ -111,7 +111,7 @@ fn emit_enum(
 
         if (!skip) {
             const field_name = to_uppercase(field.name);
-            if (@typeInfo(Type) == .Enum) {
+            if (@typeInfo(Type) == .@"enum") {
                 try buffer.writer().print("    {s}_{s} = {},\n", .{
                     c_name[0..suffix_pos],
                     @as([]const u8, &field_name),
@@ -145,7 +145,7 @@ fn emit_struct(
         });
 
         switch (@typeInfo(field.type)) {
-            .Array => |array| try buffer.writer().print("[{d}]", .{array.len}),
+            .array => |array| try buffer.writer().print("[{d}]", .{array.len}),
             else => {},
         }
 
@@ -196,12 +196,12 @@ pub fn main() !void {
         }
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
                 .@"packed" => try emit_enum(&buffer, ZigType, info, c_name, &.{"padding"}),
                 .@"extern" => try emit_struct(&buffer, info, c_name),
             },
-            .Enum => |info| {
+            .@"enum" => |info| {
                 comptime var skip: []const []const u8 = &.{};
                 if (ZigType == exports.tb_operation) {
                     skip = &.{ "reserved", "root", "register" };

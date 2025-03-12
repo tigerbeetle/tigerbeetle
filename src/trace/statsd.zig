@@ -356,22 +356,22 @@ fn format_metric(
             switch (stat_data.aggregate.event) {
                 inline else => |data| {
                     const Tags = @TypeOf(data);
-                    if (@typeInfo(Tags) == .Struct) {
+                    if (@typeInfo(Tags) == .@"struct") {
                         const fields = std.meta.fields(@TypeOf(data));
                         inline for (fields) |data_field| {
                             comptime assert(!std.mem.eql(u8, data_field.name, "cluster"));
                             comptime assert(!std.mem.eql(u8, data_field.name, "replica"));
-                            comptime assert(@typeInfo(data_field.type) == .Int or
-                                @typeInfo(data_field.type) == .Enum or
-                                @typeInfo(data_field.type) == .Union);
+                            comptime assert(@typeInfo(data_field.type) == .int or
+                                @typeInfo(data_field.type) == .@"enum" or
+                                @typeInfo(data_field.type) == .@"union");
 
                             const data_field_value = @field(data, data_field.name);
                             try writer.writeByte(',');
                             try writer.writeAll(data_field.name);
                             try writer.writeByte(':');
 
-                            if (@typeInfo(data_field.type) == .Enum or
-                                @typeInfo(data_field.type) == .Union)
+                            if (@typeInfo(data_field.type) == .@"enum" or
+                                @typeInfo(data_field.type) == .@"union")
                             {
                                 try writer.print("{s}", .{@tagName(data_field_value)});
                             } else {
@@ -393,20 +393,20 @@ fn format_metric(
 ///
 /// Integers get maxInt, and Enums get a value corresponding to `enum_size_max()`.
 fn struct_size_max(StructOrVoid: type) StructOrVoid {
-    if (@typeInfo(StructOrVoid) == .Void) return {};
+    if (@typeInfo(StructOrVoid) == .void) return {};
 
-    assert(@typeInfo(StructOrVoid) == .Struct);
+    assert(@typeInfo(StructOrVoid) == .@"struct");
     const Struct = StructOrVoid;
 
     var output: Struct = undefined;
 
     for (std.meta.fields(Struct)) |field| {
         const type_info = @typeInfo(field.type);
-        assert(type_info == .Int or type_info == .Enum);
-        assert(type_info != .Int or type_info.Int.signedness == .unsigned);
+        assert(type_info == .int or type_info == .@"enum");
+        assert(type_info != .int or type_info.Int.signedness == .unsigned);
         switch (type_info) {
-            .Int => @field(output, field.name) = std.math.maxInt(field.type),
-            .Enum => @field(output, field.name) =
+            .int => @field(output, field.name) = std.math.maxInt(field.type),
+            .@"enum" => @field(output, field.name) =
                 std.enums.nameCast(field.type, enum_size_max(field.type)),
             else => @compileError("unsupported type"),
         }

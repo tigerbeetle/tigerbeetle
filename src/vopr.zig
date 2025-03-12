@@ -1709,7 +1709,7 @@ var log_performance_mode: bool = false;
 
 fn log_override(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
+    comptime scope: @TypeOf(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {

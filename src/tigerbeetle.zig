@@ -422,8 +422,8 @@ pub const CreateTransferResult = enum(u32) {
         }
 
         var type_info = @typeInfo(enum {});
-        type_info.Enum.tag_type = std.meta.Tag(CreateTransferResult);
-        type_info.Enum.fields = &fields;
+        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.@"enum".fields = &fields;
         break :type @Type(type_info);
     };
 

@@ -1240,18 +1240,18 @@ fn print_struct(
     label: []const u8,
     value: anytype,
 ) !void {
-    comptime assert(@typeInfo(@TypeOf(value)) == .Pointer);
-    comptime assert(@typeInfo(@TypeOf(value)).Pointer.size == .One);
+    comptime assert(@typeInfo(@TypeOf(value)) == .pointer);
+    comptime assert(@typeInfo(@TypeOf(value)).pointer.size == .one);
 
-    const Type = @typeInfo(@TypeOf(value)).Pointer.child;
+    const Type = @typeInfo(@TypeOf(value)).pointer.child;
     // Print structs *without* a custom format() function.
-    if (comptime @typeInfo(Type) == .Struct and !std.meta.hasFn(Type, "format")) {
-        if (@typeInfo(Type).Struct.is_tuple) {
+    if (comptime @typeInfo(Type) == .@"struct" and !std.meta.hasFn(Type, "format")) {
+        if (@typeInfo(Type).@"struct".is_tuple) {
             try output.writeAll(label);
             // Print tuples as a single line.
             inline for (std.meta.fields(Type), 0..) |field, i| {
-                if (@typeInfo(field.type) == .Pointer and
-                    @typeInfo(@typeInfo(field.type).Pointer.child) == .Array)
+                if (@typeInfo(field.type) == .pointer and
+                    @typeInfo(@typeInfo(field.type).pointer.child) == .array)
                 {
                     // Allow inline labels.
                     try output.writeAll(@field(value, field.name));
@@ -1275,8 +1275,8 @@ fn print_struct(
 
     if (Element: {
         const type_info = @typeInfo(Type);
-        if (type_info == .Array) {
-            break :Element @as(?type, type_info.Array.child);
+        if (type_info == .array) {
+            break :Element @as(?type, type_info.array.child);
         }
         break :Element null;
     }) |Element| {
@@ -1304,8 +1304,8 @@ fn print_struct(
 
 fn print_value(output: std.io.AnyWriter, value: anytype) !void {
     const Type = @TypeOf(value);
-    if (@typeInfo(Type) == .Struct) assert(std.meta.hasFn(Type, "format"));
-    assert(@typeInfo(Type) != .Array);
+    if (@typeInfo(Type) == .@"struct") assert(std.meta.hasFn(Type, "format"));
+    assert(@typeInfo(Type) != .array);
 
     if (Type == u128) return output.print("0x{x:0>32}", .{value});
 
@@ -1317,7 +1317,7 @@ fn print_value(output: std.io.AnyWriter, value: anytype) !void {
         }
     }
 
-    if (@typeInfo(Type) == .Enum) {
+    if (@typeInfo(Type) == .@"enum") {
         if (std.enums.tagName(Type, value)) |value_string| {
             return output.print("{s}", .{value_string});
         } else {

@@ -55,7 +55,7 @@ fn SegmentedArrayBaseType(
     comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
     comptime options: Options,
 ) type {
-    comptime assert(Key == null or @typeInfo(Key.?) == .Int or @typeInfo(Key.?) == .ComptimeInt);
+    comptime assert(Key == null or @typeInfo(Key.?) == .int or @typeInfo(Key.?) == .comptime_int);
 
     return struct {
         const SegmentedArray = @This();

@@ -8536,8 +8536,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_other_replicas(self: *Replica, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_other_replicas_base(message.base());
         }
@@ -8562,8 +8562,8 @@ pub fn ReplicaType(
 
         /// `message` is a `*MessageType(command)`.
         fn send_message_to_replica(self: *Replica, replica: u8, message: anytype) void {
-            assert(@typeInfo(@TypeOf(message)) == .Pointer);
-            assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+            assert(@typeInfo(@TypeOf(message)) == .pointer);
+            assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
             self.send_message_to_replica_base(replica, message.base());
         }

@@ -199,13 +199,13 @@ test fill {
 /// No biased version is provided --- while biased generation is simpler&faster, the bias can be
 /// quite high depending on max!
 pub fn int_inclusive(prng: *PRNG, Int: anytype, max: Int) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     if (max == std.math.maxInt(Int)) {
         return prng.int(Int);
     }
 
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
-    const bits = @typeInfo(Int).Int.bits;
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
+    const bits = @typeInfo(Int).int.bits;
     const less_than = max + 1;
 
     // adapted from:
@@ -294,7 +294,7 @@ test index {
 
 /// Generates a uniform, unbiased integer r such that max ≤ r ≤ max.
 pub fn range_inclusive(prng: *PRNG, Int: type, min: Int, max: Int) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     assert(min <= max);
     return min + prng.int_inclusive(Int, max - min);
 }
@@ -318,7 +318,7 @@ test range_inclusive {
 ///
 /// That is, fills @sizeOf(T) bytes with random bits.
 pub fn int(prng: *PRNG, Int: type) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     if (Int == u64) return prng.next();
     if (@sizeOf(Int) < @sizeOf(u64)) return @truncate(prng.next());
     var result: Int = undefined;
@@ -429,7 +429,7 @@ pub fn EnumWeightsType(E: type) type {
 
 /// Returns a random value of an enum, where probability is proportional to weight.
 pub fn enum_weighted(prng: *PRNG, Enum: type, weights: EnumWeightsType(Enum)) Enum {
-    const fields = @typeInfo(Enum).Enum.fields;
+    const fields = @typeInfo(Enum).@"enum".fields;
     var total: u64 = 0;
     inline for (fields) |field| {
         total += @field(weights, field.name);

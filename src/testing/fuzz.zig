@@ -16,8 +16,8 @@ const log = std.log.scoped(.fuzz);
 pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
-        assert(info == .Int);
-        assert(info.Int.signedness == .unsigned);
+        assert(info == .int);
+        assert(info.int.signedness == .unsigned);
     }
     // Note: we use floats and rely on std implementation. Ideally, we should do neither, but I
     // wasn't able to find a quick way to generate geometrically distributed integers using only
