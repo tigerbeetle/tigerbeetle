@@ -281,7 +281,7 @@ pub fn main() !void {
             }
         }
     }
-
+    output.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
     output.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 

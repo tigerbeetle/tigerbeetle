@@ -68,6 +68,7 @@ pub const Network = struct {
     processes: std.ArrayListUnmanaged(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
+    message_summary: MessageSummary,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -112,6 +113,7 @@ pub const Network = struct {
             .buses_enabled = buses_enabled,
             .processes = processes,
             .message_pool = message_pool,
+            .message_summary = .{},
         };
     }
 
@@ -224,6 +226,7 @@ pub const Network = struct {
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
+        network.message_summary.add(message.header);
         log.debug("send_message: {} > {}: {}", .{
             path.source,
             path.target,
@@ -325,5 +328,46 @@ pub const Network = struct {
                 return .{ .client = raw };
             },
         }
+    }
+};
+
+pub const MessageSummary = struct {
+    map: Map = Map.initFill(.{ .count = 0, .size = 0 }),
+
+    const Map = std.EnumArray(vsr.Command, struct { count: u32, size: u64 });
+
+    pub fn add(summary: *MessageSummary, header: *const vsr.Header) void {
+        const entry = summary.map.getPtr(header.command);
+        entry.count += 1;
+        entry.size += header.size;
+    }
+
+    pub fn format(
+        summary: MessageSummary,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        const slice = comptime std.enums.values(vsr.Command);
+        var commands = slice[0..slice.len].*;
+        std.mem.sort(vsr.Command, &commands, summary.map, greater_than);
+
+        for (commands) |command| {
+            const message_summary = summary.map.get(command);
+            if (message_summary.count > 0) {
+                try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+                    @tagName(command),
+                    message_summary.count,
+                    std.fmt.fmtIntSizeBin(message_summary.size),
+                });
+            }
+        }
+    }
+
+    fn greater_than(map: Map, lhs: vsr.Command, rhs: vsr.Command) bool {
+        return map.get(lhs).count > map.get(rhs).count;
     }
 };
