@@ -596,7 +596,7 @@ pub const FreeSet = struct {
 
         // Block releases from the current checkpoint that were temporarily recorded in
         // blocks_released_prior_checkpoint_durability can now be moved to blocks_released.
-        while (set.blocks_released_prior_checkpoint_durability.popOrNull()) |block_entry| {
+        while (set.blocks_released_prior_checkpoint_durability.pop()) |block_entry| {
             const block = block_entry.key;
             set.blocks_released.set(block);
         }

@@ -561,7 +561,7 @@ pub const AccountFilterFlags = packed struct(u32) {
 comptime {
     const target = builtin.target;
 
-    if (target.os.tag != .linux and !target.isDarwin() and target.os.tag != .windows) {
+    if (target.os.tag != .linux and !target.os.tag.isDarwin() and target.os.tag != .windows) {
         @compileError("linux, windows or macos is required for io");
     }
 

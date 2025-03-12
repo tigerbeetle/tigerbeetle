@@ -625,6 +625,8 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     error.SystemResources,
                     error.Unexpected,
                     error.WouldBlock,
+                    error.NoDevice,
+                    error.ProcessNotFound,
                     => return err,
                 }
             };
@@ -796,6 +798,8 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                                 error.SystemResources,
                                 error.Unexpected,
                                 error.WouldBlock,
+                                error.NoDevice,
+                                error.ProcessNotFound,
                                 => return err,
                             }
                         };

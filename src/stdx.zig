@@ -190,7 +190,7 @@ const Cut = struct {
 ///
 /// This is a Zig version of Go's `string.Cut` / Rust's `str::split_once`. Cut turns out to be a
 /// surprisingly versatile primitive for ad-hoc string processing. Often `std.mem.indexOf` and
-/// `std.mem.split` can be replaced with a shorter and clearer code using  `cut`.
+/// `std.mem.splitSequence` can be replaced with a shorter and clearer code using  `cut`.
 pub fn cut(haystack: []const u8, needle: []const u8) ?Cut {
     const index = std.mem.indexOf(u8, haystack, needle) orelse return null;
 
@@ -884,7 +884,7 @@ test "Instant/Duration" {
 
     if (builtin.os.tag == .linux) {
         var instant_3 = instant_1;
-        instant_3.base.timestamp.tv_sec += 1;
+        instant_3.base.timestamp.sec += 1;
         assert(instant_1.duration_since(instant_3).nanoseconds == 0);
 
         const duration = instant_3.duration_since(instant_1);
