@@ -118,11 +118,24 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     errdefer tmp_beetle.log_stderr();
 
     try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
-
     try shell.exec("dotnet new console", .{});
-    try shell.exec("dotnet add package tigerbeetle --version {version}", .{
-        .version = options.version,
-    });
+
+    // NuGet may take a few minutes to make the new package available for download.
+    for (0..9) |_| {
+        if (try nuget_install(shell, .{ .version = options.version }) == .ok) break;
+        log.warn("waiting for 5 minutes for the {s} version to appear in nuget.org", .{
+            options.version,
+        });
+        std.time.sleep(5 * std.time.ns_per_min);
+    } else {
+        switch (try nuget_install(shell, .{ .version = options.version })) {
+            .ok => {},
+            .retry => |err| {
+                log.err("package is not available in nuget.org", .{});
+                return err;
+            },
+        }
+    }
 
     try Shell.copy_path(
         shell.project_root,
@@ -131,4 +144,29 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
         "Program.cs",
     );
     try shell.exec("dotnet run", .{});
+}
+
+fn nuget_install(shell: *Shell, options: struct {
+    version: []const u8,
+}) !union(enum) { ok, retry: anyerror } {
+    const command: []const u8 = "dotnet add package tigerbeetle --version {version}";
+    if (shell.exec(command, options)) {
+        return .ok;
+    } else |err| {
+        const exec_result = try shell.exec_raw(command, options);
+        switch (exec_result.term) {
+            .Exited => |code| if (code == 0) return .ok,
+            else => {},
+        }
+
+        // Error message:
+        // NU1102: Unable to find package tigerbeetle with version (>= {version}).
+        const package_missing = std.mem.indexOf(
+            u8,
+            exec_result.stdout,
+            "NU1102",
+        ) != null;
+        if (package_missing) return .{ .retry = err };
+        return err;
+    }
 }
