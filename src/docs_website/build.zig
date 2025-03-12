@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) !void {
     try docs.build(b, content, website);
     try redirects.build(b, content, website);
 
-    const clean_zigout_step = b.addRemoveDirTree("zig-out");
+    const clean_zigout_step = b.addRemoveDirTree(b.path("zig-out"));
 
     const install_content_step = b.addInstallDirectory(.{
         .source_dir = content.getDirectory(),
