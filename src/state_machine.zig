@@ -5641,9 +5641,9 @@ fn check(test_table: []const u8) !void {
 
                 const interval_ns: u64 = @abs(ticks.value) *
                     @as(u64, switch (ticks.unit) {
-                    .nanoseconds => 1,
-                    .seconds => std.time.ns_per_s,
-                });
+                        .nanoseconds => 1,
+                        .seconds => std.time.ns_per_s,
+                    });
 
                 // The `parse` logic already computes `maxInt - value` when a unsigned int is
                 // represented as a negative number. However, we need to use a signed int and
@@ -6093,7 +6093,7 @@ test "linked accounts" {
 
 test "linked_event_chain_open" {
     try check(
-    // A chain of 3 events (the last event in the chain closes the chain with linked=false):
+        // A chain of 3 events (the last event in the chain closes the chain with linked=false):
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1 LNK   _   _ _ _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1 LNK   _   _ _ _ _ _ _ ok
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
@@ -6114,7 +6114,7 @@ test "linked_event_chain_open" {
 
 test "linked_event_chain_open for an already failed batch" {
     try check(
-    // An individual event (successful):
+        // An individual event (successful):
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
 
         // An open chain of 3 events (the second one fails):
@@ -7017,7 +7017,7 @@ test "imported events: linked chain" {
 
 test "create_accounts: closed accounts" {
     try check(
-    // Accounts can be created already closed.
+        // Accounts can be created already closed.
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _  _  _ _ _  CLSD _ _ ok
         \\ commit create_accounts
         \\

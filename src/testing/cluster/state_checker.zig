@@ -189,11 +189,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
                 assert(replica.view > head_max.view or
                     (replica.view == head_max.view and (replica.op >= head_max.op or
-                    // The last acked prepare may have been truncated through a view change,
-                    // replaced by a prepare from a newer view, and the replica may have crashed
-                    // before making this new view durable in the superblock. Such prepares are
-                    // then truncated on startup.
-                    head_max.view < head_max_journal.view)));
+                        // The last acked prepare may have been truncated through a view change,
+                        // replaced by a prepare from a newer view, and the replica may have crashed
+                        // before making this new view durable in the superblock. Such prepares are
+                        // then truncated on startup.
+                        head_max.view < head_max_journal.view)));
             }
 
             const commit_root_op = replica.superblock.working.vsr_state.checkpoint.header.op;

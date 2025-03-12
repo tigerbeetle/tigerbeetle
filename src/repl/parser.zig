@@ -452,16 +452,16 @@ pub const Parser = struct {
             try parser.terminal.print_error(
                 "Operation must be " ++
                     comptime operations: {
-                    var names: []const u8 = "";
-                    for (std.enums.values(Operation), 0..) |operation, index| {
-                        if (operation == .none) continue;
-                        names = names ++
-                            (if (names.len > 0) ", " else "") ++
-                            (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
-                            @tagName(operation);
-                    }
-                    break :operations names;
-                } ++ ". Got: '{s}'.\n",
+                        var names: []const u8 = "";
+                        for (std.enums.values(Operation), 0..) |operation, index| {
+                            if (operation == .none) continue;
+                            names = names ++
+                                (if (names.len > 0) ", " else "") ++
+                                (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
+                                @tagName(operation);
+                        }
+                        break :operations names;
+                    } ++ ". Got: '{s}'.\n",
                 .{operation_identifier},
             );
             return Error.OperationBad;

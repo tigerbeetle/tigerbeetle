@@ -1114,7 +1114,7 @@ pub fn CompactionType(
 
                         const level_a_priority = compaction.level_b_index_block.count == 0 or
                             compaction.level_a_value_block.count <
-                            compaction.level_b_value_block.count;
+                                compaction.level_b_value_block.count;
                         if (index_block.stage == .read_index_block_done and
                             !compaction.level_a_value_block.full() and
                             level_a_priority)
@@ -1148,7 +1148,7 @@ pub fn CompactionType(
                         index_block.stage == .read_index_block_done);
                     const level_b_priority = compaction.level_a_index_block.count == 0 or
                         compaction.level_b_value_block.count <=
-                        compaction.level_a_value_block.count;
+                            compaction.level_a_value_block.count;
                     if (index_block.stage == .read_index_block_done and
                         !compaction.level_b_value_block.full() and
                         level_b_priority)

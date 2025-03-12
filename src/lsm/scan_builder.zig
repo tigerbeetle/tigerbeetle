@@ -354,10 +354,10 @@ pub fn ScanType(
                 const ScanTree = ScanTreeType(*Context, Groove.IdTree, Storage);
                 type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
-                    .name = "id",
-                    .type = ScanTree,
-                    .alignment = @alignOf(ScanTree),
-                }};
+                        .name = "id",
+                        .type = ScanTree,
+                        .alignment = @alignOf(ScanTree),
+                    }};
             }
 
             // Union fields for each index tree:
@@ -366,10 +366,10 @@ pub fn ScanType(
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
                 type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
-                    .name = field.name,
-                    .type = ScanTree,
-                    .alignment = @alignOf(ScanTree),
-                }};
+                        .name = field.name,
+                        .type = ScanTree,
+                        .alignment = @alignOf(ScanTree),
+                    }};
             }
 
             // We need a tagged union for dynamic dispatching.

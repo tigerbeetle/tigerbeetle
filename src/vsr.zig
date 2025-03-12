@@ -1329,7 +1329,7 @@ const ViewChangeHeadersSlice = struct {
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
             if (headers.command == .do_view_change or
                 (headers.command == .start_view and
-                index < constants.pipeline_prepare_queue_max + 1))
+                    index < constants.pipeline_prepare_queue_max + 1))
             {
                 assert(header.op == head.op - index);
             }

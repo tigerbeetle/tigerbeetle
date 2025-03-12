@@ -104,12 +104,12 @@ fn SegmentedArrayBaseType(
         pub const node_count_max = if (element_count_max >=
             // * The node that we split must be full.
             node_capacity +
-            // * The last node must have at least one element.
-            1 +
-            // * All other nodes must be at least half-full.
-            ((node_count_max_naive -| 3) * @divExact(node_capacity, 2)) +
-            // * And then we insert one more element into the full node.
-            1)
+                // * The last node must have at least one element.
+                1 +
+                // * All other nodes must be at least half-full.
+                ((node_count_max_naive -| 3) * @divExact(node_capacity, 2)) +
+                // * And then we insert one more element into the full node.
+                1)
             node_count_max_naive
         else
             node_count_max_naive - 1;

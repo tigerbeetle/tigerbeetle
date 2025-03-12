@@ -346,7 +346,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
-                        partition[from] == asymmetric_partition_side);
+                            partition[from] == asymmetric_partition_side);
                     self.links[self.path_index(path)].filter =
                         if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }

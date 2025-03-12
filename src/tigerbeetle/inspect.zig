@@ -572,8 +572,8 @@ const Inspector = struct {
             const wal_prepare_body_valid =
                 wal_prepare.valid_checksum() and
                 wal_prepare.valid_checksum_body(
-                prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
-            );
+                    prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
+                );
 
             const header_pair = [_]*const vsr.Header.Prepare{ wal_header, wal_prepare };
 
@@ -632,8 +632,8 @@ const Inspector = struct {
         const prepare_body_valid =
             prepare_header.valid_checksum() and
             prepare_header.valid_checksum_body(
-            prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
-        );
+                prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
+            );
 
         const copies: [2]*const vsr.Header.Prepare = .{ &headers[slot], prepare_header };
 
@@ -764,38 +764,38 @@ const Inspector = struct {
 
         const free_set_blocks_acquired_buffer =
             try inspector.allocator.alignedAlloc(
-            u8,
-            @alignOf(vsr.FreeSet.Word),
-            free_set_blocks_acquired_size,
-        );
+                u8,
+                @alignOf(vsr.FreeSet.Word),
+                free_set_blocks_acquired_size,
+            );
         defer inspector.allocator.free(free_set_blocks_acquired_buffer);
 
         var free_set_blocks_acquired_addresses =
             try std.ArrayList(u64).initCapacity(
-            inspector.allocator,
-            stdx.div_ceil(
-                free_set_blocks_acquired_size,
-                constants.block_size - @sizeOf(vsr.Header),
-            ),
-        );
+                inspector.allocator,
+                stdx.div_ceil(
+                    free_set_blocks_acquired_size,
+                    constants.block_size - @sizeOf(vsr.Header),
+                ),
+            );
         defer free_set_blocks_acquired_addresses.deinit();
 
         const free_set_blocks_released_buffer =
             try inspector.allocator.alignedAlloc(
-            u8,
-            @alignOf(vsr.FreeSet.Word),
-            free_set_blocks_released_size,
-        );
+                u8,
+                @alignOf(vsr.FreeSet.Word),
+                free_set_blocks_released_size,
+            );
         defer inspector.allocator.free(free_set_blocks_released_buffer);
 
         var free_set_blocks_released_addresses =
             try std.ArrayList(u64).initCapacity(
-            inspector.allocator,
-            stdx.div_ceil(
-                free_set_blocks_released_size,
-                constants.block_size - @sizeOf(vsr.Header),
-            ),
-        );
+                inspector.allocator,
+                stdx.div_ceil(
+                    free_set_blocks_released_size,
+                    constants.block_size - @sizeOf(vsr.Header),
+                ),
+            );
         defer free_set_blocks_released_addresses.deinit();
 
         try inspector.read_free_set_bitset(
