@@ -113,6 +113,7 @@ pub const Event = union(enum) {
 
     /// Convert the base event to an EventTiming or EventMetric.
     pub fn as(event: *const Event, EventType: type) EventType {
+        @setEvalBranchQuota(32_000);
         return switch (event.*) {
             inline else => |source_payload, tag| {
                 const TargetPayload = std.meta.fieldInfo(EventType, tag).type;

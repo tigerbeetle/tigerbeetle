@@ -399,6 +399,7 @@ pub fn ScanType(
         assigned: bool,
 
         pub fn read(scan: *Scan, context: *Context) void {
+            @setEvalBranchQuota(4_000);
             switch (scan.dispatcher) {
                 inline else => |*scan_impl, tag| read_dispatch(
                     tag,
