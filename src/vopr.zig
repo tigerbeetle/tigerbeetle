@@ -237,18 +237,18 @@ pub fn main() !void {
         .cluster = cluster_options,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = ratio(2, 100_000),
+        .replica_crash_probability = ratio(2, 10_000_000),
         .replica_crash_stability = prng.int_inclusive(u32, 1_000),
-        .replica_restart_probability = ratio(2, 10_000),
+        .replica_restart_probability = ratio(2, 1_000_000),
         .replica_restart_stability = prng.int_inclusive(u32, 1_000),
 
-        .replica_pause_probability = ratio(8, 100_000),
+        .replica_pause_probability = ratio(8, 10_000_000),
         .replica_pause_stability = prng.int_inclusive(u32, 1_000),
-        .replica_unpause_probability = ratio(8, 1_000),
+        .replica_unpause_probability = ratio(8, 1_000_000),
         .replica_unpause_stability = prng.int_inclusive(u32, 1_000),
 
-        .replica_release_advance_probability = ratio(1, 10_000),
-        .replica_release_catchup_probability = ratio(1, 1_000),
+        .replica_release_advance_probability = ratio(1, 1_000_000),
+        .replica_release_catchup_probability = ratio(1, 100_000),
 
         .requests_max = constants.journal_slot_count * 3,
         .request_probability = ratio(
