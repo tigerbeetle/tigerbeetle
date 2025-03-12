@@ -139,7 +139,7 @@ pub fn main() !void {
         200 * MiB - prng.int_inclusive(u64, 20 * MiB),
     );
 
-    const cluster_options = Cluster.Options{
+    const cluster_options: Cluster.Options = .{
         .cluster_id = cluster_id,
         .replica_count = replica_count,
         .standby_count = standby_count,
@@ -148,63 +148,7 @@ pub fn main() !void {
         .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
-        .network = .{
-            .node_count = node_count,
-            .client_count = client_count,
 
-            .seed = prng.int(u64),
-
-            .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
-            .one_way_delay_min = prng.int_inclusive(u16, 3),
-            .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
-            .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
-            .path_clog_duration_mean = prng.int_inclusive(u16, 500),
-            .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
-            .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
-
-            .partition_mode = prng.enum_uniform(PartitionMode),
-            .partition_symmetry = prng.enum_uniform(PartitionSymmetry),
-            .partition_probability = ratio(prng.int_inclusive(u8, 3), 100),
-            .unpartition_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
-            .partition_stability = 100 + prng.int_inclusive(u32, 100),
-            .unpartition_stability = prng.int_inclusive(u32, 20),
-        },
-        .storage = .{
-            .seed = prng.int(u64),
-            .read_latency_min = prng.range_inclusive(u16, 0, 3),
-            .read_latency_mean = prng.range_inclusive(u16, 3, 10),
-            .write_latency_min = prng.range_inclusive(u16, 0, 3),
-            .write_latency_mean = prng.range_inclusive(
-                u16,
-                3,
-                100,
-            ),
-            .read_fault_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .write_fault_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .write_misdirect_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .crash_fault_probability = ratio(
-                prng.range_inclusive(u8, 80, 100),
-                100,
-            ),
-        },
-        .storage_fault_atlas = .{
-            .faulty_superblock = true,
-            .faulty_wal_headers = replica_count > 1,
-            .faulty_wal_prepares = replica_count > 1,
-            .faulty_client_replies = replica_count > 1,
-            // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
-            // but then the leading replica may have the only copy of a block in the cluster.
-            .faulty_grid = replica_count > 2,
-        },
         .state_machine = switch (state_machine) {
             .testing => .{
                 .batch_size_limit = batch_size_limit,
@@ -220,8 +164,65 @@ pub fn main() !void {
                 .cache_entries_posted = if (prng.boolean()) 256 else 0,
             },
         },
-        .on_cluster_reply = Simulator.on_cluster_reply,
-        .on_client_reply = Simulator.on_client_reply,
+    };
+
+    const network_options = .{
+        .node_count = node_count,
+        .client_count = client_count,
+
+        .seed = prng.int(u64),
+
+        .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
+        .one_way_delay_min = prng.int_inclusive(u16, 3),
+        .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
+        .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
+        .path_clog_duration_mean = prng.int_inclusive(u16, 500),
+        .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
+        .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
+
+        .partition_mode = prng.enum_uniform(PartitionMode),
+        .partition_symmetry = prng.enum_uniform(PartitionSymmetry),
+        .partition_probability = ratio(prng.int_inclusive(u8, 3), 100),
+        .unpartition_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
+        .partition_stability = 100 + prng.int_inclusive(u32, 100),
+        .unpartition_stability = prng.int_inclusive(u32, 20),
+    };
+
+    const storage_options = .{
+        .seed = prng.int(u64),
+        .read_latency_min = prng.range_inclusive(u16, 0, 3),
+        .read_latency_mean = prng.range_inclusive(u16, 3, 10),
+        .write_latency_min = prng.range_inclusive(u16, 0, 3),
+        .write_latency_mean = prng.range_inclusive(
+            u16,
+            3,
+            100,
+        ),
+        .read_fault_probability = ratio(
+            prng.range_inclusive(u8, 0, 10),
+            100,
+        ),
+        .write_fault_probability = ratio(
+            prng.range_inclusive(u8, 0, 10),
+            100,
+        ),
+        .write_misdirect_probability = ratio(
+            prng.range_inclusive(u8, 0, 10),
+            100,
+        ),
+        .crash_fault_probability = ratio(
+            prng.range_inclusive(u8, 80, 100),
+            100,
+        ),
+    };
+    const storage_fault_atlas = .{
+        .faulty_superblock = true,
+        .faulty_wal_headers = replica_count > 1,
+        .faulty_wal_prepares = replica_count > 1,
+        .faulty_client_replies = replica_count > 1,
+        // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
+        // but then the leading replica may have the only copy of a block in the cluster.
+        .faulty_grid = replica_count > 2,
     };
 
     const workload_options = StateMachine.Workload.Options.generate(&prng, .{
@@ -235,6 +236,9 @@ pub fn main() !void {
 
     const simulator_options = Simulator.Options{
         .cluster = cluster_options,
+        .network = network_options,
+        .storage = storage_options,
+        .storage_fault_atlas = storage_fault_atlas,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
         .replica_crash_probability = ratio(2, 10_000_000),
@@ -306,25 +310,25 @@ pub fn main() !void {
         simulator_options.request_probability,
         simulator_options.request_idle_on_probability,
         simulator_options.request_idle_off_probability,
-        cluster_options.network.one_way_delay_mean,
-        cluster_options.network.one_way_delay_min,
-        cluster_options.network.packet_loss_probability,
-        cluster_options.network.path_maximum_capacity,
-        cluster_options.network.path_clog_duration_mean,
-        cluster_options.network.path_clog_probability,
-        cluster_options.network.packet_replay_probability,
-        cluster_options.network.partition_mode,
-        cluster_options.network.partition_symmetry,
-        cluster_options.network.partition_probability,
-        cluster_options.network.unpartition_probability,
-        cluster_options.network.partition_stability,
-        cluster_options.network.unpartition_stability,
-        cluster_options.storage.read_latency_min,
-        cluster_options.storage.read_latency_mean,
-        cluster_options.storage.write_latency_min,
-        cluster_options.storage.write_latency_mean,
-        cluster_options.storage.read_fault_probability,
-        cluster_options.storage.write_fault_probability,
+        network_options.one_way_delay_mean,
+        network_options.one_way_delay_min,
+        network_options.packet_loss_probability,
+        network_options.path_maximum_capacity,
+        network_options.path_clog_duration_mean,
+        network_options.path_clog_probability,
+        network_options.packet_replay_probability,
+        network_options.partition_mode,
+        network_options.partition_symmetry,
+        network_options.partition_probability,
+        network_options.unpartition_probability,
+        network_options.partition_stability,
+        network_options.unpartition_stability,
+        storage_options.read_latency_min,
+        storage_options.read_latency_mean,
+        storage_options.write_latency_min,
+        storage_options.write_latency_mean,
+        storage_options.read_fault_probability,
+        storage_options.write_fault_probability,
         simulator_options.replica_crash_probability,
         simulator_options.replica_crash_stability,
         simulator_options.replica_restart_probability,
@@ -440,6 +444,10 @@ pub fn main() !void {
 pub const Simulator = struct {
     pub const Options = struct {
         cluster: Cluster.Options,
+        network: Cluster.NetworkOptions,
+        storage: Cluster.Storage.Options,
+        storage_fault_atlas: Cluster.StorageFaultAtlas.Options,
+
         workload: StateMachine.Workload.Options,
 
         /// Probability per tick that a crash will occur.
@@ -508,7 +516,16 @@ pub const Simulator = struct {
         assert(options.request_probability.numerator > 0);
         assert(options.request_idle_off_probability.numerator > 0);
 
-        var cluster = try Cluster.init(allocator, options.cluster);
+        var cluster = try Cluster.init(allocator, .{
+            .cluster = options.cluster,
+            .network = options.network,
+            .storage = options.storage,
+            .storage_fault_atlas = options.storage_fault_atlas,
+            .callbacks = .{
+                .on_cluster_reply = on_cluster_reply,
+                .on_client_reply = on_client_reply,
+            },
+        });
         errdefer cluster.deinit();
 
         var workload = try StateMachine.Workload.init(allocator, prng, options.workload);
