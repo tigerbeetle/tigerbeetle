@@ -45,7 +45,6 @@ const releases = [_]Release{
     },
 };
 
-pub const output = std.log.scoped(.cluster);
 const log = std.log.scoped(.simulator);
 
 pub const std_options: std.Options = .{
@@ -105,7 +104,7 @@ pub fn main() !void {
             @panic("no seed provided: the simulator must be run with -OReleaseSafe");
         }
         if (vsr_vopr_options.log != .short) {
-            output.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
+            log.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
         }
     }
 
@@ -113,7 +112,7 @@ pub fn main() !void {
 
     const options = if (cli_args.lite) options_lite(&prng) else options_swarm(&prng);
 
-    output.info(
+    log.info(
         \\
         \\          SEED={}
         \\
@@ -211,7 +210,7 @@ pub fn main() !void {
 
         if (requests_done and upgrades_done) break;
     } else {
-        output.info(
+        log.info(
             "no liveness, final cluster state (requests_max={} requests_replied={}):",
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
@@ -230,10 +229,10 @@ pub fn main() !void {
                 @intFromBool(!replica.standby() and replica.status == .recovering_head);
         }
         if (view_change_quorum > options.cluster.replica_count - replicas_recovering_head) {
-            output.warn("no liveness, too many replicas replicas in recovering_head", .{});
+            log.warn("no liveness, too many replicas replicas in recovering_head", .{});
             return;
         } else {
-            output.err("you can reproduce this failure with seed={}", .{seed});
+            log.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
         }
     }
@@ -255,19 +254,19 @@ pub fn main() !void {
 
     if (simulator.pending()) |reason| {
         if (simulator.core_missing_primary()) {
-            stdx.unimplemented("repair requires reachable primary");
+            unimplemented("repair requires reachable primary");
         } else if (simulator.core_missing_quorum()) {
-            output.warn("no liveness, core replicas cannot view-change", .{});
+            log.warn("no liveness, core replicas cannot view-change", .{});
         } else if (simulator.core_missing_prepare()) |header| {
-            output.warn("no liveness, op={} is not available in core", .{header.op});
+            log.warn("no liveness, op={} is not available in core", .{header.op});
         } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
-            output.warn("no liveness, {} blocks are not available in core", .{blocks});
+            log.warn("no liveness, {} blocks are not available in core", .{blocks});
         } else if (simulator.core_missing_reply()) |header| {
-            output.warn("no liveness, reply op={} is not available in core", .{header.op});
+            log.warn("no liveness, reply op={} is not available in core", .{header.op});
         } else {
-            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
+            log.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
             simulator.cluster.log_cluster();
-            output.err("you can reproduce this failure with seed={}", .{seed});
+            log.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "no state convergence: {s}", .{reason});
         }
     } else {
@@ -281,8 +280,8 @@ pub fn main() !void {
             }
         }
     }
-    output.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
-    output.info("\n          PASSED ({} ticks)", .{tick_total});
+    log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+    log.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
 fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
@@ -1082,7 +1081,7 @@ pub const Simulator = struct {
                     assert(simulator.cluster.client_eviction_reasons[index] == .no_session or
                         simulator.cluster.client_eviction_reasons[index] == .session_too_low);
                 }
-                stdx.unimplemented("client replacement; all clients were evicted");
+                unimplemented("client replacement; all clients were evicted");
             }
         };
 
@@ -1328,8 +1327,19 @@ pub const Simulator = struct {
 
 /// Print an error message and then exit with an exit code.
 fn fatal(failure: Failure, comptime fmt_string: []const u8, args: anytype) noreturn {
-    output.err(fmt_string, args);
+    log.err(fmt_string, args);
     std.process.exit(@intFromEnum(failure));
+}
+
+/// Signal that something is not yet fully implemented, and abort the process.
+///
+/// In VOPR, this will exit with status 0, to make it easy to find "real" failures by running
+/// the simulator in a loop.
+fn unimplemented(comptime message: []const u8) noreturn {
+    const full_message = "unimplemented: " ++ message;
+    log.info(full_message, .{});
+    log.info("not crashing in VOPR", .{});
+    std.process.exit(0);
 }
 
 /// Returns a random fully-connected subgraph which includes at least view change
@@ -1379,7 +1389,13 @@ fn log_override(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (vsr_vopr_options.log == .short and scope != .cluster) return;
+    if (vsr_vopr_options.log == .short) {
+        if (scope == .cluster or scope == .simulator) {
+            // These are the only logs in short mode.
+        } else {
+            return;
+        }
+    }
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
     const prefix = if (vsr_vopr_options.log == .short) "" else prefix_default;
