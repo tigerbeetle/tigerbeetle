@@ -698,10 +698,10 @@ const JNIHelper = struct {
     ) jni.JFieldID {
         return env.get_field_id(class, name.ptr, signature.ptr) orelse
             vm_panic(
-            env,
-            "Field could not be found {s} {s}",
-            .{ name, signature },
-        );
+                env,
+                "Field could not be found {s} {s}",
+                .{ name, signature },
+            );
     }
 
     pub inline fn find_method(
@@ -712,10 +712,10 @@ const JNIHelper = struct {
     ) jni.JMethodID {
         return env.get_method_id(class, name.ptr, signature.ptr) orelse
             vm_panic(
-            env,
-            "Method could not be found {s} {s}",
-            .{ name, signature },
-        );
+                env,
+                "Method could not be found {s} {s}",
+                .{ name, signature },
+            );
     }
 
     pub inline fn get_direct_buffer(

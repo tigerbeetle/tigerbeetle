@@ -366,9 +366,9 @@ pub fn ScanTreeType(
                     // or ahead the probe.
                     assert(self.merge_iterator.?.key_popped == null or
                         switch (self.direction) {
-                        .ascending => self.merge_iterator.?.key_popped.? < probe_key,
-                        .descending => self.merge_iterator.?.key_popped.? > probe_key,
-                    });
+                            .ascending => self.merge_iterator.?.key_popped.? < probe_key,
+                            .descending => self.merge_iterator.?.key_popped.? > probe_key,
+                        });
 
                     // Once the underlying streams have been changed, the merge iterator needs
                     // to reset its state, otherwise it may have dirty keys buffered.
@@ -463,7 +463,7 @@ pub fn ScanTreeType(
                 .ascending => {
                     while (values.len > 1 and
                         key_from_value(&values[0]) ==
-                        key_from_value(&values[1]))
+                            key_from_value(&values[1]))
                     {
                         values = values[1..];
                     }
@@ -476,7 +476,7 @@ pub fn ScanTreeType(
                     const value_last = values[values.len - 1];
                     while (values.len > 1 and
                         key_from_value(&values[values.len - 1]) ==
-                        key_from_value(&values[values.len - 2]))
+                            key_from_value(&values[values.len - 2]))
                     {
                         values = values[0 .. values.len - 1];
                     }
