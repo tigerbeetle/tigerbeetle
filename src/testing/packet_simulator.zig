@@ -201,7 +201,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 link.queue.deinit(allocator);
             }
 
-            while (self.recorded.popOrNull()) |recorded_packet| {
+            while (self.recorded.pop()) |recorded_packet| {
                 self.packet_deinit(recorded_packet.packet);
             }
             self.recorded.deinit(allocator);
@@ -242,7 +242,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             assert(recording);
 
-            while (self.recorded.popOrNull()) |packet| {
+            while (self.recorded.pop()) |packet| {
                 self.submit_packet(packet.packet, packet.path);
             }
         }
