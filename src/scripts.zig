@@ -51,7 +51,7 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- cfo [--budget-minutes=<n>] [--hang-minutes=<n>] [--concurrency=<n>]
         \\
-        \\  zig build scripts -- ci [--language=<dotnet|go|java|node>] [--validate-release]
+        \\  zig build scripts -- ci [--language=<dotnet|go|java|node|python>] [--validate-release]
         \\                          [--build-docs]
         \\
         \\  zig build scripts -- devhub --sha=<commit>
@@ -65,7 +65,7 @@ const CLIArgs = union(enum) {
         \\
         \\Options (release):
         \\
-        \\  --language=<dotnet|go|java|node|zig|docker>
+        \\  --language=<dotnet|go|java|node|python|zig|docker>
         \\        Build/publish only the specified language.
         \\        (If not set, cover all languages in sequence.)
         \\
