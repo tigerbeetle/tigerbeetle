@@ -111,10 +111,183 @@ pub fn main() !void {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    const replica_count =
-        if (cli_args.lite) 3 else prng.range_inclusive(u8, 1, constants.replicas_max);
-    const standby_count =
-        if (cli_args.lite) 0 else prng.int_inclusive(u8, constants.standbys_max);
+    const options = if (cli_args.lite) options_lite(&prng) else options_swarm(&prng);
+
+    output.info(
+        \\
+        \\          SEED={}
+        \\
+        \\          replicas={}
+        \\          standbys={}
+        \\          clients={}
+        \\          request_probability={}
+        \\          idle_on_probability={}
+        \\          idle_off_probability={}
+        \\          one_way_delay_mean={} ticks
+        \\          one_way_delay_min={} ticks
+        \\          packet_loss_probability={}
+        \\          path_maximum_capacity={} messages
+        \\          path_clog_duration_mean={} ticks
+        \\          path_clog_probability={}
+        \\          packet_replay_probability={}
+        \\          partition_mode={}
+        \\          partition_symmetry={}
+        \\          partition_probability={}
+        \\          unpartition_probability={}
+        \\          partition_stability={} ticks
+        \\          unpartition_stability={} ticks
+        \\          read_latency_min={}
+        \\          read_latency_mean={}
+        \\          write_latency_min={}
+        \\          write_latency_mean={}
+        \\          read_fault_probability={}
+        \\          write_fault_probability={}
+        \\          crash_probability={}
+        \\          crash_stability={} ticks
+        \\          restart_probability={}
+        \\          restart_stability={} ticks
+    , .{
+        seed,
+        options.cluster.replica_count,
+        options.cluster.standby_count,
+        options.cluster.client_count,
+        options.request_probability,
+        options.request_idle_on_probability,
+        options.request_idle_off_probability,
+        options.network.one_way_delay_mean,
+        options.network.one_way_delay_min,
+        options.network.packet_loss_probability,
+        options.network.path_maximum_capacity,
+        options.network.path_clog_duration_mean,
+        options.network.path_clog_probability,
+        options.network.packet_replay_probability,
+        options.network.partition_mode,
+        options.network.partition_symmetry,
+        options.network.partition_probability,
+        options.network.unpartition_probability,
+        options.network.partition_stability,
+        options.network.unpartition_stability,
+        options.storage.read_latency_min,
+        options.storage.read_latency_mean,
+        options.storage.write_latency_min,
+        options.storage.write_latency_mean,
+        options.storage.read_fault_probability,
+        options.storage.write_fault_probability,
+        options.replica_crash_probability,
+        options.replica_crash_stability,
+        options.replica_restart_probability,
+        options.replica_restart_stability,
+    });
+
+    var simulator = try Simulator.init(allocator, &prng, options);
+    defer simulator.deinit(allocator);
+
+    for (0..simulator.cluster.clients.len) |client_index| {
+        simulator.cluster.register(client_index);
+    }
+
+    // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
+    // be crashed, but each replica restarts eventually. The cluster must process all requests
+    // without split-brain.
+    var tick_total: u64 = 0;
+    var tick: u64 = 0;
+    while (tick < cli_args.ticks_max_requests) : (tick += 1) {
+        const requests_replied_old = simulator.requests_replied;
+        simulator.tick();
+        tick_total += 1;
+        if (simulator.requests_replied > requests_replied_old) {
+            tick = 0;
+        }
+        const requests_done = simulator.requests_replied == simulator.options.requests_max;
+        const upgrades_done =
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
+        {
+            if (health == .down) continue;
+            const release_latest = releases[simulator.replica_releases_limit - 1].release;
+            if (replica.release.value == release_latest.value) {
+                break true;
+            }
+        } else false;
+
+        if (requests_done and upgrades_done) break;
+    } else {
+        output.info(
+            "no liveness, final cluster state (requests_max={} requests_replied={}):",
+            .{ simulator.options.requests_max, simulator.requests_replied },
+        );
+        simulator.cluster.log_cluster();
+
+        if (cli_args.lite) return;
+
+        // Cluster may be correctly unavailable because too many replicas are in recovering_head.
+        // This is possible as `Cluster.replica_release_execute()` does not heal WAL faults while
+        // while restarting replicas (unlike `Simulator.replica_restart`).
+        var replicas_recovering_head: usize = 0;
+        const view_change_quorum = vsr.quorums(options.cluster.replica_count).view_change;
+
+        for (simulator.cluster.replicas) |*replica| {
+            replicas_recovering_head +=
+                @intFromBool(!replica.standby() and replica.status == .recovering_head);
+        }
+        if (view_change_quorum > options.cluster.replica_count - replicas_recovering_head) {
+            output.warn("no liveness, too many replicas replicas in recovering_head", .{});
+            return;
+        } else {
+            output.err("you can reproduce this failure with seed={}", .{seed});
+            fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
+        }
+    }
+
+    if (cli_args.lite) return;
+
+    simulator.transition_to_liveness_mode();
+
+    // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
+    // crashed or partitioned permanently. The core should converge to the same state.
+    tick = 0;
+    while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
+        simulator.tick();
+        tick_total += 1;
+        if (simulator.pending() == null) {
+            break;
+        }
+    }
+
+    if (simulator.pending()) |reason| {
+        if (simulator.core_missing_primary()) {
+            stdx.unimplemented("repair requires reachable primary");
+        } else if (simulator.core_missing_quorum()) {
+            output.warn("no liveness, core replicas cannot view-change", .{});
+        } else if (simulator.core_missing_prepare()) |header| {
+            output.warn("no liveness, op={} is not available in core", .{header.op});
+        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
+            output.warn("no liveness, {} blocks are not available in core", .{blocks});
+        } else if (simulator.core_missing_reply()) |header| {
+            output.warn("no liveness, reply op={} is not available in core", .{header.op});
+        } else {
+            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
+            simulator.cluster.log_cluster();
+            output.err("you can reproduce this failure with seed={}", .{seed});
+            fatal(.liveness, "no state convergence: {s}", .{reason});
+        }
+    } else {
+        const commits = simulator.cluster.state_checker.commits.items;
+        const last_checksum = commits[commits.len - 1].header.checksum;
+        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
+            if (simulator.core.isSet(replica_index)) {
+                try aof.validate(last_checksum);
+            } else {
+                try aof.validate(null);
+            }
+        }
+    }
+
+    output.info("\n          PASSED ({} ticks)", .{tick_total});
+}
+
+fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
+    const replica_count = prng.range_inclusive(u8, 1, constants.replicas_max);
+    const standby_count = prng.int_inclusive(u8, constants.standbys_max);
     const node_count = replica_count + standby_count;
     // -1 since otherwise it is possible that all clients will evict each other.
     // (Due to retried register messages from the first set of evicted clients.
@@ -193,27 +366,11 @@ pub fn main() !void {
         .read_latency_min = prng.range_inclusive(u16, 0, 3),
         .read_latency_mean = prng.range_inclusive(u16, 3, 10),
         .write_latency_min = prng.range_inclusive(u16, 0, 3),
-        .write_latency_mean = prng.range_inclusive(
-            u16,
-            3,
-            100,
-        ),
-        .read_fault_probability = ratio(
-            prng.range_inclusive(u8, 0, 10),
-            100,
-        ),
-        .write_fault_probability = ratio(
-            prng.range_inclusive(u8, 0, 10),
-            100,
-        ),
-        .write_misdirect_probability = ratio(
-            prng.range_inclusive(u8, 0, 10),
-            100,
-        ),
-        .crash_fault_probability = ratio(
-            prng.range_inclusive(u8, 80, 100),
-            100,
-        ),
+        .write_latency_mean = prng.range_inclusive(u16, 3, 100),
+        .read_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .write_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .crash_fault_probability = ratio(prng.range_inclusive(u8, 80, 100), 100),
     };
     const storage_fault_atlas = .{
         .faulty_superblock = true,
@@ -225,7 +382,7 @@ pub fn main() !void {
         .faulty_grid = replica_count > 2,
     };
 
-    const workload_options = StateMachine.Workload.Options.generate(&prng, .{
+    const workload_options = StateMachine.Workload.Options.generate(prng, .{
         .batch_size_limit = batch_size_limit,
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
@@ -234,7 +391,7 @@ pub fn main() !void {
         .in_flight_max = ReplySequence.stalled_queue_capacity,
     });
 
-    const simulator_options = Simulator.Options{
+    return .{
         .cluster = cluster_options,
         .network = network_options,
         .storage = storage_options,
@@ -255,190 +412,17 @@ pub fn main() !void {
         .replica_release_catchup_probability = ratio(1, 100_000),
 
         .requests_max = constants.journal_slot_count * 3,
-        .request_probability = ratio(
-            prng.range_inclusive(u8, 1, 100),
-            100,
-        ),
-        .request_idle_on_probability = ratio(
-            prng.range_inclusive(u8, 0, 20),
-            100,
-        ),
-        .request_idle_off_probability = ratio(
-            prng.range_inclusive(u8, 10, 20),
-            100,
-        ),
+        .request_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
+        .request_idle_on_probability = ratio(prng.range_inclusive(u8, 0, 20), 100),
+        .request_idle_off_probability = ratio(prng.range_inclusive(u8, 10, 20), 100),
     };
+}
 
-    output.info(
-        \\
-        \\          SEED={}
-        \\
-        \\          replicas={}
-        \\          standbys={}
-        \\          clients={}
-        \\          request_probability={}
-        \\          idle_on_probability={}
-        \\          idle_off_probability={}
-        \\          one_way_delay_mean={} ticks
-        \\          one_way_delay_min={} ticks
-        \\          packet_loss_probability={}
-        \\          path_maximum_capacity={} messages
-        \\          path_clog_duration_mean={} ticks
-        \\          path_clog_probability={}
-        \\          packet_replay_probability={}
-        \\          partition_mode={}
-        \\          partition_symmetry={}
-        \\          partition_probability={}
-        \\          unpartition_probability={}
-        \\          partition_stability={} ticks
-        \\          unpartition_stability={} ticks
-        \\          read_latency_min={}
-        \\          read_latency_mean={}
-        \\          write_latency_min={}
-        \\          write_latency_mean={}
-        \\          read_fault_probability={}
-        \\          write_fault_probability={}
-        \\          crash_probability={}
-        \\          crash_stability={} ticks
-        \\          restart_probability={}
-        \\          restart_stability={} ticks
-    , .{
-        seed,
-        cluster_options.replica_count,
-        cluster_options.standby_count,
-        cluster_options.client_count,
-        simulator_options.request_probability,
-        simulator_options.request_idle_on_probability,
-        simulator_options.request_idle_off_probability,
-        network_options.one_way_delay_mean,
-        network_options.one_way_delay_min,
-        network_options.packet_loss_probability,
-        network_options.path_maximum_capacity,
-        network_options.path_clog_duration_mean,
-        network_options.path_clog_probability,
-        network_options.packet_replay_probability,
-        network_options.partition_mode,
-        network_options.partition_symmetry,
-        network_options.partition_probability,
-        network_options.unpartition_probability,
-        network_options.partition_stability,
-        network_options.unpartition_stability,
-        storage_options.read_latency_min,
-        storage_options.read_latency_mean,
-        storage_options.write_latency_min,
-        storage_options.write_latency_mean,
-        storage_options.read_fault_probability,
-        storage_options.write_fault_probability,
-        simulator_options.replica_crash_probability,
-        simulator_options.replica_crash_stability,
-        simulator_options.replica_restart_probability,
-        simulator_options.replica_restart_stability,
-    });
-
-    var simulator = try Simulator.init(allocator, &prng, simulator_options);
-    defer simulator.deinit(allocator);
-
-    for (0..simulator.cluster.clients.len) |client_index| {
-        simulator.cluster.register(client_index);
-    }
-
-    // Safety: replicas crash and restart; at any given point in time arbitrarily many replicas may
-    // be crashed, but each replica restarts eventually. The cluster must process all requests
-    // without split-brain.
-    var tick_total: u64 = 0;
-    var tick: u64 = 0;
-    while (tick < cli_args.ticks_max_requests) : (tick += 1) {
-        const requests_replied_old = simulator.requests_replied;
-        simulator.tick();
-        tick_total += 1;
-        if (simulator.requests_replied > requests_replied_old) {
-            tick = 0;
-        }
-        const requests_done = simulator.requests_replied == simulator.options.requests_max;
-        const upgrades_done =
-            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
-        {
-            if (health == .down) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
-            }
-        } else false;
-
-        if (requests_done and upgrades_done) break;
-    } else {
-        output.info(
-            "no liveness, final cluster state (requests_max={} requests_replied={}):",
-            .{ simulator.options.requests_max, simulator.requests_replied },
-        );
-        simulator.cluster.log_cluster();
-
-        if (cli_args.lite) return;
-
-        // Cluster may be correctly unavailable because too many replicas are in recovering_head.
-        // This is possible as `Cluster.replica_release_execute()` does not heal WAL faults while
-        // while restarting replicas (unlike `Simulator.replica_restart`).
-        var replicas_recovering_head: usize = 0;
-        const view_change_quorum = vsr.quorums(replica_count).view_change;
-
-        for (simulator.cluster.replicas) |*replica| {
-            replicas_recovering_head +=
-                @intFromBool(!replica.standby() and replica.status == .recovering_head);
-        }
-        if (view_change_quorum > replica_count - replicas_recovering_head) {
-            output.warn("no liveness, too many replicas replicas in recovering_head", .{});
-            return;
-        } else {
-            output.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
-        }
-    }
-
-    if (cli_args.lite) return;
-
-    simulator.transition_to_liveness_mode();
-
-    // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
-    // crashed or partitioned permanently. The core should converge to the same state.
-    tick = 0;
-    while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
-        simulator.tick();
-        tick_total += 1;
-        if (simulator.pending() == null) {
-            break;
-        }
-    }
-
-    if (simulator.pending()) |reason| {
-        if (simulator.core_missing_primary()) {
-            stdx.unimplemented("repair requires reachable primary");
-        } else if (simulator.core_missing_quorum()) {
-            output.warn("no liveness, core replicas cannot view-change", .{});
-        } else if (simulator.core_missing_prepare()) |header| {
-            output.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
-            output.warn("no liveness, {} blocks are not available in core", .{blocks});
-        } else if (simulator.core_missing_reply()) |header| {
-            output.warn("no liveness, reply op={} is not available in core", .{header.op});
-        } else {
-            output.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
-            simulator.cluster.log_cluster();
-            output.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "no state convergence: {s}", .{reason});
-        }
-    } else {
-        const commits = simulator.cluster.state_checker.commits.items;
-        const last_checksum = commits[commits.len - 1].header.checksum;
-        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
-            if (simulator.core.isSet(replica_index)) {
-                try aof.validate(last_checksum);
-            } else {
-                try aof.validate(null);
-            }
-        }
-    }
-
-    output.info("\n          PASSED ({} ticks)", .{tick_total});
+fn options_lite(prng: *stdx.PRNG) Simulator.Options {
+    var base = options_swarm(prng);
+    base.cluster.replica_count = 3;
+    base.cluster.standby_count = 0;
+    return base;
 }
 
 pub const Simulator = struct {
