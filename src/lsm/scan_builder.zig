@@ -352,7 +352,7 @@ pub fn ScanType(
             // Union field for the id tree:
             if (Groove.IdTree != void) {
                 const ScanTree = ScanTreeType(*Context, Groove.IdTree, Storage);
-                type_info.Union.fields = type_info.Union.fields ++
+                type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
                     .name = "id",
                     .type = ScanTree,
@@ -364,7 +364,7 @@ pub fn ScanType(
             for (std.meta.fields(Groove.IndexTrees)) |field| {
                 const IndexTree = field.type;
                 const ScanTree = ScanTreeType(*Context, IndexTree, Storage);
-                type_info.Union.fields = type_info.Union.fields ++
+                type_info.@"union".fields = type_info.@"union".fields ++
                     [_]std.builtin.Type.UnionField{.{
                     .name = field.name,
                     .type = ScanTree,
@@ -373,8 +373,8 @@ pub fn ScanType(
             }
 
             // We need a tagged union for dynamic dispatching.
-            type_info.Union.tag_type = blk: {
-                const union_fields = type_info.Union.fields;
+            type_info.@"union".tag_type = blk: {
+                const union_fields = type_info.@"union".fields;
                 var tag_fields: [union_fields.len]std.builtin.Type.EnumField =
                     undefined;
                 for (&tag_fields, union_fields, 0..) |*tag_field, union_field, i| {
@@ -384,7 +384,7 @@ pub fn ScanType(
                     };
                 }
 
-                break :blk @Type(.{ .Enum = .{
+                break :blk @Type(.{ .@"enum" = .{
                     .tag_type = std.math.IntFittingRange(0, tag_fields.len - 1),
                     .fields = &tag_fields,
                     .decls = &.{},

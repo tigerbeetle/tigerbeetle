@@ -38,7 +38,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         groove_fields[i] = .{
             .name = field.name,
             .type = Groove,
-            .default_value = null,
+            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(Groove),
         };
@@ -46,14 +46,14 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         groove_options_fields[i] = .{
             .name = field.name,
             .type = Groove.Options,
-            .default_value = null,
+            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(Groove),
         };
     }
 
     const _Grooves = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &groove_fields,
             .decls = &.{},
@@ -62,7 +62,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     });
 
     const _GroovesOptions = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &groove_options_fields,
             .decls = &.{},
@@ -161,7 +161,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .value = tree_info.tree_id,
             };
         }
-        break :tree_id @Type(.{ .Enum = .{
+        break :tree_id @Type(.{ .@"enum" = .{
             .tag_type = u16,
             .fields = &fields,
             .decls = &.{},

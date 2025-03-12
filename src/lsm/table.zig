@@ -58,7 +58,7 @@ pub fn TableType(
     comptime table_value_count_max: usize,
     comptime table_usage: TableUsage,
 ) type {
-    comptime assert(@typeInfo(TableKey) == .Int or @typeInfo(TableKey) == .ComptimeInt);
+    comptime assert(@typeInfo(TableKey) == .int or @typeInfo(TableKey) == .comptime_int);
 
     return struct {
         const Table = @This();
