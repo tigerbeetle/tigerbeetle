@@ -17,16 +17,16 @@ comptime {
         @compileError("Must be built with libc to export tb_client symbols.");
     }
 
-    @export(exports.init, .{ .name = "tb_client_init", .linkage = .strong });
-    @export(exports.init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
-    @export(exports.submit, .{ .name = "tb_client_submit", .linkage = .strong });
-    @export(exports.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
+    @export(&exports.init, .{ .name = "tb_client_init", .linkage = .strong });
+    @export(&exports.init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
+    @export(&exports.submit, .{ .name = "tb_client_submit", .linkage = .strong });
+    @export(&exports.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
     @export(
-        exports.completion_context,
+        &exports.completion_context,
         .{ .name = "tb_client_completion_context", .linkage = .strong },
     );
     @export(
-        exports.register_log_callback,
+        &exports.register_log_callback,
         .{ .name = "tb_client_register_log_callback", .linkage = .strong },
     );
     @export(
