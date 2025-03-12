@@ -589,7 +589,12 @@ test shuffle {
 }
 
 test "no floating point please" {
-    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, @src().file, 64 * 1024);
+    const path = try std.fs.path.join(std.testing.allocator, &.{
+        "src",
+        @src().file,
+    });
+    defer std.testing.allocator.free(path);
+    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * 1024);
     defer std.testing.allocator.free(file_text);
 
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);
