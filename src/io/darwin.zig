@@ -565,7 +565,7 @@ pub const IO = struct {
         );
     }
 
-    pub const SendError = posix.SendError;
+    pub const SendError = error{ConnectionRefused} || posix.SendError;
 
     pub fn send(
         self: *IO,
@@ -592,7 +592,28 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) SendError!usize {
-                    return posix.send(op.socket, op.buf[0..op.len], 0);
+                    // Use `posix.sendto` instead of `posix.send` because UDP sockets
+                    // may return `ConnectionRefused`.
+                    // https://github.com/ziglang/zig/issues/20219
+                    // https://github.com/ziglang/zig/pull/20223
+                    return posix.sendto(
+                        op.socket,
+                        op.buf[0..op.len],
+                        0,
+                        null,
+                        0,
+                    ) catch |err| switch (err) {
+                        error.AddressFamilyNotSupported => unreachable,
+                        error.SymLinkLoop => unreachable,
+                        error.NameTooLong => unreachable,
+                        error.FileNotFound => unreachable,
+                        error.NotDir => unreachable,
+                        error.NetworkUnreachable => unreachable,
+                        error.AddressNotAvailable => unreachable,
+                        error.SocketNotConnected => unreachable,
+                        error.UnreachableAddress => unreachable,
+                        else => |e| return e,
+                    };
                 }
             },
         );
