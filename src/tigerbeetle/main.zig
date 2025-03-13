@@ -45,7 +45,7 @@ pub fn log_runtime(
     }
 }
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
     // The runtime filtering is handled by log_level_runtime.
     .log_level = .debug,

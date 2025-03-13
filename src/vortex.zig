@@ -19,7 +19,7 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.vortex);
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .info,
     .logFn = stdx.log_with_timestamp,
 };

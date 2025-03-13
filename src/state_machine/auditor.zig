@@ -25,6 +25,12 @@ pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Or
 const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
 const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
 
+const InFlightKey = struct {
+    client_index: usize,
+    /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
+    client_request: usize,
+};
+
 /// Store expected possible results for an in-flight request.
 /// This reply validation takes advantage of the Workload's additional context about the request.
 const InFlight = union(enum) {
@@ -32,11 +38,7 @@ const InFlight = union(enum) {
     create_transfers: [transfers_batch_size_max]CreateTransferResultSet,
 };
 
-const InFlightQueue = std.AutoHashMapUnmanaged(struct {
-    client_index: usize,
-    /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
-    client_request: usize,
-}, InFlight);
+const InFlightQueue = std.AutoHashMapUnmanaged(InFlightKey, InFlight);
 
 const PendingTransfer = struct {
     amount: u128,
@@ -642,7 +644,7 @@ pub const AccountingAuditor = struct {
     }
 
     fn take_in_flight(self: *AccountingAuditor, client_index: usize) InFlight {
-        const key = .{
+        const key: InFlightKey = .{
             .client_index = client_index,
             .client_request = self.creates_delivered[client_index],
         };

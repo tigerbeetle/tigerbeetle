@@ -32,7 +32,7 @@ pub fn log_fn(
     stdx.log_with_timestamp(message_level, scope, format, args);
 }
 
-pub const std_options = .{ .logFn = log_fn };
+pub const std_options: std.Options = .{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,

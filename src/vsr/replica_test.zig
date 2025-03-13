@@ -14,6 +14,7 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
+const Release = @import("../testing/cluster.zig").Release;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
 const ratio = stdx.PRNG.ratio;
@@ -34,7 +35,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const log_level = std.log.Level.err;
 
-const releases = .{
+const releases = [_]Release{
     .{
         .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
         .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),

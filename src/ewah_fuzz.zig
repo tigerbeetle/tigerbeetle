@@ -87,7 +87,7 @@ fn generate_bits(prng: *stdx.PRNG, data: []u8, bits_set_total: usize) void {
     }
 }
 
-fn ContextType(comptime Word: type) type {
+pub fn ContextType(comptime Word: type) type {
     return struct {
         const Context = @This();
         const Codec = ewah.ewah(Word);
@@ -117,7 +117,7 @@ fn ContextType(comptime Word: type) type {
             allocator.free(context.encoded_actual);
         }
 
-        const TestOptions = struct {
+        pub const TestOptions = struct {
             encode_chunk_words_count: usize,
             decode_chunk_words_count: usize,
         };

@@ -86,7 +86,7 @@ pub fn binary_search_values_upsert_index(
             inline for (0..cache_lines_per_value) |i| {
                 // Locality = 0 means no temporal locality. That is, the data can be immediately
                 // dropped from the cache after it is accessed.
-                const options = .{
+                const options: std.builtin.PrefetchOptions = .{
                     .rw = .read,
                     .locality = 0,
                     .cache = .data,

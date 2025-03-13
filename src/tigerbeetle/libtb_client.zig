@@ -2,11 +2,12 @@
 //! Used by language clients that rely on the shared or static library exposed by `tb_client.h`.
 //! For an idiomatic Zig API, use `vsr.tb_client` directly instead.
 const builtin = @import("builtin");
+const std = @import("std");
 
 pub const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .debug,
     .logFn = exports.Logging.application_logger,
 };

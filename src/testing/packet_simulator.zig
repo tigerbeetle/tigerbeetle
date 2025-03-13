@@ -339,7 +339,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path: Path = .{ .source = from, .target = to };
                     const enabled =
                         from >= self.options.node_count or
                         to >= self.options.node_count or
@@ -378,7 +378,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path: Path = .{ .source = from, .target = to };
                     if (self.is_clogged(path)) continue;
 
                     const queue = &self.links[self.path_index(path)].queue;

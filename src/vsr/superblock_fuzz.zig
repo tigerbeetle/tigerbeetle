@@ -53,7 +53,7 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     });
     defer storage_fault_atlas.deinit(allocator);
 
-    const storage_options = .{
+    const storage_options: Storage.Options = .{
         .replica_index = 0,
         .seed = prng.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.

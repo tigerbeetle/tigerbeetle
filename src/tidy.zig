@@ -434,7 +434,7 @@ fn tidy_long_functions(
         const function_body_first_token = tree.firstToken(@intCast(function_body_node));
         const function_body_last_token = tree.lastToken(@intCast(function_body_node));
 
-        const innermost_function = .{
+        const innermost_function: Function = .{
             .fn_decl_line = tree.tokenLocation(0, function_decl_first_token).line,
             .first_token_location = tree.tokenLocation(0, function_body_first_token),
             .last_token_location = tree.tokenLocation(0, function_body_last_token),

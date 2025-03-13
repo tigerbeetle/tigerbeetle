@@ -304,10 +304,10 @@ test "ewah encode→decode cycle" {
     var prng = stdx.PRNG.from_seed(123);
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
+        const Context = fuzz.ContextType(Word);
         for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
             var decoded: [4096]Word = undefined;
-
-            const fuzz_options = .{
+            const fuzz_options: Context.TestOptions = .{
                 .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
                 .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
             };
