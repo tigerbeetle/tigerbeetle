@@ -421,6 +421,7 @@ fn options_lite(prng: *stdx.PRNG) Simulator.Options {
     var base = options_swarm(prng);
     base.cluster.replica_count = 3;
     base.cluster.standby_count = 0;
+    base.network.node_count = 3;
     return base;
 }
 
