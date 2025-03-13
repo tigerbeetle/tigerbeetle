@@ -111,159 +111,7 @@ pub fn main() !void {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    const replica_count =
-        if (cli_args.lite) 3 else prng.range_inclusive(u8, 1, constants.replicas_max);
-    const standby_count =
-        if (cli_args.lite) 0 else prng.int_inclusive(u8, constants.standbys_max);
-    const node_count = replica_count + standby_count;
-    // -1 since otherwise it is possible that all clients will evict each other.
-    // (Due to retried register messages from the first set of evicted clients.
-    // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
-    const client_count = prng.range_inclusive(u8, 1, constants.clients_max * 2 - 1);
-
-    const batch_size_limit_min = comptime batch_size_limit_min: {
-        var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
-        for (std.enums.values(StateMachine.Operation)) |operation| {
-            const event_size = @sizeOf(StateMachine.EventType(operation));
-            event_size_max = @max(event_size_max, event_size);
-        }
-        break :batch_size_limit_min event_size_max;
-    };
-    const batch_size_limit: u32 = if (prng.boolean())
-        constants.message_body_size_max
-    else
-        prng.range_inclusive(u32, batch_size_limit_min, constants.message_body_size_max);
-
-    const MiB = 1024 * 1024;
-    const storage_size_limit = vsr.sector_floor(
-        200 * MiB - prng.int_inclusive(u64, 20 * MiB),
-    );
-
-    const cluster_options = Cluster.Options{
-        .cluster_id = cluster_id,
-        .replica_count = replica_count,
-        .standby_count = standby_count,
-        .client_count = client_count,
-        .storage_size_limit = storage_size_limit,
-        .seed = prng.int(u64),
-        .releases = &releases,
-        .client_release = releases[0].release,
-        .network = .{
-            .node_count = node_count,
-            .client_count = client_count,
-
-            .seed = prng.int(u64),
-
-            .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
-            .one_way_delay_min = prng.int_inclusive(u16, 3),
-            .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
-            .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
-            .path_clog_duration_mean = prng.int_inclusive(u16, 500),
-            .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
-            .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
-
-            .partition_mode = prng.enum_uniform(PartitionMode),
-            .partition_symmetry = prng.enum_uniform(PartitionSymmetry),
-            .partition_probability = ratio(prng.int_inclusive(u8, 3), 100),
-            .unpartition_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
-            .partition_stability = 100 + prng.int_inclusive(u32, 100),
-            .unpartition_stability = prng.int_inclusive(u32, 20),
-        },
-        .storage = .{
-            .seed = prng.int(u64),
-            .read_latency_min = prng.range_inclusive(u16, 0, 3),
-            .read_latency_mean = prng.range_inclusive(u16, 3, 10),
-            .write_latency_min = prng.range_inclusive(u16, 0, 3),
-            .write_latency_mean = prng.range_inclusive(
-                u16,
-                3,
-                100,
-            ),
-            .read_fault_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .write_fault_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .write_misdirect_probability = ratio(
-                prng.range_inclusive(u8, 0, 10),
-                100,
-            ),
-            .crash_fault_probability = ratio(
-                prng.range_inclusive(u8, 80, 100),
-                100,
-            ),
-        },
-        .storage_fault_atlas = .{
-            .faulty_superblock = true,
-            .faulty_wal_headers = replica_count > 1,
-            .faulty_wal_prepares = replica_count > 1,
-            .faulty_client_replies = replica_count > 1,
-            // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
-            // but then the leading replica may have the only copy of a block in the cluster.
-            .faulty_grid = replica_count > 2,
-        },
-        .state_machine = switch (state_machine) {
-            .testing => .{
-                .batch_size_limit = batch_size_limit,
-                .lsm_forest_node_count = 4096,
-            },
-            .accounting => .{
-                .batch_size_limit = batch_size_limit,
-                .lsm_forest_compaction_block_count = prng.int_inclusive(u32, 256) +
-                    StateMachine.Forest.Options.compaction_block_count_min,
-                .lsm_forest_node_count = 4096,
-                .cache_entries_accounts = if (prng.boolean()) 256 else 0,
-                .cache_entries_transfers = if (prng.boolean()) 256 else 0,
-                .cache_entries_posted = if (prng.boolean()) 256 else 0,
-            },
-        },
-        .on_cluster_reply = Simulator.on_cluster_reply,
-        .on_client_reply = Simulator.on_client_reply,
-    };
-
-    const workload_options = StateMachine.Workload.Options.generate(&prng, .{
-        .batch_size_limit = batch_size_limit,
-        .client_count = client_count,
-        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
-        // private. Also maybe make it dynamic (computed from the client_count instead of
-        // clients_max).
-        .in_flight_max = ReplySequence.stalled_queue_capacity,
-    });
-
-    const simulator_options = Simulator.Options{
-        .cluster = cluster_options,
-        .workload = workload_options,
-        // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
-        .replica_crash_probability = ratio(2, 10_000_000),
-        .replica_crash_stability = prng.int_inclusive(u32, 1_000),
-        .replica_restart_probability = ratio(2, 1_000_000),
-        .replica_restart_stability = prng.int_inclusive(u32, 1_000),
-
-        .replica_pause_probability = ratio(8, 10_000_000),
-        .replica_pause_stability = prng.int_inclusive(u32, 1_000),
-        .replica_unpause_probability = ratio(8, 1_000_000),
-        .replica_unpause_stability = prng.int_inclusive(u32, 1_000),
-
-        .replica_release_advance_probability = ratio(1, 1_000_000),
-        .replica_release_catchup_probability = ratio(1, 100_000),
-
-        .requests_max = constants.journal_slot_count * 3,
-        .request_probability = ratio(
-            prng.range_inclusive(u8, 1, 100),
-            100,
-        ),
-        .request_idle_on_probability = ratio(
-            prng.range_inclusive(u8, 0, 20),
-            100,
-        ),
-        .request_idle_off_probability = ratio(
-            prng.range_inclusive(u8, 10, 20),
-            100,
-        ),
-    };
+    const options = if (cli_args.lite) options_lite(&prng) else options_swarm(&prng);
 
     output.info(
         \\
@@ -300,38 +148,38 @@ pub fn main() !void {
         \\          restart_stability={} ticks
     , .{
         seed,
-        cluster_options.replica_count,
-        cluster_options.standby_count,
-        cluster_options.client_count,
-        simulator_options.request_probability,
-        simulator_options.request_idle_on_probability,
-        simulator_options.request_idle_off_probability,
-        cluster_options.network.one_way_delay_mean,
-        cluster_options.network.one_way_delay_min,
-        cluster_options.network.packet_loss_probability,
-        cluster_options.network.path_maximum_capacity,
-        cluster_options.network.path_clog_duration_mean,
-        cluster_options.network.path_clog_probability,
-        cluster_options.network.packet_replay_probability,
-        cluster_options.network.partition_mode,
-        cluster_options.network.partition_symmetry,
-        cluster_options.network.partition_probability,
-        cluster_options.network.unpartition_probability,
-        cluster_options.network.partition_stability,
-        cluster_options.network.unpartition_stability,
-        cluster_options.storage.read_latency_min,
-        cluster_options.storage.read_latency_mean,
-        cluster_options.storage.write_latency_min,
-        cluster_options.storage.write_latency_mean,
-        cluster_options.storage.read_fault_probability,
-        cluster_options.storage.write_fault_probability,
-        simulator_options.replica_crash_probability,
-        simulator_options.replica_crash_stability,
-        simulator_options.replica_restart_probability,
-        simulator_options.replica_restart_stability,
+        options.cluster.replica_count,
+        options.cluster.standby_count,
+        options.cluster.client_count,
+        options.request_probability,
+        options.request_idle_on_probability,
+        options.request_idle_off_probability,
+        options.network.one_way_delay_mean,
+        options.network.one_way_delay_min,
+        options.network.packet_loss_probability,
+        options.network.path_maximum_capacity,
+        options.network.path_clog_duration_mean,
+        options.network.path_clog_probability,
+        options.network.packet_replay_probability,
+        options.network.partition_mode,
+        options.network.partition_symmetry,
+        options.network.partition_probability,
+        options.network.unpartition_probability,
+        options.network.partition_stability,
+        options.network.unpartition_stability,
+        options.storage.read_latency_min,
+        options.storage.read_latency_mean,
+        options.storage.write_latency_min,
+        options.storage.write_latency_mean,
+        options.storage.read_fault_probability,
+        options.storage.write_fault_probability,
+        options.replica_crash_probability,
+        options.replica_crash_stability,
+        options.replica_restart_probability,
+        options.replica_restart_stability,
     });
 
-    var simulator = try Simulator.init(allocator, &prng, simulator_options);
+    var simulator = try Simulator.init(allocator, &prng, options);
     defer simulator.deinit(allocator);
 
     for (0..simulator.cluster.clients.len) |client_index| {
@@ -375,13 +223,13 @@ pub fn main() !void {
         // This is possible as `Cluster.replica_release_execute()` does not heal WAL faults while
         // while restarting replicas (unlike `Simulator.replica_restart`).
         var replicas_recovering_head: usize = 0;
-        const view_change_quorum = vsr.quorums(replica_count).view_change;
+        const view_change_quorum = vsr.quorums(options.cluster.replica_count).view_change;
 
         for (simulator.cluster.replicas) |*replica| {
             replicas_recovering_head +=
                 @intFromBool(!replica.standby() and replica.status == .recovering_head);
         }
-        if (view_change_quorum > replica_count - replicas_recovering_head) {
+        if (view_change_quorum > options.cluster.replica_count - replicas_recovering_head) {
             output.warn("no liveness, too many replicas replicas in recovering_head", .{});
             return;
         } else {
@@ -437,9 +285,153 @@ pub fn main() !void {
     output.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
+fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
+    const replica_count = prng.range_inclusive(u8, 1, constants.replicas_max);
+    const standby_count = prng.int_inclusive(u8, constants.standbys_max);
+    const node_count = replica_count + standby_count;
+    // -1 since otherwise it is possible that all clients will evict each other.
+    // (Due to retried register messages from the first set of evicted clients.
+    // See the "Cluster: eviction: session_too_low" replica test for a related scenario.)
+    const client_count = prng.range_inclusive(u8, 1, constants.clients_max * 2 - 1);
+
+    const batch_size_limit_min = comptime batch_size_limit_min: {
+        var event_size_max: u32 = @sizeOf(vsr.RegisterRequest);
+        for (std.enums.values(StateMachine.Operation)) |operation| {
+            const event_size = @sizeOf(StateMachine.EventType(operation));
+            event_size_max = @max(event_size_max, event_size);
+        }
+        break :batch_size_limit_min event_size_max;
+    };
+    const batch_size_limit: u32 = if (prng.boolean())
+        constants.message_body_size_max
+    else
+        prng.range_inclusive(u32, batch_size_limit_min, constants.message_body_size_max);
+
+    const MiB = 1024 * 1024;
+    const storage_size_limit = vsr.sector_floor(
+        200 * MiB - prng.int_inclusive(u64, 20 * MiB),
+    );
+
+    const cluster_options: Cluster.Options = .{
+        .cluster_id = cluster_id,
+        .replica_count = replica_count,
+        .standby_count = standby_count,
+        .client_count = client_count,
+        .storage_size_limit = storage_size_limit,
+        .seed = prng.int(u64),
+        .releases = &releases,
+        .client_release = releases[0].release,
+
+        .state_machine = switch (state_machine) {
+            .testing => .{
+                .batch_size_limit = batch_size_limit,
+                .lsm_forest_node_count = 4096,
+            },
+            .accounting => .{
+                .batch_size_limit = batch_size_limit,
+                .lsm_forest_compaction_block_count = prng.int_inclusive(u32, 256) +
+                    StateMachine.Forest.Options.compaction_block_count_min,
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = if (prng.boolean()) 256 else 0,
+                .cache_entries_transfers = if (prng.boolean()) 256 else 0,
+                .cache_entries_posted = if (prng.boolean()) 256 else 0,
+            },
+        },
+    };
+
+    const network_options = .{
+        .node_count = node_count,
+        .client_count = client_count,
+
+        .seed = prng.int(u64),
+
+        .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
+        .one_way_delay_min = prng.int_inclusive(u16, 3),
+        .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
+        .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
+        .path_clog_duration_mean = prng.int_inclusive(u16, 500),
+        .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
+        .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
+
+        .partition_mode = prng.enum_uniform(PartitionMode),
+        .partition_symmetry = prng.enum_uniform(PartitionSymmetry),
+        .partition_probability = ratio(prng.int_inclusive(u8, 3), 100),
+        .unpartition_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
+        .partition_stability = 100 + prng.int_inclusive(u32, 100),
+        .unpartition_stability = prng.int_inclusive(u32, 20),
+    };
+
+    const storage_options = .{
+        .seed = prng.int(u64),
+        .read_latency_min = prng.range_inclusive(u16, 0, 3),
+        .read_latency_mean = prng.range_inclusive(u16, 3, 10),
+        .write_latency_min = prng.range_inclusive(u16, 0, 3),
+        .write_latency_mean = prng.range_inclusive(u16, 3, 100),
+        .read_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .write_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
+        .crash_fault_probability = ratio(prng.range_inclusive(u8, 80, 100), 100),
+    };
+    const storage_fault_atlas = .{
+        .faulty_superblock = true,
+        .faulty_wal_headers = replica_count > 1,
+        .faulty_wal_prepares = replica_count > 1,
+        .faulty_client_replies = replica_count > 1,
+        // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
+        // but then the leading replica may have the only copy of a block in the cluster.
+        .faulty_grid = replica_count > 2,
+    };
+
+    const workload_options = StateMachine.Workload.Options.generate(prng, .{
+        .batch_size_limit = batch_size_limit,
+        .client_count = client_count,
+        // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
+        // private. Also maybe make it dynamic (computed from the client_count instead of
+        // clients_max).
+        .in_flight_max = ReplySequence.stalled_queue_capacity,
+    });
+
+    return .{
+        .cluster = cluster_options,
+        .network = network_options,
+        .storage = storage_options,
+        .storage_fault_atlas = storage_fault_atlas,
+        .workload = workload_options,
+        // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
+        .replica_crash_probability = ratio(2, 10_000_000),
+        .replica_crash_stability = prng.int_inclusive(u32, 1_000),
+        .replica_restart_probability = ratio(2, 1_000_000),
+        .replica_restart_stability = prng.int_inclusive(u32, 1_000),
+
+        .replica_pause_probability = ratio(8, 10_000_000),
+        .replica_pause_stability = prng.int_inclusive(u32, 1_000),
+        .replica_unpause_probability = ratio(8, 1_000_000),
+        .replica_unpause_stability = prng.int_inclusive(u32, 1_000),
+
+        .replica_release_advance_probability = ratio(1, 1_000_000),
+        .replica_release_catchup_probability = ratio(1, 100_000),
+
+        .requests_max = constants.journal_slot_count * 3,
+        .request_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
+        .request_idle_on_probability = ratio(prng.range_inclusive(u8, 0, 20), 100),
+        .request_idle_off_probability = ratio(prng.range_inclusive(u8, 10, 20), 100),
+    };
+}
+
+fn options_lite(prng: *stdx.PRNG) Simulator.Options {
+    var base = options_swarm(prng);
+    base.cluster.replica_count = 3;
+    base.cluster.standby_count = 0;
+    return base;
+}
+
 pub const Simulator = struct {
     pub const Options = struct {
         cluster: Cluster.Options,
+        network: Cluster.NetworkOptions,
+        storage: Cluster.Storage.Options,
+        storage_fault_atlas: Cluster.StorageFaultAtlas.Options,
+
         workload: StateMachine.Workload.Options,
 
         /// Probability per tick that a crash will occur.
@@ -508,7 +500,16 @@ pub const Simulator = struct {
         assert(options.request_probability.numerator > 0);
         assert(options.request_idle_off_probability.numerator > 0);
 
-        var cluster = try Cluster.init(allocator, options.cluster);
+        var cluster = try Cluster.init(allocator, .{
+            .cluster = options.cluster,
+            .network = options.network,
+            .storage = options.storage,
+            .storage_fault_atlas = options.storage_fault_atlas,
+            .callbacks = .{
+                .on_cluster_reply = on_cluster_reply,
+                .on_client_reply = on_client_reply,
+            },
+        });
         errdefer cluster.deinit();
 
         var workload = try StateMachine.Workload.init(allocator, prng, options.workload);

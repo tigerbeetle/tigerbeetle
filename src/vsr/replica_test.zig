@@ -1857,14 +1857,20 @@ const TestContext = struct {
         var prng = stdx.PRNG.from_seed(options.seed);
 
         const cluster = try Cluster.init(allocator, .{
-            .cluster_id = 0,
-            .replica_count = options.replica_count,
-            .standby_count = options.standby_count,
-            .client_count = options.client_count,
-            .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
-            .seed = prng.int(u64),
-            .releases = &releases,
-            .client_release = options.client_release,
+            .cluster = .{
+                .cluster_id = 0,
+                .replica_count = options.replica_count,
+                .standby_count = options.standby_count,
+                .client_count = options.client_count,
+                .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
+                .seed = prng.int(u64),
+                .releases = &releases,
+                .client_release = options.client_release,
+                .state_machine = .{
+                    .batch_size_limit = constants.message_body_size_max,
+                    .lsm_forest_node_count = 4096,
+                },
+            },
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
@@ -1890,11 +1896,9 @@ const TestContext = struct {
                 .faulty_client_replies = false,
                 .faulty_grid = false,
             },
-            .state_machine = .{
-                .batch_size_limit = constants.message_body_size_max,
-                .lsm_forest_node_count = 4096,
+            .callbacks = .{
+                .on_client_reply = TestContext.on_client_reply,
             },
-            .on_client_reply = TestContext.on_client_reply,
         });
         errdefer cluster.deinit();
 
