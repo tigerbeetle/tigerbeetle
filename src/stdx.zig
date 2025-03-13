@@ -216,21 +216,6 @@ pub fn maybe(ok: bool) void {
     assert(ok or !ok);
 }
 
-/// Signal that something is not yet fully implemented, and abort the process.
-///
-/// In VOPR, this will exit with status 0, to make it easy to find "real" failures by running
-/// the simulator in a loop.
-pub fn unimplemented(comptime message: []const u8) noreturn {
-    const full_message = "unimplemented: " ++ message;
-    const root = @import("root");
-    if (@hasDecl(root, "Simulator")) {
-        root.output.info(full_message, .{});
-        root.output.info("not crashing in VOPR", .{});
-        std.process.exit(0);
-    }
-    @panic(full_message);
-}
-
 pub const log = if (builtin.is_test)
     // Downgrade `err` to `warn` for tests.
     // Zig fails any test that does `log.err`, but we want to test those code paths here.
