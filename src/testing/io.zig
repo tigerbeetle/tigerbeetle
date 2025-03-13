@@ -80,7 +80,7 @@ pub const IO = struct {
         comptime callback: anytype,
         completion: *Completion,
         comptime operation_tag: std.meta.Tag(Operation),
-        operation_data: anytype,
+        operation_data: std.meta.TagPayload(Operation, operation_tag),
         comptime OperationImpl: type,
     ) void {
         const on_complete_fn = struct {

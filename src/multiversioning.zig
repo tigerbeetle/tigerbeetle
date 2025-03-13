@@ -687,7 +687,7 @@ pub const Multiversion = struct {
         };
         errdefer posix.close(target_fd);
 
-        const args_envp = switch (builtin.target.os.tag) {
+        const args_envp: ArgsEnvp = switch (builtin.target.os.tag) {
             .linux, .macos => blk: {
                 // We can pass through our env as-is to exec. We have to manipulate the types
                 // here somewhat: they're cast in start.zig and we can't access `argc_argv_ptr`

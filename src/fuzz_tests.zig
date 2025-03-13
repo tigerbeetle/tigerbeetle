@@ -13,7 +13,7 @@ comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .superblock_quorums, .level = .err },

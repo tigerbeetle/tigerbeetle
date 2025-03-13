@@ -887,7 +887,7 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     });
     defer storage_fault_atlas.deinit(allocator);
 
-    const storage_options = .{
+    const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .replica_index = 0,
         .read_latency_min = 0,

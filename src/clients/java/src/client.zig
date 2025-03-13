@@ -30,7 +30,7 @@ const jni_version = jni.jni_version_10;
 
 const global_allocator = std.heap.c_allocator;
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .debug,
     .logFn = tb.exports.Logging.application_logger,
 };

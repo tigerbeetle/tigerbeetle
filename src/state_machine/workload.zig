@@ -111,7 +111,12 @@ const transfer_templates = table: {
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
-    const two_phase_ok = .{
+    const InitValues = std.enums.EnumFieldStruct(
+        tb.CreateTransferResult.Ordered,
+        bool,
+        false,
+    );
+    const two_phase_ok: InitValues = .{
         .ok = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,

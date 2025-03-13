@@ -1651,7 +1651,7 @@ pub fn ReplicaType(
                     return;
                 };
 
-            const request = .{
+            const request: Request = .{
                 .message = message.ref(),
                 .realtime = realtime,
             };
