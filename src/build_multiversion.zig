@@ -20,12 +20,12 @@ const Target = union(enum) {
     macos, // Universal binary packing both x86_64 and aarch64 versions.
 
     pub fn parse(str: []const u8) !Target {
-        const targets = .{
-            .{ "x86_64-linux", Target{ .linux = .x86_64 } },
-            .{ "aarch64-linux", Target{ .linux = .aarch64 } },
-            .{ "x86_64-windows", Target{ .windows = .x86_64 } },
-            .{ "aarch64-windows", Target{ .windows = .aarch64 } },
-            .{ "macos", Target.macos },
+        const targets = [_]struct { []const u8, Target }{
+            .{ "x86_64-linux", .{ .linux = .x86_64 } },
+            .{ "aarch64-linux", .{ .linux = .aarch64 } },
+            .{ "x86_64-windows", .{ .windows = .x86_64 } },
+            .{ "aarch64-windows", .{ .windows = .aarch64 } },
+            .{ "macos", .macos },
         };
 
         inline for (targets) |t| if (std.mem.eql(u8, str, t[0])) return t[1];
