@@ -212,16 +212,21 @@ pub fn main() !void {
     } else {
         if (cli_args.lite) return;
 
+        // Safety mode ran out of ticks without completing its requests, so now we check whether it
+        // was correct to do so.
+        //
         // Heal current network partitions, disable future process, storage, and network faults
         // on all replicas. Run this fully-connected core of replicas for 500_000 ticks, which
         // should enough to ensure all faulty grid blocks, headers, or prepares that can be repaired
         // are repaired. After this, all we must be left with are correlated faults.
         {
             var replica: u8 = 0;
+            var core: Core = Core.initEmpty();
             while (replica < simulator.options.cluster.replica_count) : (replica += 1) {
-                simulator.core.set(replica);
+                core.set(replica);
             }
-            simulator.transition_to_liveness_mode(simulator.core);
+
+            simulator.transition_to_liveness_mode(core);
 
             tick = 0;
             while (tick < 500_000) : (tick += 1) simulator.tick();
@@ -240,13 +245,13 @@ pub fn main() !void {
 
     if (cli_args.lite) return;
 
-    simulator.core = random_core(
+    const core = random_core(
         simulator.prng,
         simulator.options.cluster.replica_count,
         simulator.options.cluster.standby_count,
     );
 
-    simulator.transition_to_liveness_mode(simulator.core);
+    simulator.transition_to_liveness_mode(core);
 
     // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
     // crashed or partitioned permanently. The core should converge to the same state.
@@ -594,7 +599,7 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica)) {
                 for (replica.op_checkpoint() + 1..commit_max + 1) |op| {
-                    const header = simulator.cluster.state_checker.header_with_op(op);
+                    const header = simulator.cluster.state_checker.committed_header_with_op(op);
                     if (!replica.journal.has_prepare(&header)) return "pending journal";
                 }
                 // It's okay for a replica to miss some prepares older than the current checkpoint.
@@ -659,6 +664,10 @@ pub const Simulator = struct {
     /// context.
     pub fn transition_to_liveness_mode(simulator: *Simulator, core: Core) void {
         log.debug("transition_to_liveness_mode: core={b}", .{core.mask});
+        assert(simulator.core.count() == 0);
+        defer assert(simulator.core.count() > 0);
+
+        simulator.core = core;
 
         var it = core.iterator(.{});
         while (it.next()) |replica_index| {
@@ -731,6 +740,28 @@ pub const Simulator = struct {
         return quorums.view_change > core_replicas - core_recovering_head;
     }
 
+    fn core_repairable_replica(
+        simulator: *const Simulator,
+        comptime Replica: type,
+        replica: *const Replica,
+    ) bool {
+        if (!simulator.core.isSet(replica.replica)) return false;
+        if (replica.standby()) return false;
+        switch (replica.status) {
+            .normal => return true,
+            .recovering_head => return false,
+            .view_change => {
+                // Lagging replicas do not initiate WAL repair during view change.
+                if (vsr.Checkpoint.durable(replica.op_checkpoint_next(), replica.commit_max)) {
+                    return false;
+                } else {
+                    return true;
+                }
+            },
+            .recovering => unreachable,
+        }
+    }
+
     // Returns a header for a prepare which can't be repaired by the core due to storage faults.
     //
     // If a replica cannot make progress on committing, then it may be stuck while repairing either
@@ -746,23 +777,44 @@ pub const Simulator = struct {
         const replica_count = simulator.options.cluster.replica_count;
 
         var cluster_op_head: u64 = 0;
+        var cluster_commit_max: u64 = 0;
+        var cluster_log_view: u32 = 0;
         var op_repair_min: ?u64 = 0;
-        for (simulator.cluster.replicas) |*replica| {
-            if (simulator.core.isSet(replica.replica)) {
-                if (replica.standby()) continue;
-                if (!simulator.core.isSet(replica.replica)) continue;
-                if (replica.status == .recovering_head) continue;
+        for (simulator.cluster.replicas) |replica| {
+            if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;
 
-                cluster_op_head = @max(cluster_op_head, replica.op);
-                if (op_repair_min == null) {
-                    op_repair_min = replica.op_repair_min();
-                } else {
-                    op_repair_min = @min(op_repair_min.?, replica.op_repair_min());
+            cluster_commit_max = @max(cluster_commit_max, replica.commit_max);
+            cluster_log_view = @max(cluster_log_view, replica.log_view);
+            cluster_op_head = @max(cluster_op_head, replica.op);
+            if (op_repair_min == null) {
+                op_repair_min = replica.op_repair_min();
+            } else {
+                op_repair_min = @min(op_repair_min.?, replica.op_repair_min());
+            }
+        }
+        const cluster_op_repair_min = op_repair_min.?;
+
+        // Use replicas with the largest log_view to infer uncommitted headers. Replicas with a
+        // smaller log_view may have an outdated version of the same uncommitted op. There may be
+        // at most a pipeline of uncommitted headers in the cluster.
+        const pipeline_max = constants.pipeline_prepare_queue_max;
+        var uncommitted_headers: [pipeline_max]vsr.Header.Prepare = undefined;
+        if (cluster_commit_max < cluster_op_head) {
+            for (simulator.cluster.replicas) |replica| {
+                if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;
+
+                if (replica.log_view < cluster_log_view) continue;
+
+                if (cluster_commit_max < cluster_op_head) {
+                    for (cluster_commit_max + 1..cluster_op_head + 1) |op| {
+                        if (replica.journal.header_with_op(op)) |header| {
+                            uncommitted_headers[op % pipeline_max] = header.*;
+                        }
+                    }
                 }
             }
         }
 
-        const cluster_op_repair_min = op_repair_min.?;
         const ReplicaSet = std.StaticBitSet(constants.replicas_max);
         var replicas_missing_ops = try allocator.alloc(
             ReplicaSet,
@@ -770,11 +822,18 @@ pub const Simulator = struct {
         );
         errdefer allocator.free(replicas_missing_ops);
 
-        for (replicas_missing_ops, 0..) |*replicas_missing_op, index| {
+        for (replicas_missing_ops, cluster_op_repair_min..) |*replicas_missing_op, op| {
             replicas_missing_op.* = ReplicaSet.initEmpty();
-            const op = index + cluster_op_repair_min;
-            const header = simulator.cluster.state_checker.header_with_op(op);
+            const header = blk: {
+                if (op > cluster_commit_max) {
+                    const slot = op % constants.pipeline_prepare_queue_max;
+                    break :blk uncommitted_headers[slot];
+                } else {
+                    break :blk simulator.cluster.state_checker.committed_header_with_op(op);
+                }
+            };
             for (simulator.cluster.replicas) |replica| {
+                // Replicas should be able to repair using any other replica in the core.
                 if (replica.standby()) continue;
                 if (!simulator.core.isSet(replica.replica) or
                     !replica.journal.has_prepare(&header))
@@ -784,46 +843,38 @@ pub const Simulator = struct {
             }
         }
 
-        for (simulator.cluster.replicas) |replica| {
-            if (replica.standby()) continue;
-            if (!simulator.core.isSet(replica.replica)) continue;
-
-            // Replicas can only initiate WAL repair in view_change/normal statuses.
-            if (replica.status == .recovering_head) continue;
-
-            // Lagging replicas do not initiate WAL repair during view change.
-            if (replica.status == .view_change and
-                vsr.Checkpoint.durable(replica.op_checkpoint_next(), replica.commit_max)) continue;
-
-            // First, check whether any of the uncommitted headers is corrupted on more than a nack
-            // quorum of replicas. If so, the cluster cannot initiate repair or commit (see the
-            // awaiting_repair and complete_invalid cases in the DVCQuorum).
-            if (replica.commit_max < replica.op) {
-                for (replica.commit_max + 1..replica.op + 1) |op| {
-                    if (replicas_missing_ops[op - cluster_op_repair_min]
-                        .count() >= vsr.quorums(replica_count).nack_prepare)
-                    {
-                        return simulator.cluster.state_checker.header_with_op(op);
-                    }
+        // Check whether any of the uncommitted headers is corrupted on more than a nack
+        // quorum of replicas. If so, the cluster cannot initiate repair or commit (see the
+        // awaiting_repair and complete_invalid cases in the DVCQuorum).
+        if (cluster_commit_max < cluster_op_head) {
+            for (cluster_commit_max + 1..cluster_op_head + 1) |op| {
+                if (replicas_missing_ops[op - cluster_op_repair_min]
+                    .count() >= vsr.quorums(replica_count).nack_prepare)
+                {
+                    return uncommitted_headers[op % pipeline_max];
                 }
             }
+        }
+
+        for (simulator.cluster.replicas) |replica| {
+            if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;
 
             // Check prepares between (commit_min, commit_max], replicas repair these first
             // as commit progress depends on them.
             if (replica.commit_min < replica.commit_max) {
                 for (replica.commit_min + 1..replica.commit_max + 1) |op| {
                     if (replicas_missing_ops[op - cluster_op_repair_min].count() == replica_count) {
-                        return simulator.cluster.state_checker.header_with_op(op);
+                        return simulator.cluster.state_checker.committed_header_with_op(op);
                     }
                 }
             }
 
-            // Finally, check prepares between [op_repair_min, commit_min] as view changing replicas
+            // Check prepares between [op_repair_min, commit_min] as view changing replicas
             // cannot step up as primary unless they have all prepares intact.
             if (replica.op_repair_min() <= replica.commit_min) {
                 for (replica.op_repair_min()..replica.commit_min + 1) |op| {
                     if (replicas_missing_ops[op - cluster_op_repair_min].count() == replica_count) {
-                        return simulator.cluster.state_checker.header_with_op(op);
+                        return simulator.cluster.state_checker.committed_header_with_op(op);
                     }
                 }
             }
@@ -838,7 +889,7 @@ pub const Simulator = struct {
     ) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
-        const FaultyReplicas = std.StaticBitSet(constants.replicas_max + constants.standbys_max);
+        const FaultyReplicas = std.StaticBitSet(constants.members_max);
         var blocks_missing = std.AutoArrayHashMap(
             struct { address: u64, checksum: u128 },
             FaultyReplicas,
