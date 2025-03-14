@@ -846,8 +846,8 @@ pub const Simulator = struct {
         // Check whether any of the uncommitted headers is corrupted on more than a nack
         // quorum of replicas. If so, the cluster cannot initiate repair or commit (see the
         // awaiting_repair and complete_invalid cases in the DVCQuorum).
-        if (cluster_commit_max < cluster_op_head) {
-            for (cluster_commit_max + 1..cluster_op_head + 1) |op| {
+        if (cluster_commit_max <= cluster_op_head) {
+            for (cluster_commit_max..cluster_op_head + 1) |op| {
                 if (replicas_missing_ops[op - cluster_op_repair_min]
                     .count() >= vsr.quorums(replica_count).nack_prepare)
                 {
