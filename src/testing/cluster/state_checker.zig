@@ -65,12 +65,6 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
 
-            const pipeline_max = constants.pipeline_prepare_queue_max;
-            var uncommitted_headers: [pipeline_max]vsr.Header.Prepare = undefined;
-            for (0..pipeline_max) |slot| {
-                uncommitted_headers[slot] = vsr.Header.Prepare.reserve(options.cluster_id, slot);
-            }
-
             return StateChecker{
                 .node_count = @intCast(options.replicas.len),
                 .replica_count = options.replica_count,
@@ -260,7 +254,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
-        pub fn committed_header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
+        pub fn header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
             assert(op < state_checker.commits.items.len);
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
