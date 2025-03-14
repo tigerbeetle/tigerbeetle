@@ -556,9 +556,9 @@ pub fn ClientType(
             if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
                 log.warn("{}: on_reply: slow request, request={} size={} {s} time={}ms", .{
                     self.id,
-                    reply.header.request,
-                    reply.header.size,
-                    reply.header.operation.tag_name(StateMachine),
+                    inflight.message.header.request,
+                    inflight.message.header.size,
+                    inflight.message.header.operation.tag_name(StateMachine),
                     request_completion_time_ms,
                 });
             }
