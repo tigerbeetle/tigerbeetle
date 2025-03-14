@@ -45,7 +45,7 @@ pub const IO = struct {
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
-    pub fn tick(io: *IO) !void {
+    pub fn run(io: *IO) !void {
         while (io.completed.pop()) |completion| {
             completion.callback(io, completion);
         }

@@ -55,7 +55,7 @@ test "open/write/read/close/statx" {
                 });
                 self.openat_callback(&completion, file.handle);
             }
-            while (!self.done) try self.io.tick();
+            while (!self.done) try self.io.run();
 
             try testing.expectEqual(self.write_buf.len, self.written);
             try testing.expectEqual(self.read_buf.len, self.read);
@@ -210,7 +210,7 @@ test "accept/connect/send/receive" {
             var server_completion: IO.Completion = undefined;
             self.io.accept(*Context, &self, accept_callback, &server_completion, server);
 
-            while (!self.done) try self.io.tick();
+            while (!self.done) try self.io.run();
 
             try testing.expectEqual(self.send_buf.len, self.sent);
             try testing.expectEqual(self.recv_buf.len, self.received);
@@ -306,9 +306,9 @@ test "timeout" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            while (self.count < count) try self.io.tick();
+            while (self.count < count) try self.io.run();
 
-            try self.io.tick();
+            try self.io.run();
             try testing.expectEqual(@as(u32, count), self.count);
 
             try testing.expectApproxEqAbs(
@@ -363,7 +363,7 @@ test "event" {
             const thread = try std.Thread.spawn(.{}, Context.trigger_event, .{&self});
 
             // Wait for the number of events to complete.
-            while (self.count < events_count) try self.io.tick();
+            while (self.count < events_count) try self.io.run();
             thread.join();
 
             // Make sure the event was triggered multiple times.
@@ -421,9 +421,9 @@ test "submission queue full" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            while (self.count < count) try self.io.tick();
+            while (self.count < count) try self.io.run();
 
-            try self.io.tick();
+            try self.io.run();
             try testing.expectEqual(@as(u32, count), self.count);
         }
 
@@ -441,7 +441,7 @@ test "submission queue full" {
 }
 
 test "tick to wait" {
-    // Use only IO.tick() to see if pending IO is actually processed
+    // Use only IO.run() to see if pending IO is actually processed
 
     try struct {
         const Context = @This();
@@ -502,7 +502,7 @@ test "tick to wait" {
             assert(self.accepted == IO.INVALID_SOCKET);
 
             while (self.accepted == IO.INVALID_SOCKET or !self.connected)
-                try self.io.tick();
+                try self.io.run();
 
             assert(self.connected);
             assert(self.accepted != IO.INVALID_SOCKET);
@@ -522,9 +522,9 @@ test "tick to wait" {
             );
 
             // Drain out the recv completion from any internal IO queues
-            try self.io.tick();
-            try self.io.tick();
-            try self.io.tick();
+            try self.io.run();
+            try self.io.run();
+            try self.io.run();
 
             // Complete the recv() *outside* of the IO instance.
             // Other tests already check .tick() with IO based completions.
@@ -533,11 +533,11 @@ test "tick to wait" {
             const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
-            // Wait for the recv() to complete using only IO.tick().
+            // Wait for the recv() to complete using only IO.run().
             // If tick is broken, then this will deadlock
             assert(!self.received);
             while (!self.received) {
-                try self.io.tick();
+                try self.io.run();
             }
 
             // Make sure the receive actually happened
@@ -710,7 +710,7 @@ test "pipe data over socket" {
                     const timeout_ns = tick % (10 * std.time.ns_per_ms);
                     try self.io.run_for_ns(@as(u63, @intCast(timeout_ns)));
                 } else {
-                    try self.io.tick();
+                    try self.io.run();
                 }
             }
 
@@ -858,14 +858,14 @@ test "cancel_all" {
             // actually test the interesting case -- cancelling an in-flight read and verifying that
             // the buffer is not written to after `cancel_all()` completes.
             //
-            // (Without DIRECT the reads all finish their callbacks even before io.tick() returns.)
+            // (Without DIRECT the reads all finish their callbacks even before io.run() returns.)
             const file = try std.posix.open(file_path, .{ .DIRECT = true }, 0);
             defer std.posix.close(file);
 
             for (&read_completions, read_buffers) |*completion, buffer| {
                 context.io.read(*Context, &context, read_callback, completion, file, buffer, 0);
             }
-            try context.io.tick();
+            try context.io.run();
 
             // Set to true *before* calling cancel_all() to ensure that any farther callbacks from
             // IO completion will panic.
