@@ -189,7 +189,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 link.queue.deinit();
             }
 
-            while (self.recorded.popOrNull()) |packet| packet.packet.deinit();
+            while (self.recorded.pop()) |packet| packet.packet.deinit();
             self.recorded.deinit(allocator);
 
             allocator.free(self.links);
@@ -227,7 +227,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             assert(recording);
 
-            while (self.recorded.popOrNull()) |packet| {
+            while (self.recorded.pop()) |packet| {
                 self.submit_packet(packet.packet, packet.callback, packet.path);
             }
         }
@@ -345,7 +345,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
-                        partition[from] == asymmetric_partition_side);
+                            partition[from] == asymmetric_partition_side);
                     self.links[self.path_index(path)].filter =
                         if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }

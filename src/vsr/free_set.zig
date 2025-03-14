@@ -202,7 +202,7 @@ pub const FreeSet = struct {
         assert((options.encoded.blocks_acquired.len == 0 and
             options.encoded.blocks_released.len == 0) ==
             (options.free_set_block_addresses.blocks_acquired.len == 0 and
-            options.free_set_block_addresses.blocks_released.len == 0));
+                options.free_set_block_addresses.blocks_released.len == 0));
         set.decode_chunks(
             options.encoded.blocks_acquired,
             options.encoded.blocks_released,
@@ -596,7 +596,7 @@ pub const FreeSet = struct {
 
         // Block releases from the current checkpoint that were temporarily recorded in
         // blocks_released_prior_checkpoint_durability can now be moved to blocks_released.
-        while (set.blocks_released_prior_checkpoint_durability.popOrNull()) |block_entry| {
+        while (set.blocks_released_prior_checkpoint_durability.pop()) |block_entry| {
             const block = block_entry.key;
             set.blocks_released.set(block);
         }

@@ -27,7 +27,8 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
         /// Returns count of elements in this BoundedArray in the specified integer types,
         /// checking at compile time that it indeed can represent the length.
         pub inline fn count_as(array: *const BoundedArray, comptime Int: type) Int {
-            return array.inner.len;
+            comptime assert(@TypeOf(array.inner.len) != comptime_int);
+            return @intCast(array.inner.len);
         }
 
         pub inline fn full(self: BoundedArray) bool {
@@ -106,7 +107,7 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             array.inner.len = 0;
         }
 
-        pub inline fn pop(array: *BoundedArray) T {
+        pub inline fn pop(array: *BoundedArray) ?T {
             return array.inner.pop();
         }
 

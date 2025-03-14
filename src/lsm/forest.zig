@@ -38,7 +38,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .{
                 .name = field.name,
                 .type = Groove,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(Groove),
             },
@@ -48,7 +48,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             .{
                 .name = field.name,
                 .type = Groove.Options,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(Groove),
             },
@@ -56,7 +56,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     }
 
     const _Grooves = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = groove_fields,
             .decls = &.{},
@@ -65,7 +65,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     });
 
     const _GroovesOptions = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = groove_options_fields,
             .decls = &.{},
@@ -164,7 +164,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .value = tree_info.tree_id,
             }};
         }
-        break :tree_id @Type(.{ .Enum = .{
+        break :tree_id @Type(.{ .@"enum" = .{
             .tag_type = u16,
             .fields = fields,
             .decls = &.{},
@@ -771,9 +771,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const half_bar_ops = @divExact(constants.lsm_compaction_ops, 2);
             const pipeline_half_bars =
                 stdx.div_ceil(
-                constants.pipeline_prepare_queue_max,
-                half_bar_ops,
-            );
+                    constants.pipeline_prepare_queue_max,
+                    half_bar_ops,
+                );
 
             // Maximum number of blocks released within a single half-bar by compaction.
             const compaction_blocks_released_half_bar_max = blocks: {
@@ -782,7 +782,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     blocks +=
                         stdx.div_ceil(constants.lsm_levels, 2) *
                         (compaction_input_tables_max *
-                        (1 + tree_info.Tree.Table.layout.data_block_count_max));
+                            (1 + tree_info.Tree.Table.layout.data_block_count_max));
                 }
                 break :blocks blocks;
             };

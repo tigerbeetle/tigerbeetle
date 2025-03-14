@@ -224,7 +224,15 @@ test "LoggedProcess: starts and stops" {
     defer allocator.destroy(test_exe_buf);
 
     { // Compile this file as an executable!
-        const this_file = try std.fs.cwd().realpath(@src().file, test_exe_buf);
+        const path_relative = try std.fs.path.join(allocator, &.{
+            "src",
+            @src().file,
+        });
+        defer allocator.free(path_relative);
+        const this_file = try std.fs.cwd().realpath(
+            path_relative,
+            test_exe_buf,
+        );
         const argv = [_][]const u8{ zig_exe, "build-exe", this_file };
         const exec_result = try std.process.Child.run(.{
             .allocator = allocator,
