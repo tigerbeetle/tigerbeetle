@@ -255,6 +255,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
+            assert(op < state_checker.commits.items.len);
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
             assert(commit.replicas.count() > 0);

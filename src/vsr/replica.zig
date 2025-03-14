@@ -6268,7 +6268,7 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        fn op_checkpoint_next(self: *const Replica) u64 {
+        pub fn op_checkpoint_next(self: *const Replica) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
