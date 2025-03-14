@@ -125,6 +125,10 @@ pub const Network = struct {
         network.message_pool.deinit(network.allocator);
     }
 
+    pub fn step(network: *Network) bool {
+        return network.packet_simulator.step();
+    }
+
     pub fn tick(network: *Network) void {
         network.packet_simulator.tick();
     }

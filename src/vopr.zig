@@ -362,12 +362,14 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .unpartition_stability = prng.int_inclusive(u32, 20),
     };
 
+    const read_latency_min = prng.range_inclusive(u16, 0, 3);
+    const write_latency_min = prng.range_inclusive(u16, 0, 3);
     const storage_options = .{
         .seed = prng.int(u64),
-        .read_latency_min = prng.range_inclusive(u16, 0, 3),
-        .read_latency_mean = prng.range_inclusive(u16, 3, 10),
-        .write_latency_min = prng.range_inclusive(u16, 0, 3),
-        .write_latency_mean = prng.range_inclusive(u16, 3, 100),
+        .read_latency_min = read_latency_min,
+        .read_latency_mean = prng.range_inclusive(u16, read_latency_min, 10),
+        .write_latency_min = write_latency_min,
+        .write_latency_mean = prng.range_inclusive(u16, write_latency_min, 100),
         .read_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
