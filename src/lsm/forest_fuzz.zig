@@ -191,7 +191,7 @@ const Environment = struct {
 
             if (env.ticks_remaining == 0) return error.OutOfTicks;
             env.ticks_remaining -= 1;
-            env.storage.tick();
+            env.storage.run();
         }
         assert(env.state == next_state);
     }
@@ -366,7 +366,7 @@ const Environment = struct {
         while (!context.finished) {
             if (env.ticks_remaining == 0) return error.OutOfTicks;
             env.ticks_remaining -= 1;
-            env.storage.tick();
+            env.storage.run();
         }
     }
 
@@ -400,7 +400,7 @@ const Environment = struct {
         while (!context.finished) {
             if (env.ticks_remaining == 0) return error.OutOfTicks;
             env.ticks_remaining -= 1;
-            env.storage.tick();
+            env.storage.run();
         }
     }
 
@@ -505,7 +505,7 @@ const Environment = struct {
                 while (self.result == null) {
                     if (env.ticks_remaining == 0) return error.OutOfTicks;
                     env.ticks_remaining -= 1;
-                    env.storage.tick();
+                    env.storage.run();
                 }
 
                 return self.result.?;
