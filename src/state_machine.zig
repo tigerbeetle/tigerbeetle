@@ -3805,7 +3805,7 @@ const TestContext = struct {
             operation,
             input,
         );
-        while (context.busy) context.storage.tick();
+        while (context.busy) context.storage.run();
 
         return context.state_machine.commit(
             0,

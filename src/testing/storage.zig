@@ -382,8 +382,12 @@ pub const Storage = struct {
         return true;
     }
 
+    pub fn run(storage: *Storage) void {
+        while (storage.step()) {}
+        storage.tick();
+    }
+
     pub fn tick(storage: *Storage) void {
-        while (storage.progress()) {}
         storage.ticks += 1;
     }
 

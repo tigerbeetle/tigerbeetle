@@ -144,10 +144,10 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
     };
 
     try env.format();
-    while (env.pending.count() > 0) env.superblock.storage.tick();
+    while (env.pending.count() > 0) env.superblock.storage.run();
 
     env.open();
-    while (env.pending.count() > 0) env.superblock.storage.tick();
+    while (env.pending.count() > 0) env.superblock.storage.run();
 
     try env.verify();
     assert(env.pending.count() == 0);
@@ -224,7 +224,7 @@ const Environment = struct {
         assert(env.pending.contains(.view_change) == env.superblock.updating(.view_change));
 
         const write = env.superblock.storage.writes.peek();
-        env.superblock.storage.tick();
+        env.superblock.storage.run();
 
         if (write) |w| {
             if (w.done_at_tick <= env.superblock.storage.ticks) try env.verify();
@@ -246,7 +246,7 @@ const Environment = struct {
         env.superblock_verify.open(verify_callback, &env.context_verify);
 
         env.pending_verify = true;
-        while (env.pending_verify) env.superblock_verify.storage.tick();
+        while (env.pending_verify) env.superblock_verify.storage.run();
 
         assert(env.superblock_verify.working.checksum == env.superblock.working.checksum or
             env.superblock_verify.working.checksum == env.superblock.staging.checksum);
