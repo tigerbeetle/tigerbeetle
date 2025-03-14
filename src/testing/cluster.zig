@@ -859,6 +859,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 },
                 .sync_stage_changed => switch (replica.syncing) {
                     .idle => cluster.log_replica(.sync, replica.replica),
+                    .updating_checkpoint => {
+                        cluster.state_checker.check_state(replica.replica) catch |err| {
+                            fatal(.correctness, "state checker error: {}", .{err});
+                        };
+                    },
                     else => {},
                 },
                 .client_evicted => |client_id| cluster.cluster_on_eviction(client_id),
