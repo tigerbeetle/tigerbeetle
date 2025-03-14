@@ -446,6 +446,29 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         pub fn tick(cluster: *Cluster) void {
+            // Interleave storage and network steps, to allow for faster-than-a-tick IO.
+            while (true) {
+                var advanced = false;
+                advanced = cluster.network.step() or advanced;
+
+                for (
+                    cluster.storages,
+                    cluster.replica_health,
+                    cluster.replica_upgrades,
+                    0..,
+                ) |*storage, *health, *upgrade, i| {
+                    if (health.* == .up and health.*.up.paused) continue;
+                    // Upgrades immediately follow storage.step(), since upgrades occur at
+                    // checkpoint completion. (Downgrades are triggered separately – see
+                    // replica_restart()).
+                    advanced = storage.step() or advanced;
+                    if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
+                    assert(upgrade.* == null);
+                }
+
+                if (!advanced) break;
+            }
+
             cluster.network.tick();
 
             for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
@@ -455,22 +478,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (
                 cluster.storages,
                 cluster.replicas,
-                cluster.replica_upgrades,
                 cluster.replica_times,
                 cluster.replica_health,
                 0..,
-            ) |*storage, *replica, *upgrade, *time, *health, i| {
+            ) |*storage, *replica, *time, *health, i| {
                 if (health.* == .up and health.*.up.paused) {
                     // Tick the time even in a paused state, to simulate VM migration.
                     time.tick();
                 } else {
-                    // Upgrades immediately follow storage.tick(), since upgrades occur at
-                    // checkpoint completion. (Downgrades are triggered separately – see
-                    // replica_restart()).
                     storage.tick();
-                    if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
-                    assert(upgrade.* == null);
-
                     switch (health.*) {
                         .up => |up| {
                             assert(!up.paused);

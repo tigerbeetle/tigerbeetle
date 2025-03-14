@@ -335,25 +335,56 @@ pub const Storage = struct {
         }
     }
 
-    pub fn tick(storage: *Storage) void {
-        storage.ticks += 1;
+    pub fn step(storage: *Storage) bool {
+        var reads: [32]*Read = undefined;
+        var read_count: u32 = 0;
+
+        var writes: [32]*Write = undefined;
+        var write_count: u32 = 0;
 
         while (storage.reads.peek()) |read| {
             if (read.done_at_tick > storage.ticks) break;
+            if (read_count == reads.len) break;
             _ = storage.reads.remove();
-            storage.read_sectors_finish(read);
+            reads[read_count] = read;
+            read_count += 1;
         }
 
         while (storage.writes.peek()) |write| {
             if (write.done_at_tick > storage.ticks) break;
+            if (write_count == writes.len) break;
             _ = storage.writes.remove();
-            storage.write_sectors_finish(write);
+            writes[write_count] = write;
+            write_count += 1;
+        }
+
+        if (read_count == 0 and write_count == 0 and storage.next_tick_queue.empty()) {
+            return false;
+        }
+
+        storage.prng.shuffle(*Read, reads[0..read_count]);
+        storage.prng.shuffle(*Write, writes[0..write_count]);
+
+        while (read_count > 0 or write_count > 0) {
+            if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
+                read_count -= 1;
+                storage.read_sectors_finish(reads[read_count]);
+            } else {
+                write_count -= 1;
+                storage.write_sectors_finish(writes[write_count]);
+            }
         }
 
         // Process the queues in a single loop, since their callbacks may append to each other.
         while (storage.next_tick_queue.pop()) |next_tick| {
             next_tick.callback(next_tick);
         }
+        return true;
+    }
+
+    pub fn tick(storage: *Storage) void {
+        while (storage.progress()) {}
+        storage.ticks += 1;
     }
 
     pub fn on_next_tick(
