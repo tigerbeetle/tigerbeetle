@@ -64,10 +64,12 @@ pub const std_options: std.Options = .{
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
+const MiB = 1024 * 1024;
 
 const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
+    performance: bool = false,
     ticks_max_requests: u32 = 40_000_000,
     ticks_max_convergence: u32 = 10_000_000,
     positional: struct {
@@ -86,6 +88,9 @@ pub fn main() !void {
     defer args.deinit();
 
     const cli_args = flags.parse(&args, CLIArgs);
+    if (cli_args.lite and cli_args.performance) {
+        return vsr.fatal(.cli, "--lite and --performance are mutially exclusive", .{});
+    }
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
@@ -110,7 +115,12 @@ pub fn main() !void {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    const options = if (cli_args.lite) options_lite(&prng) else options_swarm(&prng);
+    const options = if (cli_args.lite)
+        options_lite(&prng)
+    else if (cli_args.performance)
+        options_performance(&prng)
+    else
+        options_swarm(&prng);
 
     log.info(
         \\
@@ -237,50 +247,59 @@ pub fn main() !void {
         }
     }
 
-    if (cli_args.lite) return;
-
-    simulator.transition_to_liveness_mode();
-
-    // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
-    // crashed or partitioned permanently. The core should converge to the same state.
-    tick = 0;
-    while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
-        simulator.tick();
-        tick_total += 1;
-        if (simulator.pending() == null) {
-            break;
-        }
-    }
-
-    if (simulator.pending()) |reason| {
-        if (simulator.core_missing_primary()) {
-            unimplemented("repair requires reachable primary");
-        } else if (simulator.core_missing_quorum()) {
-            log.warn("no liveness, core replicas cannot view-change", .{});
-        } else if (simulator.core_missing_prepare()) |header| {
-            log.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
-            log.warn("no liveness, {} blocks are not available in core", .{blocks});
-        } else if (simulator.core_missing_reply()) |header| {
-            log.warn("no liveness, reply op={} is not available in core", .{header.op});
-        } else {
-            log.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
-            simulator.cluster.log_cluster();
-            log.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "no state convergence: {s}", .{reason});
-        }
+    if (cli_args.lite) {
+        // Don't care about convergence
     } else {
-        const commits = simulator.cluster.state_checker.commits.items;
-        const last_checksum = commits[commits.len - 1].header.checksum;
-        for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
-            if (simulator.core.isSet(replica_index)) {
-                try aof.validate(last_checksum);
+        simulator.transition_to_liveness_mode(.{
+            .all_in_core = cli_args.performance,
+        });
+        // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
+        // crashed or partitioned permanently. The core should converge to the same state.
+        tick = 0;
+        while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
+            simulator.tick();
+            tick_total += 1;
+            if (simulator.pending() == null) {
+                break;
+            }
+        }
+
+        if (simulator.pending()) |reason| {
+            if (simulator.core_missing_primary()) {
+                unimplemented("repair requires reachable primary");
+            } else if (simulator.core_missing_quorum()) {
+                log.warn("no liveness, core replicas cannot view-change", .{});
+            } else if (simulator.core_missing_prepare()) |header| {
+                log.warn("no liveness, op={} is not available in core", .{header.op});
+            } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
+                log.warn("no liveness, {} blocks are not available in core", .{blocks});
+            } else if (simulator.core_missing_reply()) |header| {
+                log.warn("no liveness, reply op={} is not available in core", .{header.op});
             } else {
-                try aof.validate(null);
+                log.info("no liveness, final cluster state (core={b}):", .{simulator.core.mask});
+                simulator.cluster.log_cluster();
+                log.err("you can reproduce this failure with seed={}", .{seed});
+                fatal(.liveness, "no state convergence: {s}", .{reason});
+            }
+        } else {
+            const commits = simulator.cluster.state_checker.commits.items;
+            const last_checksum = commits[commits.len - 1].header.checksum;
+            for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
+                if (simulator.core.isSet(replica_index)) {
+                    try aof.validate(last_checksum);
+                } else {
+                    try aof.validate(null);
+                }
             }
         }
     }
-    log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+
+    if (cli_args.performance) {
+        log.info("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+    } else {
+        log.debug("\nMessages:\n{}", .{simulator.cluster.network.message_summary});
+    }
+
     log.info("\n          PASSED ({} ticks)", .{tick_total});
 }
 
@@ -306,7 +325,6 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
     else
         prng.range_inclusive(u32, batch_size_limit_min, constants.message_body_size_max);
 
-    const MiB = 1024 * 1024;
     const storage_size_limit = vsr.sector_floor(
         200 * MiB - prng.int_inclusive(u64, 20 * MiB),
     );
@@ -423,6 +441,109 @@ fn options_lite(prng: *stdx.PRNG) Simulator.Options {
     base.cluster.standby_count = 0;
     base.network.node_count = 3;
     return base;
+}
+
+fn options_performance(prng: *stdx.PRNG) Simulator.Options {
+    const cluster_options: Cluster.Options = .{
+        .cluster_id = cluster_id,
+        .replica_count = 6,
+        .standby_count = 0,
+        .client_count = 16,
+        .storage_size_limit = vsr.sector_floor(200 * MiB),
+        .seed = prng.int(u64),
+        .releases = releases[0..1],
+        .client_release = releases[0].release,
+
+        .state_machine = switch (state_machine) {
+            .testing => .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_node_count = 4096,
+            },
+            .accounting => .{
+                .batch_size_limit = constants.message_body_size_max,
+                .lsm_forest_compaction_block_count = 128 +
+                    StateMachine.Forest.Options.compaction_block_count_min,
+                .lsm_forest_node_count = 4096,
+                .cache_entries_accounts = 256,
+                .cache_entries_transfers = 0,
+                .cache_entries_posted = 0,
+            },
+        },
+    };
+
+    const network_options = .{
+        .node_count = cluster_options.replica_count,
+        .client_count = cluster_options.client_count,
+
+        .seed = prng.int(u64),
+
+        .one_way_delay_mean = 5,
+        .one_way_delay_min = 0,
+        .packet_loss_probability = ratio(0, 100),
+        .path_maximum_capacity = 10,
+        .path_clog_duration_mean = 200,
+        .path_clog_probability = ratio(0, 100),
+        .packet_replay_probability = ratio(0, 100),
+
+        .partition_mode = .none,
+        .partition_symmetry = .symmetric,
+        .partition_probability = ratio(0, 100),
+        .unpartition_probability = ratio(0, 100),
+        .partition_stability = 100,
+        .unpartition_stability = 10,
+    };
+
+    const storage_options = .{
+        .seed = prng.int(u64),
+        .read_latency_min = 0,
+        .read_latency_mean = 5,
+        .write_latency_min = 0,
+        .write_latency_mean = 50,
+        .read_fault_probability = ratio(0, 100),
+        .write_fault_probability = ratio(0, 100),
+        .write_misdirect_probability = ratio(0, 100),
+        .crash_fault_probability = ratio(0, 100),
+    };
+    const storage_fault_atlas = .{
+        .faulty_superblock = false,
+        .faulty_wal_headers = false,
+        .faulty_wal_prepares = false,
+        .faulty_client_replies = false,
+        .faulty_grid = false,
+    };
+
+    var workload_prng = stdx.PRNG.from_seed(92); // Fix workload for perf testing.
+    const workload_options = StateMachine.Workload.Options.generate(&workload_prng, .{
+        .batch_size_limit = constants.message_body_size_max,
+        .client_count = cluster_options.client_count,
+        .in_flight_max = ReplySequence.stalled_queue_capacity,
+    });
+
+    return .{
+        .cluster = cluster_options,
+        .network = network_options,
+        .storage = storage_options,
+        .storage_fault_atlas = storage_fault_atlas,
+        .workload = workload_options,
+        // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
+        .replica_crash_probability = ratio(0, 100),
+        .replica_crash_stability = 500,
+        .replica_restart_probability = ratio(0, 100),
+        .replica_restart_stability = 500,
+
+        .replica_pause_probability = ratio(0, 100),
+        .replica_pause_stability = 500,
+        .replica_unpause_probability = ratio(0, 100),
+        .replica_unpause_stability = 500,
+
+        .replica_release_advance_probability = ratio(0, 100),
+        .replica_release_catchup_probability = ratio(0, 100),
+
+        .requests_max = constants.journal_slot_count * 8,
+        .request_probability = ratio(100, 100),
+        .request_idle_on_probability = ratio(0, 100),
+        .request_idle_off_probability = ratio(100, 100),
+    };
 }
 
 pub const Simulator = struct {
@@ -643,12 +764,22 @@ pub const Simulator = struct {
     ///
     /// See https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness for broader
     /// context.
-    pub fn transition_to_liveness_mode(simulator: *Simulator) void {
-        simulator.core = random_core(
-            simulator.prng,
-            simulator.options.cluster.replica_count,
-            simulator.options.cluster.standby_count,
-        );
+    pub fn transition_to_liveness_mode(simulator: *Simulator, options: struct {
+        all_in_core: bool,
+    }) void {
+        if (options.all_in_core) {
+            const node_count =
+                simulator.options.cluster.replica_count + simulator.options.cluster.standby_count;
+            for (0..node_count) |node| {
+                simulator.core.set(node);
+            }
+        } else {
+            simulator.core = random_core(
+                simulator.prng,
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            );
+        }
         log.debug("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
 
         var it = simulator.core.iterator(.{});
