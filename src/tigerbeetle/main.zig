@@ -390,7 +390,7 @@ const Command = struct {
                 .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
-                .cache_entries_posted = args.cache_transfers_pending,
+                .cache_entries_transfers_pending = args.cache_transfers_pending,
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),

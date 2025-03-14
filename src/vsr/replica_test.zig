@@ -35,18 +35,20 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const log_level = std.log.Level.err;
 
+/// Do not use development builds here (.major = 0, .minor = 0),
+/// since they relax some version checks.
 const releases = [_]Release{
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 10 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 10 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 20 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 20 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 10 }),
     },
     .{
-        .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 30 }),
-        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
+        .release = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 30 }),
+        .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 1, .patch = 10 }),
     },
 };
 
@@ -2093,11 +2095,17 @@ const TestReplicas = struct {
     }
 
     pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
+        const release_triple: vsr.ReleaseTriple = triple: {
+            // TODO(zig): Cannot call `.triple()` directly:
+            // error: runtime value contains reference to comptime var.
+            const release_replica = releases[0].release;
+            break :triple release_replica.triple();
+        };
         var releases_bundled = vsr.ReleaseList{};
         for (releases_bundled_patch) |patch| {
             releases_bundled.append_assume_capacity(vsr.Release.from(.{
-                .major = 0,
-                .minor = 0,
+                .major = release_triple.major,
+                .minor = release_triple.minor,
                 .patch = patch,
             }));
         }

@@ -58,14 +58,14 @@ In the default configuration, the maximum batch sizes for each request type are:
 
 | Request Type            | Request Batch Size (Events) | Reply Batch Size (Results) |
 | ----------------------- | --------------------------: | -------------------------: |
-| `lookup_accounts`       |                        8190 |                       8190 |
-| `lookup_transfers`      |                        8190 |                       8190 |
-| `create_accounts`       |                        8190 |                       8190 |
-| `create_transfers`      |                        8190 |                       8190 |
-| `get_account_transfers` |                           1 |                       8190 |
-| `get_account_balances`  |                           1 |                       8190 |
-| `query_accounts`        |                           1 |                       8190 |
-| `query_transfers`       |                           1 |                       8190 |
+| `lookup_accounts`       |                        8189 |                       8189 |
+| `lookup_transfers`      |                        8189 |                       8189 |
+| `create_accounts`       |                        8189 |                       8189 |
+| `create_transfers`      |                        8189 |                       8189 |
+| `get_account_transfers` |                           1 |                       8189 |
+| `get_account_balances`  |                           1 |                       8189 |
+| `query_accounts`        |                           1 |                       8189 |
+| `query_transfers`       |                           1 |                       8189 |
 
 TigerBeetle clients automatically batch events. Therefore, it is recommended to share the client
 instances between multiple threads or tasks to have events batched transparently.
