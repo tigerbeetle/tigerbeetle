@@ -304,12 +304,12 @@ bitflags! {
     #[derive(Copy, Clone, Debug, Default)]
     pub struct AccountFlags: u16 {
         const None = 0;
-        const Linked = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED as u16;
-        const DebitsMustNotExceedCredits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS as u16;
-        const CreditsMustNotExceedDebits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS as u16;
-        const History = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_HISTORY as u16;
-        const Imported = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_IMPORTED as u16;
-        const Closed = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CLOSED as u16;
+        const Linked = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED;
+        const DebitsMustNotExceedCredits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_DEBITS_MUST_NOT_EXCEED_CREDITS;
+        const CreditsMustNotExceedDebits = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CREDITS_MUST_NOT_EXCEED_DEBITS;
+        const History = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_HISTORY;
+        const Imported = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_IMPORTED;
+        const Closed = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_CLOSED;
     }
 }
 
@@ -335,15 +335,15 @@ bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
     pub struct TransferFlags: u16 {
-        const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED as u16;
-        const Pending = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING as u16;
-        const PostPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_POST_PENDING_TRANSFER as u16;
-        const VoidPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_VOID_PENDING_TRANSFER as u16;
-        const BalancingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_DEBIT as u16;
-        const BalancingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_CREDIT as u16;
-        const ClosingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_DEBIT as u16;
-        const ClosingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_CREDIT as u16;
-        const Imported = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_IMPORTED as u16;
+        const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED;
+        const Pending = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING;
+        const PostPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_POST_PENDING_TRANSFER;
+        const VoidPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_VOID_PENDING_TRANSFER;
+        const BalancingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_DEBIT;
+        const BalancingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_BALANCING_CREDIT;
+        const ClosingDebit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_DEBIT;
+        const ClosingCredit = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_CLOSING_CREDIT;
+        const Imported = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_IMPORTED;
     }
 }
 
@@ -800,7 +800,7 @@ where
         next: ptr::null_mut(),
         user_data: Box::into_raw(callback) as *mut c_void,
         operation: op,
-        status: tbc::TB_PACKET_STATUS_TB_PACKET_OK as u8,
+        status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
         data_size: (mem::size_of::<CEvent>() * events_len) as u32,
         data: events_ptr as *mut c_void,
         batch_next: ptr::null_mut(),
@@ -819,7 +819,7 @@ fn handle_message<'stack, CEvent, CResult>(
     let packet = &msg.packet;
     let result = &msg.result;
 
-    if packet.status != tbc::TB_PACKET_STATUS_TB_PACKET_OK as u8 {
+    if packet.status != tbc::TB_PACKET_STATUS_TB_PACKET_OK {
         return Err(packet.status.into());
     }
 
