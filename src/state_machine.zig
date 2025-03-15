@@ -35,6 +35,7 @@ const CreateTransfersResult = tb.CreateTransfersResult;
 
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
+const CreateTransfersWithBalanceResult = tb.CreateTransfersWithBalanceResult;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
@@ -143,6 +144,7 @@ pub fn StateMachineType(
             .pulse = false,
             .create_accounts = true,
             .create_transfers = true,
+            .create_transfers_with_balance = false, // TODO: Multi-batching.
             // Don't batch lookups/queries for now.
             .lookup_accounts = false,
             .lookup_transfers = false,
@@ -518,6 +520,7 @@ pub fn StateMachineType(
             query_accounts = config.vsr_operations_reserved + 7,
             query_transfers = config.vsr_operations_reserved + 8,
             get_events = config.vsr_operations_reserved + 9,
+            create_transfers_with_balance = config.vsr_operations_reserved + 10,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
@@ -532,6 +535,7 @@ pub fn StateMachineType(
                 .pulse => void,
                 .create_accounts => Account,
                 .create_transfers => Transfer,
+                .create_transfers_with_balance => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
@@ -547,6 +551,7 @@ pub fn StateMachineType(
                 .pulse => void,
                 .create_accounts => CreateAccountsResult,
                 .create_transfers => CreateTransfersResult,
+                .create_transfers_with_balance => CreateTransfersWithBalanceResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
@@ -564,6 +569,7 @@ pub fn StateMachineType(
                 .pulse => false,
                 .create_accounts => true,
                 .create_transfers => true,
+                .create_transfers_with_balance => true,
                 .lookup_accounts => true,
                 .lookup_transfers => true,
                 .get_account_transfers => false,
@@ -581,6 +587,7 @@ pub fn StateMachineType(
                 .pulse, .get_events => "none",
                 .create_accounts => "accounts",
                 .create_transfers => "transfers",
+                .create_transfers_with_balance => "transfers",
                 .lookup_accounts => "accounts",
                 .lookup_transfers => "transfers",
                 .get_account_transfers => "filter",
@@ -685,6 +692,7 @@ pub fn StateMachineType(
 
             create_accounts: TimingSummary = .{},
             create_transfers: TimingSummary = .{},
+            create_transfers_with_balance: TimingSummary = .{},
             lookup_accounts: TimingSummary = .{},
             lookup_transfers: TimingSummary = .{},
             get_account_transfers: TimingSummary = .{},
@@ -909,6 +917,7 @@ pub fn StateMachineType(
                 .pulse => constants.batch_max.create_transfers, // Max transfers to expire.
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
                 .create_transfers => mem.bytesAsSlice(Transfer, input).len,
+                .create_transfers_with_balance => mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
@@ -960,7 +969,7 @@ pub fn StateMachineType(
                 .create_accounts => {
                     self.prefetch_create_accounts(mem.bytesAsSlice(Account, input));
                 },
-                .create_transfers => {
+                .create_transfers, .create_transfers_with_balance => {
                     self.prefetch_create_transfers(mem.bytesAsSlice(Transfer, input));
                 },
                 .lookup_accounts => {
@@ -1841,6 +1850,13 @@ pub fn StateMachineType(
                     input,
                     output,
                 ),
+                .create_transfers_with_balance => self.execute_create(
+                    .create_transfers_with_balance,
+                    client_release,
+                    timestamp,
+                    input,
+                    output,
+                ),
                 .lookup_accounts => self.execute_lookup_accounts(input, output),
                 .lookup_transfers => self.execute_lookup_transfers(input, output),
                 .get_account_transfers => self.execute_get_account_transfers(input, output),
@@ -1934,7 +1950,7 @@ pub fn StateMachineType(
                 .create_accounts => {
                     self.forest.grooves.accounts.scope_open();
                 },
-                .create_transfers => {
+                .create_transfers, .create_transfers_with_balance => {
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.transfers_pending.scope_open();
@@ -1949,7 +1965,7 @@ pub fn StateMachineType(
                 .create_accounts => {
                     self.forest.grooves.accounts.scope_close(mode);
                 },
-                .create_transfers => {
+                .create_transfers, .create_transfers_with_balance => {
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.transfers_pending.scope_close(mode);
@@ -1967,10 +1983,20 @@ pub fn StateMachineType(
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            comptime assert(operation == .create_accounts or operation == .create_transfers);
+            comptime assert(operation == .create_accounts or
+                operation == .create_transfers or
+                operation == .create_transfers_with_balance);
 
-            const events = mem.bytesAsSlice(EventType(operation), input);
-            var results = mem.bytesAsSlice(ResultType(operation), output);
+            const Event = EventType(operation);
+            const Result = ResultType(operation);
+            const ResultEnum = switch (operation) {
+                .create_accounts => CreateAccountResult,
+                .create_transfers, .create_transfers_with_balance => CreateTransferResult,
+                else => unreachable,
+            };
+
+            const events = mem.bytesAsSlice(Event, input);
+            var results = mem.bytesAsSlice(Result, output);
             var count: usize = 0;
 
             var chain: ?usize = null;
@@ -1979,7 +2005,7 @@ pub fn StateMachineType(
             for (events, 0..) |*event_, index| {
                 var event = event_.*;
 
-                const result = blk: {
+                const result: ResultEnum = blk: {
                     if (event.flags.linked) {
                         if (chain == null) {
                             chain = index;
@@ -2020,8 +2046,11 @@ pub fn StateMachineType(
                     assert(event.timestamp <= TimestampRange.timestamp_max);
 
                     break :blk switch (operation) {
-                        .create_accounts => self.create_account(&event),
-                        .create_transfers => self.create_transfer(client_release, &event),
+                        .create_accounts,
+                        => self.create_account(&event),
+                        .create_transfers,
+                        .create_transfers_with_balance,
+                        => self.create_transfer(client_release, &event),
                         else => unreachable,
                     };
                 };
@@ -2043,22 +2072,38 @@ pub fn StateMachineType(
                             // Add errors for rolled back events in FIFO order:
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
-                                results[count] = .{
-                                    .index = @intCast(chain_index),
-                                    .result = .linked_event_failed,
+                                const wrapped: *Result = if (chain_index < count)
+                                    &results[chain_index]
+                                else wrapped: {
+                                    defer count += 1;
+                                    break :wrapped &results[count];
                                 };
-                                count += 1;
+                                wrapped.* = self.wrap_create_result(
+                                    operation,
+                                    @intCast(chain_index),
+                                    &events[chain_index],
+                                    .linked_event_failed,
+                                ).?;
                             }
                         } else {
                             assert(result == .linked_event_failed or
                                 result == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @intCast(index), .result = result };
-                    count += 1;
-
                     self.transient_error(operation, event.id, result);
                 }
+
+                if (self.wrap_create_result(
+                    operation,
+                    @intCast(index),
+                    &event,
+                    result,
+                )) |wrapped| {
+                    assert(index <= count);
+                    results[count] = wrapped;
+                    count += 1;
+                }
+
                 if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
                     if (!chain_broken) {
                         // We've finished this linked chain, and all events have applied
@@ -2076,6 +2121,170 @@ pub fn StateMachineType(
             return @sizeOf(ResultType(operation)) * count;
         }
 
+        inline fn wrap_create_result(
+            self: *StateMachine,
+            comptime operation: Operation,
+            index: u32,
+            event: *const EventType(operation),
+            result: switch (operation) {
+                .create_accounts => CreateAccountResult,
+                .create_transfers, .create_transfers_with_balance => CreateTransferResult,
+                else => unreachable,
+            },
+        ) ?ResultType(operation) {
+            return switch (operation) {
+                .create_accounts => if (result == .ok) null else .{
+                    .index = index,
+                    .result = result,
+                },
+                .create_transfers => if (result == .ok) null else .{
+                    .index = index,
+                    .result = result,
+                },
+                .create_transfers_with_balance => self.wrap_create_transfer_with_balance_result(
+                    event,
+                    result,
+                ),
+                else => unreachable,
+            };
+        }
+
+        fn wrap_create_transfer_with_balance_result(
+            self: *StateMachine,
+            event: *const Transfer,
+            result: CreateTransferResult,
+        ) CreateTransfersWithBalanceResult {
+            switch (result) {
+                .ok, .exists => {
+                    const transfer = self.get_transfer(event.id).?;
+                    const dr_account = self.get_account(transfer.debit_account_id).?;
+                    const cr_account = self.get_account(transfer.credit_account_id).?;
+                    return .{
+                        .result = result,
+                        .flags = .{
+                            .transfer_set = true,
+                            .account_balances_set = true,
+                        },
+                        .timestamp = transfer.timestamp,
+                        .amount = transfer.amount,
+                        .debit_account_balance_debits_pending = dr_account.debits_pending,
+                        .debit_account_balance_debits_posted = dr_account.debits_posted,
+                        .debit_account_balance_credits_pending = dr_account.credits_pending,
+                        .debit_account_balance_credits_posted = dr_account.credits_posted,
+                        .credit_account_balance_debits_pending = cr_account.debits_pending,
+                        .credit_account_balance_debits_posted = cr_account.debits_posted,
+                        .credit_account_balance_credits_pending = cr_account.credits_pending,
+                        .credit_account_balance_credits_posted = cr_account.credits_posted,
+                    };
+                },
+                .exceeds_credits,
+                .exceeds_debits,
+                .overflows_debits_pending,
+                .overflows_credits_pending,
+                .overflows_debits_posted,
+                .overflows_credits_posted,
+                .overflows_debits,
+                .overflows_credits,
+                .debit_account_already_closed,
+                .credit_account_already_closed,
+                => {
+                    const dr_account = self.get_account(event.debit_account_id).?;
+                    const cr_account = self.get_account(event.credit_account_id).?;
+                    return .{
+                        .result = result,
+                        .flags = .{
+                            .transfer_set = false,
+                            .account_balances_set = true,
+                        },
+                        .timestamp = 0,
+                        .amount = 0,
+                        .debit_account_balance_debits_pending = dr_account.debits_pending,
+                        .debit_account_balance_debits_posted = dr_account.debits_posted,
+                        .debit_account_balance_credits_pending = dr_account.credits_pending,
+                        .debit_account_balance_credits_posted = dr_account.credits_posted,
+                        .credit_account_balance_debits_pending = cr_account.debits_pending,
+                        .credit_account_balance_debits_posted = cr_account.debits_posted,
+                        .credit_account_balance_credits_pending = cr_account.credits_pending,
+                        .credit_account_balance_credits_posted = cr_account.credits_posted,
+                    };
+                },
+                .linked_event_failed,
+                .linked_event_chain_open,
+                .imported_event_expected,
+                .imported_event_not_expected,
+                .timestamp_must_be_zero,
+                .imported_event_timestamp_out_of_range,
+                .imported_event_timestamp_must_not_advance,
+                .reserved_flag,
+                .id_must_not_be_zero,
+                .id_must_not_be_int_max,
+                .exists_with_different_flags,
+                .exists_with_different_pending_id,
+                .exists_with_different_timeout,
+                .exists_with_different_debit_account_id,
+                .exists_with_different_credit_account_id,
+                .exists_with_different_amount,
+                .exists_with_different_user_data_128,
+                .exists_with_different_user_data_64,
+                .exists_with_different_user_data_32,
+                .exists_with_different_ledger,
+                .exists_with_different_code,
+                .id_already_failed,
+                .flags_are_mutually_exclusive,
+                .debit_account_id_must_not_be_zero,
+                .debit_account_id_must_not_be_int_max,
+                .credit_account_id_must_not_be_zero,
+                .credit_account_id_must_not_be_int_max,
+                .accounts_must_be_different,
+                .pending_id_must_be_zero,
+                .pending_id_must_not_be_zero,
+                .pending_id_must_not_be_int_max,
+                .pending_id_must_be_different,
+                .timeout_reserved_for_pending_transfer,
+                .closing_transfer_must_be_pending,
+                .amount_must_not_be_zero,
+                .ledger_must_not_be_zero,
+                .code_must_not_be_zero,
+                .debit_account_not_found,
+                .credit_account_not_found,
+                .accounts_must_have_the_same_ledger,
+                .transfer_must_have_the_same_ledger_as_accounts,
+                .pending_transfer_not_found,
+                .pending_transfer_not_pending,
+                .pending_transfer_has_different_debit_account_id,
+                .pending_transfer_has_different_credit_account_id,
+                .pending_transfer_has_different_ledger,
+                .pending_transfer_has_different_code,
+                .exceeds_pending_transfer_amount,
+                .pending_transfer_has_different_amount,
+                .pending_transfer_already_posted,
+                .pending_transfer_already_voided,
+                .pending_transfer_expired,
+                .imported_event_timestamp_must_not_regress,
+                .imported_event_timestamp_must_postdate_debit_account,
+                .imported_event_timestamp_must_postdate_credit_account,
+                .imported_event_timeout_must_be_zero,
+                .overflows_timeout,
+                => return .{
+                    .result = result,
+                    .flags = .{
+                        .transfer_set = false,
+                        .account_balances_set = false,
+                    },
+                    .timestamp = 0,
+                    .amount = 0,
+                    .debit_account_balance_debits_pending = 0,
+                    .debit_account_balance_debits_posted = 0,
+                    .debit_account_balance_credits_pending = 0,
+                    .debit_account_balance_credits_posted = 0,
+                    .credit_account_balance_debits_pending = 0,
+                    .credit_account_balance_debits_posted = 0,
+                    .credit_account_balance_credits_pending = 0,
+                    .credit_account_balance_credits_posted = 0,
+                },
+            }
+        }
+
         fn transient_error(
             self: *StateMachine,
             comptime operation: Operation,
@@ -2090,7 +2299,7 @@ pub fn StateMachineType(
                     // The `create_accounts` error codes do not depend on transient system status.
                     return;
                 },
-                .create_transfers => {
+                .create_transfers, .create_transfers_with_balance => {
                     comptime assert(@TypeOf(result) == CreateTransferResult);
 
                     // Transfers that fail with transient codes cannot reuse the same `id`,
@@ -6519,7 +6728,7 @@ test "StateMachine: input_valid" {
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
                 }},
-                .create_transfers => array ++ [_]Event{.{
+                .create_transfers, .create_transfers_with_balance => array ++ [_]Event{.{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
