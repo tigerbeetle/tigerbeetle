@@ -25,6 +25,7 @@ const vsr = @import("../vsr.zig");
 pub const ReplicaHealth = union(enum) {
     up: struct { paused: bool },
     down,
+    dead,
 };
 
 pub const Release = struct {
@@ -110,7 +111,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
         network: *Network,
         storages: []Storage,
-        storage_fault_atlas: *StorageFaultAtlas,
         aofs: []AOF,
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
@@ -147,7 +147,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster: Options,
                 network: NetworkOptions,
                 storage: Storage.Options,
-                storage_fault_atlas: StorageFaultAtlas.Options,
                 callbacks: Callbacks,
             },
         ) !*Cluster {
@@ -158,7 +157,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(options.cluster.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.cluster.releases.len > 0);
             assert(options.storage.replica_index == null);
-            assert(options.storage.fault_atlas == null);
+            assert(options.cluster.releases.len > 0);
 
             for (
                 options.cluster.releases[0 .. options.cluster.releases.len - 1],
@@ -184,17 +183,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             );
             errdefer network.deinit();
 
-            const storage_fault_atlas = try allocator.create(StorageFaultAtlas);
-            errdefer allocator.destroy(storage_fault_atlas);
-
-            storage_fault_atlas.* = try StorageFaultAtlas.init(
-                allocator,
-                options.cluster.replica_count,
-                &prng,
-                options.storage_fault_atlas,
-            );
-            errdefer storage_fault_atlas.deinit(allocator);
-
             var grid_checker = try allocator.create(GridChecker);
             errdefer allocator.destroy(grid_checker);
 
@@ -208,7 +196,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (storages[0..replica_index]) |*s| s.deinit(allocator);
                 var storage_options = options.storage;
                 storage_options.replica_index = @intCast(replica_index);
-                storage_options.fault_atlas = storage_fault_atlas;
                 storage_options.grid_checker = grid_checker;
                 storage.* = try Storage.init(
                     allocator,
@@ -360,7 +347,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .network = network,
                 .storages = storages,
                 .aofs = aofs,
-                .storage_fault_atlas = storage_fault_atlas,
                 .replicas = replicas,
                 .replica_pools = replica_pools,
                 .replica_times = replica_times,
@@ -399,6 +385,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
+            for (storages) |*storage| storage.faulty = true;
+
             for (clients) |*client| {
                 client.on_reply_context = cluster;
                 client.on_reply_callback = client_on_reply;
@@ -412,20 +400,28 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.manifest_checker.deinit();
             cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
-            cluster.network.deinit();
-            for (cluster.clients) |*client| client.deinit(cluster.allocator);
-            for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
-            for (cluster.replicas, 0..) |*replica, i| {
-                switch (cluster.replica_health[i]) {
-                    .up => replica.deinit(cluster.allocator),
-                    .down => {},
-                }
-            }
-            for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
-            for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
-            for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
 
-            cluster.storage_fault_atlas.deinit(cluster.allocator);
+            for (cluster.clients, cluster.client_pools) |*client, *client_pool| {
+                client.deinit(cluster.allocator);
+                client_pool.deinit(cluster.allocator);
+            }
+
+            for (
+                cluster.replicas,
+                cluster.replica_pools,
+                cluster.storages,
+                cluster.aofs,
+                cluster.replica_health,
+            ) |*replica, *replica_pool, *storage, *aof, *health| {
+                // Dead replicas are already deinitialized; we deinit a replica right before we try
+                // start it.
+                if (health.* != .dead) cluster.replica_deinit(replica.replica);
+                replica_pool.deinit(cluster.allocator);
+                storage.deinit(cluster.allocator);
+                aof.deinit(cluster.allocator);
+            }
+
+            cluster.network.deinit();
             cluster.grid_checker.deinit(); // (Storage references this.)
 
             cluster.allocator.free(cluster.clients);
@@ -440,7 +436,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.aofs);
             cluster.allocator.free(cluster.releases_bundled);
             cluster.allocator.destroy(cluster.grid_checker);
-            cluster.allocator.destroy(cluster.storage_fault_atlas);
             cluster.allocator.destroy(cluster.network);
             cluster.allocator.destroy(cluster);
         }
@@ -488,6 +483,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                             // synchronize when the replica restarts.
                             time.tick();
                         },
+                        .dead => {},
                     }
                 }
             }
@@ -510,7 +506,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster: *Cluster,
             replica_index: u8,
             releases_bundled: *const vsr.ReleaseList,
-        ) !void {
+        ) void {
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_upgrades[replica_index] == null);
 
@@ -520,11 +516,22 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             defer maybe(cluster.replica_health[replica_index] == .up);
             defer assert(cluster.replica_upgrades[replica_index] == null);
 
-            try cluster.replica_open(replica_index, .{
+            cluster.replica_deinit(replica_index);
+            cluster.replica_open(replica_index, .{
                 .nonce = cluster.replicas[replica_index].nonce + 1,
                 .release = release,
                 .releases_bundled = releases_bundled,
-            });
+            }) catch |err| {
+                switch (err) {
+                    error.WALCorrupt, error.WALInvalid => {
+                        log.warn("{}: replica_restart failed: error={}", .{ replica_index, err });
+                        cluster.replica_health[replica_index] = .dead;
+                        return;
+                    },
+                    else => @panic("unexpected error"),
+                }
+            };
+
             cluster.replica_enable(replica_index);
 
             if (cluster.replica_upgrades[replica_index]) |_| {
@@ -543,10 +550,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             // Reset the storage before the replica so that pending writes can (partially) finish.
             cluster.storages[replica_index].reset();
 
-            cluster.replicas[replica_index].deinit(cluster.allocator);
             cluster.network.process_disable(.{ .replica = replica_index });
             cluster.replica_health[replica_index] = .down;
             cluster.log_replica(.crash, replica_index);
+        }
+
+        fn replica_deinit(cluster: *Cluster, replica_index: u8) void {
+            cluster.replicas[replica_index].deinit(cluster.allocator);
 
             // Ensure that none of the replica's messages leaked when it was deinitialized.
             var messages_in_pool: usize = 0;
@@ -660,19 +670,23 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             } else false;
 
             if (release_available) {
-                // Disable faults while restarting to ensure that the cluster doesn't get stuck due
-                // to too many replicas in status=recovering_head.
-                const faulty = cluster.storages[replica_index].faulty;
-                cluster.storages[replica_index].faulty = false;
-                defer cluster.storages[replica_index].faulty = faulty;
-
+                cluster.replica_deinit(replica_index);
                 cluster.replica_open(replica_index, .{
                     .nonce = cluster.replicas[replica_index].nonce + 1,
                     .release = release,
                     .releases_bundled = replica.releases_bundled,
                 }) catch |err| {
-                    log.err("{}: release_execute failed: error={}", .{ replica_index, err });
-                    @panic("release_execute failed");
+                    switch (err) {
+                        error.WALCorrupt, error.WALInvalid => {
+                            log.warn("{}: release_execute failed: error={}", .{
+                                replica_index,
+                                err,
+                            });
+                            cluster.replica_health[replica_index] = .dead;
+                            return;
+                        },
+                        else => @panic("unexpected error"),
+                    }
                 };
                 cluster.replica_enable(replica_index);
             } else {
@@ -878,15 +892,21 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const replica = &cluster.replicas[replica_index];
 
             var statuses = [_]u8{' '} ** constants.members_max;
-            if (cluster.replica_health[replica_index] == .down) {
-                statuses[replica_index] = '#';
-            } else {
-                statuses[replica_index] = switch (replica.status) {
-                    .normal => @as(u8, '.'),
-                    .view_change => @as(u8, 'v'),
-                    .recovering => @as(u8, 'r'),
-                    .recovering_head => @as(u8, 'h'),
-                };
+            switch (cluster.replica_health[replica_index]) {
+                .up => {
+                    statuses[replica_index] = switch (replica.status) {
+                        .normal => @as(u8, '.'),
+                        .view_change => @as(u8, 'v'),
+                        .recovering => @as(u8, 'r'),
+                        .recovering_head => @as(u8, 'h'),
+                    };
+                },
+                .down => {
+                    statuses[replica_index] = '#';
+                },
+                .dead => {
+                    statuses[replica_index] = '%';
+                },
             }
 
             const role: u8 = role: {

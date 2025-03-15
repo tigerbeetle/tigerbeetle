@@ -815,6 +815,7 @@ pub fn ReplicaType(
                 // completes.
                 self.log_view += 1;
                 self.view += 1;
+                self.commit_max = self.op;
                 self.primary_update_view_headers();
                 self.view_durable_update();
 

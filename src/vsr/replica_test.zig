@@ -77,12 +77,12 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     t.replica(.R0).corrupt(.{ .wal_prepare = 2 });
 
     // 2/3 can't commit when 1/2 is status=recovering_head.
-    try t.replica(.R0).open();
+    t.replica(.R0).open();
     try expectEqual(t.replica(.R0).status(), .recovering_head);
-    try t.replica(.R1).open();
+    t.replica(.R1).open();
     try c.request(4, 0);
     // With the aid of the last replica, the cluster can recover.
-    try t.replica(.R2).open();
+    t.replica(.R2).open();
     try c.request(4, 4);
     try expectEqual(t.replica(.R_).commit(), 4);
 }
@@ -97,7 +97,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 
     try c.request(2, 2);
     t.replica(.R_).stop();
     t.replica(.R_).corrupt(.{ .wal_prepare = 1 });
-    try t.replica(.R_).open();
+    t.replica(.R_).open();
     t.run();
 
     // The same prepare is lost by all WALs, so the cluster can never recover.
@@ -114,7 +114,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
     var c = t.clients(0, t.cluster.clients.len);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 0 });
-    try t.replica(.R0).open();
+    t.replica(.R0).open();
 
     try c.request(1, 1);
     try expectEqual(t.replica(.R_).commit(), 1);
@@ -134,7 +134,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     while (slot < slot_count) : (slot += 1) {
         t.replica(.R0).corrupt(.{ .wal_prepare = slot });
     }
-    try t.replica(.R0).open();
+    t.replica(.R0).open();
     try expectEqual(t.replica(.R0).status(), .recovering_head);
 
     try c.request(slot_count, slot_count);
@@ -152,12 +152,8 @@ test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 1 });
-    if (t.replica(.R0).open()) {
-        unreachable;
-    } else |err| switch (err) {
-        error.WALCorrupt => {},
-        else => unreachable,
-    }
+    t.replica(.R0).open();
+    try expectEqual(t.replica(.R0).health(), .dead);
 }
 
 test "Cluster: recovery: WAL header corruption (R=1)" {
@@ -169,7 +165,7 @@ test "Cluster: recovery: WAL header corruption (R=1)" {
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 1 });
-    try t.replica(.R0).open();
+    t.replica(.R0).open();
     try c.request(3, 3);
 }
 
@@ -189,7 +185,7 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 2 });
-    try t.replica(.R0).open();
+    t.replica(.R0).open();
     try c.request(3, 3);
     try expectEqual(t.replica(.R0).commit(), 3);
     try expectEqual(t.replica(.S0).commit(), 3);
@@ -228,7 +224,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
         }
     }
 
-    try t.replica(.R_).open();
+    t.replica(.R_).open();
     t.run();
 
     try expectEqual(t.replica(.R_).status(), .normal);
@@ -259,7 +255,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     b1.stop();
     b1.corrupt(.{ .wal_prepare = 2 });
 
-    try b1.open();
+    b1.open();
     try expectEqual(b1.status(), .recovering_head);
     try expectEqual(b1.op_head(), 1);
 
@@ -275,7 +271,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     b1.stop();
     b1.corrupt(.{ .wal_prepare = 3 });
 
-    try b1.open();
+    b1.open();
     try expectEqual(b1.status(), .recovering_head);
     try expectEqual(b1.op_head(), 2);
 
@@ -290,7 +286,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     // Should B1 erroneously accept op=2 as head, unpartitioning B2 here would lead to a data loss.
     b2.pass_all(.R_, .bidirectional);
     t.run();
-    try a.open();
+    a.open();
     try c.request(4, 4);
     try mark.expect_hit();
 }
@@ -308,7 +304,7 @@ test "Cluster: recovery: recovering head: idle cluster" {
     b.corrupt(.{ .wal_prepare = 3 });
     b.corrupt(.{ .wal_header = 3 });
 
-    try b.open();
+    b.open();
     try expectEqual(b.status(), .recovering_head);
     try expectEqual(b.op_head(), 2);
 
@@ -502,7 +498,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     try expectEqual(t.replica(.A0).op_checkpoint(), checkpoint_1);
     try expectEqual(t.replica(.B1).op_checkpoint(), checkpoint_1);
 
-    try r_lag.open();
+    r_lag.open();
     try expectEqual(r_lag.status(), .normal);
     try expectEqual(r_lag.op_checkpoint(), 0);
 
@@ -594,7 +590,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
 
     // We can't learn op=4's prepare, only its header (via start_view).
     b1.drop(.R_, .bidirectional, .prepare);
-    try b1.open();
+    b1.open();
     try expectEqual(b1.status(), .recovering_head);
     t.run();
 
@@ -612,7 +608,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
 
     // A0 provides prepare=4.
     a0.pass_all(.R_, .outgoing);
-    try a0.open();
+    a0.open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), 4);
@@ -752,7 +748,7 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
         checkpoint_1_trigger + constants.pipeline_prepare_queue_max,
         checkpoint_1_trigger,
     );
-    try b1.open();
+    b1.open();
     t.run();
 
     try expectEqual(p.op_checkpoint(), checkpoint_1);
@@ -781,8 +777,8 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     // - R0 never received op=3 (it had already crashed), so it nacks.
     // - R1 did receive op=3, but upon recovering its WAL, it was corrupt, so it cannot nack.
     // The cluster must wait form R2 before recovering.
-    try t.replica(.R0).open();
-    try t.replica(.R1).open();
+    t.replica(.R0).open();
+    t.replica(.R1).open();
     const mark = marks.check("quorum received, awaiting repair");
     t.run();
     try expectEqual(t.replica(.R0).status(), .view_change);
@@ -790,7 +786,7 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     try mark.expect_hit();
 
     // R2 provides the missing header, allowing the view-change to succeed.
-    try t.replica(.R2).open();
+    t.replica(.R2).open();
     t.run();
     try expectEqual(t.replica(.R_).status(), .normal);
     try expectEqual(t.replica(.R_).commit(), 4);
@@ -810,7 +806,7 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     t.replica(.R1).corrupt(.{ .wal_prepare = 2 });
     t.replica(.R2).corrupt(.{ .wal_prepare = 2 });
 
-    try t.replica(.R_).open();
+    t.replica(.R_).open();
     const mark = marks.check("quorum received, deadlocked");
     t.run();
     try expectEqual(t.replica(.R_).status(), .view_change);
@@ -894,7 +890,7 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
 
     b1.stop();
 
-    try b2.open();
+    b2.open();
     // Don't allow b2 to repair its grid, otherwise it could help a0 commit past op_prepare_max for
     // checkpoint_2.
     b2.drop(.R_, .incoming, .block);
@@ -923,9 +919,9 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
     a0.stop();
     // Drop incoming DVCs to a0 to check if b1 steps up as primary.
     a0.drop(.R_, .incoming, .do_view_change);
-    try a0.open();
+    a0.open();
 
-    try b1.open();
+    b1.open();
     b1.pass(.R_, .incoming, .commit);
 
     t.run();
@@ -1105,7 +1101,7 @@ test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     const pipeline_prepare_queue_max = constants.pipeline_prepare_queue_max;
     try c.request(checkpoint_1_trigger + pipeline_prepare_queue_max, checkpoint_1_trigger);
 
-    try b1.open();
+    b1.open();
     t.run();
 
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger + pipeline_prepare_queue_max);
@@ -1135,8 +1131,8 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     try expectEqual(a0.status(), .normal);
     try expectEqual(b1.status(), .normal);
 
-    try b2.open();
-    try b3.open();
+    b2.open();
+    b3.open();
     t.run();
     t.run();
 
@@ -1279,7 +1275,7 @@ test "Cluster: sync: checkpoint from a newer view" {
 
         // Wipe B1 in-memory state and check that it ends up in a consistent state after restart.
         b1.stop();
-        try b1.open();
+        b1.open();
         t.run();
     }
 
@@ -1341,7 +1337,7 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         try c.request(data.request, data.request);
 
         t.replica(.R_).stop();
-        try t.replica(.R_).open_upgrade(&[_]u8{ 10, 20 });
+        t.replica(.R_).open_upgrade(&[_]u8{ 10, 20 });
 
         // Prevent the upgrade from committing so that we can verify that the replica is still
         // running version 1.
@@ -1368,7 +1364,7 @@ test "Cluster: upgrade: R=1" {
     defer t.deinit();
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
+    t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
     t.run();
 
     try expectEqual(t.replica(.R0).health(), .up);
@@ -1384,9 +1380,9 @@ test "Cluster: upgrade: state-sync to new release" {
     var c = t.clients(0, t.cluster.clients.len);
 
     t.replica(.R_).stop();
-    try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
-    try t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
-    try t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
+    t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
+    t.replica(.R1).open_upgrade(&[_]u8{ 10, 20 });
+    t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
 
     // R2 is advertising the new release (so that the upgrade can begin) but it doesn't actually
     // join in yet.
@@ -1401,7 +1397,7 @@ test "Cluster: upgrade: state-sync to new release" {
     // R2 state-syncs from R0/R1, updating its release from v1 to v2 via CheckpointState...
     t.replica(.R2).stop();
     t.replica(.R2).pass_all(.__, .bidirectional);
-    try t.replica(.R2).open_upgrade(&[_]u8{10});
+    t.replica(.R2).open_upgrade(&[_]u8{10});
     try expectEqual(t.replica(.R2).health(), .up);
     try expectEqual(t.replica(.R2).release(), 10);
     try expectEqual(t.replica(.R2).commit(), 0);
@@ -1413,7 +1409,7 @@ test "Cluster: upgrade: state-sync to new release" {
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
 
     // Start R2 up with v2 available, and it recovers.
-    try t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
+    t.replica(.R2).open_upgrade(&[_]u8{ 10, 20 });
     try expectEqual(t.replica(.R2).health(), .up);
     try expectEqual(t.replica(.R2).release(), 20);
     try expectEqual(t.replica(.R2).commit(), checkpoint_2);
@@ -1639,8 +1635,8 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     try expectEqual(b1.op_checkpoint(), checkpoint_1);
 
     b1.stop();
+    b2.open();
 
-    try b2.open();
     t.run();
 
     // b2 performs state sync to get caught up with a0.
@@ -1669,8 +1665,8 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
 
     const mark = marks.check("quorum received, awaiting repair");
 
-    try a0.open();
-    try b1.open();
+    a0.open();
+    b1.open();
 
     t.run();
 
@@ -1689,7 +1685,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     a0_storage.faulty = false;
     const mark2 = marks.check("quorum received, awaiting repair");
 
-    try a0.open();
+    a0.open();
 
     t.run();
 
@@ -1700,7 +1696,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
     try expectEqual(b1.status(), .view_change);
 
     a0_storage.faulty = true;
-    try b2.open();
+    b2.open();
     t.run();
 
     // a0 is able to resolve its dilemma about op_head() - 1 with the help of b2, which acks it.
@@ -1736,7 +1732,7 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
 
     // Start b2 so that the a0 & b2 can make progress to checkpoint_3; b1 is stopped so it remains
     // lagging at checkpoint_1.
-    try b2.open();
+    b2.open();
     b1.stop();
 
     t.run();
@@ -1780,7 +1776,7 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
     // Partition a0, force b1 & b2 into view_change by blocking outgoing .do_view_change messages.
     a0.drop_all(.R_, .bidirectional);
 
-    try b1.open();
+    b1.open();
     b1.drop(.R_, .outgoing, .do_view_change);
     b2.drop(.R_, .outgoing, .do_view_change);
 
@@ -1888,13 +1884,6 @@ const TestContext = struct {
                 .read_latency_mean = 5,
                 .write_latency_min = 1,
                 .write_latency_mean = 5,
-            },
-            .storage_fault_atlas = .{
-                .faulty_superblock = false,
-                .faulty_wal_headers = false,
-                .faulty_wal_prepares = false,
-                .faulty_client_replies = false,
-                .faulty_grid = false,
             },
             .callbacks = .{
                 .on_client_reply = TestContext.on_client_reply,
@@ -2075,24 +2064,17 @@ const TestReplicas = struct {
         }
     }
 
-    pub fn open(t: *const TestReplicas) !void {
+    pub fn open(t: *const TestReplicas) void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
             t.cluster.replica_restart(
                 r,
                 t.cluster.replicas[r].releases_bundled,
-            ) catch |err| {
-                assert(t.replicas.count() == 1);
-                return switch (err) {
-                    error.WALCorrupt => return error.WALCorrupt,
-                    error.WALInvalid => return error.WALInvalid,
-                    else => @panic("unexpected error"),
-                };
-            };
+            );
         }
     }
 
-    pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
+    pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) void {
         var releases_bundled = vsr.ReleaseList{};
         for (releases_bundled_patch) |patch| {
             releases_bundled.append_assume_capacity(vsr.Release.from(.{
@@ -2104,14 +2086,7 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.replica_restart(r, &releases_bundled) catch |err| {
-                assert(t.replicas.count() == 1);
-                return switch (err) {
-                    error.WALCorrupt => return error.WALCorrupt,
-                    error.WALInvalid => return error.WALInvalid,
-                    else => @panic("unexpected error"),
-                };
-            };
+            t.cluster.replica_restart(r, &releases_bundled);
         }
     }
 
@@ -2120,7 +2095,7 @@ const TestReplicas = struct {
         return t.replicas.get(0);
     }
 
-    const Health = enum { up, down };
+    const Health = enum { up, down, dead };
 
     pub fn health(t: *const TestReplicas) Health {
         var value_all: ?Health = null;
@@ -2128,6 +2103,7 @@ const TestReplicas = struct {
             const value: Health = switch (t.cluster.replica_health[r]) {
                 .up => .up,
                 .down => .down,
+                .dead => .dead,
             };
             if (value_all) |all| {
                 assert(all == value);

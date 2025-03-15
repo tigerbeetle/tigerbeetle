@@ -14,7 +14,6 @@ const log = std.log.scoped(.lsm_tree_fuzz);
 
 const Direction = @import("../direction.zig").Direction;
 const Storage = @import("../testing/storage.zig").Storage;
-const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
@@ -878,15 +877,6 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
     const table_usage = prng.enum_uniform(TableUsage);
     log.info("table_usage={}", .{table_usage});
 
-    var storage_fault_atlas = try ClusterFaultAtlas.init(allocator, 3, &prng, .{
-        .faulty_superblock = false,
-        .faulty_wal_headers = false,
-        .faulty_wal_prepares = false,
-        .faulty_client_replies = false,
-        .faulty_grid = true,
-    });
-    defer storage_fault_atlas.deinit(allocator);
-
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .replica_index = 0,
@@ -896,7 +886,6 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         .write_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, 20),
         .read_fault_probability = ratio(0, 100),
         .write_fault_probability = ratio(0, 100),
-        .fault_atlas = &storage_fault_atlas,
     };
 
     const block_count_min =
