@@ -10,21 +10,8 @@ impl From<tbc::tb_account_t> for Account {
             std::mem::align_of::<Account>(),
             std::mem::align_of::<tbc::tb_account_t>()
         );
-        Account {
-            id: other.id,
-            debits_pending: other.debits_pending,
-            debits_posted: other.debits_posted,
-            credits_pending: other.credits_pending,
-            credits_posted: other.credits_posted,
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            reserved: Reserved(other.reserved.to_le_bytes()),
-            ledger: other.ledger,
-            code: other.code,
-            flags: AccountFlags::from_bits(other.flags).expect("account flags"),
-            timestamp: other.timestamp,
-        }
+        AccountFlags::from_bits(other.flags).expect("account flags");
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -38,21 +25,7 @@ impl From<Account> for tbc::tb_account_t {
             std::mem::align_of::<Account>(),
             std::mem::align_of::<tbc::tb_account_t>()
         );
-        tbc::tb_account_t {
-            id: other.id,
-            debits_pending: other.debits_pending,
-            debits_posted: other.debits_posted,
-            credits_pending: other.credits_pending,
-            credits_posted: other.credits_posted,
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            reserved: u32::from_le_bytes(other.reserved.0),
-            ledger: other.ledger,
-            code: other.code,
-            flags: other.flags.bits(),
-            timestamp: other.timestamp,
-        }
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -66,21 +39,8 @@ impl From<tbc::tb_transfer_t> for Transfer {
             std::mem::align_of::<Transfer>(),
             std::mem::align_of::<tbc::tb_transfer_t>()
         );
-        Transfer {
-            id: other.id,
-            debit_account_id: other.debit_account_id,
-            credit_account_id: other.credit_account_id,
-            amount: other.amount,
-            pending_id: other.pending_id,
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            timeout: other.timeout,
-            ledger: other.ledger,
-            code: other.code,
-            flags: TransferFlags::from_bits(other.flags).expect("transfer flags"),
-            timestamp: other.timestamp,
-        }
+        TransferFlags::from_bits(other.flags).expect("transfer flags");
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -94,21 +54,7 @@ impl From<Transfer> for tbc::tb_transfer_t {
             std::mem::align_of::<Transfer>(),
             std::mem::align_of::<tbc::tb_transfer_t>()
         );
-        tbc::tb_transfer_t {
-            id: other.id,
-            debit_account_id: other.debit_account_id,
-            credit_account_id: other.credit_account_id,
-            amount: other.amount,
-            pending_id: other.pending_id,
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            timeout: other.timeout,
-            ledger: other.ledger,
-            code: other.code,
-            flags: other.flags.bits(),
-            timestamp: other.timestamp,
-        }
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -122,18 +68,7 @@ impl From<AccountFilter> for tbc::tb_account_filter_t {
             std::mem::align_of::<AccountFilter>(),
             std::mem::align_of::<tbc::tb_account_filter_t>()
         );
-        tbc::tb_account_filter_t {
-            account_id: other.account_id,
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            code: other.code,
-            reserved: other.reserved.0,
-            timestamp_min: other.timestamp_min,
-            timestamp_max: other.timestamp_max,
-            limit: other.limit,
-            flags: other.flags.bits(),
-        }
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -147,14 +82,7 @@ impl From<tbc::tb_account_balance_t> for AccountBalance {
             std::mem::align_of::<AccountBalance>(),
             std::mem::align_of::<tbc::tb_account_balance_t>()
         );
-        AccountBalance {
-            debits_pending: other.debits_pending,
-            debits_posted: other.debits_posted,
-            credits_pending: other.credits_pending,
-            credits_posted: other.credits_posted,
-            timestamp: other.timestamp,
-            reserved: Reserved(other.reserved),
-        }
+        unsafe { std::mem::transmute(other) }
     }
 }
 
@@ -168,18 +96,7 @@ impl From<QueryFilter> for tbc::tb_query_filter_t {
             std::mem::align_of::<QueryFilter>(),
             std::mem::align_of::<tbc::tb_query_filter_t>()
         );
-        tbc::tb_query_filter_t {
-            user_data_128: other.user_data_128,
-            user_data_64: other.user_data_64,
-            user_data_32: other.user_data_32,
-            ledger: other.ledger,
-            code: other.code,
-            reserved: other.reserved.0,
-            timestamp_min: other.timestamp_min,
-            timestamp_max: other.timestamp_max,
-            limit: other.limit,
-            flags: other.flags.bits(),
-        }
+        unsafe { std::mem::transmute(other) }
     }
 }
 
