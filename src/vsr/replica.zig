@@ -815,6 +815,7 @@ pub fn ReplicaType(
                 // completes.
                 self.log_view += 1;
                 self.view += 1;
+                self.commit_max = self.op;
                 self.primary_update_view_headers();
                 self.view_durable_update();
 
@@ -1275,7 +1276,7 @@ pub fn ReplicaType(
                 .grid_repair_message_timeout = Timeout{
                     .name = "grid_repair_message_timeout",
                     .id = replica_index,
-                    .after = options.timeout_grid_repair_message_ticks orelse 50,
+                    .after = options.timeout_grid_repair_message_ticks orelse 25,
                 },
                 .grid_scrub_timeout = Timeout{
                     .name = "grid_scrub_timeout",
