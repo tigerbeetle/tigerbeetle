@@ -281,6 +281,7 @@ impl Drop for Client {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Account {
     pub id: u128,
@@ -299,6 +300,7 @@ pub struct Account {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
     pub struct AccountFlags: u16 {
         const None = 0;
@@ -311,6 +313,7 @@ bitflags! {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct Transfer {
     pub id: u128,
@@ -329,6 +332,7 @@ pub struct Transfer {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
     pub struct TransferFlags: u16 {
         const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED as u16;
@@ -343,6 +347,7 @@ bitflags! {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AccountFilter {
     pub account_id: u128,
@@ -358,6 +363,7 @@ pub struct AccountFilter {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
     pub struct AccountFilterFlags: u32 {
         const Debits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_DEBITS;
@@ -366,6 +372,7 @@ bitflags! {
     }
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AccountBalance {
     pub debits_pending: u128,
@@ -376,6 +383,7 @@ pub struct AccountBalance {
     pub reserved: Reserved<56>,
 }
 
+#[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct QueryFilter {
     pub user_data_128: u128,
@@ -391,6 +399,7 @@ pub struct QueryFilter {
 }
 
 bitflags! {
+    #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
     pub struct QueryFilterFlags: u32 {
         const Reversed = tbc::TB_QUERY_FILTER_FLAGS_TB_QUERY_FILTER_REVERSED;
@@ -735,6 +744,7 @@ impl core::fmt::Display for NotFound {
     }
 }
 
+#[repr(transparent)]
 #[derive(Debug, Copy, Clone)]
 pub struct Reserved<const N: usize>([u8; N]);
 

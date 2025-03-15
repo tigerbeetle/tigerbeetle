@@ -2,6 +2,14 @@ pub use super::*;
 
 impl From<tbc::tb_account_t> for Account {
     fn from(other: tbc::tb_account_t) -> Account {
+        assert_eq!(
+            std::mem::size_of::<Account>(),
+            std::mem::size_of::<tbc::tb_account_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Account>(),
+            std::mem::align_of::<tbc::tb_account_t>()
+        );
         Account {
             id: other.id,
             debits_pending: other.debits_pending,
@@ -22,6 +30,14 @@ impl From<tbc::tb_account_t> for Account {
 
 impl From<Account> for tbc::tb_account_t {
     fn from(other: Account) -> tbc::tb_account_t {
+        assert_eq!(
+            std::mem::size_of::<Account>(),
+            std::mem::size_of::<tbc::tb_account_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Account>(),
+            std::mem::align_of::<tbc::tb_account_t>()
+        );
         tbc::tb_account_t {
             id: other.id,
             debits_pending: other.debits_pending,
@@ -42,6 +58,14 @@ impl From<Account> for tbc::tb_account_t {
 
 impl From<tbc::tb_transfer_t> for Transfer {
     fn from(other: tbc::tb_transfer_t) -> Transfer {
+        assert_eq!(
+            std::mem::size_of::<Transfer>(),
+            std::mem::size_of::<tbc::tb_transfer_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Transfer>(),
+            std::mem::align_of::<tbc::tb_transfer_t>()
+        );
         Transfer {
             id: other.id,
             debit_account_id: other.debit_account_id,
@@ -62,6 +86,14 @@ impl From<tbc::tb_transfer_t> for Transfer {
 
 impl From<Transfer> for tbc::tb_transfer_t {
     fn from(other: Transfer) -> tbc::tb_transfer_t {
+        assert_eq!(
+            std::mem::size_of::<Transfer>(),
+            std::mem::size_of::<tbc::tb_transfer_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<Transfer>(),
+            std::mem::align_of::<tbc::tb_transfer_t>()
+        );
         tbc::tb_transfer_t {
             id: other.id,
             debit_account_id: other.debit_account_id,
@@ -82,6 +114,14 @@ impl From<Transfer> for tbc::tb_transfer_t {
 
 impl From<AccountFilter> for tbc::tb_account_filter_t {
     fn from(other: AccountFilter) -> tbc::tb_account_filter_t {
+        assert_eq!(
+            std::mem::size_of::<AccountFilter>(),
+            std::mem::size_of::<tbc::tb_account_filter_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<AccountFilter>(),
+            std::mem::align_of::<tbc::tb_account_filter_t>()
+        );
         tbc::tb_account_filter_t {
             account_id: other.account_id,
             user_data_128: other.user_data_128,
@@ -99,6 +139,14 @@ impl From<AccountFilter> for tbc::tb_account_filter_t {
 
 impl From<tbc::tb_account_balance_t> for AccountBalance {
     fn from(other: tbc::tb_account_balance_t) -> AccountBalance {
+        assert_eq!(
+            std::mem::size_of::<AccountBalance>(),
+            std::mem::size_of::<tbc::tb_account_balance_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<AccountBalance>(),
+            std::mem::align_of::<tbc::tb_account_balance_t>()
+        );
         AccountBalance {
             debits_pending: other.debits_pending,
             debits_posted: other.debits_posted,
@@ -112,6 +160,14 @@ impl From<tbc::tb_account_balance_t> for AccountBalance {
 
 impl From<QueryFilter> for tbc::tb_query_filter_t {
     fn from(other: QueryFilter) -> tbc::tb_query_filter_t {
+        assert_eq!(
+            std::mem::size_of::<QueryFilter>(),
+            std::mem::size_of::<tbc::tb_query_filter_t>()
+        );
+        assert_eq!(
+            std::mem::align_of::<QueryFilter>(),
+            std::mem::align_of::<tbc::tb_query_filter_t>()
+        );
         tbc::tb_query_filter_t {
             user_data_128: other.user_data_128,
             user_data_64: other.user_data_64,
