@@ -124,8 +124,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // will be very inconvenient for operators.
     const release_triple_client_min = .{
         .major = 0,
-        .minor = 15,
-        .patch = 3,
+        .minor = 16,
+        .patch = 4,
     };
 
     const version_info = VersionInfo{
