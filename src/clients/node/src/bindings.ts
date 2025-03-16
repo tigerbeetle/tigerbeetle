@@ -603,11 +603,6 @@ export enum CreateTransferError {
   closing_transfer_must_be_pending = 64,
 
   /**
-  * See [amount_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero)
-  */
-  amount_must_not_be_zero = 18,
-
-  /**
   * See [ledger_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#ledger_must_not_be_zero)
   */
   ledger_must_not_be_zero = 19,
@@ -766,6 +761,11 @@ export enum CreateTransferError {
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits)
   */
   exceeds_debits = 55,
+
+  /**
+  * See [deprecated_18](https://docs.tigerbeetle.com/reference/requests/create_transfers#deprecated_18)
+  */
+  deprecated_18 = 18,
 }
 
 export type CreateAccountsError = {

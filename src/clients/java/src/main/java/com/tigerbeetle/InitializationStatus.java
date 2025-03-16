@@ -4,6 +4,7 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
+import java.util.HashMap;
 
 public enum InitializationStatus {
     Success((int) 0),
@@ -16,12 +17,12 @@ public enum InitializationStatus {
 
     public final int value;
 
-    static final InitializationStatus[] enumByValue;
+    static final HashMap<Object, InitializationStatus> enumByValue;
     static {
     final var values = values();
-      enumByValue = new InitializationStatus[values.length];
+      enumByValue = new HashMap<Object, InitializationStatus>(values.length);
        for (final var item : values) {
-          enumByValue[item.value] = item;
+          enumByValue.put(item.value, item);
       }
     }
 
@@ -30,11 +31,10 @@ public enum InitializationStatus {
     }
 
     public static InitializationStatus fromValue(int value) {
-        if (value < 0 || value >= enumByValue.length)
+        final var item = enumByValue.getOrDefault(value, null);
+        if (item == null)
             throw new IllegalArgumentException(
                     String.format("Invalid InitializationStatus value=%d", value));
-
-        final var item = enumByValue[value];
         AssertionError.assertTrue(item.value == value,
           "Unexpected InitializationStatus: found=%d expected=%d", item.value, value);
         return item;

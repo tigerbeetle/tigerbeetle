@@ -70,6 +70,7 @@ test "valid tb_client.h" {
 
                 // Compare the enum int values in C to the enum int values in Zig.
                 for (std.meta.fields(ty)) |field| {
+                    if (std.mem.startsWith(u8, field.name, "deprecated_")) continue;
                     const c_enum_field = to_uppercase(to_snakecase(field.name));
                     const c_value = @field(c, c_enum_prefix ++ c_enum_field);
 

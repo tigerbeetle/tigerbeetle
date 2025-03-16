@@ -4,6 +4,7 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
+import java.util.HashMap;
 
 public enum CreateTransferResult {
 
@@ -188,11 +189,6 @@ public enum CreateTransferResult {
     ClosingTransferMustBePending((int) 64),
 
     /**
-     * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero">amount_must_not_be_zero</a>
-     */
-    AmountMustNotBeZero((int) 18),
-
-    /**
      * @see <a href="https://docs.tigerbeetle.com/reference/requests/create_transfers#ledger_must_not_be_zero">ledger_must_not_be_zero</a>
      */
     LedgerMustNotBeZero((int) 19),
@@ -354,12 +350,12 @@ public enum CreateTransferResult {
 
     public final int value;
 
-    static final CreateTransferResult[] enumByValue;
+    static final HashMap<Object, CreateTransferResult> enumByValue;
     static {
     final var values = values();
-      enumByValue = new CreateTransferResult[values.length];
+      enumByValue = new HashMap<Object, CreateTransferResult>(values.length);
        for (final var item : values) {
-          enumByValue[item.value] = item;
+          enumByValue.put(item.value, item);
       }
     }
 
@@ -368,11 +364,10 @@ public enum CreateTransferResult {
     }
 
     public static CreateTransferResult fromValue(int value) {
-        if (value < 0 || value >= enumByValue.length)
+        final var item = enumByValue.getOrDefault(value, null);
+        if (item == null)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateTransferResult value=%d", value));
-
-        final var item = enumByValue[value];
         AssertionError.assertTrue(item.value == value,
           "Unexpected CreateTransferResult: found=%d expected=%d", item.value, value);
         return item;

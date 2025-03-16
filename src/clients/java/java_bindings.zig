@@ -236,6 +236,7 @@ fn emit_enum(
     try buffer.writer().print(
         \\{[notice]s}
         \\package com.tigerbeetle;
+        \\import java.util.HashMap;
         \\
         \\{[visibility]s}enum {[name]s} {{
         \\
@@ -245,10 +246,19 @@ fn emit_enum(
         .name = mapping.name,
     });
 
-    const type_info = @typeInfo(Type).Enum;
-    inline for (type_info.fields, 0..) |field, i| {
-        if (comptime mapping.is_private(field.name)) continue;
+    const fields = comptime fields: {
+        const EnumField = std.builtin.Type.EnumField;
+        const type_info = @typeInfo(Type).Enum;
+        var fields: []const EnumField = &[_]EnumField{};
+        for (type_info.fields) |field| {
+            if (mapping.is_private(field.name)) continue;
+            if (std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+            fields = fields ++ [_]EnumField{field};
+        }
+        break :fields fields;
+    };
 
+    inline for (fields, 0..) |field, i| {
         if (mapping.docs_link) |docs_link| {
             try buffer.writer().print(
                 \\
@@ -269,7 +279,7 @@ fn emit_enum(
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
             .value = @intFromEnum(@field(Type, field.name)),
-            .separator = if (i == type_info.fields.len - 1) ';' else ',',
+            .separator = if (i == fields.len - 1) ';' else ',',
         });
     }
 
@@ -277,12 +287,12 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
-        \\    static final {[name]s}[] enumByValue;
+        \\    static final HashMap<Object, {[name]s}> enumByValue;
         \\    static {{
         \\    final var values = values();
-        \\      enumByValue = new {[name]s}[values.length];
+        \\      enumByValue = new HashMap<Object, {[name]s}>(values.length);
         \\       for (final var item : values) {{
-        \\          enumByValue[item.value] = item;
+        \\          enumByValue.put(item.value, item);
         \\      }}
         \\    }}
         \\
@@ -291,11 +301,10 @@ fn emit_enum(
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        if (value < 0 || value >= enumByValue.length)
+        \\        final var item = enumByValue.getOrDefault(value, null);
+        \\        if (item == null)
         \\            throw new IllegalArgumentException(
         \\                    String.format("Invalid {[name]s} value=%d", value));
-        \\
-        \\        final var item = enumByValue[value];
         \\        AssertionError.assertTrue(item.value == value,
         \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
         \\        return item;

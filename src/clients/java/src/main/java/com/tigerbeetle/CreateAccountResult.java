@@ -4,6 +4,7 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
+import java.util.HashMap;
 
 public enum CreateAccountResult {
 
@@ -144,12 +145,12 @@ public enum CreateAccountResult {
 
     public final int value;
 
-    static final CreateAccountResult[] enumByValue;
+    static final HashMap<Object, CreateAccountResult> enumByValue;
     static {
     final var values = values();
-      enumByValue = new CreateAccountResult[values.length];
+      enumByValue = new HashMap<Object, CreateAccountResult>(values.length);
        for (final var item : values) {
-          enumByValue[item.value] = item;
+          enumByValue.put(item.value, item);
       }
     }
 
@@ -158,11 +159,10 @@ public enum CreateAccountResult {
     }
 
     public static CreateAccountResult fromValue(int value) {
-        if (value < 0 || value >= enumByValue.length)
+        final var item = enumByValue.getOrDefault(value, null);
+        if (item == null)
             throw new IllegalArgumentException(
                     String.format("Invalid CreateAccountResult value=%d", value));
-
-        final var item = enumByValue[value];
         AssertionError.assertTrue(item.value == value,
           "Unexpected CreateAccountResult: found=%d expected=%d", item.value, value);
         return item;

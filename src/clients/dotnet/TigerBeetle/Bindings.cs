@@ -652,11 +652,6 @@ public enum CreateTransferResult : uint
     ClosingTransferMustBePending = 64,
 
     /// <summary>
-    /// https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero
-    /// </summary>
-    AmountMustNotBeZero = 18,
-
-    /// <summary>
     /// https://docs.tigerbeetle.com/reference/requests/create_transfers#ledger_must_not_be_zero
     /// </summary>
     LedgerMustNotBeZero = 19,
