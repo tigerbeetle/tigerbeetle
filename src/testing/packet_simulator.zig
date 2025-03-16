@@ -356,9 +356,6 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const ReadyPacket = struct { path: Path, link_packet: LinkPacket };
             var packets: [32]ReadyPacket = undefined;
             var packet_count: u32 = 0;
-            defer for (packets[0..packet_count]) |ready| {
-                ready.link_packet.packet.deinit();
-            };
 
             for (0..self.process_count()) |from| {
                 for (0..self.process_count()) |to| {
@@ -381,6 +378,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.prng.shuffle(ReadyPacket, packets[0..packet_count]);
             for (packets[0..packet_count]) |ready| {
                 self.submit_packet_finish(ready.path, ready.link_packet);
+                ready.link_packet.packet.deinit();
             }
 
             return true;
