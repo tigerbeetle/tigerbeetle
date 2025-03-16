@@ -5600,7 +5600,6 @@ pub fn ReplicaType(
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
                 if (!self.state_machine.input_valid(
-                    message.header.release,
                     operation,
                     message.body_used(),
                 )) {
@@ -6512,7 +6511,6 @@ pub fn ReplicaType(
                 },
                 else => {
                     self.state_machine.prepare(
-                        request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
                         request.message.body_used(),
                     );

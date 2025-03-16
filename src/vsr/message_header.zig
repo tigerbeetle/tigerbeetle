@@ -553,9 +553,7 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
-                    if (self.size != @sizeOf(Header) and // Compat(v0.15.3)
-                        self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
-                    {
+                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest)) {
                         return "register: size != @sizeOf(Header) [+ @sizeOf(vsr.RegisterRequest)]";
                     }
                 },
