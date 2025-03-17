@@ -34,6 +34,8 @@ pub struct Client {
 
 impl Client {
     pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, Status> {
+        assert_abi_compatibility();
+
         unsafe {
             let mut tb_client = std::ptr::null_mut();
             let status = tbc::tb_client_init(
@@ -276,6 +278,72 @@ impl Drop for Client {
             .close();
         }
     }
+}
+
+/// Make basic assertions about the ABI of our types.
+///
+/// We don't actually use some of the C types at all,
+/// instead casting directly to hand-written Rust types.
+///
+/// These assertions give us some confidence those types
+/// might be possibly correct.
+fn assert_abi_compatibility() {
+    assert_eq!(
+        std::mem::size_of::<Account>(),
+        std::mem::size_of::<tbc::tb_account_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<Account>(),
+        std::mem::align_of::<tbc::tb_account_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<Account>(),
+        std::mem::size_of::<tbc::tb_account_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<Account>(),
+        std::mem::align_of::<tbc::tb_account_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<Transfer>(),
+        std::mem::size_of::<tbc::tb_transfer_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<Transfer>(),
+        std::mem::align_of::<tbc::tb_transfer_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<Transfer>(),
+        std::mem::size_of::<tbc::tb_transfer_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<Transfer>(),
+        std::mem::align_of::<tbc::tb_transfer_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<AccountFilter>(),
+        std::mem::size_of::<tbc::tb_account_filter_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<AccountFilter>(),
+        std::mem::align_of::<tbc::tb_account_filter_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<AccountBalance>(),
+        std::mem::size_of::<tbc::tb_account_balance_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<AccountBalance>(),
+        std::mem::align_of::<tbc::tb_account_balance_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<QueryFilter>(),
+        std::mem::size_of::<tbc::tb_query_filter_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<QueryFilter>(),
+        std::mem::align_of::<tbc::tb_query_filter_t>()
+    );
 }
 
 #[repr(C)]
