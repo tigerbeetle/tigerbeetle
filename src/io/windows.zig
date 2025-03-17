@@ -42,7 +42,7 @@ pub const IO = struct {
         os.windows.WSACleanup() catch unreachable;
     }
 
-    pub fn tick(self: *IO) !void {
+    pub fn run(self: *IO) !void {
         return self.flush(.non_blocking);
     }
 

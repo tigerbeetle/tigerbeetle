@@ -107,8 +107,8 @@ pub fn StorageType(comptime IO: type) type {
             storage.fd = IO.INVALID_FILE;
         }
 
-        pub fn tick(storage: *Storage) void {
-            storage.io.tick() catch |err| {
+        pub fn run(storage: *Storage) void {
+            storage.io.run() catch |err| {
                 log.warn("tick: {}", .{err});
                 std.debug.panic("io.tick(): {}", .{err});
             };

@@ -631,7 +631,7 @@ pub fn ReplicaType(
             // Open the superblock:
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
-            while (!self.opened) self.superblock.storage.tick();
+            while (!self.opened) self.superblock.storage.run();
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
@@ -699,7 +699,7 @@ pub fn ReplicaType(
 
             self.opened = false;
             self.journal.recover(journal_recover_callback);
-            while (!self.opened) self.superblock.storage.tick();
+            while (!self.opened) self.superblock.storage.run();
 
             // Abort if all slots are faulty, since something is very wrong.
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;

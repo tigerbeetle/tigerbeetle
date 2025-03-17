@@ -48,7 +48,7 @@ pub const Signal = struct {
     }
 
     /// Requests to stop listening for notifications.
-    /// The caller must continue processing `IO.tick()` until `state() == .stopped`.
+    /// The caller must continue processing `IO.run()` until `state() == .stopped`.
     /// Safe to call from multiple threads.
     pub fn stop(self: *Signal) void {
         const listening = self.listening.swap(false, .release);
@@ -180,11 +180,11 @@ test "signal" {
             const thread = try std.Thread.spawn(.{}, Context.notify, .{&self});
 
             // Wait for the number of events to complete.
-            while (self.count < events_count) try self.io.tick();
+            while (self.count < events_count) try self.io.run();
 
             // Begin shutdown and keep ticking until it's completed.
             self.signal.stop();
-            while (self.signal.status() != .stopped) try self.io.tick();
+            while (self.signal.status() != .stopped) try self.io.run();
             thread.join();
 
             // Notify after shutdown should be ignored.

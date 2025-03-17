@@ -89,7 +89,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                 0,
             );
 
-            storage.tick();
+            storage.run();
         }
 
         for (zones) |zone| {
@@ -142,7 +142,7 @@ pub fn main(args: fuzz.FuzzArgs) !void {
                     sector_offset,
                 );
 
-                storage.tick();
+                storage.run();
             }
         }
 
