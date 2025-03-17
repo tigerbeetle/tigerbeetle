@@ -138,8 +138,8 @@ fn smoke() -> anyhow::Result<()> {
 
             assert_eq!(result.len(), 2);
 
-            assert!(result[0].is_ok());
-            assert!(result[1].is_ok());
+            assert_eq!(result[0], tb::CreateAccountResult::Ok);
+            assert_eq!(result[1], tb::CreateAccountResult::Ok);
         }
 
         {
@@ -162,7 +162,7 @@ fn smoke() -> anyhow::Result<()> {
                 .await?;
 
             assert_eq!(result.len(), 1);
-            assert!(result[0].is_ok());
+            assert_eq!(result[0], tb::CreateTransferResult::Ok);
         }
 
         {

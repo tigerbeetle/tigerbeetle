@@ -55,8 +55,7 @@ impl Client {
     pub fn create_accounts<'s>(
         &'s self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<Result<(), CreateAccountResult>>, PacketStatus>> + use<'s>
-    {
+    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> + use<'s> {
         let (packet, rx) = create_packet::<Account, tbc::tb_account_t>(
             tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS,
             events,
@@ -75,8 +74,8 @@ impl Client {
                  _next_event: &tbc::tb_account_t,
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
-                Ok(()),
-                Err,
+                CreateAccountResult::Ok,
+                std::convert::identity,
             )
         }
     }
@@ -84,8 +83,7 @@ impl Client {
     pub fn create_transfers<'s>(
         &'s self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<Result<(), CreateTransferResult>>, PacketStatus>> + use<'s>
-    {
+    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> + use<'s> {
         let (packet, rx) = create_packet::<Transfer, tbc::tb_transfer_t>(
             tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS,
             events,
@@ -104,8 +102,8 @@ impl Client {
                  _next_event: &tbc::tb_transfer_t,
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
-                Ok(()),
-                Err,
+                CreateTransferResult::Ok,
+                std::convert::identity,
             )
         }
     }
@@ -406,9 +404,10 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[non_exhaustive]
 pub enum CreateAccountResult {
+    Ok,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -438,10 +437,10 @@ pub enum CreateAccountResult {
     Unknown(u32),
 }
 
-impl std::error::Error for CreateAccountResult {}
 impl core::fmt::Display for CreateAccountResult {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
+            Self::Ok => f.write_str("ok"),
             Self::LinkedEventFailed => f.write_str("linked event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),
@@ -485,9 +484,10 @@ impl core::fmt::Display for CreateAccountResult {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 #[non_exhaustive]
 pub enum CreateTransferResult {
+    Ok,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -559,10 +559,10 @@ pub enum CreateTransferResult {
     Unknown(u32),
 }
 
-impl std::error::Error for CreateTransferResult {}
 impl core::fmt::Display for CreateTransferResult {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
+            Self::Ok => f.write_str("ok"),
             Self::LinkedEventFailed => f.write_str("link event failed"),
             Self::LinkedEventChainOpen => f.write_str("linked event chain open"),
             Self::ImportedEventExpected => f.write_str("imported event expected"),
