@@ -177,6 +177,29 @@ pub fn zeroed(bytes: []const u8) bool {
     return byte_bits == 0;
 }
 
+/// Similar to `std.mem.bytesAsSlice`, but allows buffers with inexact sizes,
+/// returning the largest possible slice that is less than or equal to the buffer length.
+/// Accepts only mutable slices, as it is intended for writing memory,
+/// where skipped bytes at the end can be safely ignored.
+pub fn buffer_as_slice(comptime T: type, buffer: []u8) []T {
+    const size = @divFloor(buffer.len, @sizeOf(T)) * @sizeOf(T);
+    return @alignCast(std.mem.bytesAsSlice(T, buffer[0..size]));
+}
+
+test buffer_as_slice {
+    const testing = std.testing;
+    var buffer: [64]u8 = undefined;
+    const T10 = extern struct { content: [10]u8 };
+    const T16 = extern struct { content: [16]u8 };
+
+    try testing.expectEqual(@as(usize, 6), buffer_as_slice(T10, buffer[0..]).len);
+    try testing.expectEqual(@as(usize, 4), buffer_as_slice(T16, buffer[0..]).len);
+    try testing.expectEqual(@as(usize, 6), buffer_as_slice(T10, buffer[0 .. buffer.len - 1]).len);
+    try testing.expectEqual(@as(usize, 3), buffer_as_slice(T16, buffer[0 .. buffer.len - 1]).len);
+    try testing.expectEqual(@as(usize, 5), buffer_as_slice(T10, buffer[0 .. buffer.len - 10]).len);
+    try testing.expectEqual(@as(usize, 3), buffer_as_slice(T16, buffer[0 .. buffer.len - 10]).len);
+}
+
 const Cut = struct {
     prefix: []const u8,
     suffix: []const u8,

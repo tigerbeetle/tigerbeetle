@@ -201,7 +201,7 @@ public final class Main {
                 // section:batch
                 ResultSet dataSource = null; /* Loaded from an external source. */;
 
-                var BATCH_SIZE = 8190;
+                var BATCH_SIZE = 8189;
                 TransferBatch batch = new TransferBatch(BATCH_SIZE);
                 while(dataSource.next()) {
                     batch.add();
@@ -465,7 +465,7 @@ public final class Main {
                 ResultSet historicalAccounts = null; // Loaded from an external source;
                 ResultSet historicalTransfers = null ; // Loaded from an external source.
 
-                var BATCH_SIZE = 8190;
+                var BATCH_SIZE = 8189;
 
                 // First, load and import all accounts with their timestamps from the historical source.
                 AccountBatch accounts = new AccountBatch(BATCH_SIZE);

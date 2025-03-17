@@ -112,16 +112,18 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
-        account_batch_size: usize = @divExact(
-            constants.message_size_max - @sizeOf(vsr.Header),
-            @sizeOf(tigerbeetle.Account),
+        account_batch_size: usize = StateMachine.batch_event_max(
+            constants.config.process.release,
+            .create_accounts,
+            constants.message_body_size_max,
         ),
         transfer_count: usize = 10_000_000,
         transfer_hot_percent: usize = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: usize = @divExact(
-            constants.message_size_max - @sizeOf(vsr.Header),
-            @sizeOf(tigerbeetle.Transfer),
+        transfer_batch_size: usize = StateMachine.batch_event_max(
+            constants.config.process.release,
+            .create_transfers,
+            constants.message_body_size_max,
         ),
         transfer_batch_delay_us: usize = 0,
         validate: bool = false,

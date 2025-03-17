@@ -393,12 +393,12 @@ But the insert rate will be a *fraction* of
 potential. Instead, **always batch what you can**.
 
 The maximum batch size is set in the TigerBeetle server. The default
-is 8190.
+is 8189.
 
 ```java
 ResultSet dataSource = null; /* Loaded from an external source. */;
 
-var BATCH_SIZE = 8190;
+var BATCH_SIZE = 8189;
 TransferBatch batch = new TransferBatch(BATCH_SIZE);
 while(dataSource.next()) {
     batch.add();
@@ -782,7 +782,7 @@ long historicalTimestamp = 0L;
 ResultSet historicalAccounts = null; // Loaded from an external source;
 ResultSet historicalTransfers = null ; // Loaded from an external source.
 
-var BATCH_SIZE = 8190;
+var BATCH_SIZE = 8189;
 
 // First, load and import all accounts with their timestamps from the historical source.
 AccountBatch accounts = new AccountBatch(BATCH_SIZE);

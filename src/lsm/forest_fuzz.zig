@@ -83,7 +83,7 @@ const Environment = struct {
         .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
-        .cache_entries_posted = cache_entries_max,
+        .cache_entries_transfers_pending = cache_entries_max,
     });
 
     const free_set_fragments_max = 2048;
@@ -144,7 +144,7 @@ const Environment = struct {
 
         env.scan_lookup_buffer = try allocator.alloc(
             tb.Account,
-            StateMachine.constants.batch_max.create_accounts,
+            StateMachine.constants.values_max.create_accounts,
         );
 
         env.forest = undefined;

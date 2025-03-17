@@ -10,7 +10,7 @@ transfer. Instead, set the
 accounts to limit their account balances. More complex conditional transfers can be expressed using
 [balance-conditional transfers](../../coding/recipes/balance-conditional-transfers.md).
 
-⚠️ It is not possible currently to look up more than a full batch (8190) of accounts atomically.
+⚠️ It is not possible currently to look up more than a full batch (8189) of accounts atomically.
 When issuing multiple `lookup_accounts` calls, it can happen that other operations will interleave
 between the calls leading to read skew. Consider using the
 [`history`](../account.md#flagshistory) flag to enable atomic lookups.

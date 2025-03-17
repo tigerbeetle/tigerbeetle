@@ -219,7 +219,7 @@ using (var client = new Client(clusterID, addresses))
     {
         // section:batch
         var batch = new Transfer[] { }; // Array of transfer to create.
-        var BATCH_SIZE = 8190;
+        var BATCH_SIZE = 8189;
         for (int firstIndex = 0; firstIndex < batch.Length; firstIndex += BATCH_SIZE)
         {
             var lastIndex = firstIndex + BATCH_SIZE;

@@ -1751,7 +1751,9 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.release.value > self.release.value) {
+            if (message.header.release.value > self.release.value and
+                !self.release.is_development())
+            {
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
 
@@ -2089,7 +2091,9 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.release.value > self.release.value) {
+            if (message.header.release.value > self.release.value and
+                !self.release.is_development())
+            {
                 // This case is possible if we advanced self.op to a prepare from the next
                 // checkpoint (which is on a higher version) via a `start_view`.
                 // This would be safe to prepare, but rejecting it simplifies assertions.
@@ -5533,7 +5537,9 @@ pub fn ReplicaType(
             if (self.ignore_request_message_backup(message)) return true;
             assert(self.primary());
 
-            if (message.header.release.value < self.release_client_min.value) {
+            if (message.header.release.value < self.release_client_min.value and
+                !self.release.is_development())
+            {
                 log.warn("{}: on_request: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
                     self.replica,
@@ -5548,7 +5554,9 @@ pub fn ReplicaType(
                 return true;
             }
 
-            if (message.header.release.value > self.release.value) {
+            if (message.header.release.value > self.release.value and
+                !self.release.is_development())
+            {
                 log.warn("{}: on_request: ignoring unsupported client version; too high " ++
                     "(client={} version={}>{})", .{
                     self.replica,
@@ -8232,7 +8240,8 @@ pub fn ReplicaType(
 
             // Compare the release in this message to ours only if we authored the message.
             if (message.header.replica == self.replica) {
-                assert(message.header.release.value <= self.release.value);
+                assert(message.header.release.value <= self.release.value or
+                    self.release.is_development());
             }
 
             if (message.header.command == .block) {
@@ -10081,7 +10090,8 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op);
             assert(message.header.op >= self.op_repair_min());
-            assert(message.header.release.value <= self.release.value);
+            assert(message.header.release.value <= self.release.value or
+                self.release.is_development());
 
             if (!self.journal.has_header(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
