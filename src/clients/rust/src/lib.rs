@@ -56,7 +56,7 @@ impl Client {
         &'s self,
         events: &[Account],
     ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<Account, tbc::tb_account_t>(
+        let (packet, rx) = create_packet::<Account, Account>(
             tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS,
             events,
         );
@@ -71,7 +71,7 @@ impl Client {
             collect_results(
                 msg,
                 |next_result: &tbc::tb_create_accounts_result_t,
-                 _next_event: &tbc::tb_account_t,
+                 _next_event: &Account,
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateAccountResult::Ok,
@@ -84,7 +84,7 @@ impl Client {
         &'s self,
         events: &[Transfer],
     ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<Transfer, tbc::tb_transfer_t>(
+        let (packet, rx) = create_packet::<Transfer, Transfer>(
             tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS,
             events,
         );
@@ -99,7 +99,7 @@ impl Client {
             collect_results(
                 msg,
                 |next_result: &tbc::tb_create_transfers_result_t,
-                 _next_event: &tbc::tb_transfer_t,
+                 _next_event: &Transfer,
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateTransferResult::Ok,
@@ -124,7 +124,7 @@ impl Client {
 
             collect_results(
                 msg,
-                |next_result: &tbc::tb_account_t, next_event: &u128, _event_index: usize| -> bool {
+                |next_result: &Account, next_event: &u128, _event_index: usize| -> bool {
                     next_result.id == *next_event
                 },
                 Err(NotFound),
@@ -149,10 +149,9 @@ impl Client {
 
             collect_results(
                 msg,
-                |next_result: &tbc::tb_transfer_t,
-                 next_event: &u128,
-                 _event_index: usize|
-                 -> bool { next_result.id == *next_event },
+                |next_result: &Transfer, next_event: &u128, _event_index: usize| -> bool {
+                    next_result.id == *next_event
+                },
                 Err(NotFound),
                 Ok,
             )
@@ -163,7 +162,7 @@ impl Client {
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<AccountFilter, tbc::tb_account_filter_t>(
+        let (packet, rx) = create_packet::<AccountFilter, AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS,
             &[event],
         );
@@ -174,7 +173,7 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-            let result: &[tbc::tb_transfer_t] = handle_message(&msg)?;
+            let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.iter().cloned().map(Into::into).collect())
         }
@@ -184,7 +183,7 @@ impl Client {
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<AccountFilter, tbc::tb_account_filter_t>(
+        let (packet, rx) = create_packet::<AccountFilter, AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES,
             &[event],
         );
@@ -195,7 +194,7 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-            let result: &[tbc::tb_account_balance_t] = handle_message(&msg)?;
+            let result: &[AccountBalance] = handle_message(&msg)?;
 
             Ok(result.iter().cloned().map(Into::into).collect())
         }
@@ -205,7 +204,7 @@ impl Client {
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<QueryFilter, tbc::tb_query_filter_t>(
+        let (packet, rx) = create_packet::<QueryFilter, QueryFilter>(
             tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS,
             &[event],
         );
@@ -216,7 +215,7 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-            let result: &[tbc::tb_account_t] = handle_message(&msg)?;
+            let result: &[Account] = handle_message(&msg)?;
 
             Ok(result.iter().cloned().map(Into::into).collect())
         }
@@ -226,7 +225,7 @@ impl Client {
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<QueryFilter, tbc::tb_query_filter_t>(
+        let (packet, rx) = create_packet::<QueryFilter, QueryFilter>(
             tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS,
             &[event],
         );
@@ -237,7 +236,7 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-            let result: &[tbc::tb_transfer_t] = handle_message(&msg)?;
+            let result: &[Transfer] = handle_message(&msg)?;
 
             Ok(result.iter().cloned().map(Into::into).collect())
         }
