@@ -58,10 +58,8 @@ impl Client {
         &'s self,
         events: &[Account],
     ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<Account, Account>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS,
-            events,
-        );
+        let (packet, rx) =
+            create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -86,10 +84,8 @@ impl Client {
         &'s self,
         events: &[Transfer],
     ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<Transfer, Transfer>(
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS,
-            events,
-        );
+        let (packet, rx) =
+            create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -115,7 +111,7 @@ impl Client {
         events: &[u128],
     ) -> impl Future<Output = Result<Vec<Result<Account, NotFound>>, PacketStatus>> + use<'s> {
         let (packet, rx) =
-            create_packet::<u128, u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
+            create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -140,7 +136,7 @@ impl Client {
         events: &[u128],
     ) -> impl Future<Output = Result<Vec<Result<Transfer, NotFound>>, PacketStatus>> + use<'s> {
         let (packet, rx) =
-            create_packet::<u128, u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
+            create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -164,7 +160,7 @@ impl Client {
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<AccountFilter, AccountFilter>(
+        let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS,
             &[event],
         );
@@ -185,7 +181,7 @@ impl Client {
         &'s self,
         event: AccountFilter,
     ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<AccountFilter, AccountFilter>(
+        let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES,
             &[event],
         );
@@ -206,10 +202,8 @@ impl Client {
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<QueryFilter, QueryFilter>(
-            tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS,
-            &[event],
-        );
+        let (packet, rx) =
+            create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS, &[event]);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -227,10 +221,8 @@ impl Client {
         &'s self,
         event: QueryFilter,
     ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
-        let (packet, rx) = create_packet::<QueryFilter, QueryFilter>(
-            tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS,
-            &[event],
-        );
+        let (packet, rx) =
+            create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS, &[event]);
 
         unsafe {
             tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -821,19 +813,18 @@ impl<const N: usize> Default for Reserved<N> {
     }
 }
 
-fn create_packet<RustEvent, CEvent>(
+fn create_packet<Event>(
     op: u8, // TB_OPERATION
-    events: &[RustEvent],
-) -> (Box<tbc::tb_packet_t>, Receiver<CompletionMessage<CEvent>>)
+    events: &[Event],
+) -> (Box<tbc::tb_packet_t>, Receiver<CompletionMessage<Event>>)
 where
-    RustEvent: Copy,
-    CEvent: From<RustEvent> + 'static,
+    Event: Copy + 'static,
 {
-    let (tx, rx) = channel::<CompletionMessage<CEvent>>();
+    let (tx, rx) = channel::<CompletionMessage<Event>>();
     let callback: Box<OnCompletion> = Box::new(Box::new(
         |context, client, packet, timestamp, result_ptr, result_len| unsafe {
-            let events_len = (*packet).data_size as usize / mem::size_of::<CEvent>();
-            let events = Vec::from_raw_parts((*packet).data as *mut CEvent, events_len, events_len);
+            let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
+            let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
             (*packet).data = ptr::null_mut();
 
             let packet = Box::from_raw(packet);
@@ -856,7 +847,7 @@ where
         },
     ));
 
-    let mut events: Vec<CEvent> = events.iter().copied().map(From::from).collect();
+    let mut events: Vec<Event> = events.iter().copied().collect();
     assert_eq!(events.len(), events.capacity());
 
     let events_len = events.len();
@@ -868,7 +859,7 @@ where
         user_data: Box::into_raw(callback) as *mut c_void,
         operation: op,
         status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
-        data_size: (mem::size_of::<CEvent>() * events_len) as u32,
+        data_size: (mem::size_of::<Event>() * events_len) as u32,
         data: events_ptr as *mut c_void,
         batch_next: ptr::null_mut(),
         batch_tail: ptr::null_mut(),
@@ -937,9 +928,9 @@ fn handle_message<'stack, CEvent, CResult>(
 ///   e.g. `CreateAccountResult`
 /// - `RustResultWrapper` - the final response for each event, created
 ///   from `RustResult`. This probably _is_ a Rust `Result` type!
-fn collect_results<CEvent, CResult, RustResult, RustResultWrapper>(
-    msg: CompletionMessage<CEvent>,
-    result_is_for_event: fn(&CResult, &CEvent, usize) -> bool,
+fn collect_results<Event, CResult, RustResult, RustResultWrapper>(
+    msg: CompletionMessage<Event>,
+    result_is_for_event: fn(&CResult, &Event, usize) -> bool,
     empty_result: RustResultWrapper,
     nonempty_result: fn(RustResult) -> RustResultWrapper,
 ) -> Result<Vec<RustResultWrapper>, PacketStatus>
