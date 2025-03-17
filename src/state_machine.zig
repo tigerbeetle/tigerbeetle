@@ -1778,7 +1778,7 @@ pub fn StateMachineType(
             assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
             assert(input.len <= self.batch_size_limit);
-            maybe(client == 0); // Can be zero for `pulse`.
+            if (client == 0) assert(operation == .pulse);
 
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
@@ -2624,7 +2624,7 @@ pub fn StateMachineType(
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
             assert(p.timestamp > cr_account.timestamp);
-            maybe(p.amount > 0);
+            maybe(p.amount == 0);
 
             if (t.debit_account_id > 0 and t.debit_account_id != p.debit_account_id) {
                 return .pending_transfer_has_different_debit_account_id;
@@ -2641,7 +2641,7 @@ pub fn StateMachineType(
 
             const amount = amount: {
                 if (t.flags.void_pending_transfer) {
-                    break :amount if (t.amount > 0) t.amount else p.amount;
+                    break :amount if (t.amount == 0) p.amount else t.amount;
                 } else {
                     break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
                 }
@@ -2762,6 +2762,7 @@ pub fn StateMachineType(
                 cr_account_new.credits_posted += amount;
             }
             if (t2.flags.void_pending_transfer) {
+                assert(t2.amount == p.amount);
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
@@ -3551,6 +3552,7 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
     busy: bool,
+    client_id: u128,
     client_release: vsr.Release,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
@@ -3610,6 +3612,7 @@ const TestContext = struct {
             .pulse_next_timestamp = TimestampRange.timestamp_max;
 
         ctx.busy = false;
+        ctx.client_id = 1;
         ctx.client_release = vsr.Release.minimum;
     }
 
@@ -3662,7 +3665,7 @@ const TestContext = struct {
         while (context.busy) context.storage.run();
 
         return context.state_machine.commit(
-            0,
+            context.client_id,
             context.client_release,
             1,
             timestamp,
