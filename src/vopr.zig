@@ -91,6 +91,7 @@ pub fn main() !void {
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutially exclusive", .{});
     }
+    log_performance_mode = cli_args.performance;
 
     const seed_random = std.crypto.random.int(u64);
     const seed = seed_from_arg: {
@@ -139,8 +140,8 @@ pub fn main() !void {
         \\          path_clog_duration_mean={} ticks
         \\          path_clog_probability={}
         \\          packet_replay_probability={}
-        \\          partition_mode={}
-        \\          partition_symmetry={}
+        \\          partition_mode={s}
+        \\          partition_symmetry={s}
         \\          partition_probability={}
         \\          unpartition_probability={}
         \\          partition_stability={} ticks
@@ -170,8 +171,8 @@ pub fn main() !void {
         options.network.path_clog_duration_mean,
         options.network.path_clog_probability,
         options.network.packet_replay_probability,
-        options.network.partition_mode,
-        options.network.partition_symmetry,
+        @tagName(options.network.partition_mode),
+        @tagName(options.network.partition_symmetry),
         options.network.partition_probability,
         options.network.unpartition_probability,
         options.network.partition_stability,
@@ -1568,6 +1569,8 @@ var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
     .unbuffered_writer = undefined,
 };
 
+var log_performance_mode: bool = false;
+
 fn log_override(
     comptime level: std.log.Level,
     comptime scope: @TypeOf(.EnumLiteral),
@@ -1575,11 +1578,8 @@ fn log_override(
     args: anytype,
 ) void {
     if (vsr_vopr_options.log == .short) {
-        if (scope == .cluster or scope == .simulator) {
-            // These are the only logs in short mode.
-        } else {
-            return;
-        }
+        if (scope != .cluster and scope != .simulator) return;
+        if (log_performance_mode and scope != .simulator) return;
     }
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
