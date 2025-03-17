@@ -87,7 +87,9 @@ fn format_changelog(buffer: std.ArrayList(u8).Writer, options: struct {
 
         try buffer.print(
             \\- [#{d}](https://github.com/tigerbeetle/tigerbeetle/pull/{d})
-            \\      {s}
+            \\
+            \\  {s}
+            \\
             \\
         , .{ merge.pr, merge.pr, merge.summary });
     } else @panic("suspiciously many PRs merged");
