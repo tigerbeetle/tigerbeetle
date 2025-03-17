@@ -3,6 +3,49 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.32
+
+Released: 2025-03-17
+
+### Safety And Performance
+
+- [#2798](https://github.com/tigerbeetle/tigerbeetle/pull/2798),
+  [#2815](https://github.com/tigerbeetle/tigerbeetle/pull/2815)
+
+  Vendor the PRNG, and tweak the API to be less wordy.
+
+  PRNG algorithms tend to change, often for reasons not applicable to TigerBeetle. We need neither
+  the fastest, nor the most secure PRNG, and it's better if we rotate our PRNG algorithm at our own
+  pace.
+
+- [#2813](https://github.com/tigerbeetle/tigerbeetle/pull/2813)
+
+  Fix a case where, if a busy cluster's pipeline is full, the prepare_timeout was never reset.
+
+  This improves performance of a local benchmark for a 6-replica cluster with one replica down and 4
+  clients almost ~4x.
+
+### Internals
+
+- [#2804](https://github.com/tigerbeetle/tigerbeetle/pull/2804),
+  [#2806](https://github.com/tigerbeetle/tigerbeetle/pull/2806),
+  [#2803](https://github.com/tigerbeetle/tigerbeetle/pull/2803)
+
+  Add syntax highlighting to docs code snippets (thanks @nilskch!), fix Python example code (thanks
+  @IvoCrnkovic!) and update our HACKING.md with current practices.
+
+- [#2819](https://github.com/tigerbeetle/tigerbeetle/pull/2819),
+  [#2814](https://github.com/tigerbeetle/tigerbeetle/pull/2814),
+  [#2812](https://github.com/tigerbeetle/tigerbeetle/pull/2812)
+
+  Prepare for the [Zig 0.14 upgrade](https://github.com/tigerbeetle/tigerbeetle/pull/2705) by
+  applying as many changes that still work on 0.13 as possible. This includes vendoring AEGIS, to
+  keep hash stability, as 0.14 changes the implementation.
+
+### TigerTracks 🎧
+
+- [Get Ready](https://open.spotify.com/track/4tvOVmc2jorV20Z2hFDtDg?si=15eb0ed7536b4ab3)
+
 ## TigerBeetle 0.16.31
 
 Released: 2025-03-09
