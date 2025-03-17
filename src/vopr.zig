@@ -21,6 +21,7 @@ const StateMachineType = switch (state_machine) {
 };
 
 const Cluster = @import("testing/cluster.zig").ClusterType(StateMachineType);
+
 const Release = @import("testing/cluster.zig").Release;
 const StateMachine = Cluster.StateMachine;
 const Failure = @import("testing/cluster.zig").Failure;
@@ -198,15 +199,34 @@ pub fn main() !void {
             tick = 0;
         }
         const requests_done = simulator.requests_replied == simulator.options.requests_max;
+
+        var recovering_head_or_dead_replicas: u8 = 0;
+
         const upgrades_done =
             for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
         {
-            if (health == .down) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
+            switch (health) {
+                .dead => {
+                    recovering_head_or_dead_replicas += 1;
+                    continue;
+                },
+                .down => continue,
+                .up => {
+                    if (replica.status == .recovering_head) recovering_head_or_dead_replicas += 1;
+
+                    const release_latest = releases[simulator.replica_releases_limit - 1].release;
+                    if (replica.release.value == release_latest.value) {
+                        break true;
+                    }
+                },
             }
         } else false;
+
+        const quorums = vsr.quorums(simulator.options.cluster.replica_count);
+        if (recovering_head_or_dead_replicas >= quorums.view_change) {
+            log.warn("no liveness, all replicas are irrecoverable", .{});
+            return;
+        }
 
         if (requests_done and upgrades_done) break;
     } else {
@@ -226,7 +246,10 @@ pub fn main() !void {
                 core.set(replica);
             }
 
-            simulator.transition_to_liveness_mode(core);
+            if (!simulator.transition_to_liveness_mode(.{ .all_in_core = true })) {
+                log.warn("no liveness, all replicas are irrecoverable", .{});
+                return;
+            }
 
             tick = 0;
             while (tick < 500_000) : (tick += 1) simulator.tick();
@@ -245,13 +268,10 @@ pub fn main() !void {
 
     if (cli_args.lite) return;
 
-    const core = random_core(
-        simulator.prng,
-        simulator.options.cluster.replica_count,
-        simulator.options.cluster.standby_count,
-    );
-
-    simulator.transition_to_liveness_mode(core);
+    if (!simulator.transition_to_liveness_mode(.{ .all_in_core = false })) {
+        log.warn("no liveness, all replicas are irrecoverable", .{});
+        return;
+    }
 
     // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
     // crashed or partitioned permanently. The core should converge to the same state.
@@ -373,15 +393,6 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .crash_fault_probability = ratio(prng.range_inclusive(u8, 80, 100), 100),
     };
-    const storage_fault_atlas = .{
-        .faulty_superblock = true,
-        .faulty_wal_headers = replica_count > 1,
-        .faulty_wal_prepares = replica_count > 1,
-        .faulty_client_replies = replica_count > 1,
-        // >2 instead of >1 because in R=2, a lagging replica may sync to the leading replica,
-        // but then the leading replica may have the only copy of a block in the cluster.
-        .faulty_grid = replica_count > 2,
-    };
 
     const workload_options = StateMachine.Workload.Options.generate(prng, .{
         .batch_size_limit = batch_size_limit,
@@ -396,7 +407,6 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .cluster = cluster_options,
         .network = network_options,
         .storage = storage_options,
-        .storage_fault_atlas = storage_fault_atlas,
         .workload = workload_options,
         // TODO Swarm testing: Test long+few crashes and short+many crashes separately.
         .replica_crash_probability = ratio(2, 10_000_000),
@@ -432,7 +442,6 @@ pub const Simulator = struct {
         cluster: Cluster.Options,
         network: Cluster.NetworkOptions,
         storage: Cluster.Storage.Options,
-        storage_fault_atlas: Cluster.StorageFaultAtlas.Options,
 
         workload: StateMachine.Workload.Options,
 
@@ -506,7 +515,6 @@ pub const Simulator = struct {
             .cluster = options.cluster,
             .network = options.network,
             .storage = options.storage,
-            .storage_fault_atlas = options.storage_fault_atlas,
             .callbacks = .{
                 .on_cluster_reply = on_cluster_reply,
                 .on_client_reply = on_client_reply,
@@ -662,27 +670,48 @@ pub const Simulator = struct {
     ///
     /// See https://tigerbeetle.com/blog/2023-07-06-simulation-testing-for-liveness for broader
     /// context.
-    pub fn transition_to_liveness_mode(simulator: *Simulator, core: Core) void {
-        log.debug("transition_to_liveness_mode: core={b}", .{core.mask});
+    pub fn transition_to_liveness_mode(
+        simulator: *Simulator,
+        options: struct { all_in_core: bool },
+    ) bool {
         assert(simulator.core.count() == 0);
-        defer assert(simulator.core.count() > 0);
-
-        simulator.core = core;
-
-        var it = core.iterator(.{});
-        while (it.next()) |replica_index| {
-            const fault = false;
-            if (simulator.cluster.replica_health[replica_index] == .down) {
-                simulator.replica_restart(@intCast(replica_index), fault);
+        if (options.all_in_core) {
+            const node_count =
+                simulator.options.cluster.replica_count + simulator.options.cluster.standby_count;
+            for (0..node_count) |node| {
+                simulator.core.set(node);
             }
-
-            const replica_health = simulator.cluster.replica_health[replica_index];
-            if (replica_health == .up and replica_health.up.paused) {
-                simulator.cluster.replica_unpause(@intCast(replica_index));
-            }
-
-            simulator.cluster.storages[replica_index].transition_to_liveness_mode();
+        } else {
+            simulator.core = random_core(
+                simulator.prng,
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            );
         }
+        log.info("transition_to_liveness_mode: core={b}", .{simulator.core.mask});
+
+        var alive_replicas: u8 = 0;
+        var it = simulator.core.iterator(.{});
+        while (it.next()) |replica_index| {
+            if (simulator.cluster.replica_health[replica_index] == .down) {
+                simulator.replica_restart(@intCast(replica_index));
+            }
+            simulator.cluster.storages[replica_index].transition_to_liveness_mode();
+
+            switch (simulator.cluster.replica_health[replica_index]) {
+                .up => |up| {
+                    if (replica_index < simulator.options.cluster.replica_count) {
+                        alive_replicas += 1;
+                    }
+                    if (up.paused) simulator.cluster.replica_unpause(@intCast(replica_index));
+                },
+                // Remove dead replicas from the core.
+                .dead => simulator.core.unset(replica_index),
+                .down => alive_replicas += 1,
+            }
+        }
+
+        if (alive_replicas == 0) return false;
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
         simulator.options.replica_crash_probability = ratio(0, 100);
@@ -690,6 +719,8 @@ pub const Simulator = struct {
         simulator.options.replica_pause_probability = ratio(0, 100);
         simulator.options.replica_release_advance_probability = ratio(0, 100);
         simulator.options.replica_release_catchup_probability = ratio(0, 100);
+
+        return true;
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,
@@ -726,18 +757,18 @@ pub const Simulator = struct {
         assert(simulator.core.count() > 0);
 
         var core_replicas: u8 = 0;
-        var core_recovering_head: u8 = 0;
+        var core_recovering_head_replicas: u8 = 0;
         for (simulator.cluster.replicas) |*replica| {
             if (simulator.core.isSet(replica.replica) and !replica.standby()) {
                 core_replicas += 1;
-                core_recovering_head += @intFromBool(replica.status == .recovering_head);
+                core_recovering_head_replicas += @intFromBool(replica.status == .recovering_head);
             }
         }
 
-        if (core_recovering_head == 0) return false;
+        if (core_recovering_head_replicas == 0) return false;
 
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
-        return quorums.view_change > core_replicas - core_recovering_head;
+        return quorums.view_change > core_replicas - core_recovering_head_replicas;
     }
 
     fn core_repairable_replica(
@@ -763,9 +794,6 @@ pub const Simulator = struct {
     //
     // If a replica cannot make progress on committing, then it may be stuck while repairing either
     // missing headers *or* prepares (see `repair` in replica.zig). This function checks for both.
-    //
-    // When generating a FaultAtlas, we don't try to protect core from excessive errors. Instead,
-    // if the core gets stuck, we verify that this is indeed due to storage faults.
     pub fn core_missing_prepare(
         simulator: *const Simulator,
         allocator: std.mem.Allocator,
@@ -905,6 +933,9 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (!simulator.core.isSet(replica.replica)) continue;
 
+            // Replicas can only initiate grid repair in view_change/normal statuses.
+            if (replica.status == .recovering_head) continue;
+
             const storage = &simulator.cluster.storages[replica.replica];
 
             var fault_iterator = replica.grid.read_global_queue.peek();
@@ -953,15 +984,15 @@ pub const Simulator = struct {
             const block_missing = block_missing_and_faulty_replicas.key_ptr;
             const faulty_replicas = block_missing_and_faulty_replicas.value_ptr;
             for (simulator.cluster.replicas) |replica| {
-                const storage = &simulator.cluster.storages[replica.replica];
+                if (!simulator.core.isSet(replica.replica)) continue;
+                if (replica.standby()) continue;
 
                 // A replica might actually have the block that it is requesting, but not know.
                 // This can occur after state sync: if we compact and create a table, but then skip
                 // over that table via state sync, we will try to sync the table anyway.
                 if (faulty_replicas.isSet(replica.replica)) continue;
 
-                if (!simulator.core.isSet(replica.replica)) continue;
-                if (replica.standby()) continue;
+                const storage = &simulator.cluster.storages[replica.replica];
                 if (storage.area_faulty(.{
                     .grid = .{ .address = block_missing.address },
                 })) continue;
@@ -969,7 +1000,7 @@ pub const Simulator = struct {
                 const block = storage.grid_block(block_missing.address) orelse continue;
                 const block_header = schema.header_from_block(block);
                 if (block_header.checksum == block_missing.checksum) {
-                    log.err("{}: core_missing_blocks: found address={} checksum={}", .{
+                    log.warn("{}: core_missing_blocks: found address={} checksum={}", .{
                         replica.replica,
                         block_missing.address,
                         block_missing.checksum,
@@ -1198,6 +1229,8 @@ pub const Simulator = struct {
 
     fn tick_crash(simulator: *Simulator) void {
         for (simulator.cluster.replicas) |*replica| {
+            if (simulator.cluster.replica_health[replica.replica] == .dead) continue;
+
             simulator.replica_crash_stability[replica.replica] -|= 1;
             if (simulator.replica_crash_stability[replica.replica] > 0) continue;
 
@@ -1206,6 +1239,7 @@ pub const Simulator = struct {
                     if (!up.paused) simulator.tick_crash_up(replica);
                 },
                 .down => simulator.tick_crash_down(replica),
+                .dead => unreachable,
             }
         }
     }
@@ -1248,77 +1282,19 @@ pub const Simulator = struct {
 
         if (!restart_upgrade and !restart_random) return;
 
-        const recoverable_count_min =
-            vsr.quorums(simulator.options.cluster.replica_count).view_change;
-
-        var recoverable_count: usize = 0;
-        for (simulator.cluster.replicas, 0..) |*r, i| {
-            recoverable_count += @intFromBool(simulator.cluster.replica_health[i] == .up and
-                !r.standby() and
-                r.status != .recovering_head and
-                r.syncing == .idle);
-        }
-
-        // To improve VOPR utilization, try to prevent the replica from going into
-        // `.recovering_head` state if the replica is needed to form a quorum.
-        const fault = recoverable_count >= recoverable_count_min or replica.standby();
-        simulator.replica_restart(replica.replica, fault);
-        maybe(!fault and replica.status == .recovering_head);
+        simulator.replica_restart(replica.replica);
     }
 
-    fn replica_restart(simulator: *Simulator, replica_index: u8, fault: bool) void {
+    fn replica_restart(simulator: *Simulator, replica_index: u8) void {
         assert(simulator.cluster.replica_health[replica_index] == .down);
 
         const replica_storage = &simulator.cluster.storages[replica_index];
-        const replica: *const Cluster.Replica = &simulator.cluster.replicas[replica_index];
-
-        {
-            // If the entire Zone.wal_headers is corrupted, the replica becomes permanently
-            // unavailable (returns `WALInvalid` from `open`). In the simulator, there are only two
-            // WAL sectors, which could both get corrupted when a replica crashes while writing them
-            // simultaneously. Repair both sectors so that even if one of them becomes corrupted on
-            // startup, the replica still remains operational.
-            //
-            // In production `journal_iops_write_max < header_sector_count`, which makes is
-            // impossible to get torn writes for all journal header sectors at the same time.
-            const header_sector_offset =
-                @divExact(vsr.Zone.wal_headers.start(), constants.sector_size);
-            const header_sector_count =
-                @divExact(constants.journal_size_headers, constants.sector_size);
-            for (0..header_sector_count) |header_sector_index| {
-                replica_storage.faults.unset(header_sector_offset + header_sector_index);
-            }
-            // TODO Clear misdirects? Waiting for a seed to confirm.
-        }
-
-        var header_prepare_view_mismatch: bool = false;
-        if (!fault) {
-            // The journal writes redundant headers of faulty ops as zeroes to ensure
-            // that they remain faulty after a crash/recover. Since that fault cannot
-            // be disabled by `storage.faulty`, we must manually repair it here to
-            // ensure a cluster cannot become stuck in status=recovering_head.
-            // See recover_slots() for more detail.
-            const headers_offset = vsr.Zone.wal_headers.offset(0);
-            const headers_size = vsr.Zone.wal_headers.size();
-            const headers_bytes = replica_storage.memory[headers_offset..][0..headers_size];
-            for (
-                mem.bytesAsSlice(vsr.Header.Prepare, headers_bytes),
-                replica_storage.wal_prepares(),
-            ) |*wal_header, *wal_prepare| {
-                if (wal_header.checksum == 0) {
-                    wal_header.* = wal_prepare.header;
-                } else {
-                    if (wal_header.view != wal_prepare.header.view) {
-                        header_prepare_view_mismatch = true;
-                    }
-                }
-            }
-        }
+        const replica = &simulator.cluster.replicas[replica_index];
+        assert(replica_storage.faulty);
 
         const replica_releases_count = simulator.replica_releases[replica_index];
-        log.debug("{}: restart replica (faults={} releases={})", .{
+        log.debug("{}: restart replica (releases={})", .{
             replica_index,
-            fault,
             replica_releases_count,
         });
 
@@ -1327,18 +1303,10 @@ pub const Simulator = struct {
             replica_releases.append_assume_capacity(releases[i].release);
         }
 
-        replica_storage.faulty = fault;
-        simulator.cluster.replica_restart(
-            replica_index,
-            &replica_releases,
-        ) catch unreachable;
+        simulator.cluster.replica_restart(replica_index, &replica_releases);
 
-        if (replica.status == .recovering_head) {
-            // Even with faults disabled, a replica may wind up in status=recovering_head.
-            assert(fault or header_prepare_view_mismatch);
-        }
+        maybe(replica.status == .recovering_head);
 
-        replica_storage.faulty = true;
         simulator.replica_crash_stability[replica_index] =
             simulator.options.replica_restart_stability;
     }
@@ -1363,7 +1331,7 @@ pub const Simulator = struct {
             stability.* -|= 1;
             if (stability.* > 0) continue;
 
-            if (simulator.cluster.replica_health[replica.replica] == .down) continue;
+            if (simulator.cluster.replica_health[replica.replica] != .up) continue;
             const paused = simulator.cluster.replica_health[replica.replica].up.paused;
             const pause = simulator.prng.chance(simulator.options.replica_pause_probability);
             const unpause = simulator.prng.chance(simulator.options.replica_unpause_probability);

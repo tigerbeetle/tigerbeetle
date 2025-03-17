@@ -16,7 +16,6 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Storage = @import("../testing/storage.zig").Storage;
-const StorageFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const superblock_zone_size = @import("superblock.zig").superblock_zone_size;
 const data_file_size_min = @import("superblock.zig").data_file_size_min;
 const VSRState = @import("superblock.zig").SuperBlockHeader.VSRState;
@@ -44,15 +43,6 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
     var prng = stdx.PRNG.from_seed(seed);
 
-    var storage_fault_atlas = try StorageFaultAtlas.init(allocator, 1, &prng, .{
-        .faulty_superblock = true,
-        .faulty_wal_headers = false,
-        .faulty_wal_prepares = false,
-        .faulty_client_replies = false,
-        .faulty_grid = false,
-    });
-    defer storage_fault_atlas.deinit(allocator);
-
     const storage_options: Storage.Options = .{
         .replica_index = 0,
         .seed = prng.int(u64),
@@ -75,7 +65,6 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
             prng.range_inclusive(u64, 50, 100),
             100,
         ),
-        .fault_atlas = &storage_fault_atlas,
     };
 
     var storage = try Storage.init(allocator, superblock_zone_size, storage_options);
