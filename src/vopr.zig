@@ -256,16 +256,15 @@ pub fn main() !void {
     if (cli_args.lite or cli_args.performance) {
         // Don't care about convergence.
     } else {
+        // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
+        // crashed or partitioned permanently. The core should converge to the same state.
         const core = random_core(
             simulator.prng,
             simulator.options.cluster.replica_count,
             simulator.options.cluster.standby_count,
         );
-
         simulator.transition_to_liveness_mode(core);
 
-        // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
-        // crashed or partitioned permanently. The core should converge to the same state.
         tick = 0;
         while (tick < cli_args.ticks_max_convergence) : (tick += 1) {
             simulator.tick();
