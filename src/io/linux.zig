@@ -87,7 +87,7 @@ pub const IO = struct {
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
-    pub fn tick(self: *IO) !void {
+    pub fn run(self: *IO) !void {
         assert(self.cancel_status != .done);
 
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`

@@ -37,7 +37,7 @@ pub fn format(
     );
 
     replica_format.formatting = true;
-    while (replica_format.formatting) storage.tick();
+    while (replica_format.formatting) storage.run();
 }
 
 fn ReplicaFormatType(comptime Storage: type) type {
@@ -101,7 +101,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     wal_offset,
                 );
                 self.formatting = true;
-                while (self.formatting) storage.tick();
+                while (self.formatting) storage.run();
                 wal_offset += size;
             }
             // There are no prepares left to write.
@@ -130,7 +130,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     wal_offset,
                 );
                 self.formatting = true;
-                while (self.formatting) storage.tick();
+                while (self.formatting) storage.run();
                 wal_offset += size;
             }
             // There are no headers left to write.
@@ -159,7 +159,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     slot * constants.message_size_max,
                 );
                 self.formatting = true;
-                while (self.formatting) storage.tick();
+                while (self.formatting) storage.run();
             }
         }
 
@@ -191,7 +191,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
                     0,
                 );
                 self.formatting = true;
-                while (self.formatting) storage.tick();
+                while (self.formatting) storage.run();
             }
         }
 

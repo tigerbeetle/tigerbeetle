@@ -771,7 +771,7 @@ pub const Multiversion = struct {
         assert(self.stage != .init);
 
         while (self.stage != .ready and self.stage != .err) {
-            self.io.tick() catch |e| {
+            self.io.run() catch |e| {
                 assert(self.stage != .ready);
                 self.stage = .{ .err = e };
             };

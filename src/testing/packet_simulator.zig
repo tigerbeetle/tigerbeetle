@@ -352,6 +352,38 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
         }
 
+        pub fn step(self: *PacketSimulator) bool {
+            const ReadyPacket = struct { path: Path, link_packet: LinkPacket };
+            var packets: [32]ReadyPacket = undefined;
+            var packet_count: u32 = 0;
+
+            for (0..self.process_count()) |from| {
+                for (0..self.process_count()) |to| {
+                    const path: Path = .{ .source = @intCast(from), .target = @intCast(to) };
+                    if (self.is_clogged(path)) continue;
+
+                    const queue = &self.links[self.path_index(path)].queue;
+                    while (queue.peek()) |*head| {
+                        if (head.expiry > self.ticks) break;
+                        if (packet_count == packets.len) break;
+
+                        const link_packet = queue.remove();
+                        packets[packet_count] = .{ .path = path, .link_packet = link_packet };
+                        packet_count += 1;
+                    }
+                }
+            }
+            if (packet_count == 0) return false;
+
+            self.prng.shuffle(ReadyPacket, packets[0..packet_count]);
+            for (packets[0..packet_count]) |ready| {
+                self.submit_packet_finish(ready.path, ready.link_packet);
+                ready.link_packet.packet.deinit();
+            }
+
+            return true;
+        }
+
         pub fn tick(self: *PacketSimulator) void {
             self.ticks += 1;
 
@@ -374,55 +406,16 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 }
             }
 
-            var from: u8 = 0;
-            while (from < self.process_count()) : (from += 1) {
-                var to: u8 = 0;
-                while (to < self.process_count()) : (to += 1) {
-                    const path: Path = .{ .source = from, .target = to };
-                    if (self.is_clogged(path)) continue;
-
-                    const queue = &self.links[self.path_index(path)].queue;
-                    while (queue.peek()) |*link_packet| {
-                        if (link_packet.expiry > self.ticks) break;
-
-                        _ = queue.remove();
-                        defer link_packet.packet.deinit();
-
-                        if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
-                            log.warn(
-                                "dropped packet (different partitions): from={} to={}",
-                                .{ from, to },
-                            );
-                            continue;
-                        }
-
-                        if (self.should_drop()) {
-                            log.warn("dropped packet from={} to={}", .{ from, to });
-                            continue;
-                        }
-
-                        if (self.should_replay()) {
-                            self.submit_packet(
-                                link_packet.packet.clone(),
-                                link_packet.callback,
-                                path,
-                            );
-                            log.debug("replayed packet from={} to={}", .{ from, to });
-                        }
-
-                        log.debug("delivering packet from={} to={}", .{ from, to });
-                        link_packet.callback(link_packet.packet, path);
-                    }
-
-                    const reverse_path: Path = .{ .source = to, .target = from };
-
-                    if (self.should_clog(reverse_path)) {
+            for (0..self.process_count()) |from| {
+                for (0..self.process_count()) |to| {
+                    const path: Path = .{ .source = @intCast(from), .target = @intCast(to) };
+                    if (self.should_clog(path)) {
                         const ticks = fuzz.random_int_exponential(
                             &self.prng,
                             u64,
                             self.options.path_clog_duration_mean,
                         );
-                        self.clog_for(reverse_path, ticks);
+                        self.clog_for(path, ticks);
                     }
                 }
             }
@@ -460,6 +453,34 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     .path = path,
                 };
             }
+        }
+
+        fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
+            assert(link_packet.expiry <= self.ticks);
+            if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
+                log.warn(
+                    "dropped packet (different partitions): from={} to={}",
+                    .{ path.source, path.target },
+                );
+                return;
+            }
+
+            if (self.should_drop()) {
+                log.warn("dropped packet from={} to={}", .{ path.source, path.target });
+                return;
+            }
+
+            if (self.should_replay()) {
+                self.submit_packet(
+                    link_packet.packet.clone(),
+                    link_packet.callback,
+                    path,
+                );
+                log.debug("replayed packet from={} to={}", .{ path.source, path.target });
+            }
+
+            log.debug("delivering packet from={} to={}", .{ path.source, path.target });
+            link_packet.callback(link_packet.packet, path);
         }
     };
 }

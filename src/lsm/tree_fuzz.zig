@@ -227,7 +227,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const safety_counter = 10_000_000;
             for (0..safety_counter) |_| {
                 if (env.state != current_state) break;
-                env.storage.tick();
+                env.storage.run();
             } else unreachable;
             assert(env.state == next_state);
         }

@@ -631,7 +631,7 @@ pub fn ReplicaType(
             // Open the superblock:
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
-            while (!self.opened) self.superblock.storage.tick();
+            while (!self.opened) self.superblock.storage.run();
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
@@ -699,7 +699,7 @@ pub fn ReplicaType(
 
             self.opened = false;
             self.journal.recover(journal_recover_callback);
-            while (!self.opened) self.superblock.storage.tick();
+            while (!self.opened) self.superblock.storage.run();
 
             // Abort if all slots are faulty, since something is very wrong.
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
@@ -4673,7 +4673,7 @@ pub fn ReplicaType(
                 std.time.ns_per_ms,
             );
             if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
-                log.warn("{}: commit_dispatch: request={} size={} {s} time={}ms", .{
+                log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.replica,
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
@@ -6268,7 +6268,7 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        fn op_checkpoint_next(self: *const Replica) u64 {
+        pub fn op_checkpoint_next(self: *const Replica) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
