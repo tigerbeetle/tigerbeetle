@@ -167,11 +167,6 @@ pub fn ReplicaType(
             replica: *Replica,
         };
 
-        const RepairTable = struct {
-            replica: *Replica,
-            table: Grid.RepairTable,
-        };
-
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
         static_allocator: StaticAllocator,
@@ -303,7 +298,7 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPSType(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_repair_tables: IOPSType(RepairTable, constants.grid_missing_tables_max) = .{},
+        grid_repair_tables: IOPSType(Grid.RepairTable, constants.grid_missing_tables_max) = .{},
         grid_repair_writes: IOPSType(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
         grid_scrubber: GridScrubber,
@@ -9703,10 +9698,9 @@ pub fn ReplicaType(
                     });
 
                     const table = self.grid_repair_tables.acquire().?;
-                    table.* = .{ .replica = self, .table = undefined };
 
                     const enqueue_result = self.grid.blocks_missing.enqueue_table(
-                        &table.table,
+                        table,
                         table_info.address,
                         table_info.checksum,
                     );
@@ -9751,18 +9745,17 @@ pub fn ReplicaType(
         }
 
         fn sync_reclaim_tables(self: *Replica) void {
-            while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
+            while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
                     "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
                     .{
-                        queue_table.index_address,
-                        queue_table.index_checksum,
-                        queue_table.table_blocks_written,
-                        queue_table.table_blocks_total,
+                        table.index_address,
+                        table.index_checksum,
+                        table.table_blocks_written,
+                        table.table_blocks_total,
                     },
                 );
 
-                const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
                 self.trace.stop(.{ .replica_sync_table = .{
                     .index = self.grid_repair_tables.index(table),
