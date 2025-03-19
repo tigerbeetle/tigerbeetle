@@ -1024,7 +1024,7 @@ pub const ClusterFaultAtlas = struct {
         faulty_grid: bool,
     };
 
-    const ReplicaSet = std.StaticBitSet(constants.replicas_max);
+    const ReplicaSet = stdx.BitSetType(constants.replicas_max);
     const headers_per_sector = @divExact(constants.sector_size, @sizeOf(vsr.Header));
     const members_max = constants.members_max;
 
@@ -1090,7 +1090,7 @@ pub const ClusterFaultAtlas = struct {
             if (!faulty) continue;
 
             for (0..chunks[0].bit_length) |chunk| {
-                var replicas = ReplicaSet.initEmpty();
+                var replicas: ReplicaSet = .{};
                 while (replicas.count() < faults_max) {
                     const replica_index = prng.int_inclusive(u8, replica_count - 1);
                     if (chunks[replica_index].count() + 1 <

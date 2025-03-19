@@ -126,8 +126,8 @@ const Request = struct {
 const DVCQuorumMessages = [constants.replicas_max]?*Message.DoViewChange;
 const dvc_quorum_messages_null = [_]?*Message.DoViewChange{null} ** constants.replicas_max;
 
-const QuorumCounter = std.StaticBitSet(constants.replicas_max);
-const quorum_counter_null = QuorumCounter.initEmpty();
+const QuorumCounter = stdx.BitSetType(constants.replicas_max);
+const quorum_counter_null: QuorumCounter = .{};
 
 pub fn ReplicaType(
     comptime StateMachine: type,
@@ -904,7 +904,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
-            assert(self.client_sessions.entries_free.count() == constants.clients_max);
+            assert(self.client_sessions.entries_present.count() == 0);
             assert(std.meta.eql(
                 self.client_sessions_checkpoint.checkpoint_reference(),
                 self.superblock.working.client_sessions_reference(),
@@ -929,8 +929,8 @@ pub fn ReplicaType(
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 maybe(self.client_replies.writing.count() > 0);
                 for (0..constants.clients_max) |entry_slot| {
-                    const slot_faulty = self.client_replies.faulty.isSet(entry_slot);
-                    const slot_free = self.client_sessions.entries_free.isSet(entry_slot);
+                    const slot_faulty = self.client_replies.faulty.is_set(entry_slot);
+                    const slot_free = !self.client_sessions.entries_present.is_set(entry_slot);
                     assert(!slot_faulty);
                     if (!slot_free) {
                         const entry = &self.client_sessions.entries[entry_slot];
@@ -938,7 +938,7 @@ pub fn ReplicaType(
                             entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
                         {
                             const entry_faulty = entry.header.size > @sizeOf(Header);
-                            self.client_replies.faulty.setValue(entry_slot, entry_faulty);
+                            self.client_replies.faulty.set_value(entry_slot, entry_faulty);
                         }
                     }
                 }
@@ -1911,7 +1911,7 @@ pub fn ReplicaType(
             else
                 self.quorum_replication;
 
-            if (!prepare.ok_from_all_replicas.isSet(message.header.replica)) {
+            if (!prepare.ok_from_all_replicas.is_set(message.header.replica)) {
                 self.primary_abdicating = false;
                 if (!prepare.ok_quorum_received) {
                     self.primary_abdicate_timeout.reset();
@@ -1972,7 +1972,7 @@ pub fn ReplicaType(
             }
 
             const slot = self.client_sessions.get_slot_for_header(message.header).?;
-            if (!self.client_replies.faulty.isSet(slot.index)) {
+            if (!self.client_replies.faulty.is_set(slot.index)) {
                 log.debug("{}: on_reply: ignoring, reply is clean (client={} request={})", .{
                     self.replica,
                     message.header.client,
@@ -2158,14 +2158,14 @@ pub fn ReplicaType(
                     self.view,
                     count,
                     threshold,
-                    self.start_view_change_from_all_replicas.mask,
+                    self.start_view_change_from_all_replicas.bits,
                 });
                 return;
             }
             log.debug("{}: on_start_view_change: view={} quorum received (replicas={b:0>6})", .{
                 self.replica,
                 self.view,
-                self.start_view_change_from_all_replicas.mask,
+                self.start_view_change_from_all_replicas.bits,
             });
 
             self.transition_to_view_change_status(self.view + 1);
@@ -3208,7 +3208,7 @@ pub fn ReplicaType(
                     self.replica_count,
                 ));
                 assert(replica != self.replica);
-                if (!prepare.ok_from_all_replicas.isSet(replica)) {
+                if (!prepare.ok_from_all_replicas.is_set(replica)) {
                     waiting[waiting_len] = replica;
                     waiting_len += 1;
                 }
@@ -3216,7 +3216,7 @@ pub fn ReplicaType(
 
             if (waiting_len == 0) {
                 assert(self.quorum_replication == self.replica_count);
-                assert(!prepare.ok_from_all_replicas.isSet(self.replica));
+                assert(!prepare.ok_from_all_replicas.is_set(self.replica));
                 assert(prepare.ok_from_all_replicas.count() == self.replica_count - 1);
                 assert(prepare.message.header.op <= self.op);
 
@@ -3307,7 +3307,7 @@ pub fn ReplicaType(
             if (self.standby()) return;
 
             // Don't reset our own SVC; it will be reset if/when we receive a heartbeat.
-            const svc = self.start_view_change_from_all_replicas.isSet(self.replica);
+            const svc = self.start_view_change_from_all_replicas.is_set(self.replica);
             self.reset_quorum_start_view_change();
             if (svc) self.start_view_change_from_all_replicas.set(self.replica);
         }
@@ -3319,7 +3319,7 @@ pub fn ReplicaType(
             if (self.solo()) return;
             if (self.standby()) return;
 
-            if (self.start_view_change_from_all_replicas.isSet(self.replica)) {
+            if (self.start_view_change_from_all_replicas.is_set(self.replica)) {
                 self.send_start_view_change();
             }
         }
@@ -3665,7 +3665,7 @@ pub fn ReplicaType(
             assert(threshold >= 1);
             assert(threshold <= self.replica_count);
 
-            assert(QuorumCounter.bit_length == constants.replicas_max);
+            assert(counter.capacity() == constants.replicas_max);
             assert(message.header.cluster == self.cluster);
             assert(message.header.replica < self.replica_count);
             assert(message.header.view == self.view);
@@ -3684,7 +3684,7 @@ pub fn ReplicaType(
 
             // Do not allow duplicate messages to trigger multiple passes through a state
             // transition:
-            if (counter.isSet(message.header.replica)) {
+            if (counter.is_set(message.header.replica)) {
                 log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
                     self.replica,
                     command,
@@ -3695,7 +3695,7 @@ pub fn ReplicaType(
 
             // Record the first receipt of this message:
             counter.set(message.header.replica);
-            assert(counter.isSet(message.header.replica));
+            assert(counter.is_set(message.header.replica));
 
             // Count the number of unique messages now received:
             const count = counter.count();
@@ -6840,10 +6840,10 @@ pub fn ReplicaType(
                 self.commit_journal();
             }
 
-            if (self.client_replies.faulty.findFirstSet()) |slot| {
+            if (self.client_replies.faulty.first_set()) |slot| {
                 // Repair replies.
                 const entry = &self.client_sessions.entries[slot];
-                assert(!self.client_sessions.entries_free.isSet(slot));
+                assert(self.client_sessions.entries_present.is_set(slot));
                 assert(entry.session != 0);
                 assert(entry.header.size > @sizeOf(Header));
 
@@ -7755,7 +7755,7 @@ pub fn ReplicaType(
         }
 
         fn reset_quorum_counter(self: *Replica, counter: *QuorumCounter) void {
-            var counter_iterator = counter.iterator(.{});
+            var counter_iterator = counter.iterate();
             while (counter_iterator.next()) |replica| {
                 assert(replica < self.replica_count);
             }
@@ -7765,7 +7765,7 @@ pub fn ReplicaType(
 
             var replica: usize = 0;
             while (replica < self.replica_count) : (replica += 1) {
-                assert(!counter.isSet(replica));
+                assert(!counter.is_set(replica));
             }
         }
 
@@ -7934,7 +7934,7 @@ pub fn ReplicaType(
 
             self.send_header_to_other_replicas(header.frame_const().*);
 
-            if (!self.start_view_change_from_all_replicas.isSet(self.replica)) {
+            if (!self.start_view_change_from_all_replicas.is_set(self.replica)) {
                 self.send_header_to_replica(self.replica, header.frame_const().*);
                 return self.flush_loopback_queue();
             }
@@ -7954,10 +7954,10 @@ pub fn ReplicaType(
             assert(self.view_headers.array.get(0).op >= self.op);
             self.view_headers.verify();
 
-            const BitSet = std.bit_set.IntegerBitSet(128);
-            comptime assert(BitSet.MaskInt ==
+            const BitSet = stdx.BitSetType(128);
+            comptime assert(BitSet.Word ==
                 std.meta.fieldInfo(Header.DoViewChange, .present_bitset).type);
-            comptime assert(BitSet.MaskInt ==
+            comptime assert(BitSet.Word ==
                 std.meta.fieldInfo(Header.DoViewChange, .nack_bitset).type);
 
             // Collect nack and presence bits for the headers, so that the new primary can run CTRL
@@ -7966,8 +7966,8 @@ pub fn ReplicaType(
             // - a header isn't truncated and is present -- the header gets into the next view
             // - a header is neither truncated nor present -- the primary waits for more
             //   DVC messages to decide whether to keep or truncate the header.
-            var nacks = BitSet.initEmpty();
-            var present = BitSet.initEmpty();
+            var nacks: BitSet = .{};
+            var present: BitSet = .{};
             for (self.view_headers.array.const_slice(), 0..) |*header, i| {
                 const slot = self.journal.slot_for_op(header.op);
                 const journal_header = self.journal.header_with_op(header.op);
@@ -8007,13 +8007,13 @@ pub fn ReplicaType(
                         if (journal_header != null) {
                             assert(journal_header.?.checksum == header.checksum);
                         }
-                        maybe(nacks.isSet(i));
+                        maybe(nacks.is_set(i));
                         present.set(i);
                     }
                 } else {
                     assert(vsr.Headers.dvc_header_type(header) == .blank);
-                    assert(!present.isSet(i));
-                    if (nacks.isSet(i)) assert(!faulty);
+                    assert(!present.is_set(i));
+                    if (nacks.is_set(i)) assert(!faulty);
                 }
             }
 
@@ -8040,9 +8040,9 @@ pub fn ReplicaType(
                 // from non-canonical DVCs.
                 .commit_min = self.commit_min,
                 // Signal which headers correspond to definitely not-prepared messages.
-                .nack_bitset = nacks.mask,
+                .nack_bitset = nacks.bits,
                 // Signal which headers correspond to locally available prepares.
-                .present_bitset = present.mask,
+                .present_bitset = present.bits,
             };
 
             stdx.copy_disjoint(
@@ -8872,10 +8872,10 @@ pub fn ReplicaType(
                     },
                 );
 
-                const BitSet = std.bit_set.IntegerBitSet(128);
+                const BitSet = stdx.BitSetType(128);
                 const dvc_headers = message_body_as_view_headers(dvc.base_const());
-                const dvc_nacks = BitSet{ .mask = dvc.header.nack_bitset };
-                const dvc_present = BitSet{ .mask = dvc.header.present_bitset };
+                const dvc_nacks = BitSet{ .bits = dvc.header.nack_bitset };
+                const dvc_present = BitSet{ .bits = dvc.header.present_bitset };
                 for (dvc_headers.slice, 0..) |*header, i| {
                     log.debug("{}: {s}: dvc: header: " ++
                         "replica={} op={} checksum={} nack={} present={} type={s}", .{
@@ -8884,8 +8884,8 @@ pub fn ReplicaType(
                         dvc.header.replica,
                         header.op,
                         header.checksum,
-                        dvc_nacks.isSet(i),
-                        dvc_present.isSet(i),
+                        dvc_nacks.is_set(i),
+                        dvc_present.is_set(i),
                         @tagName(vsr.Headers.dvc_header_type(header)),
                     });
                 }
@@ -9532,7 +9532,7 @@ pub fn ReplicaType(
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
             // Faulty bits will be set in sync_content().
-            while (self.client_replies.faulty.findFirstSet()) |slot| {
+            while (self.client_replies.faulty.first_set()) |slot| {
                 self.client_replies.faulty.unset(slot);
             }
         }
@@ -9663,7 +9663,7 @@ pub fn ReplicaType(
                 if (!self.state_machine_opened) return false;
 
                 for (0..constants.clients_max) |entry_slot| {
-                    if (self.client_sessions.entries_free.isSet(entry_slot)) continue;
+                    if (!self.client_sessions.entries_present.is_set(entry_slot)) continue;
 
                     const entry = &self.client_sessions.entries[entry_slot];
                     if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
@@ -10711,21 +10711,21 @@ const DVCQuorum = struct {
                 assert(header.op == op);
                 assert(header.view <= log_view_canonical);
 
-                const header_nacks = std.bit_set.IntegerBitSet(128){
-                    .mask = dvc.header.nack_bitset,
+                const header_nacks = stdx.BitSetType(128){
+                    .bits = dvc.header.nack_bitset,
                 };
-                const header_present = std.bit_set.IntegerBitSet(128){
-                    .mask = dvc.header.present_bitset,
+                const header_present = stdx.BitSetType(128){
+                    .bits = dvc.header.present_bitset,
                 };
 
                 if (vsr.Headers.dvc_header_type(header) == .valid and
-                    header_present.isSet(header_index) and
+                    header_present.is_set(header_index) and
                     header_canonical != null and header_canonical.?.checksum == header.checksum)
                 {
                     copies += 1;
                 }
 
-                if (header_nacks.isSet(header_index)) {
+                if (header_nacks.is_set(header_index)) {
                     // The op is nacked explicitly.
                     nacks += 1;
                 } else if (vsr.Headers.dvc_header_type(header) == .valid) {

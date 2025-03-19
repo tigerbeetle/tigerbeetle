@@ -1,53 +1,56 @@
 const std = @import("std");
+const stdx = @import("./stdx.zig");
 const assert = std.debug.assert;
 
 /// Take a u8 to limit to 256 items max (2^8 = 256)
 pub fn IOPSType(comptime T: type, comptime size: u8) type {
-    const Map = std.StaticBitSet(size);
+    const Map = stdx.BitSetType(size);
+
     return struct {
         const IOPS = @This();
 
         items: [size]T = undefined,
-        /// 1 bits are free items.
-        free: Map = Map.initFull(),
+        busy: Map = .{},
 
         pub fn acquire(self: *IOPS) ?*T {
-            const i = self.free.findFirstSet() orelse return null;
-            self.free.unset(i);
+            const i = self.busy.first_unset() orelse return null;
+            self.busy.set(i);
             return &self.items[i];
         }
 
         pub fn release(self: *IOPS, item: *T) void {
             item.* = undefined;
             const i = self.index(item);
-            assert(!self.free.isSet(i));
-            self.free.set(i);
+            assert(self.busy.is_set(i));
+            self.busy.unset(i);
         }
 
         pub fn index(self: *IOPS, item: *T) usize {
-            const i = @divExact((@intFromPtr(item) - @intFromPtr(&self.items)), @sizeOf(T));
+            const i = @divExact(
+                (@intFromPtr(item) - @intFromPtr(&self.items)),
+                @sizeOf(T),
+            );
             assert(i < size);
             return i;
         }
 
         /// Returns the count of IOPs available.
         pub fn available(self: *const IOPS) usize {
-            return self.free.count();
+            return self.busy.capacity() - self.busy.count();
         }
 
-        pub fn total(self: *const IOPS) usize {
-            _ = self;
+        pub inline fn total(_: *const IOPS) usize {
             return size;
         }
 
         /// Returns the count of IOPs in use.
         pub fn executing(self: *const IOPS) usize {
-            return self.total() - self.available();
+            return self.busy.count();
         }
 
         pub const Iterator = struct {
             iops: *IOPS,
-            bitset_iterator: Map.Iterator(.{ .kind = .unset }),
+            bitset_iterator: Map.Iterator,
 
             pub fn next(iterator: *@This()) ?*T {
                 const i = iterator.bitset_iterator.next() orelse return null;
@@ -57,7 +60,7 @@ pub fn IOPSType(comptime T: type, comptime size: u8) type {
 
         pub const IteratorConst = struct {
             iops: *const IOPS,
-            bitset_iterator: Map.Iterator(.{ .kind = .unset }),
+            bitset_iterator: Map.Iterator,
 
             pub fn next(iterator: *@This()) ?*const T {
                 const i = iterator.bitset_iterator.next() orelse return null;
@@ -65,17 +68,19 @@ pub fn IOPSType(comptime T: type, comptime size: u8) type {
             }
         };
 
+        /// Iteratos over all currenty executiong IOPs.
         pub fn iterate(self: *IOPS) Iterator {
             return .{
                 .iops = self,
-                .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
+                .bitset_iterator = self.busy.iterate(),
             };
         }
 
+        /// Iteratos over all currenty executiong IOPs.
         pub fn iterate_const(self: *const IOPS) IteratorConst {
             return .{
                 .iops = self,
-                .bitset_iterator = self.free.iterator(.{ .kind = .unset }),
+                .bitset_iterator = self.busy.iterate(),
             };
         }
     };

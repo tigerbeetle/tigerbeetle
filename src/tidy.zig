@@ -126,6 +126,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.BoundedArrayType instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "Static" ++ "BitSet") != null) {
+        return "use stdx.BitSetType instead of std version";
+    }
+
     if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
         return "use stdx.Duration instead of std veresion";
     }

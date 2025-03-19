@@ -187,13 +187,13 @@ pub const CreateAccountResult = enum(u32) {
 
     comptime {
         const values = std.enums.values(CreateAccountResult);
-        const BitSet = std.StaticBitSet(values.len);
-        var set = BitSet.initEmpty();
+        const BitSet = stdx.BitSetType(values.len);
+        var set: BitSet = .{};
         for (0..values.len) |index| {
             const result: CreateAccountResult = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
-            assert(!set.isSet(index));
+            assert(!set.is_set(index));
             set.set(index);
         }
 
@@ -385,13 +385,13 @@ pub const CreateTransferResult = enum(u32) {
 
     comptime {
         const values = std.enums.values(CreateTransferResult);
-        const BitSet = std.StaticBitSet(values.len);
-        var set = BitSet.initEmpty();
+        const BitSet = stdx.BitSetType(values.len);
+        var set: BitSet = .{};
         for (0..values.len) |index| {
             const result: CreateTransferResult = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
-            assert(!set.isSet(index));
+            assert(!set.is_set(index));
             set.set(index);
         }
 

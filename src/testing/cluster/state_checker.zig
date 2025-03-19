@@ -4,17 +4,18 @@ const mem = std.mem;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
+const stdx = @import("../../stdx.zig");
 
 const message_pool = @import("../../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
-const ReplicaSet = std.StaticBitSet(constants.members_max);
+const ReplicaSet = stdx.BitSetType(constants.members_max);
 const Commits = std.ArrayList(struct {
     header: vsr.Header.Prepare,
     // null for operation=root and operation=upgrade
     release: ?vsr.Release,
-    replicas: ReplicaSet = ReplicaSet.initEmpty(),
+    replicas: ReplicaSet = .{},
 });
 
 const ReplicaHead = struct {
@@ -53,7 +54,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             var commits = Commits.init(allocator);
             errdefer commits.deinit();
 
-            var commit_replicas = ReplicaSet.initEmpty();
+            var commit_replicas: ReplicaSet = .{};
             for (options.replicas, 0..) |_, i| commit_replicas.set(i);
             try commits.append(.{
                 .header = root_prepare,

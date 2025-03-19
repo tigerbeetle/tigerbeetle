@@ -204,7 +204,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             }
         };
 
-        const HeaderChunks = std.StaticBitSet(stdx.div_ceil(slot_count, headers_per_message));
+        const HeaderChunks = stdx.BitSetType(stdx.div_ceil(slot_count, headers_per_message));
 
         storage: *Storage,
         replica: u8,
@@ -240,10 +240,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             constants.journal_iops_write_max
         ][constants.sector_size]u8,
 
-        /// A set bit indicates a chunk of redundant headers that no read has been issued to yet.
-        header_chunks_requested: HeaderChunks = HeaderChunks.initFull(),
+        /// A set bit indicates a chunk of redundant headers that have a read has been issued.
+        header_chunks_requested: HeaderChunks = .{},
         /// A set bit indicates a chunk of redundant headers that has been recovered.
-        header_chunks_recovered: HeaderChunks = HeaderChunks.initEmpty(),
+        header_chunks_recovered: HeaderChunks = .{},
 
         /// Statically allocated read IO operation context data.
         reads: IOPSType(Read, constants.journal_iops_read_max) = .{},
@@ -956,7 +956,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.faulty.count == slot_count);
             assert(journal.reads.executing() == 0);
             assert(journal.writes.executing() == 0);
-            assert(journal.header_chunks_requested.count() == HeaderChunks.bit_length);
+            assert(journal.header_chunks_requested.count() == 0);
             assert(journal.header_chunks_recovered.count() == 0);
 
             journal.status = .{ .recovering = callback };
@@ -966,24 +966,27 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             while (available > 0) : (available -= 1) journal.recover_headers();
 
             assert(journal.header_chunks_recovered.count() == 0);
-            assert(journal.header_chunks_requested.count() ==
-                HeaderChunks.bit_length - journal.reads.executing());
+            assert(journal.header_chunks_requested.count() == journal.reads.executing());
         }
 
         fn recover_headers(journal: *Journal) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
             assert(journal.reads.available() > 0);
+            assert(
+                journal.header_chunks_recovered.count() <= journal.header_chunks_requested.count(),
+            );
 
-            if (journal.header_chunks_recovered.count() == HeaderChunks.bit_length) {
-                assert(journal.header_chunks_requested.count() == 0);
+            if (journal.header_chunks_recovered.count() ==
+                journal.header_chunks_recovered.capacity())
+            {
                 log.debug("{}: recover_headers: complete", .{journal.replica});
                 journal.recover_prepares();
                 return;
             }
 
-            const chunk_index = journal.header_chunks_requested.findFirstSet() orelse return;
-            assert(!journal.header_chunks_recovered.isSet(chunk_index));
+            const chunk_index = journal.header_chunks_requested.first_unset() orelse return;
+            assert(!journal.header_chunks_recovered.is_set(chunk_index));
 
             const message = replica.message_bus.get_message(.prepare);
             defer replica.message_bus.unref(message);
@@ -1013,7 +1016,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 buffer.len,
             });
 
-            journal.header_chunks_requested.unset(chunk_index);
+            journal.header_chunks_requested.set(chunk_index);
             journal.storage.read_sectors(
                 recover_headers_callback,
                 &chunk_read.completion,
@@ -1031,8 +1034,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(chunk_read.destination_replica == null);
 
             const chunk_index = chunk_read.op;
-            assert(!journal.header_chunks_requested.isSet(chunk_index));
-            assert(!journal.header_chunks_recovered.isSet(chunk_index));
+            assert(journal.header_chunks_requested.is_set(chunk_index));
+            assert(!journal.header_chunks_recovered.is_set(chunk_index));
 
             const chunk_buffer = recover_headers_buffer(
                 chunk_read.message,
@@ -1665,7 +1668,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.faulty.count <= slot_count);
             assert(journal.faulty.count == journal.dirty.count);
             assert(journal.header_chunks_requested.count() == 0);
-            assert(journal.header_chunks_recovered.count() == HeaderChunks.bit_length);
+            assert(journal.header_chunks_recovered.count() ==
+                journal.header_chunks_recovered.capacity());
 
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const callback = journal.status.recovering;
