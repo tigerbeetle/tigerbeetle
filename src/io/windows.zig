@@ -1277,7 +1277,16 @@ pub const IO = struct {
         // Obtain an advisory exclusive lock
         // even when we haven't given shared access to other processes.
         fs_lock(handle, size) catch |err| switch (err) {
-            error.WouldBlock => @panic("another process holds the data file lock"),
+            error.WouldBlock => {
+                if (method == .open_read_only) {
+                    log.warn(
+                        "another process holds the data file lock - results may be inconsistent",
+                        .{},
+                    );
+                } else {
+                    @panic("another process holds the data file lock");
+                }
+            },
             else => return err,
         };
 
