@@ -749,11 +749,13 @@ article {
       }
     }
 
-    a>code {
+    a>code,
+    a>strong {
       color: var(--primary-10);
     }
 
-    a:visited>code {
+    a:visited>code,
+    a:visited>strong {
       color: var(--visited-link);
     }
 
