@@ -20,8 +20,6 @@ const FIFOType = @import("../fifo.zig").FIFOType;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
 pub const GridBlocksMissing = struct {
-    const TableDataBlocksSet = std.StaticBitSet(constants.lsm_table_data_blocks_max);
-
     /// A block is removed from the collection when:
     /// - the block's write completes, or
     /// - the block is released and the release is checkpointed, or
@@ -58,10 +56,11 @@ pub const GridBlocksMissing = struct {
         index_checksum: u128,
         /// Invariants:
         /// - data_blocks_received.count < table_blocks_total
+        /// - data_blocks_received.capacity = constants.lsm_table_data_blocks_max
         /// TODO(Congestion control): This bitset is currently used only for extra validation.
         /// Eventually we should request tables using this + EWAH encoding, instead of
         /// block-by-block.
-        data_blocks_received: TableDataBlocksSet = TableDataBlocksSet.initEmpty(),
+        data_blocks_received: *std.DynamicBitSetUnmanaged,
         /// This count includes the index block.
         /// Invariants:
         /// - table_blocks_written ≤ table_blocks_total
@@ -180,7 +179,9 @@ pub const GridBlocksMissing = struct {
     }
 
     pub fn reclaim_table(queue: *GridBlocksMissing) ?*RepairTable {
-        return queue.faulty_tables_free.pop();
+        const table = queue.faulty_tables_free.pop() orelse return null;
+        table.data_blocks_received.unsetAll();
+        return table;
     }
 
     /// Count the number of *non-table* block repairs available.
@@ -212,16 +213,20 @@ pub const GridBlocksMissing = struct {
     pub fn enqueue_table(
         queue: *GridBlocksMissing,
         table: *RepairTable,
+        table_bitset: *std.DynamicBitSetUnmanaged,
         address: u64,
         checksum: u128,
     ) enum { insert, duplicate } {
         assert(queue.faulty_tables.count < queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
+        assert(table_bitset.capacity() == constants.lsm_table_data_blocks_max);
+        assert(table_bitset.count() == 0);
 
         var tables = queue.faulty_tables.peek();
         while (tables) |queue_table| : (tables = queue_table.next) {
             assert(queue_table != table);
+            assert(queue_table.data_blocks_received != table_bitset);
 
             if (queue_table.index_address == address) {
                 // The ForestTableIterator does not repeat tables *except* when the table was first
@@ -235,6 +240,7 @@ pub const GridBlocksMissing = struct {
         table.* = .{
             .index_address = address,
             .index_checksum = checksum,
+            .data_blocks_received = table_bitset,
         };
         queue.faulty_tables.push(table);
 
