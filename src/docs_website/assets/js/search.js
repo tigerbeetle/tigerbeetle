@@ -42,7 +42,6 @@ document.addEventListener("keydown", event => {
         } else {
           closeSearch();
           searchPreviewUsed = false;
-          document.querySelector("article").focus();
         }
         event.preventDefault();
       }
@@ -58,10 +57,7 @@ searchInput.addEventListener("blur", () => {
 });
 searchInput.addEventListener("input", onSearchInput);
 searchClearButton.addEventListener("click", () => {
-  searchInput.value = "";
-  onSearchInput();
-  if (searchInput !== document.activeElement) searchHotkey.style.display = "block";
-  removeTextHighlight(content);
+  closeSearch();
   searchPreviewUsed = false;
 });
 
@@ -323,6 +319,7 @@ function closeSearch() {
   removeTextHighlight(content);
   syncSideNavWithLocation();
   if (sidenavWasCollapsed) document.body.classList.add("sidenav-collapsed");
+  document.querySelector("article").focus();
 }
 
 function highlightText(term, container) {
