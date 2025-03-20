@@ -8,16 +8,21 @@ set -eu
 
 git --version
 
-if ! [ -d ./tigerbeetle ]
-then git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
-fi
-
 while true
 do
+    # Drop the cache every ~24 hours.
+    if [ $((RANDOM % 24 )) -eq 0 ]
+    then rm -rf ./tigerbeetle
+    fi
+
     (
+        if ! [ -d ./tigerbeetle ]
+        then git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
+        fi
+
         cd tigerbeetle
         git fetch
-        git checkout -f origin/main
+        git switch --discard-changes --detach origin/main
         ./zig/download.sh
         # `unshare --pid` ensures that, if the parent process dies, all children die as well.
         # `unshare --user` is needed to make `--pid` work without root.
