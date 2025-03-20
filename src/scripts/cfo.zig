@@ -170,9 +170,6 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         try shell.exec("gh --version", .{});
     }
 
-    // Only garbage-collect the working directory once per run, so that we can reuse the Zig cache.
-    shell.project_root.deleteTree("working") catch {};
-
     try run_fuzzers(shell, gpa, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
