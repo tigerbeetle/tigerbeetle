@@ -4,7 +4,6 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
-import java.util.HashMap;
 
 enum ClientStatus {
     Ok((int) 0),
@@ -12,27 +11,17 @@ enum ClientStatus {
 
     public final int value;
 
-    static final HashMap<Object, ClientStatus> enumByValue;
-    static {
-    final var values = values();
-      enumByValue = new HashMap<Object, ClientStatus>(values.length);
-       for (final var item : values) {
-          enumByValue.put(item.value, item);
-      }
-    }
-
     ClientStatus(int value) {
         this.value = value;
     }
 
     public static ClientStatus fromValue(int value) {
-        final var item = enumByValue.getOrDefault(value, null);
-        if (item == null)
-            throw new IllegalArgumentException(
-                    String.format("Invalid ClientStatus value=%d", value));
-        AssertionError.assertTrue(item.value == value,
-          "Unexpected ClientStatus: found=%d expected=%d", item.value, value);
-        return item;
+        switch (value) {
+            case 0: return Ok;
+            case 1: return Invalid;
+            default: throw new IllegalArgumentException(
+                String.format("Invalid ClientStatus value=%d", value));
+        }
     }
 }
 

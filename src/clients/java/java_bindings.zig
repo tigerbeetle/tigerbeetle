@@ -236,7 +236,6 @@ fn emit_enum(
     try buffer.writer().print(
         \\{[notice]s}
         \\package com.tigerbeetle;
-        \\import java.util.HashMap;
         \\
         \\{[visibility]s}enum {[name]s} {{
         \\
@@ -287,33 +286,37 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
-        \\    static final HashMap<Object, {[name]s}> enumByValue;
-        \\    static {{
-        \\    final var values = values();
-        \\      enumByValue = new HashMap<Object, {[name]s}>(values.length);
-        \\       for (final var item : values) {{
-        \\          enumByValue.put(item.value, item);
-        \\      }}
-        \\    }}
-        \\
         \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        final var item = enumByValue.getOrDefault(value, null);
-        \\        if (item == null)
-        \\            throw new IllegalArgumentException(
-        \\                    String.format("Invalid {[name]s} value=%d", value));
-        \\        AssertionError.assertTrue(item.value == value,
-        \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
-        \\        return item;
+        \\        switch (value) {{
+        \\
+    , .{
+        .int_type = int_type,
+        .name = mapping.name,
+    });
+
+    inline for (fields) |field| {
+        try buffer.writer().print(
+            \\            case {[value]d}: return {[enum_name]s};
+            \\
+        , .{
+            .enum_name = to_case(field.name, .pascal),
+            .value = @intFromEnum(@field(Type, field.name)),
+        });
+    }
+
+    try buffer.writer().print(
+        \\            default: throw new IllegalArgumentException(
+        \\                String.format("Invalid {[name]s} value=%d", value));
+        \\        }}
         \\    }}
         \\}}
         \\
         \\
     , .{
-        .int_type = int_type,
         .name = mapping.name,
     });
 }

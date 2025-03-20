@@ -4,7 +4,6 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
-import java.util.HashMap;
 
 public enum CreateAccountResult {
 
@@ -145,27 +144,42 @@ public enum CreateAccountResult {
 
     public final int value;
 
-    static final HashMap<Object, CreateAccountResult> enumByValue;
-    static {
-    final var values = values();
-      enumByValue = new HashMap<Object, CreateAccountResult>(values.length);
-       for (final var item : values) {
-          enumByValue.put(item.value, item);
-      }
-    }
-
     CreateAccountResult(int value) {
         this.value = value;
     }
 
     public static CreateAccountResult fromValue(int value) {
-        final var item = enumByValue.getOrDefault(value, null);
-        if (item == null)
-            throw new IllegalArgumentException(
-                    String.format("Invalid CreateAccountResult value=%d", value));
-        AssertionError.assertTrue(item.value == value,
-          "Unexpected CreateAccountResult: found=%d expected=%d", item.value, value);
-        return item;
+        switch (value) {
+            case 0: return Ok;
+            case 1: return LinkedEventFailed;
+            case 2: return LinkedEventChainOpen;
+            case 22: return ImportedEventExpected;
+            case 23: return ImportedEventNotExpected;
+            case 3: return TimestampMustBeZero;
+            case 24: return ImportedEventTimestampOutOfRange;
+            case 25: return ImportedEventTimestampMustNotAdvance;
+            case 4: return ReservedField;
+            case 5: return ReservedFlag;
+            case 6: return IdMustNotBeZero;
+            case 7: return IdMustNotBeIntMax;
+            case 15: return ExistsWithDifferentFlags;
+            case 16: return ExistsWithDifferentUserData128;
+            case 17: return ExistsWithDifferentUserData64;
+            case 18: return ExistsWithDifferentUserData32;
+            case 19: return ExistsWithDifferentLedger;
+            case 20: return ExistsWithDifferentCode;
+            case 21: return Exists;
+            case 8: return FlagsAreMutuallyExclusive;
+            case 9: return DebitsPendingMustBeZero;
+            case 10: return DebitsPostedMustBeZero;
+            case 11: return CreditsPendingMustBeZero;
+            case 12: return CreditsPostedMustBeZero;
+            case 13: return LedgerMustNotBeZero;
+            case 14: return CodeMustNotBeZero;
+            case 26: return ImportedEventTimestampMustNotRegress;
+            default: throw new IllegalArgumentException(
+                String.format("Invalid CreateAccountResult value=%d", value));
+        }
     }
 }
 

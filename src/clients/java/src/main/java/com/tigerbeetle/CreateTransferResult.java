@@ -4,7 +4,6 @@
 //////////////////////////////////////////////////////////
 
 package com.tigerbeetle;
-import java.util.HashMap;
 
 public enum CreateTransferResult {
 
@@ -350,27 +349,83 @@ public enum CreateTransferResult {
 
     public final int value;
 
-    static final HashMap<Object, CreateTransferResult> enumByValue;
-    static {
-    final var values = values();
-      enumByValue = new HashMap<Object, CreateTransferResult>(values.length);
-       for (final var item : values) {
-          enumByValue.put(item.value, item);
-      }
-    }
-
     CreateTransferResult(int value) {
         this.value = value;
     }
 
     public static CreateTransferResult fromValue(int value) {
-        final var item = enumByValue.getOrDefault(value, null);
-        if (item == null)
-            throw new IllegalArgumentException(
-                    String.format("Invalid CreateTransferResult value=%d", value));
-        AssertionError.assertTrue(item.value == value,
-          "Unexpected CreateTransferResult: found=%d expected=%d", item.value, value);
-        return item;
+        switch (value) {
+            case 0: return Ok;
+            case 1: return LinkedEventFailed;
+            case 2: return LinkedEventChainOpen;
+            case 56: return ImportedEventExpected;
+            case 57: return ImportedEventNotExpected;
+            case 3: return TimestampMustBeZero;
+            case 58: return ImportedEventTimestampOutOfRange;
+            case 59: return ImportedEventTimestampMustNotAdvance;
+            case 4: return ReservedFlag;
+            case 5: return IdMustNotBeZero;
+            case 6: return IdMustNotBeIntMax;
+            case 36: return ExistsWithDifferentFlags;
+            case 40: return ExistsWithDifferentPendingId;
+            case 44: return ExistsWithDifferentTimeout;
+            case 37: return ExistsWithDifferentDebitAccountId;
+            case 38: return ExistsWithDifferentCreditAccountId;
+            case 39: return ExistsWithDifferentAmount;
+            case 41: return ExistsWithDifferentUserData128;
+            case 42: return ExistsWithDifferentUserData64;
+            case 43: return ExistsWithDifferentUserData32;
+            case 67: return ExistsWithDifferentLedger;
+            case 45: return ExistsWithDifferentCode;
+            case 46: return Exists;
+            case 68: return IdAlreadyFailed;
+            case 7: return FlagsAreMutuallyExclusive;
+            case 8: return DebitAccountIdMustNotBeZero;
+            case 9: return DebitAccountIdMustNotBeIntMax;
+            case 10: return CreditAccountIdMustNotBeZero;
+            case 11: return CreditAccountIdMustNotBeIntMax;
+            case 12: return AccountsMustBeDifferent;
+            case 13: return PendingIdMustBeZero;
+            case 14: return PendingIdMustNotBeZero;
+            case 15: return PendingIdMustNotBeIntMax;
+            case 16: return PendingIdMustBeDifferent;
+            case 17: return TimeoutReservedForPendingTransfer;
+            case 64: return ClosingTransferMustBePending;
+            case 19: return LedgerMustNotBeZero;
+            case 20: return CodeMustNotBeZero;
+            case 21: return DebitAccountNotFound;
+            case 22: return CreditAccountNotFound;
+            case 23: return AccountsMustHaveTheSameLedger;
+            case 24: return TransferMustHaveTheSameLedgerAsAccounts;
+            case 25: return PendingTransferNotFound;
+            case 26: return PendingTransferNotPending;
+            case 27: return PendingTransferHasDifferentDebitAccountId;
+            case 28: return PendingTransferHasDifferentCreditAccountId;
+            case 29: return PendingTransferHasDifferentLedger;
+            case 30: return PendingTransferHasDifferentCode;
+            case 31: return ExceedsPendingTransferAmount;
+            case 32: return PendingTransferHasDifferentAmount;
+            case 33: return PendingTransferAlreadyPosted;
+            case 34: return PendingTransferAlreadyVoided;
+            case 35: return PendingTransferExpired;
+            case 60: return ImportedEventTimestampMustNotRegress;
+            case 61: return ImportedEventTimestampMustPostdateDebitAccount;
+            case 62: return ImportedEventTimestampMustPostdateCreditAccount;
+            case 63: return ImportedEventTimeoutMustBeZero;
+            case 65: return DebitAccountAlreadyClosed;
+            case 66: return CreditAccountAlreadyClosed;
+            case 47: return OverflowsDebitsPending;
+            case 48: return OverflowsCreditsPending;
+            case 49: return OverflowsDebitsPosted;
+            case 50: return OverflowsCreditsPosted;
+            case 51: return OverflowsDebits;
+            case 52: return OverflowsCredits;
+            case 53: return OverflowsTimeout;
+            case 54: return ExceedsCredits;
+            case 55: return ExceedsDebits;
+            default: throw new IllegalArgumentException(
+                String.format("Invalid CreateTransferResult value=%d", value));
+        }
     }
 }
 
