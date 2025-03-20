@@ -33,6 +33,7 @@ pub const Parser = struct {
         help,
         create_accounts,
         create_transfers,
+        create_transfers_with_balance,
         lookup_accounts,
         lookup_transfers,
         get_account_transfers,
@@ -264,7 +265,9 @@ pub const Parser = struct {
         const default: ObjectSyntaxTree = switch (operation) {
             .help, .none => return,
             .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
-            .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
+            .create_transfers, .create_transfers_with_balance => .{
+                .transfer = std.mem.zeroInit(tb.Transfer, .{}),
+            },
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
             .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
