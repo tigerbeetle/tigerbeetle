@@ -170,9 +170,6 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         try shell.exec("gh --version", .{});
     }
 
-    // Only garbage-collect the working directory once per run, so that we can reuse the Zig cache.
-    shell.project_root.deleteTree("working") catch {};
-
     try run_fuzzers(shell, gpa, gh_token_option, .{
         .concurrency = cli_args.concurrency orelse try std.Thread.getCpuCount(),
         .budget_seconds = cli_args.budget_minutes * std.time.s_per_min,
@@ -239,6 +236,7 @@ fn run_fuzzers(
 
         if (iteration_pull) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
+            try run_fuzzers_cleanup(&tasks, shell, gh_token);
 
             for (tasks.list.items) |*task| {
                 if (task.generation == tasks.generation) {
@@ -680,6 +678,34 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         if (task.generation == tasks.generation) {
             task.weight *= Fuzzer.weights.get(task.seed_template.fuzzer);
         }
+    }
+}
+
+/// Garbage-collect checkouts which don't have any running tasks.
+/// Otherwise we reuse checkouts as long as possible, to minimize time spent recompiling fuzzers.
+fn run_fuzzers_cleanup(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8) !void {
+    if (gh_token) |_| {
+        const working_directory = try shell.cwd.openDir("./working", .{ .iterate = true });
+        var checkouts = working_directory.iterate();
+        while (try checkouts.next()) |checkout| {
+            if (checkout.kind == .directory) {
+                if (std.mem.eql(u8, checkout.name, "main")) continue;
+
+                for (tasks.list.items) |*task| {
+                    const checkout_pull = std.fmt.parseInt(u32, checkout.name, 10) catch continue;
+                    if (task.seed_template.branch == .pull and
+                        task.seed_template.branch.pull == checkout_pull)
+                    {
+                        break;
+                    }
+                } else {
+                    log.info("garbage collect {s}", .{checkout.name});
+                    working_directory.deleteTree(checkout.name) catch {};
+                }
+            }
+        }
+    } else {
+        // No other checkouts.
     }
 }
 

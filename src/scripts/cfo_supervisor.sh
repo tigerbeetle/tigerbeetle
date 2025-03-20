@@ -8,12 +8,16 @@ set -eu
 
 git --version
 
+if ! [ -d ./tigerbeetle ]
+then git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
+fi
+
 while true
 do
-    rm -rf ./tigerbeetle
     (
-        git clone https://github.com/tigerbeetle/tigerbeetle tigerbeetle
         cd tigerbeetle
+        git fetch
+        git checkout -f origin/main
         ./zig/download.sh
         # `unshare --pid` ensures that, if the parent process dies, all children die as well.
         # `unshare --user` is needed to make `--pid` work without root.
