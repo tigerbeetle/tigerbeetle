@@ -4251,7 +4251,6 @@ pub fn ReplicaType(
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
                     prepare.body_used(),
@@ -4779,7 +4778,6 @@ pub fn ReplicaType(
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 else => self.state_machine.commit(
                     prepare.header.client,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),

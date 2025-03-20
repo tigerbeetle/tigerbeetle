@@ -930,15 +930,12 @@ pub fn StateMachineType(
         pub fn prefetch(
             self: *StateMachine,
             callback: *const fn (*StateMachine) void,
-            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            // NB: The `client_release` parameter may only be used for backwards compatibility
-            // with old clients' behavior.
+            // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
-            _ = client_release;
             assert(op > 0);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
@@ -1763,17 +1760,14 @@ pub fn StateMachineType(
         pub fn commit(
             self: *StateMachine,
             client: u128,
-            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            // NB: The `client_release` parameter may only be used for backwards compatibility
-            // with old clients' behavior.
+            // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
-            _ = client_release;
             assert(op != 0);
             assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
@@ -3552,8 +3546,6 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
     busy: bool,
-    client_id: u128,
-    client_release: vsr.Release,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
@@ -3612,8 +3604,6 @@ const TestContext = struct {
             .pulse_next_timestamp = TimestampRange.timestamp_max;
 
         ctx.busy = false;
-        ctx.client_id = 1;
-        ctx.client_release = vsr.Release.minimum;
     }
 
     fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
@@ -3657,7 +3647,6 @@ const TestContext = struct {
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
             TestContext.callback,
-            context.client_release,
             op,
             operation,
             input,
@@ -3665,9 +3654,8 @@ const TestContext = struct {
         while (context.busy) context.storage.run();
 
         return context.state_machine.commit(
-            context.client_id,
-            context.client_release,
             1,
+            op,
             timestamp,
             operation,
             input,
@@ -3684,13 +3672,6 @@ const TestAction = union(enum) {
         debits_posted: u128,
         credits_pending: u128,
         credits_posted: u128,
-    },
-
-    // Opposite order to vsr.ReleaseTriple!
-    setup_client_release: struct {
-        major: u16,
-        minor: u8,
-        patch: u8,
     },
 
     tick: struct {
@@ -4012,19 +3993,6 @@ fn check(test_table: []const u8) !void {
                         .new = &account_new,
                     });
                 }
-            },
-            .setup_client_release => |r| {
-                assert(operation == null);
-                assert(context.client_release.value == vsr.Release.minimum.value);
-
-                // ReleaseTriple defines things in the opposite order. Swap the fields by name so
-                // that the check in code can look in-order to a human.
-                const release_triple = vsr.ReleaseTriple{
-                    .major = r.major,
-                    .minor = r.minor,
-                    .patch = r.patch,
-                };
-                context.client_release = vsr.Release.from(release_triple);
             },
             .tick => |ticks| {
                 assert(ticks.value != 0);
