@@ -359,8 +359,13 @@ pub const MessageSummary = struct {
         var commands = slice[0..slice.len].*;
         std.mem.sort(vsr.Command, &commands, summary.map, greater_than);
 
+        var total_count: u32 = 0;
+        var total_size: u64 = 0;
+
         for (commands) |command| {
             const message_summary = summary.map.get(command);
+            total_count += message_summary.count;
+            total_size += message_summary.size;
             if (message_summary.count > 0) {
                 try writer.print("{s:<24} {d:<7} {:.2}\n", .{
                     @tagName(command),
@@ -369,6 +374,11 @@ pub const MessageSummary = struct {
                 });
             }
         }
+        try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+            "total",
+            total_count,
+            std.fmt.fmtIntSizeBin(total_size),
+        });
     }
 
     fn greater_than(map: Map, lhs: vsr.Command, rhs: vsr.Command) bool {
