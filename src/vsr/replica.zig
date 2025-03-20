@@ -5607,6 +5607,30 @@ pub fn ReplicaType(
                 }
             }
 
+            // For compatibility with clients <= 0.15.3, `Request.invalid_header()`
+            // considers a `.register` without body as valid, evicting the client with
+            // `client_release_too_low` instead of silently dropping the invalid request.
+            //
+            // This code is a safeguard against **malformed** requests that have the
+            // expected release number but lack a `RegisterRequest`.
+            // TODO: Remove this code once `invalid_header()` starts rejecting the request.
+            if (message.header.operation == .register and
+                message.header.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
+            {
+                log.warn("{}: on_request: ignoring register without body" ++
+                    " (client={} version={}<{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release_client_min,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_body_size,
+                );
+                return true;
+            }
+
             if (self.view_durable_updating()) {
                 log.debug("{}: on_request: ignoring (still persisting view)", .{self.replica});
                 return true;
