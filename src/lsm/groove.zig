@@ -259,17 +259,15 @@ pub fn GrooveType(
         };
     }
 
-    comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
-    for (index_fields) |index_field| {
+    comptime var index_options_fields: [index_fields.len]std.builtin.Type.StructField = undefined;
+    for (index_fields, 0..) |index_field, i| {
         const IndexTree = index_field.type;
-        index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = index_field.name,
-                .type = IndexTree.Options,
-                .default_value = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree.Options),
-            },
+        index_options_fields[i] = .{
+            .name = index_field.name,
+            .type = IndexTree.Options,
+            .default_value = null,
+            .is_comptime = false,
+            .alignment = @alignOf(IndexTree.Options),
         };
     }
 
@@ -325,7 +323,7 @@ pub fn GrooveType(
     const _IndexTreeOptions = @Type(.{
         .Struct = .{
             .layout = .auto,
-            .fields = index_options_fields,
+            .fields = &index_options_fields,
             .decls = &.{},
             .is_tuple = false,
         },

@@ -732,18 +732,18 @@ pub fn EnumUnionType(
 ) type {
     const UnionField = std.builtin.Type.UnionField;
 
-    var fields: []const UnionField = &[_]UnionField{};
-    for (std.enums.values(Enum)) |enum_variant| {
-        fields = fields ++ &[_]UnionField{.{
+    var fields: [std.enums.values(Enum).len]UnionField = undefined;
+    for (std.enums.values(Enum), 0..) |enum_variant, i| {
+        fields[i] = .{
             .name = @tagName(enum_variant),
             .type = TypeForVariant(enum_variant),
             .alignment = @alignOf(TypeForVariant(enum_variant)),
-        }};
+        };
     }
 
     return @Type(.{ .Union = .{
         .layout = .auto,
-        .fields = fields,
+        .fields = &fields,
         .decls = &.{},
         .tag_type = Enum,
     } });

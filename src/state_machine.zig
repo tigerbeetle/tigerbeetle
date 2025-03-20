@@ -6504,63 +6504,63 @@ test "StateMachine: input_valid" {
     };
 
     const events = comptime events: {
-        var array: []const Event = &.{};
-        for (std.enums.values(TestContext.StateMachine.Operation)) |operation| {
-            array = switch (operation) {
-                .pulse, .get_events => array ++ [_]Event{.{
+        var array: [std.enums.values(TestContext.StateMachine.Operation).len]Event = undefined;
+        for (std.enums.values(TestContext.StateMachine.Operation), 0..) |operation, i| {
+            array[i] = switch (operation) {
+                .pulse, .get_events => .{
                     .operation = operation,
                     .min = 0,
                     .max = 0,
                     .size = 0,
-                }},
-                .create_accounts => array ++ [_]Event{.{
+                },
+                .create_accounts => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
-                }},
-                .create_transfers => array ++ [_]Event{.{
+                },
+                .create_transfers => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(Transfer),
-                }},
-                .lookup_accounts => array ++ [_]Event{.{
+                },
+                .lookup_accounts => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(u128),
-                }},
-                .lookup_transfers => array ++ [_]Event{.{
+                },
+                .lookup_transfers => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(u128),
-                }},
-                .get_account_transfers => array ++ [_]Event{.{
+                },
+                .get_account_transfers => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(AccountFilter),
-                }},
-                .get_account_balances => array ++ [_]Event{.{
+                },
+                .get_account_balances => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(AccountFilter),
-                }},
-                .query_accounts => array ++ [_]Event{.{
+                },
+                .query_accounts => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(QueryFilter),
-                }},
-                .query_transfers => array ++ [_]Event{.{
+                },
+                .query_transfers => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(QueryFilter),
-                }},
+                },
             };
         }
         break :events array;
