@@ -761,11 +761,6 @@ export enum CreateTransferError {
   * See [exceeds_debits](https://docs.tigerbeetle.com/reference/requests/create_transfers#exceeds_debits)
   */
   exceeds_debits = 55,
-
-  /**
-  * See [deprecated_18](https://docs.tigerbeetle.com/reference/requests/create_transfers#deprecated_18)
-  */
-  deprecated_18 = 18,
 }
 
 export type CreateAccountsError = {
