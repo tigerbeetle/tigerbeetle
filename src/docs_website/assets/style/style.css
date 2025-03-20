@@ -749,11 +749,13 @@ article {
       }
     }
 
-    a>code {
+    a>code,
+    a>strong {
       color: var(--primary-10);
     }
 
-    a:visited>code {
+    a:visited>code,
+    a:visited>strong {
       color: var(--visited-link);
     }
 
@@ -894,6 +896,24 @@ article {
           cursor: pointer;
         }
       }
+    }
+
+    blockquote {
+      font-style: italic;
+      padding: 0 0 0 24px;
+      position: relative;
+    }
+    
+    blockquote::before {
+      background-color: var(--primary-10);
+      border-radius: 2px;
+      content: "";
+      display: block;
+      height: 100%;
+      left: 0;
+      position: absolute;
+      top: 0;
+      width: 4px;
     }
 
     img {
