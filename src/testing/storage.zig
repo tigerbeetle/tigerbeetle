@@ -358,28 +358,35 @@ pub const Storage = struct {
             write_count += 1;
         }
 
-        if (read_count == 0 and write_count == 0 and storage.next_tick_queue.empty()) {
-            return false;
-        }
+        // NB: to support upgrades in the simulator, we do not process next_tick_queue if we
+        // processed any IO. This is to get the simulator the chance to restart the corresponding
+        // replica into a newer version.
 
-        storage.prng.shuffle(*Read, reads[0..read_count]);
-        storage.prng.shuffle(*Write, writes[0..write_count]);
+        if (read_count > 0 or write_count > 0) {
+            storage.prng.shuffle(*Read, reads[0..read_count]);
+            storage.prng.shuffle(*Write, writes[0..write_count]);
 
-        while (read_count > 0 or write_count > 0) {
-            if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
-                read_count -= 1;
-                storage.read_sectors_finish(reads[read_count]);
-            } else {
-                write_count -= 1;
-                storage.write_sectors_finish(writes[write_count]);
+            while (read_count > 0 or write_count > 0) {
+                if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
+                    read_count -= 1;
+                    storage.read_sectors_finish(reads[read_count]);
+                } else {
+                    write_count -= 1;
+                    storage.write_sectors_finish(writes[write_count]);
+                }
             }
+            return true;
         }
 
-        // Process the queues in a single loop, since their callbacks may append to each other.
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            next_tick.callback(next_tick);
+        if (!storage.next_tick_queue.empty()) {
+            // Process the queues in a single loop, since their callbacks may append to each other.
+            while (storage.next_tick_queue.pop()) |next_tick| {
+                next_tick.callback(next_tick);
+            }
+            return true;
         }
-        return true;
+
+        return false;
     }
 
     pub fn run(storage: *Storage) void {
