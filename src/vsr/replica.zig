@@ -167,11 +167,6 @@ pub fn ReplicaType(
             replica: *Replica,
         };
 
-        const RepairTable = struct {
-            replica: *Replica,
-            table: Grid.RepairTable,
-        };
-
         /// We use this allocator during open/init and then disable it.
         /// An accidental dynamic allocation after open/init will cause an assertion failure.
         static_allocator: StaticAllocator,
@@ -303,7 +298,8 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPSType(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_repair_tables: IOPSType(RepairTable, constants.grid_missing_tables_max) = .{},
+        grid_repair_tables: IOPSType(Grid.RepairTable, constants.grid_missing_tables_max) = .{},
+        grid_repair_table_bitsets: [constants.grid_repair_writes_max]std.DynamicBitSetUnmanaged,
         grid_repair_writes: IOPSType(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
         grid_scrubber: GridScrubber,
@@ -1128,6 +1124,13 @@ pub fn ReplicaType(
             });
             errdefer self.grid.deinit(allocator);
 
+            for (&self.grid_repair_table_bitsets, 0..) |*bitset, i| {
+                errdefer for (self.grid_repair_table_bitsets[0..i]) |*b| b.deinit(allocator);
+                bitset.* = try std.DynamicBitSetUnmanaged
+                    .initEmpty(allocator, constants.lsm_table_data_blocks_max);
+            }
+            errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
+
             for (&self.grid_repair_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
                 block.* = try allocate_block(allocator);
@@ -1196,6 +1199,7 @@ pub fn ReplicaType(
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
+                .grid_repair_table_bitsets = self.grid_repair_table_bitsets,
                 .grid_repair_write_blocks = self.grid_repair_write_blocks,
                 .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
@@ -1355,6 +1359,7 @@ pub fn ReplicaType(
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
             for (self.grid_repair_write_blocks) |block| allocator.free(block);
+            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
 
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
@@ -9702,11 +9707,13 @@ pub fn ReplicaType(
                         snapshot_from_commit(sync_op_max),
                     });
 
-                    const table = self.grid_repair_tables.acquire().?;
-                    table.* = .{ .replica = self, .table = undefined };
+                    const table: *Grid.RepairTable = self.grid_repair_tables.acquire().?;
+                    const table_bitset: *std.DynamicBitSetUnmanaged =
+                        &self.grid_repair_table_bitsets[self.grid_repair_tables.index(table)];
 
                     const enqueue_result = self.grid.blocks_missing.enqueue_table(
-                        &table.table,
+                        table,
+                        table_bitset,
                         table_info.address,
                         table_info.checksum,
                     );
@@ -9751,18 +9758,17 @@ pub fn ReplicaType(
         }
 
         fn sync_reclaim_tables(self: *Replica) void {
-            while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
+            while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
                     "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
                     .{
-                        queue_table.index_address,
-                        queue_table.index_checksum,
-                        queue_table.table_blocks_written,
-                        queue_table.table_blocks_total,
+                        table.index_address,
+                        table.index_checksum,
+                        table.table_blocks_written,
+                        table.table_blocks_total,
                     },
                 );
 
-                const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
                 self.trace.stop(.{ .replica_sync_table = .{
                     .index = self.grid_repair_tables.index(table),
