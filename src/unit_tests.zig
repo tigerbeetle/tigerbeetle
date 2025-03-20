@@ -11,11 +11,12 @@ comptime {
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
     _ = @import("stdx/aegis.zig");
+    _ = @import("stdx/bit_set.zig");
     _ = @import("stdx/bounded_array.zig");
+    _ = @import("stdx/prng.zig");
     _ = @import("stdx/ring_buffer.zig");
     _ = @import("stdx/sort_test.zig");
     _ = @import("stdx/zipfian.zig");
-    _ = @import("stdx/prng.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("trace.zig");
