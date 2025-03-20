@@ -553,7 +553,11 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
-                    if (self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest)) {
+                    // Support `register` requests without the body to correctly
+                    // reply with `client_release_too_low` for clients <= v0.15.3.
+                    if (self.size != @sizeOf(Header) and
+                        self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
+                    {
                         return "register: size != @sizeOf(Header) [+ @sizeOf(vsr.RegisterRequest)]";
                     }
                 },

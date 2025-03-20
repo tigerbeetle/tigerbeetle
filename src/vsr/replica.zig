@@ -4896,30 +4896,20 @@ pub fn ReplicaType(
                 output_buffer[0..@sizeOf(vsr.RegisterResult)],
             );
 
-            if (prepare.header.size == @sizeOf(vsr.Header)) {
-                // Old clients which don't send a RegisterRequest also don't check
-                // `batch_size_limit`.
-                result.* = .{
-                    .batch_size_limit = 0,
-                };
-            } else {
-                assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit > 0);
+            assert(register_request.batch_size_limit <= constants.message_body_size_max);
+            assert(register_request.batch_size_limit <=
+                self.request_size_limit - @sizeOf(vsr.Header));
+            assert(stdx.zeroed(&register_request.reserved));
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit > 0);
-                assert(register_request.batch_size_limit <= constants.message_body_size_max);
-                assert(register_request.batch_size_limit <=
-                    self.request_size_limit - @sizeOf(vsr.Header));
-                assert(stdx.zeroed(&register_request.reserved));
-
-                result.* = .{
-                    .batch_size_limit = register_request.batch_size_limit,
-                };
-            }
-
+            result.* = .{
+                .batch_size_limit = register_request.batch_size_limit,
+            };
             return @sizeOf(vsr.RegisterResult);
         }
 
@@ -6599,26 +6589,22 @@ pub fn ReplicaType(
             assert(request.header.operation == .register);
             assert(request.header.request == 0);
 
-            if (request.header.size == @sizeOf(vsr.Header)) {
-                // Old clients don't send a RegisterRequest.
-            } else {
-                assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
 
-                const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
-                assert(batch_size_limit > 0);
-                assert(batch_size_limit <= constants.message_body_size_max);
+            const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
+            assert(batch_size_limit > 0);
+            assert(batch_size_limit <= constants.message_body_size_max);
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit == 0);
-                assert(stdx.zeroed(&register_request.reserved));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit == 0);
+            assert(stdx.zeroed(&register_request.reserved));
 
-                register_request.* = .{
-                    .batch_size_limit = batch_size_limit,
-                };
-            }
+            register_request.* = .{
+                .batch_size_limit = batch_size_limit,
+            };
         }
 
         fn primary_prepare_reconfiguration(
