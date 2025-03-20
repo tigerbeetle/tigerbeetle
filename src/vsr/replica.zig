@@ -904,7 +904,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.sync_tables == null);
             assert(self.grid_repair_tables.executing() == 0);
-            assert(self.client_sessions.entries_present.count() == 0);
+            assert(self.client_sessions.entries_present.empty());
             assert(std.meta.eql(
                 self.client_sessions_checkpoint.checkpoint_reference(),
                 self.superblock.working.client_sessions_reference(),
@@ -927,7 +927,7 @@ pub fn ReplicaType(
             }
 
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
-                maybe(self.client_replies.writing.count() > 0);
+                maybe(!self.client_replies.writing.empty());
                 for (0..constants.clients_max) |entry_slot| {
                     const slot_faulty = self.client_replies.faulty.is_set(entry_slot);
                     const slot_free = !self.client_sessions.entries_present.is_set(entry_slot);
@@ -2169,7 +2169,7 @@ pub fn ReplicaType(
             });
 
             self.transition_to_view_change_status(self.view + 1);
-            assert(self.start_view_change_from_all_replicas.count() == 0);
+            assert(self.start_view_change_from_all_replicas.empty());
         }
 
         /// DVC serves two purposes:
@@ -3300,7 +3300,7 @@ pub fn ReplicaType(
 
         fn on_start_view_change_window_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(self.start_view_change_from_all_replicas.count() > 0);
+            assert(!self.start_view_change_from_all_replicas.empty());
             assert(!self.solo());
             self.start_view_change_window_timeout.stop();
 
@@ -7761,7 +7761,7 @@ pub fn ReplicaType(
             }
 
             counter.* = quorum_counter_null;
-            assert(counter.count() == 0);
+            assert(counter.empty());
 
             var replica: usize = 0;
             while (replica < self.replica_count) : (replica += 1) {
@@ -8919,7 +8919,7 @@ pub fn ReplicaType(
                 while (pipeline_prepares.next()) |prepare| {
                     assert(self.journal.has_header(prepare.message.header));
                     assert(!prepare.ok_quorum_received);
-                    assert(prepare.ok_from_all_replicas.count() == 0);
+                    assert(prepare.ok_from_all_replicas.empty());
 
                     log.debug("{}: start_view_as_the_new_primary: pipeline " ++
                         "(op={} checksum={x} parent={x})", .{

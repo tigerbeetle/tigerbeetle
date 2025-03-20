@@ -956,8 +956,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.faulty.count == slot_count);
             assert(journal.reads.executing() == 0);
             assert(journal.writes.executing() == 0);
-            assert(journal.header_chunks_requested.count() == 0);
-            assert(journal.header_chunks_recovered.count() == 0);
+            assert(journal.header_chunks_requested.empty());
+            assert(journal.header_chunks_recovered.empty());
 
             journal.status = .{ .recovering = callback };
             log.debug("{}: recover: recovering", .{journal.replica});
@@ -965,7 +965,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             var available: usize = journal.reads.available();
             while (available > 0) : (available -= 1) journal.recover_headers();
 
-            assert(journal.header_chunks_recovered.count() == 0);
+            assert(journal.header_chunks_recovered.empty());
             assert(journal.header_chunks_requested.count() == journal.reads.executing());
         }
 
@@ -977,9 +977,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 journal.header_chunks_recovered.count() <= journal.header_chunks_requested.count(),
             );
 
-            if (journal.header_chunks_recovered.count() ==
-                journal.header_chunks_recovered.capacity())
-            {
+            if (journal.header_chunks_recovered.full()) {
                 log.debug("{}: recover_headers: complete", .{journal.replica});
                 journal.recover_prepares();
                 return;
@@ -1667,9 +1665,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count <= slot_count);
             assert(journal.faulty.count <= slot_count);
             assert(journal.faulty.count == journal.dirty.count);
-            assert(journal.header_chunks_requested.count() == 0);
-            assert(journal.header_chunks_recovered.count() ==
-                journal.header_chunks_recovered.capacity());
+            assert(journal.header_chunks_requested.full());
+            assert(journal.header_chunks_recovered.full());
 
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const callback = journal.status.recovering;

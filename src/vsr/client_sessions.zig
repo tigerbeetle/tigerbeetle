@@ -136,7 +136,7 @@ pub const ClientSessions = struct {
         source: []align(@alignOf(vsr.Header)) const u8,
     ) void {
         assert(client_sessions.count() == 0);
-        assert(client_sessions.entries_present.count() == 0);
+        assert(client_sessions.entries_present.empty());
         for (client_sessions.entries) |*entry| {
             assert(entry.session == 0);
             assert(stdx.zeroed(std.mem.asBytes(&entry.header)));
@@ -273,7 +273,7 @@ pub const ClientSessions = struct {
     /// This ensures that we will always pick the entry with the oldest commit number.
     /// We also check that a client has only one entry in the hash map (or it's buggy).
     pub fn evictee(client_sessions: *const ClientSessions) u128 {
-        assert(client_sessions.entries_present.count() == constants.clients_max);
+        assert(client_sessions.entries_present.full());
         assert(client_sessions.count() == constants.clients_max);
 
         var evictee_: ?*const vsr.Header.Reply = null;

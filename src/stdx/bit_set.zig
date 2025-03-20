@@ -27,6 +27,15 @@ pub fn BitSetType(comptime with_capacity: u8) type {
         pub inline fn capacity(_: BitSet) usize {
             return with_capacity;
         }
+
+        pub fn full(bit_set: BitSet) bool {
+            return bit_set.count() == bit_set.capacity();
+        }
+
+        pub fn empty(bit_set: BitSet) bool {
+            return bit_set.bits == 0;
+        }
+
         pub fn first_set(bit_set: BitSet) ?usize {
             if (bit_set.bits == 0) return null;
             return @ctz(bit_set.bits);

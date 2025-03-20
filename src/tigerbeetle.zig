@@ -199,7 +199,7 @@ pub const CreateAccountResult = enum(u32) {
 
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
-        assert(set.count() == set.capacity());
+        assert(set.full());
     }
 };
 
@@ -397,7 +397,7 @@ pub const CreateTransferResult = enum(u32) {
 
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
-        assert(set.count() == set.capacity());
+        assert(set.full());
     }
 
     /// TODO(zig): CreateTransferResult is ordered by precedence, but it crashes

@@ -148,7 +148,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         }
 
         // There are no gaps in the tree ids.
-        assert(tree_infos_set.count() == tree_infos.len);
+        assert(tree_infos_set.full());
 
         break :tree_infos tree_infos_sorted;
     };

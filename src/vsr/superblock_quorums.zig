@@ -102,7 +102,7 @@ pub fn QuorumsType(comptime options: Options) type {
             std.mem.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
             for (quorums.slice()) |quorum| {
-                if (quorum.copies.count() == options.superblock_copies) {
+                if (quorum.copies.full()) {
                     log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
                         quorum.header.checksum,
                         quorum.header.parent,

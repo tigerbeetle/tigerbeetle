@@ -293,7 +293,7 @@ const Benchmark = struct {
     pub fn run(b: *Benchmark, stage: Stage) !void {
         assert(b.stage == .idle);
         assert(b.clients.len > 0);
-        assert(b.clients_busy.count() == 0);
+        assert(b.clients_busy.empty());
         assert(stdx.zeroed(std.mem.sliceAsBytes(b.request_latency_histogram)));
         assert(b.request_index == 0);
         assert(b.account_index == 0);
@@ -325,7 +325,7 @@ const Benchmark = struct {
 
     fn run_finish(b: *Benchmark) void {
         assert(b.stage != .idle);
-        assert(b.clients_busy.count() == 0);
+        assert(b.clients_busy.empty());
 
         b.stage = .idle;
         b.request_index = 0;
@@ -355,7 +355,7 @@ const Benchmark = struct {
         assert(b.clients_busy.is_set(context.client_index));
 
         b.clients_busy.unset(context.client_index);
-        if (b.clients_busy.count() == 0) b.run_finish();
+        if (b.clients_busy.empty()) b.run_finish();
     }
 
     fn create_accounts(b: *Benchmark, client_index: u32) void {
@@ -364,7 +364,7 @@ const Benchmark = struct {
         assert(b.account_batch_size > 0);
 
         if (b.account_index >= b.account_count) {
-            if (b.clients_busy.count() == 0) b.run_finish();
+            if (b.clients_busy.empty()) b.run_finish();
         } else {
             const accounts_count = @min(b.account_count, b.account_batch_size);
             const accounts_bytes = &b.client_requests[client_index];
@@ -390,7 +390,7 @@ const Benchmark = struct {
         assert(b.transfer_batch_size > 0);
 
         if (b.transfer_index >= b.transfer_count) {
-            if (b.clients_busy.count() == 0) b.create_transfers_finish();
+            if (b.clients_busy.empty()) b.create_transfers_finish();
         } else {
             const transfers_count = @min(b.transfer_count, b.transfer_batch_size);
             const transfers_bytes = &b.client_requests[client_index];
@@ -451,7 +451,7 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
 
         if (b.query_index >= b.query_count) {
-            if (b.clients_busy.count() == 0) b.get_account_transfers_finish();
+            if (b.clients_busy.empty()) b.get_account_transfers_finish();
             return;
         }
         b.query_index += 1;
@@ -510,7 +510,7 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
 
         if (b.account_index >= b.account_count) {
-            if (b.clients_busy.count() == 0) b.validate_accounts_finish();
+            if (b.clients_busy.empty()) b.validate_accounts_finish();
         } else {
             const account_count = @min(b.account_count, b.account_batch_size);
             const account_ids =
@@ -562,7 +562,7 @@ const Benchmark = struct {
         assert(!b.clients_busy.is_set(client_index));
 
         if (b.transfer_index >= b.transfer_count) {
-            if (b.clients_busy.count() == 0) b.validate_transfers_finish();
+            if (b.clients_busy.empty()) b.validate_transfers_finish();
         } else {
             const transfer_count = @min(b.transfer_count, b.transfer_batch_size);
             const transfer_ids =
