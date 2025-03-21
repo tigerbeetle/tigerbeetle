@@ -103,12 +103,12 @@ const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
 const IO = @import("io.zig").IO;
 const StatsD = @import("trace/statsd.zig").StatsD;
-const Event = @import("trace/event.zig").Event;
-const EventMetric = @import("trace/event.zig").EventMetric;
-const EventTracing = @import("trace/event.zig").EventTracing;
-const EventTiming = @import("trace/event.zig").EventTiming;
-const EventTimingAggregate = @import("trace/event.zig").EventTimingAggregate;
-const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate;
+pub const Event = @import("trace/event.zig").Event;
+pub const EventMetric = @import("trace/event.zig").EventMetric;
+pub const EventTracing = @import("trace/event.zig").EventTracing;
+pub const EventTiming = @import("trace/event.zig").EventTiming;
+pub const EventTimingAggregate = @import("trace/event.zig").EventTimingAggregate;
+pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate;
 
 const trace_span_size_max = 1024;
 

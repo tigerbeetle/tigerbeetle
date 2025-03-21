@@ -29,6 +29,11 @@ const Grid = vsr.GridType(Storage);
 const allocate_block = vsr.grid.allocate_block;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
+const EventMetric = vsr.trace.EventMetric;
+const EventMetricAggregate = vsr.trace.EventMetricAggregate;
+const EventTiming = vsr.trace.EventTiming;
+const EventTimingAggregate = vsr.trace.EventTimingAggregate;
+
 pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
@@ -46,6 +51,7 @@ fn main_inspect(
 ) !void {
     const data_file = switch (cli_args.*) {
         .constants => return try inspect_constants(stdout),
+        .metrics => return try inspect_metrics(stdout),
         .data_file => |data_file| data_file,
     };
 
@@ -223,6 +229,49 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
                 2 * stdx.div_ceil(vsr.block_count_max(datafile_size), 8),
         )});
     }
+}
+
+fn inspect_metrics(output: std.io.AnyWriter) !void {
+    const EventMetricTag = std.meta.Tag(EventMetric);
+    const EventTimingTag = std.meta.Tag(EventTiming);
+
+    const stats_per_gauge = std.meta.fields(EventMetricAggregate).len - 1; // -1 to ignore `event`.
+    const stats_per_timing = std.meta.fields(std.meta.FieldType(EventTimingAggregate, .values)).len;
+    var stats_total: usize = 0;
+
+    log.info("Format: [metric type]: [metric name]([metric tags])=[metric cardinality]", .{});
+
+    inline for (std.meta.fields(EventMetric)) |field| {
+        const metric_tag = std.meta.stringToEnum(EventMetricTag, field.name).?;
+        try output.print("gauge: {s}(", .{field.name});
+        if (field.type != void) {
+            inline for (std.meta.fields(field.type), 0..) |data_field, i| {
+                if (i != 0) try output.print(", ");
+                try output.print("{s}", .{data_field.name});
+            }
+        }
+        const metric_stats = EventMetric.slot_limits.get(metric_tag) * stats_per_gauge;
+        try output.print(")={}\n", .{metric_stats});
+        stats_total += metric_stats;
+    }
+    inline for (std.meta.fields(EventTiming)) |field| {
+        const timing_tag = std.meta.stringToEnum(EventTimingTag, field.name).?;
+        try output.print("timing: {s}(", .{field.name});
+        if (field.type != void) {
+            inline for (std.meta.fields(field.type), 0..) |data_field, i| {
+                if (i != 0) try output.print(", ");
+                try output.print("{s}", .{data_field.name});
+            }
+        }
+        const timing_stats = EventTiming.slot_limits.get(timing_tag) * stats_per_timing;
+        try output.print(")={}\n", .{timing_stats});
+        stats_total += timing_stats;
+    }
+    log.info("Total stats per replica: {}", .{stats_total});
+    log.info(
+        "(All stats are tagged with the replica, so the cluster has 6x as many stats.)",
+        .{},
+    );
 }
 
 fn print_header(output: std.io.AnyWriter, comptime level: u8, comptime header: []const u8) !void {
