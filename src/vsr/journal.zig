@@ -240,7 +240,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             constants.journal_iops_write_max
         ][constants.sector_size]u8,
 
-        /// A set bit indicates a chunk of redundant headers that have a read has been issued.
+        /// A set bit indicates a chunk of redundant headers for which a read has been issued.
         header_chunks_requested: HeaderChunks = .{},
         /// A set bit indicates a chunk of redundant headers that has been recovered.
         header_chunks_recovered: HeaderChunks = .{},

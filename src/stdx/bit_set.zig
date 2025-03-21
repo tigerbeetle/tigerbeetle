@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 pub fn BitSetType(comptime with_capacity: u8) type {
     return struct {
         // While mathematicaly 0 and 1 are symmetric, we intentionally bias the API to use zeros
-        // default, as zero-initalization requces binary size.
+        // default, as zero-initialization reduces binary size.
         bits: Word = 0,
 
         pub const Word = for (.{ u8, u16, u32, u64, u128, u256 }) |w| {
@@ -129,8 +129,8 @@ test BitSetType {
                 .unset => {
                     if (N > 0) {
                         const bit = prng.int_inclusive(usize, N - 1);
-                        set.set(bit);
-                        model.set(bit);
+                        set.unset(bit);
+                        model.unset(bit);
                     }
                 },
                 .set_value => {
