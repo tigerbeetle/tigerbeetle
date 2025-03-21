@@ -8626,6 +8626,14 @@ pub fn ReplicaType(
                     if (checkpoint.header.op == self.op_checkpoint()) {
                         self.sync_superblock_update_finish();
                         assert(self.syncing == .idle);
+                        if (self.release.value <
+                            self.superblock.working.vsr_state.checkpoint.release.value)
+                        {
+                            // sync_superblock_update_finish triggered `release_transition`,
+                            // short-circuite for VOPR.
+                            assert(Forest.Storage == TestStorage);
+                            return;
+                        }
                     }
                 },
                 else => {},
