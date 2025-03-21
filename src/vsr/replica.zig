@@ -433,7 +433,7 @@ pub fn ReplicaType(
 
         /// When "log_view < view": The DVC headers.
         /// When "log_view = view": The SV headers. (Just as a cache,
-        //  since they are regenerated for every request_start_view).
+        /// since they are regenerated for every request_start_view).
         ///
         /// Invariants:
         /// - view_headers.len     > 0
@@ -3471,6 +3471,35 @@ pub fn ReplicaType(
         fn on_trace_emit_timeout(self: *Replica) void {
             assert(self.trace_emit_timeout.ticking);
             self.trace_emit_timeout.reset();
+
+            self.trace.gauge(.replica_status, @intFromEnum(self.status));
+            self.trace.gauge(.replica_view, self.view);
+            self.trace.gauge(.replica_log_view, self.log_view);
+            self.trace.gauge(.replica_op, self.op);
+            self.trace.gauge(.replica_op_checkpoint, self.op_checkpoint());
+            self.trace.gauge(.replica_commit_min, self.commit_min);
+            self.trace.gauge(.replica_commit_max, self.commit_max);
+            self.trace.gauge(.replica_sync_stage, @intFromEnum(self.syncing));
+            self.trace.gauge(.replica_sync_op_min, self.superblock.working.vsr_state.sync_op_min);
+            self.trace.gauge(.replica_sync_op_max, self.superblock.working.vsr_state.sync_op_max);
+            self.trace.gauge(.journal_dirty, self.journal.dirty.count);
+            self.trace.gauge(.journal_faulty, self.journal.faulty.count);
+            self.trace.gauge(.grid_blocks_missing, self.grid.blocks_missing.faulty_blocks.count());
+            self.trace.gauge(.grid_cache_hits, self.grid.cache.metrics.hits);
+            self.trace.gauge(.grid_cache_misses, self.grid.cache.metrics.misses);
+            self.trace.gauge(.lsm_nodes_free, self.state_machine.forest.node_pool.free.count());
+
+            self.trace.gauge(
+                .replica_pipeline_queue_length,
+                switch (self.pipeline) {
+                    .cache => |_| 0,
+                    .queue => |*queue| queue.prepare_queue.count + queue.request_queue.count,
+                },
+            );
+            self.trace.gauge(
+                .lsm_manifest_block_count,
+                self.superblock.working.vsr_state.checkpoint.manifest_block_count,
+            );
 
             self.trace.emit_metrics();
         }
