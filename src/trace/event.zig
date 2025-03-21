@@ -376,10 +376,46 @@ pub const EventMetric = union(enum) {
 
     table_count_visible: struct { tree: TreeEnum },
     table_count_visible_max: struct { tree: TreeEnum },
+    replica_status,
+    replica_view,
+    replica_log_view,
+    replica_op,
+    replica_op_checkpoint,
+    replica_commit_min,
+    replica_commit_max,
+    replica_pipeline_queue_length,
+    replica_sync_stage,
+    replica_sync_op_min,
+    replica_sync_op_max,
+    journal_dirty,
+    journal_faulty,
+    grid_blocks_missing,
+    grid_cache_hits,
+    grid_cache_misses,
+    lsm_nodes_free,
+    lsm_manifest_block_count,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_max(TreeEnum),
         .table_count_visible_max = enum_max(TreeEnum),
+        .replica_status = 1,
+        .replica_view = 1,
+        .replica_log_view = 1,
+        .replica_op = 1,
+        .replica_op_checkpoint = 1,
+        .replica_commit_min = 1,
+        .replica_commit_max = 1,
+        .replica_pipeline_queue_length = 1,
+        .replica_sync_stage = 1,
+        .replica_sync_op_min = 1,
+        .replica_sync_op_max = 1,
+        .journal_dirty = 1,
+        .journal_faulty = 1,
+        .grid_blocks_missing = 1,
+        .grid_cache_hits = 1,
+        .grid_cache_misses = 1,
+        .lsm_nodes_free = 1,
+        .lsm_manifest_block_count = 1,
     });
 
     pub const slot_bases = array: {
@@ -408,6 +444,9 @@ pub const EventMetric = union(enum) {
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + @as(u32, @intCast(offset));
+            },
+            else => {
+                return slot_bases.get(event.*);
             },
         }
     }
@@ -478,6 +517,7 @@ test "EventMetric slot doesn't have collisions" {
             .table_count_visible_max => .{ .table_count_visible_max = .{
                 .tree = g.enum_value(TreeEnum),
             } },
+            inline else => |tag| tag,
         };
         try stacks.append(allocator, event.slot());
     }
