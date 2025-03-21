@@ -5523,7 +5523,17 @@ pub fn ReplicaType(
 
             // This check must precede any send_eviction_message_to_client(), since only the primary
             // should send evictions.
-            if (self.ignore_request_message_backup(message)) return true;
+            if (self.backup()) {
+                // Clients only send requests to the primary. Either the client's view is outdated,
+                // or a message was misdirected. Intentinonally don't try to forward the message to
+                // the primary, to avoid amplyfying the network load.
+                log.debug("{}: on_request: ignoring (backup view={} header.view={})", .{
+                    self.replica,
+                    self.view,
+                    message.header.view,
+                });
+                return true;
+            }
             assert(self.primary());
 
             if (message.header.release.value < self.release_client_min.value) {
@@ -5903,52 +5913,6 @@ pub fn ReplicaType(
             });
 
             self.send_reply_message_to_client(reply);
-        }
-
-        /// Returns whether the replica is eligible to process this request as the primary.
-        /// Takes the client's perspective into account if the client is aware of a newer view.
-        /// Forwards requests to the primary if the client has an older view.
-        fn ignore_request_message_backup(self: *Replica, message: *Message.Request) bool {
-            assert(self.status == .normal);
-            assert(message.header.command == .request);
-
-            // The client is aware of a newer view:
-            // Even if we think we are the primary, we may be partitioned from the rest of the
-            // cluster. We therefore drop the message rather than flood our partition with traffic.
-            if (message.header.view > self.view) {
-                log.debug("{}: on_request: ignoring (newer view)", .{self.replica});
-                return true;
-            } else if (self.primary()) {
-                return false;
-            }
-
-            if (message.header.operation == .register) {
-                // We do not forward `.register` requests for the sake of `Header.peer_type()`.
-                // This enables the MessageBus to identify client connections on the first message.
-                log.debug("{}: on_request: ignoring (backup, register)", .{self.replica});
-            } else if (message.header.view < self.view) {
-                // The client may not know who the primary is, or may be retrying after a primary
-                // failure. We forward to the new primary ahead of any client retry timeout to
-                // reduce latency. Since the client is already connected to all replicas, the client
-                // may yet receive the reply from the new primary directly.
-                log.debug("{}: on_request: forwarding (backup)", .{self.replica});
-                self.send_message_to_replica(self.primary_index(self.view), message);
-            } else {
-                assert(message.header.view == self.view);
-                // The client has the correct view, but has retried against a backup.
-                // This may mean that the primary is down and that we are about to do a view change.
-                // There is also not much we can do as the client already knows who the primary is.
-                // We do not forward as this would amplify traffic on the network.
-
-                // TODO This may also indicate a client-primary partition. If we see enough of
-                // these, should we trigger a view change to select a primary that clients can
-                // reach? This is a question of weighing the probability of a partition vs routing
-                // error.
-                log.debug("{}: on_request: ignoring (backup, same view)", .{self.replica});
-            }
-
-            assert(self.backup());
-            return true;
         }
 
         fn ignore_request_message_preparing(self: *Replica, message: *const Message.Request) bool {

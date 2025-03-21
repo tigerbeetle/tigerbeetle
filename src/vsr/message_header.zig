@@ -201,7 +201,8 @@ pub const Header = extern struct {
     } {
         switch (self.into_any()) {
             .reserved => unreachable,
-            // These messages cannot always identify the peer as they may be forwarded:
+            // TODO: replicas used to forward requests. They no longer do, and can always return
+            // request.client starting with the next release.
             .request => |request| {
                 switch (request.operation) {
                     // However, we do not forward the first .register request sent by a client:
