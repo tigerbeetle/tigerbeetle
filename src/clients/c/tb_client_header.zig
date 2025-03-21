@@ -102,6 +102,7 @@ fn emit_enum(
     try buffer.writer().print("typedef enum {s} {{\n", .{c_name});
 
     inline for (type_info.fields, 0..) |field, i| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         comptime var skip = false;
         inline for (skip_fields) |sf| {
             skip = skip or comptime std.mem.eql(u8, sf, field.name);

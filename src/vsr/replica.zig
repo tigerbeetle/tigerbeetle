@@ -4251,7 +4251,6 @@ pub fn ReplicaType(
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
                     prepare.body_used(),
@@ -4779,7 +4778,6 @@ pub fn ReplicaType(
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 else => self.state_machine.commit(
                     prepare.header.client,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),
@@ -4898,30 +4896,20 @@ pub fn ReplicaType(
                 output_buffer[0..@sizeOf(vsr.RegisterResult)],
             );
 
-            if (prepare.header.size == @sizeOf(vsr.Header)) {
-                // Old clients which don't send a RegisterRequest also don't check
-                // `batch_size_limit`.
-                result.* = .{
-                    .batch_size_limit = 0,
-                };
-            } else {
-                assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit > 0);
+            assert(register_request.batch_size_limit <= constants.message_body_size_max);
+            assert(register_request.batch_size_limit <=
+                self.request_size_limit - @sizeOf(vsr.Header));
+            assert(stdx.zeroed(&register_request.reserved));
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit > 0);
-                assert(register_request.batch_size_limit <= constants.message_body_size_max);
-                assert(register_request.batch_size_limit <=
-                    self.request_size_limit - @sizeOf(vsr.Header));
-                assert(stdx.zeroed(&register_request.reserved));
-
-                result.* = .{
-                    .batch_size_limit = register_request.batch_size_limit,
-                };
-            }
-
+            result.* = .{
+                .batch_size_limit = register_request.batch_size_limit,
+            };
             return @sizeOf(vsr.RegisterResult);
         }
 
@@ -5600,7 +5588,6 @@ pub fn ReplicaType(
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
                 if (!self.state_machine.input_valid(
-                    message.header.release,
                     operation,
                     message.body_used(),
                 )) {
@@ -5618,6 +5605,30 @@ pub fn ReplicaType(
                     );
                     return true;
                 }
+            }
+
+            // For compatibility with clients <= 0.15.3, `Request.invalid_header()`
+            // considers a `.register` without body as valid, evicting the client with
+            // `client_release_too_low` instead of silently dropping the invalid request.
+            //
+            // This code is a safeguard against **malformed** requests that have the
+            // expected release number but lack a `RegisterRequest`.
+            // TODO: Remove this code once `invalid_header()` starts rejecting the request.
+            if (message.header.operation == .register and
+                message.header.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
+            {
+                log.warn("{}: on_request: ignoring register without body" ++
+                    " (client={} version={}<{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release_client_min,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_body_size,
+                );
+                return true;
             }
 
             if (self.view_durable_updating()) {
@@ -6512,7 +6523,6 @@ pub fn ReplicaType(
                 },
                 else => {
                     self.state_machine.prepare(
-                        request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
                         request.message.body_used(),
                     );
@@ -6603,26 +6613,22 @@ pub fn ReplicaType(
             assert(request.header.operation == .register);
             assert(request.header.request == 0);
 
-            if (request.header.size == @sizeOf(vsr.Header)) {
-                // Old clients don't send a RegisterRequest.
-            } else {
-                assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
 
-                const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
-                assert(batch_size_limit > 0);
-                assert(batch_size_limit <= constants.message_body_size_max);
+            const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
+            assert(batch_size_limit > 0);
+            assert(batch_size_limit <= constants.message_body_size_max);
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit == 0);
-                assert(stdx.zeroed(&register_request.reserved));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit == 0);
+            assert(stdx.zeroed(&register_request.reserved));
 
-                register_request.* = .{
-                    .batch_size_limit = batch_size_limit,
-                };
-            }
+            register_request.* = .{
+                .batch_size_limit = batch_size_limit,
+            };
         }
 
         fn primary_prepare_reconfiguration(

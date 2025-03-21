@@ -11,28 +11,17 @@ enum ClientStatus {
 
     public final int value;
 
-    static final ClientStatus[] enumByValue;
-    static {
-    final var values = values();
-      enumByValue = new ClientStatus[values.length];
-       for (final var item : values) {
-          enumByValue[item.value] = item;
-      }
-    }
-
     ClientStatus(int value) {
         this.value = value;
     }
 
     public static ClientStatus fromValue(int value) {
-        if (value < 0 || value >= enumByValue.length)
-            throw new IllegalArgumentException(
-                    String.format("Invalid ClientStatus value=%d", value));
-
-        final var item = enumByValue[value];
-        AssertionError.assertTrue(item.value == value,
-          "Unexpected ClientStatus: found=%d expected=%d", item.value, value);
-        return item;
+        switch (value) {
+            case 0: return Ok;
+            case 1: return Invalid;
+            default: throw new IllegalArgumentException(
+                String.format("Invalid ClientStatus value=%d", value));
+        }
     }
 }
 

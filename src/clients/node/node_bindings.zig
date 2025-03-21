@@ -128,6 +128,7 @@ fn emit_enum(
     try buffer.writer().print("export enum {s} {{\n", .{mapping.name});
 
     inline for (@typeInfo(Type).Enum.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime mapping.hidden(field.name)) continue;
 
         try emit_docs(buffer, mapping, 1, field.name);

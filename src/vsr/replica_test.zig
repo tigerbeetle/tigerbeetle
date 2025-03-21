@@ -1498,41 +1498,47 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
 // Compat(v0.15.3)
 test "Cluster: client: empty command=request operation=register body" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
+    const run_test = struct {
+        fn run_test(
+            client_release: vsr.Release,
+            eviction_reason: vsr.Header.Eviction.Reason,
+        ) !void {
+            const t = try TestContext.init(.{ .replica_count = 1 });
+            defer t.deinit();
 
-    // Wait for the primary to settle, since this test doesn't implement request retries.
-    t.run();
+            // Wait for the primary to settle, since this test doesn't implement request retries.
+            t.run();
 
-    var client_bus = try t.client_bus(0);
-    defer client_bus.deinit();
+            var client_bus = try t.client_bus(0);
+            defer client_bus.deinit();
 
-    var request_header = vsr.Header.Request{
-        .cluster = t.cluster.options.cluster_id,
-        .size = @sizeOf(vsr.Header),
-        .client = client_bus.client_id,
-        .request = 0,
-        .command = .request,
-        .operation = .register,
-        .release = releases[0].release,
-    };
-    request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
-    request_header.set_checksum();
+            var request_header = vsr.Header.Request{
+                .cluster = t.cluster.options.cluster_id,
+                .size = @sizeOf(vsr.Header),
+                .client = client_bus.client_id,
+                .request = 0,
+                .command = .request,
+                .operation = .register,
+                .release = client_release,
+            };
+            request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
+            request_header.set_checksum();
 
-    client_bus.request(t.replica(.A0).index(), &request_header, &.{});
-    t.run();
+            client_bus.request(t.replica(.A0).index(), &request_header, &.{});
+            t.run();
 
-    const Reply = extern struct {
-        header: vsr.Header.Reply,
-        body: vsr.RegisterResult,
-    };
+            const reply = std.mem.bytesAsValue(
+                vsr.Header.Eviction,
+                client_bus.reply.?.buffer[0..@sizeOf(vsr.Header.Eviction)],
+            );
+            try expectEqual(reply.command, .eviction);
+            try expectEqual(reply.size, @sizeOf(vsr.Header.Eviction));
+            try expectEqual(reply.reason, eviction_reason);
+        }
+    }.run_test;
 
-    const reply = std.mem.bytesAsValue(Reply, client_bus.reply.?.buffer[0..@sizeOf(Reply)]);
-    try expectEqual(reply.header.command, .reply);
-    try expectEqual(reply.header.operation, .register);
-    try expectEqual(reply.header.size, @sizeOf(Reply));
-    try expectEqual(reply.header.request, 0);
-    try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+    try run_test(vsr.Release.minimum, .client_release_too_low);
+    try run_test(releases[0].release_client_min, .invalid_request_body_size);
 }
 
 test "Cluster: eviction: no_session" {
@@ -2588,7 +2594,7 @@ const TestClientBus = struct {
         assert(message.header.cluster == t.context.cluster.options.cluster_id);
 
         switch (message.header.command) {
-            .reply => {
+            .reply, .eviction => {
                 assert(t.reply == null);
                 t.reply = message.ref();
             },

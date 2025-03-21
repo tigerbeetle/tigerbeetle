@@ -603,11 +603,6 @@ export enum CreateTransferError {
   closing_transfer_must_be_pending = 64,
 
   /**
-  * See [amount_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#amount_must_not_be_zero)
-  */
-  amount_must_not_be_zero = 18,
-
-  /**
   * See [ledger_must_not_be_zero](https://docs.tigerbeetle.com/reference/requests/create_transfers#ledger_must_not_be_zero)
   */
   ledger_must_not_be_zero = 19,

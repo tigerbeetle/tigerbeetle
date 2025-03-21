@@ -1216,13 +1216,7 @@ pub fn GrooveType(
         pub fn insert(groove: *Groove, object: *const Object) void {
             assert(object.timestamp >= TimestampRange.timestamp_min);
             assert(object.timestamp <= TimestampRange.timestamp_max);
-
-            // Old clients may retry the same transient error many times.
-            // TODO: When client_release_min is bumped, replace this code with
-            // `assert(!groove.objects_cache.has(@field(object, primary_field)));`
-            if (groove.objects_cache.get(@field(object, primary_field))) |existing| {
-                assert(existing.timestamp == 0);
-            }
+            assert(!groove.objects_cache.has(@field(object, primary_field)));
 
             groove.objects_cache.upsert(object);
 
@@ -1351,14 +1345,7 @@ pub fn GrooveType(
             // We should not insert an orphaned `id` inside a scope.
             assert(!groove.objects_cache.scope_is_active);
             assert(groove.ids.active_scope == null);
-
-            // Old clients may retry the same transient error many times.
-            // TODO: When client_release_min is bumped, replace this code with
-            // `assert(!groove.objects_cache.has(id));`
-            if (groove.objects_cache.get(id)) |object| {
-                assert(object.timestamp == 0);
-                return;
-            }
+            assert(!groove.objects_cache.has(id));
 
             groove.objects_cache.upsert(&std.mem.zeroInit(Object, .{ .id = id }));
             groove.ids.put(&.{ .id = id, .timestamp = 0 });

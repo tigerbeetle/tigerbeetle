@@ -115,6 +115,7 @@ fn emit_enum(
     const type_info = @typeInfo(Type).Enum;
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
         if (type_info.tag_type == u1) {
             try buffer.writer().print("\t{s} {s} = {s}\n", .{
@@ -159,6 +160,7 @@ fn emit_enum(
         try buffer.writer().print("\tswitch i {{\n", .{});
 
         inline for (type_info.fields) |field| {
+            if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
             const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
             try buffer.writer().print("\tcase {s}:\n" ++
                 "\t\treturn \"{s}\"\n", .{

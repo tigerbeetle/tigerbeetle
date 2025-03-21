@@ -693,7 +693,7 @@ fn build_test_integration(
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
         .config_release = "0.16.99",
-        .config_release_client_min = "0.15.3",
+        .config_release_client_min = "0.16.4",
         .config_aof_recovery = false,
         .hash_log_mode = .none,
     });

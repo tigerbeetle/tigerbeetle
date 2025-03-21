@@ -854,33 +854,34 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             self: *const StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(input.len <= self.batch_size_limit);
 
             switch (operation) {
                 .pulse, .get_events => {
                     if (input.len != 0) return false;
                 },
-                .get_account_transfers, .get_account_balances => {
-                    const event_size: u32 = if (AccountFilterFormer.required(client_release))
-                        @sizeOf(AccountFilterFormer)
-                    else
-                        @sizeOf(AccountFilter);
-
-                    if (input.len != event_size) return false;
+                inline .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => |operation_comptime| {
+                    if (input.len != @sizeOf(EventType(operation_comptime))) return false;
                 },
-                .query_accounts, .query_transfers => {
-                    if (input.len != @sizeOf(QueryFilter)) return false;
-                },
-                inline else => |comptime_operation| {
-                    const event_size = @sizeOf(EventType(comptime_operation));
+                inline .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+                => |operation_comptime| {
+                    const event_size = @sizeOf(EventType(operation_comptime));
                     comptime assert(event_size > 0);
 
                     const batch_limit: u32 =
-                        operation_batch_max(comptime_operation, self.batch_size_limit);
+                        operation_batch_max(operation_comptime, self.batch_size_limit);
                     assert(batch_limit > 0);
 
                     // Clients do not validate batch size == 0,
@@ -898,11 +899,10 @@ pub fn StateMachineType(
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(
             self: *StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
             self.prepare_timestamp += switch (operation) {
@@ -930,15 +930,16 @@ pub fn StateMachineType(
         pub fn prefetch(
             self: *StateMachine,
             callback: *const fn (*StateMachine) void,
-            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            _ = op;
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
+            assert(op > 0);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
             self.prefetch_input = input;
@@ -970,10 +971,10 @@ pub fn StateMachineType(
                     self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
                 },
                 .get_account_transfers => {
-                    self.prefetch_get_account_transfers(account_filter_from_input(input));
+                    self.prefetch_get_account_transfers(mem.bytesToValue(AccountFilter, input));
                 },
                 .get_account_balances => {
-                    self.prefetch_get_account_balances(account_filter_from_input(input));
+                    self.prefetch_get_account_balances(mem.bytesToValue(AccountFilter, input));
                 },
                 .query_accounts => {
                     self.prefetch_query_accounts(mem.bytesToValue(QueryFilter, input));
@@ -1234,7 +1235,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            const filter = account_filter_from_input(self.prefetch_input.?);
+            const filter = std.mem.bytesToValue(AccountFilter, self.prefetch_input.?);
             self.prefetch_get_account_balances_scan(filter);
         }
 
@@ -1304,56 +1305,6 @@ pub fn StateMachineType(
 
             self.prefetch_finish();
         }
-
-        fn account_filter_from_input(
-            input: []const u8,
-        ) AccountFilter {
-            if (input.len == @sizeOf(AccountFilterFormer)) {
-                const filter = mem.bytesAsValue(AccountFilterFormer, input);
-                return .{
-                    .account_id = filter.account_id,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .code = 0,
-                    .timestamp_min = filter.timestamp_min,
-                    .timestamp_max = filter.timestamp_max,
-                    .limit = filter.limit,
-                    .flags = filter.flags,
-                };
-            }
-
-            assert(input.len == @sizeOf(AccountFilter));
-            return mem.bytesToValue(AccountFilter, input);
-        }
-
-        const AccountFilterFormer = extern struct {
-            account_id: u128,
-            timestamp_min: u64,
-            timestamp_max: u64,
-            limit: u32,
-            flags: tb.AccountFilterFlags,
-            reserved: [24]u8 = [_]u8{0} ** 24,
-
-            fn required(client_release: vsr.Release) bool {
-                const release_min_inclusive =
-                    vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-                const release_max_exclusive =
-                    vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 2 });
-
-                return client_release.value >= release_min_inclusive.value and
-                    client_release.value < release_max_exclusive.value;
-            }
-
-            comptime {
-                assert(@sizeOf(AccountFilterFormer) == 64);
-                assert(stdx.no_padding(AccountFilterFormer));
-
-                const release_max_transition =
-                    vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-                assert(config.release.value < release_max_transition.value);
-            }
-        };
 
         fn get_scan_from_account_filter(
             self: *StateMachine,
@@ -1809,18 +1760,19 @@ pub fn StateMachineType(
         pub fn commit(
             self: *StateMachine,
             client: u128,
-            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            _ = client;
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op != 0);
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
             assert(input.len <= self.batch_size_limit);
+            if (client == 0) assert(operation == .pulse);
 
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
@@ -1829,14 +1781,12 @@ pub fn StateMachineType(
                 .pulse => self.execute_expire_pending_transfers(timestamp),
                 .create_accounts => self.execute_create(
                     .create_accounts,
-                    client_release,
                     timestamp,
                     input,
                     output,
                 ),
                 .create_transfers => self.execute_create(
                     .create_transfers,
-                    client_release,
                     timestamp,
                     input,
                     output,
@@ -1854,16 +1804,7 @@ pub fn StateMachineType(
             switch (operation) {
                 .pulse, .get_events => {},
                 inline else => |operation_comptime| {
-                    const event_size: usize = switch (operation_comptime) {
-                        .get_account_transfers, .get_account_balances => blk: {
-                            break :blk if (AccountFilterFormer.required(client_release))
-                                @sizeOf(AccountFilterFormer)
-                            else
-                                @sizeOf(AccountFilter);
-                        },
-                        else => @sizeOf(EventType(operation_comptime)),
-                    };
-
+                    const event_size: usize = @sizeOf(EventType(operation_comptime));
                     const count_batch = @divExact(
                         input.len,
                         event_size,
@@ -1962,7 +1903,6 @@ pub fn StateMachineType(
         fn execute_create(
             self: *StateMachine,
             comptime operation: Operation,
-            client_release: vsr.Release,
             timestamp: u64,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
@@ -2021,7 +1961,7 @@ pub fn StateMachineType(
 
                     break :blk switch (operation) {
                         .create_accounts => self.create_account(&event),
-                        .create_transfers => self.create_transfer(client_release, &event),
+                        .create_transfers => self.create_transfer(&event),
                         else => unreachable,
                     };
                 };
@@ -2179,8 +2119,7 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const filter = account_filter_from_input(input);
-
+            const filter = std.mem.bytesAsValue(AccountFilter, input);
             const scan_results: []const AccountEvent = mem.bytesAsSlice(
                 AccountEvent,
                 self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? *
@@ -2353,7 +2292,6 @@ pub fn StateMachineType(
 
         fn create_transfer(
             self: *StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.timestamp > self.commit_timestamp or
@@ -2366,15 +2304,13 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(client_release, t, &e),
-                .found_orphaned_id => if (!retry_transient_error(client_release)) {
-                    return .id_already_failed;
-                },
+                .found_object => |e| return self.create_transfer_exists(t, &e),
+                .found_orphaned_id => return .id_already_failed,
                 .not_found => {},
             }
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(client_release, t);
+                return self.post_or_void_pending_transfer(t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -2392,11 +2328,6 @@ pub fn StateMachineType(
                 if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
                 if (t.flags.closing_debit or t.flags.closing_credit) {
                     return .closing_transfer_must_be_pending;
-                }
-            }
-            if (forbid_zero_amounts(client_release)) {
-                if (!t.flags.balancing_debit and !t.flags.balancing_credit) {
-                    if (t.amount == 0) return .amount_must_not_be_zero;
                 }
             }
 
@@ -2453,33 +2384,18 @@ pub fn StateMachineType(
 
             const amount = amount: {
                 var amount = t.amount;
-                if (forbid_zero_amounts(client_release)) {
-                    if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                        comptime assert(@TypeOf(amount) == u128);
-                        if (amount == 0) amount = std.math.maxInt(u128);
-                    } else {
-                        assert(amount != 0);
-                    }
-                }
-
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_account.debits_posted + dr_account.debits_pending;
                     amount = @min(amount, dr_account.credits_posted -| dr_balance);
-                    if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_credits;
-                    }
                 }
 
                 if (t.flags.balancing_credit) {
                     const cr_balance = cr_account.credits_posted + cr_account.credits_pending;
                     amount = @min(amount, cr_account.debits_posted -| cr_balance);
-                    if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_debits;
-                    }
                 }
                 break :amount amount;
             };
-            assert(amount > 0 or !forbid_zero_amounts(client_release));
+            maybe(amount == 0);
 
             if (t.flags.pending) {
                 if (sum_overflows(u128, amount, dr_account.debits_pending)) {
@@ -2603,7 +2519,6 @@ pub fn StateMachineType(
 
         fn create_transfer_exists(
             self: *const StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
             e: *const Transfer,
         ) CreateTransferResult {
@@ -2621,7 +2536,7 @@ pub fn StateMachineType(
                 // Since both `t` and `e` have the same `pending_id`,
                 // it must be a valid transfer.
                 const p = self.get_transfer(t.pending_id).?;
-                return post_or_void_pending_transfer_exists(client_release, t, e, &p);
+                return post_or_void_pending_transfer_exists(t, e, &p);
             } else {
                 if (t.debit_account_id != e.debit_account_id) {
                     return .exists_with_different_debit_account_id;
@@ -2642,13 +2557,7 @@ pub fn StateMachineType(
                 // range of possible values it should fail with `exists` rather than
                 // `exists_with_different_amount`.
                 if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                    if (forbid_zero_amounts(client_release)) {
-                        if (t.amount > 0 and t.amount < e.amount) {
-                            return .exists_with_different_amount;
-                        }
-                    } else {
-                        if (t.amount < e.amount) return .exists_with_different_amount;
-                    }
+                    if (t.amount < e.amount) return .exists_with_different_amount;
                 } else {
                     if (t.amount != e.amount) return .exists_with_different_amount;
                 }
@@ -2663,10 +2572,7 @@ pub fn StateMachineType(
                     return .exists_with_different_user_data_32;
                 }
                 if (t.ledger != e.ledger) {
-                    return if (retry_transient_error(client_release))
-                        .transfer_must_have_the_same_ledger_as_accounts
-                    else
-                        .exists_with_different_ledger;
+                    return .exists_with_different_ledger;
                 }
                 if (t.code != e.code) {
                     return .exists_with_different_code;
@@ -2678,7 +2584,6 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
@@ -2713,7 +2618,7 @@ pub fn StateMachineType(
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
             assert(p.timestamp > cr_account.timestamp);
-            if (forbid_zero_amounts(client_release)) assert(p.amount > 0);
+            maybe(p.amount == 0);
 
             if (t.debit_account_id > 0 and t.debit_account_id != p.debit_account_id) {
                 return .pending_transfer_has_different_debit_account_id;
@@ -2729,17 +2634,13 @@ pub fn StateMachineType(
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
             const amount = amount: {
-                if (forbid_zero_amounts(client_release)) {
-                    break :amount if (t.amount > 0) t.amount else p.amount;
+                if (t.flags.void_pending_transfer) {
+                    break :amount if (t.amount == 0) p.amount else t.amount;
                 } else {
-                    if (t.flags.void_pending_transfer) {
-                        break :amount if (t.amount > 0) t.amount else p.amount;
-                    } else {
-                        break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
-                    }
+                    break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
                 }
             };
-            if (p.amount > 0 and amount == 0) assert(!forbid_zero_amounts(client_release));
+            maybe(amount == 0);
 
             if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
@@ -2850,14 +2751,12 @@ pub fn StateMachineType(
             if (t2.flags.post_pending_transfer) {
                 assert(!p.flags.closing_debit);
                 assert(!p.flags.closing_credit);
-                if (forbid_zero_amounts(client_release)) {
-                    assert(amount > 0);
-                }
                 assert(amount <= p.amount);
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
             if (t2.flags.void_pending_transfer) {
+                assert(t2.amount == p.amount);
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
@@ -2906,7 +2805,6 @@ pub fn StateMachineType(
         }
 
         fn post_or_void_pending_transfer_exists(
-            client_release: vsr.Release,
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
@@ -2933,16 +2831,14 @@ pub fn StateMachineType(
                 return .exists_with_different_credit_account_id;
             }
 
-            if (forbid_zero_amounts(client_release) or
-                t.flags.void_pending_transfer)
-            {
+            if (t.flags.void_pending_transfer) {
                 if (t.amount == 0) {
                     if (e.amount != p.amount) return .exists_with_different_amount;
                 } else {
                     if (t.amount != e.amount) return .exists_with_different_amount;
                 }
-            } else {
-                assert(t.flags.post_pending_transfer);
+            }
+            if (t.flags.post_pending_transfer) {
                 assert(e.amount <= p.amount);
                 if (t.amount == std.math.maxInt(u128)) {
                     if (e.amount != p.amount) return .exists_with_different_amount;
@@ -2982,10 +2878,7 @@ pub fn StateMachineType(
             }
 
             if (t.ledger != 0 and t.ledger != e.ledger) {
-                return if (retry_transient_error(client_release))
-                    .transfer_must_have_the_same_ledger_as_accounts
-                else
-                    .exists_with_different_ledger;
+                return .exists_with_different_ledger;
             }
             if (t.code != 0 and t.code != e.code) {
                 return .exists_with_different_code;
@@ -3437,49 +3330,6 @@ pub fn StateMachineType(
                 @divFloor(constants.message_body_size_max, result_size),
             );
         }
-
-        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
-        // legacy code it gates.
-        //
-        // Specifically, when forbid_zero_amounts() is true:
-        // - Zero-amount transfers are forbidden (`amount_must_not_be_zero`).
-        // - Post-pending-transfer uses amount=0 as a sentinel for "post full amount".
-        // - Balancing transfers use amount=0 as a sentinel for `maxInt(u128)`.
-        fn forbid_zero_amounts(client_release: vsr.Release) bool {
-            const release_min_inclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-            const release_max_exclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
-            const release_max_transition =
-                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-
-            comptime assert(config.release.value < release_max_transition.value);
-
-            return client_release.value >= release_min_inclusive.value and
-                client_release.value < release_max_exclusive.value;
-        }
-
-        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
-        // legacy code it gates.
-        //
-        // Specifically, when retry_transient_error() is true:
-        // - Transfers that fail due to transient errors can be retried
-        //   with the same ID without returning `id_already_failed`.
-        // - The `exists_with_different_ledger` error code does not apply
-        //   to `create_transfers`.
-        fn retry_transient_error(client_release: vsr.Release) bool {
-            const release_min_inclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-            const release_max_exclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 4 });
-            const release_max_transition =
-                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-
-            comptime assert(config.release.value < release_max_transition.value);
-
-            return client_release.value >= release_min_inclusive.value and
-                client_release.value < release_max_exclusive.value;
-        }
     };
 }
 
@@ -3696,7 +3546,6 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
     busy: bool,
-    client_release: vsr.Release,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
@@ -3755,7 +3604,6 @@ const TestContext = struct {
             .pulse_next_timestamp = TimestampRange.timestamp_max;
 
         ctx.busy = false;
-        ctx.client_release = vsr.Release.minimum;
     }
 
     fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
@@ -3781,7 +3629,6 @@ const TestContext = struct {
         context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
         context.state_machine.prepare_timestamp += 1;
         context.state_machine.prepare(
-            context.client_release,
             operation,
             input,
         );
@@ -3800,7 +3647,6 @@ const TestContext = struct {
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
             TestContext.callback,
-            context.client_release,
             op,
             operation,
             input,
@@ -3808,9 +3654,8 @@ const TestContext = struct {
         while (context.busy) context.storage.run();
 
         return context.state_machine.commit(
-            0,
-            context.client_release,
             1,
+            op,
             timestamp,
             operation,
             input,
@@ -3827,13 +3672,6 @@ const TestAction = union(enum) {
         debits_posted: u128,
         credits_pending: u128,
         credits_posted: u128,
-    },
-
-    // Opposite order to vsr.ReleaseTriple!
-    setup_client_release: struct {
-        major: u16,
-        minor: u8,
-        patch: u8,
     },
 
     tick: struct {
@@ -3865,7 +3703,6 @@ const TestAction = union(enum) {
     },
 
     get_account_balances: TestGetAccountBalances,
-    get_account_balances_former: TestGetAccountBalancesFormer,
     get_account_balances_result: struct {
         transfer_id: u128,
         debits_pending: u128,
@@ -3875,7 +3712,6 @@ const TestAction = union(enum) {
     },
 
     get_account_transfers: TestGetAccountTransfers,
-    get_account_transfers_former: TestGetAccountTransfersFormer,
     get_account_transfers_result: u128,
 
     query_accounts: TestQueryAccounts,
@@ -4008,18 +3844,6 @@ const TestAccountFilter = struct {
     flags_reversed: ?enum { REV } = null,
 };
 
-const TestAccountFilterFormer = struct {
-    account_id: u128,
-    // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
-    // created.
-    timestamp_min_transfer_id: ?u128 = null,
-    timestamp_max_transfer_id: ?u128 = null,
-    limit: u32,
-    flags_debits: ?enum { DR } = null,
-    flags_credits: ?enum { CR } = null,
-    flags_reversed: ?enum { REV } = null,
-};
-
 const TestQueryFilter = struct {
     user_data_128: u128,
     user_data_64: u64,
@@ -4121,8 +3945,6 @@ const TestEventBalanceResult = struct {
 // Operations that share the same input.
 const TestGetAccountBalances = TestAccountFilter;
 const TestGetAccountTransfers = TestAccountFilter;
-const TestGetAccountBalancesFormer = TestAccountFilterFormer;
-const TestGetAccountTransfersFormer = TestAccountFilterFormer;
 const TestQueryAccounts = TestQueryFilter;
 const TestQueryTransfers = TestQueryFilter;
 
@@ -4171,19 +3993,6 @@ fn check(test_table: []const u8) !void {
                         .new = &account_new,
                     });
                 }
-            },
-            .setup_client_release => |r| {
-                assert(operation == null);
-                assert(context.client_release.value == vsr.Release.minimum.value);
-
-                // ReleaseTriple defines things in the opposite order. Swap the fields by name so
-                // that the check in code can look in-order to a human.
-                const release_triple = vsr.ReleaseTriple{
-                    .major = r.major,
-                    .minor = r.minor,
-                    .patch = r.patch,
-                };
-                context.client_release = vsr.Release.from(release_triple);
             },
             .tick => |ticks| {
                 assert(ticks.value != 0);
@@ -4351,28 +4160,6 @@ fn check(test_table: []const u8) !void {
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_account_balances_former => |f| {
-                assert(operation == null or operation.? == .get_account_balances);
-                operation = .get_account_balances;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = TestContext.StateMachine.AccountFilterFormer{
-                    .account_id = f.account_id,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
             .get_account_balances_result => |r| {
                 assert(operation.? == .get_account_balances);
 
@@ -4400,28 +4187,6 @@ fn check(test_table: []const u8) !void {
                     .user_data_64 = f.user_data_64 orelse 0,
                     .user_data_32 = f.user_data_32 orelse 0,
                     .code = f.code orelse 0,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .get_account_transfers_former => |f| {
-                assert(operation == null or operation.? == .get_account_transfers);
-                operation = .get_account_transfers;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = TestContext.StateMachine.AccountFilterFormer{
-                    .account_id = f.account_id,
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
@@ -4816,16 +4581,8 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ commit create_transfers
         \\
-        // Ensure compatibility with clients < 0.16.4
-        \\ setup_client_release 0 16 3
-        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
-        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
-        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ ok
-        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L2 C1   _ _     _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 223 204   0   7  _
-        \\ lookup_account A3   0   7 233 214  _
+        \\ lookup_account A1 223 203   0   7  _
+        \\ lookup_account A3   0   7 233 213  _
         \\ commit lookup_accounts
         \\
         \\ lookup_transfer T5 exists true
@@ -4933,34 +4690,9 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T107 A0 A0    1  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > e.amount
         \\ commit create_transfers
 
-        // Ensure compatibility with client < 0.16.0
-        \\ setup_client_release 0 15 3
-        \\
-        \\ transfer T20  A1 A2    0   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ amount_must_not_be_zero
-        \\ transfer T20  A1 A2    7   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T21  A1 A2    2   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
-        \\
-        \\ transfer T201 A0 A0   -0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T201 A0 A0   -1 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok
-        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
-        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists // ledger/code = 0
-        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists // amount = 0
-        \\ transfer T201 A0 A0    8 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
-        \\ transfer T201 A0 A0    6 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
-        \\
-        \\ transfer T202 A0 A0   -0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T202 A0 A0   -1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ ok
-        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists
-        \\ transfer T202 A0 A0    1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < p.amount
-        \\ transfer T202 A0 A0    2 T21 U0 U0 U0    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ exists
-        \\ transfer T202 A0 A0    3 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
-        \\ commit create_transfers
-
         // Check balances after resolving.
-        \\ lookup_account A1  0 43  0  0  _
-        \\ lookup_account A2  0  0  0 43  _
+        \\ lookup_account A1  0 36  0  0  _
+        \\ lookup_account A2  0  0  0 36  _
         \\ commit lookup_accounts
 
         // The posted transfer amounts are set to the actual amount posted (which may be less than
@@ -4969,9 +4701,6 @@ test "create/lookup 2-phase transfers" {
         \\ lookup_transfer T105 amount 7
         \\ lookup_transfer T106 amount 1
         \\ lookup_transfer T107 amount 0
-        \\
-        \\ lookup_transfer T201 amount 7
-        \\ lookup_transfer T202 amount 2
         \\ commit lookup_transfers
     );
 }
@@ -5306,36 +5035,6 @@ test "create_transfers: balancing_debit | balancing_credit (amount=maxInt, balan
         \\
         \\ transfer   T1 A1 A2   -0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
         \\ transfer   T2 A3 A4   -0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 0 -1  0 -1 _
-        \\ lookup_account A2 0  0  0 -1 _
-        \\ lookup_account A3 0 -1  0  0 _
-        \\ lookup_account A4 0 -1  0 -1 _
-        \\ commit lookup_accounts
-        \\
-        \\ lookup_transfer T1 amount -1
-        \\ lookup_transfer T2 amount -1
-        \\ commit lookup_transfers
-    );
-}
-
-test "create_transfers: balancing_debit | balancing_credit (amount=0, balance≈maxInt)" {
-    // Ensure compatibility with clients < 0.16.0
-    try check(
-        \\ setup_client_release 0 15 3
-        \\
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
-        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
-        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
-        \\ commit create_accounts
-        \\
-        \\ setup A1 0  0 0 -1
-        \\ setup A4 0 -1 0  0
-        \\
-        \\ transfer   T1 A1 A2   0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
-        \\ transfer   T2 A3 A4   0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 -1  0 -1 _
@@ -6103,38 +5802,6 @@ test "get_account_balances: invalid filter" {
     );
 }
 
-test "get_account_transfers_former / get_account_balances_former" {
-    try check(
-        \\ setup_client_release 0 15 3
-        \\
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
-        \\ commit create_accounts
-        \\
-        \\ transfer T1 A1 A2   10   _  U1000  U10  U1 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T2 A2 A1   11   _  U1001  U10  U2 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T3 A1 A2   12   _  U1000  U20  U2 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T4 A2 A1   13   _  U1001  U20  U1 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ commit create_transfers
-
-        // Debits + credits, chronological.
-        \\ get_account_transfers_former A1 _  _ 10 DR CR  _
-        \\ get_account_transfers_result T1
-        \\ get_account_transfers_result T2
-        \\ get_account_transfers_result T3
-        \\ get_account_transfers_result T4
-        \\ commit get_account_transfers
-
-        // Debits + credits, chronological.
-        \\ get_account_balances_former A1 _  _ 10 DR CR  _
-        \\ get_account_balances_result T1 0 10 0  0
-        \\ get_account_balances_result T2 0 10 0 11
-        \\ get_account_balances_result T3 0 22 0 11
-        \\ get_account_balances_result T4 0 22 0 24
-        \\ commit get_account_balances
-    );
-}
-
 test "query_accounts" {
     try check(
         \\ account A1  0  0  0  0 U1000 U10 U1 _ L1 C1 _   _   _ _ _ _ _ _ ok
@@ -6572,7 +6239,6 @@ test "StateMachine: input_valid" {
 
     for (events) |event| {
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -6584,18 +6250,15 @@ test "StateMachine: input_valid" {
         }
 
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. 1 * event.size],
         ));
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. event.max * event.size],
         ));
         if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
             try std.testing.expect(!context.state_machine.input_valid(
-                context.client_release,
                 event.operation,
                 input[0 .. (event.max + 1) * event.size],
             ));
@@ -6604,7 +6267,6 @@ test "StateMachine: input_valid" {
             // on an assert.
         }
         try std.testing.expect(!context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));

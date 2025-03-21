@@ -330,7 +330,6 @@ const (
 	TransferPendingIDMustBeDifferent                        CreateTransferResult = 16
 	TransferTimeoutReservedForPendingTransfer               CreateTransferResult = 17
 	TransferClosingTransferMustBePending                    CreateTransferResult = 64
-	TransferAmountMustNotBeZero                             CreateTransferResult = 18
 	TransferLedgerMustNotBeZero                             CreateTransferResult = 19
 	TransferCodeMustNotBeZero                               CreateTransferResult = 20
 	TransferDebitAccountNotFound                            CreateTransferResult = 21
@@ -439,8 +438,6 @@ func (i CreateTransferResult) String() string {
 		return "TransferTimeoutReservedForPendingTransfer"
 	case TransferClosingTransferMustBePending:
 		return "TransferClosingTransferMustBePending"
-	case TransferAmountMustNotBeZero:
-		return "TransferAmountMustNotBeZero"
 	case TransferLedgerMustNotBeZero:
 		return "TransferLedgerMustNotBeZero"
 	case TransferCodeMustNotBeZero:

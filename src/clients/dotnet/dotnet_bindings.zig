@@ -245,6 +245,7 @@ fn emit_enum(
 
     inline for (type_info.fields, 0..) |field, i| {
         if (comptime mapping.is_private(field.name)) continue;
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
 
         try emit_docs(buffer, mapping, field.name);
         if (is_packed_struct) {

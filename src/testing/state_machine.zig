@@ -185,12 +185,10 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             state_machine: *const StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
             _ = state_machine;
-            _ = client_release;
             _ = operation;
             _ = input;
             return true;
@@ -198,12 +196,10 @@ pub fn StateMachineType(
 
         pub fn prepare(
             state_machine: *StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
             _ = state_machine;
-            _ = client_release;
             _ = operation;
             _ = input;
         }
@@ -211,12 +207,10 @@ pub fn StateMachineType(
         pub fn prefetch(
             state_machine: *StateMachine,
             callback: *const fn (*StateMachine) void,
-            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            _ = client_release;
             _ = operation;
             _ = input;
 
@@ -243,7 +237,6 @@ pub fn StateMachineType(
         pub fn commit(
             state_machine: *StateMachine,
             client: u128,
-            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
@@ -261,7 +254,6 @@ pub fn StateMachineType(
                     value.add(std.mem.asBytes(&op));
                     value.add(std.mem.asBytes(&timestamp));
                     value.add(std.mem.asBytes(&operation));
-                    value.add(std.mem.asBytes(&client_release));
                     value.add(input);
 
                     state_machine.forest.grooves.things.insert(&.{
