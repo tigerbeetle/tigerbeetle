@@ -2,6 +2,7 @@ const std = @import("std");
 const stdx = @import("../stdx.zig");
 const mem = std.mem;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -451,6 +452,10 @@ pub fn ClientType(
                     pong.header.view,
                 });
                 self.view = pong.header.view;
+                // Even if there is a requst in flight, don't try to retransmit it immediately after
+                // a view change. Instead, ride the on_request_timeout normally  to reduce the size
+                // of thundering heard.
+                maybe(self.request_inflight != null);
             }
 
             const ping_timestamp_monotonic = pong.header.ping_timestamp_monotonic;
@@ -622,11 +627,15 @@ pub fn ClientType(
             };
 
             // TODO If we haven't received a pong from a replica since our last ping, then back off.
-            self.send_header_to_replicas(ping.frame_const().*);
+            self.send_header_to_replicas(ping.frame_const());
         }
 
+        // Possible reasons for a timeout:
+        // - the cluster is overloaded and takes too long to respond
+        // - the request message got dropped by the network
+        // - there was a view change, and we are not speaking to the primary
         fn on_request_timeout(self: *Client) void {
-            self.request_timeout.backoff(&self.prng);
+            self.request_timeout.backoff(&self.prng); // Reduce the load.
 
             const message = self.request_inflight.?.message;
             assert(message.header.command == .request);
@@ -640,35 +649,56 @@ pub fn ClientType(
                 message.header.checksum,
             });
 
-            // We assume the primary is down and round-robin through the cluster:
-            self.send_message_to_replica(
-                @as(u8, @intCast((self.view + self.request_timeout.attempts) % self.replica_count)),
-                message.base(),
-            );
+            // Retransmit potentially dropped message.
+            const primary: u32 = self.view % self.replica_count;
+            self.send_message_to_replica(@as(u8, @intCast(primary)), message.base());
+
+            // Try to learn the new view.
+            const ping = Header.PingClient{
+                .command = .ping_client,
+                .cluster = self.cluster,
+                .release = self.release,
+                .client = self.id,
+                .ping_timestamp_monotonic = self.time.monotonic(),
+            };
+            assert(self.request_timeout.attempts > 0);
+            const next_backup: u32 =
+                (self.view + self.request_timeout.attempts) % self.replica_count;
+            self.send_header_to_replica(@as(u8, @intCast(next_backup)), ping.frame_const());
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_message_from_header(self: *Client, header: Header) *Message {
+        fn create_message_from_header(self: *Client, header: *const Header) *Message {
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
             const message = self.message_bus.get_message(null);
             defer self.message_bus.unref(message);
 
-            message.header.* = header;
+            message.header.* = header.*;
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
             return message.ref();
         }
 
-        fn send_header_to_replicas(self: *Client, header: Header) void {
+        fn send_header_to_replicas(self: *Client, header: *const Header) void {
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
-            var replica: u8 = 0;
-            while (replica < self.replica_count) : (replica += 1) {
-                self.send_message_to_replica(replica, message);
+            self.send_message_to_replicas(message);
+        }
+
+        fn send_header_to_replica(self: *Client, replica: u8, header: *const Header) void {
+            const message = self.create_message_from_header(header);
+            defer self.message_bus.unref(message);
+
+            self.send_message_to_replica(replica, message);
+        }
+
+        fn send_message_to_replicas(self: *Client, message: *Message) void {
+            for (0..self.replica_count) |replica| {
+                self.send_message_to_replica(@intCast(replica), message);
             }
         }
 
@@ -734,9 +764,7 @@ pub fn ClientType(
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            // If our view number is out of date, then the old primary will forward our request.
-            // If the primary is offline, then our request timeout will fire and we will
-            // round-robin.
+            // Otherwise we know the view and send directly to the primary.
             self.send_message_to_replica(
                 @as(u8, @intCast(self.view % self.replica_count)),
                 message.base(),
