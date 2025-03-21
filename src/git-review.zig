@@ -96,28 +96,31 @@ pub fn main() !void {
     }
 }
 
+fn has_review(shell: *Shell) !bool {
+    const has_summary = shell.file_exists("REVIEW_SUMMARY.md");
+    const has_commit = has_commit: {
+        const top_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+        const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
+            .commit = top_commit,
+        });
+        break :has_commit std.mem.eql(u8, commit_message, "review\n\n");
+    };
+    if (has_summary and !has_commit) {
+        log.err("REVIEW_SUMMARY.md present, but top-level commit is not a review", .{});
+        return error.InvalidReviewState;
+    }
+    if (!has_summary and has_commit) {
+        log.err("no REVIEW_SUMMARY.md present, but top-level commit is a review", .{});
+        return error.InvalidReviewState;
+    }
+    return has_summary;
+}
+
 fn review_status(shell: *Shell) !enum { resolved, unresolved } {
-    if (!shell.file_exists("REVIEW_SUMMARY.md")) {
+    if (!try has_review(shell)) {
         log.info("no review", .{});
         return error.NoReview;
     }
-
-    const top_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
-    const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
-        .commit = top_commit,
-    });
-    if (!std.mem.eql(u8, commit_message, "review\n\n")) {
-        log.err("REVIEW_SUMMARY.md file present, but the top commit is not a review: {s}", .{
-            commit_message,
-        });
-        return error.InvalidCommit;
-    }
-
-    defer {
-        shell.exec("git reset {commit}", .{ .commit = top_commit }) catch {};
-    }
-    try shell.exec("git add .", .{});
-    try shell.exec("git commit --amend --no-edit", .{});
 
     const diff_review = try shell.exec_stdout("git diff HEAD~ HEAD", .{});
     const stats = try parse_diff(diff_review);
@@ -163,10 +166,11 @@ fn review_status(shell: *Shell) !enum { resolved, unresolved } {
 }
 
 fn review_new(shell: *Shell) !void {
-    if (try git_has_changes(shell)) {
-        log.err("working tree is dirty", .{});
-        return error.DirtyWorkingTree;
+    if (try has_review(shell)) {
+        log.err("review already exists", .{});
+        return error.ReviewExists;
     }
+
     const summary =
         \\# Review Summary
         \\
@@ -175,7 +179,7 @@ fn review_new(shell: *Shell) !void {
     try shell.cwd.writeFile(.{ .sub_path = "REVIEW_SUMMARY.md", .data = summary });
 
     try shell.exec("git add REVIEW_SUMMARY.md", .{});
-    try shell.exec("git commit -m review", .{});
+    try shell.exec("git commit --message review", .{});
 }
 
 fn review_lgtm(shell: *Shell) !void {
@@ -188,7 +192,7 @@ fn review_lgtm(shell: *Shell) !void {
     }
     const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
     try shell.exec("git revert --no-commit {commit}", .{ .commit = commit });
-    try shell.exec("git commit -m {message}", .{ .message = "review revert" });
+    try shell.exec("git commit --message {message}", .{ .message = "review revert" });
     try shell.exec("git push --force-with-lease", .{});
 }
 
@@ -244,9 +248,4 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
     }
     assert(result.comments_total >= result.comments_resolved);
     return result;
-}
-
-fn git_has_changes(shell: *Shell) !bool {
-    const output = try shell.exec_stdout("git status --short", .{});
-    return output.len > 0;
 }
