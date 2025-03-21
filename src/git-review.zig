@@ -97,6 +97,8 @@ pub fn main() !void {
 }
 
 fn has_review(shell: *Shell) !bool {
+    //? Nit, but what do you think of `REVIEW.md` or `PR.md`? Shorter more memorable name, since
+    //? this file is always being recreated every PR.
     const has_summary = shell.file_exists("REVIEW_SUMMARY.md");
     const has_commit = has_commit: {
         const top_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
@@ -165,12 +167,20 @@ fn review_status(shell: *Shell) !enum { resolved, unresolved } {
     return if (unresolved == 0) .resolved else .unresolved;
 }
 
+//? I'm not clear on whether REVIEW_SUMMARY is for the PR author or the reviewer.
+//?
+//? For both of them, clarified in the initial text.
+//? resolved.
 fn review_new(shell: *Shell) !void {
     if (try has_review(shell)) {
         log.err("review already exists", .{});
         return error.ReviewExists;
     }
 
+    //? We should also fail if there is already a `REVIEW_SUMMARY` and/or a review commit.
+    //?
+    //? Indeed!
+    //? resolved.
     const summary =
         \\# Review Summary
         \\
@@ -225,8 +235,12 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
             return error.InvalidDiff;
         }
 
-        if (stdx.cut_prefix(line, "+")) |line_added| {
-            if (std.mem.startsWith(u8, line_added, "++")) continue;
+        //? This parsing misses comments which start at the beginning of the line (no indentation).
+        //? For example, right now `zig build git-status -- status` shows:
+        //? comments:   1
+        //? unresolved: 0
+        //? ...but there are more comments than that. I think we need to cut_prefix at "+" and "-".
+        if (stdx.cut_prefix(line, "+ ")) |line_added| {
             const comment = std.mem.trimLeft(u8, line_added, " ");
             if (!std.mem.startsWith(u8, comment, "//?")) {
                 return error.InvalidDiff;
@@ -249,3 +263,10 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
     assert(result.comments_total >= result.comments_resolved);
     return result;
 }
+//? I think we should ignore untracked files here -- I always have untracked files (debug logs,
+//? notes, data files). I _could_ use a global gitignore but I would prefer not to -- I use "git
+//? status" to find them.
+//?
+//? Good call! I reworked the thing to not touch staging area&working tree at all, and only look
+//? at the contents of the actual commit.
+//? resolved.
