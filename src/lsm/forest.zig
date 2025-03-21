@@ -138,17 +138,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         for (tree_infos) |tree_info| tree_id_min = @min(tree_id_min, tree_info.tree_id);
 
         var tree_infos_sorted: [tree_infos.len]TreeInfo = undefined;
-        var tree_infos_set = std.StaticBitSet(tree_infos.len).initEmpty();
+        var tree_infos_set: stdx.BitSetType(tree_infos.len) = .{};
         for (tree_infos) |tree_info| {
             const tree_index = tree_info.tree_id - tree_id_min;
-            assert(!tree_infos_set.isSet(tree_index));
+            assert(!tree_infos_set.is_set(tree_index));
 
             tree_infos_sorted[tree_index] = tree_info;
             tree_infos_set.set(tree_index);
         }
 
         // There are no gaps in the tree ids.
-        assert(tree_infos_set.count() == tree_infos.len);
+        assert(tree_infos_set.full());
 
         break :tree_infos tree_infos_sorted;
     };

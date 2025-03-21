@@ -15,6 +15,7 @@
 //! - remove dynamic-dispatch idirection (a minor bonus).
 
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
 const Snap = @import("../testing/snaptest.zig").Snap;
@@ -130,7 +131,7 @@ test fill {
     for (0..size_max + 1) |size| {
         // Check that the entire buffer is filled, by filling it over a couple of times
         // and checking that each byte is non-zero at least once.
-        var non_zero = std.StaticBitSet(size_max).initEmpty();
+        var non_zero: stdx.BitSetType(size_max) = .{};
         for (0..3) |_| {
             const buffer = buffer_max[0..size];
             @memset(buffer, 0);
@@ -140,7 +141,7 @@ test fill {
                 if (byte != 0) non_zero.set(i);
             }
         }
-        for (0..size) |i| assert(non_zero.isSet(i));
+        for (0..size) |i| assert(non_zero.is_set(i));
     }
 
     try snap(@src(),

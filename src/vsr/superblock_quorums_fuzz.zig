@@ -314,14 +314,14 @@ pub fn fuzz_quorum_repairs(
     // Generate a random valid 2/4 quorum.
     // 1 bits indicate valid headers.
     // 0 bits indicate invalid headers.
-    var valid = std.bit_set.IntegerBitSet(superblock_copies).initEmpty();
+    var valid: stdx.BitSetType(superblock_copies) = .{};
     while (valid.count() < Quorums.Threshold.open.count() or prng.boolean()) {
         valid.set(prng.int_inclusive(usize, superblock_copies - 1));
     }
 
     var working_headers: [superblock_copies]SuperBlockHeader = undefined;
     for (&working_headers, 0..) |*header, i| {
-        header.* = if (valid.isSet(i)) headers_valid[i] else header_invalid;
+        header.* = if (valid.is_set(i)) headers_valid[i] else header_invalid;
     }
     prng.shuffle(SuperBlockHeader, &working_headers);
     var repair_headers = working_headers;
@@ -346,7 +346,7 @@ pub fn fuzz_quorum_repairs(
 
     // At the end of all repairs, we expect to have every copy of the superblock.
     // They do not need to be in their home slot.
-    var copies = Quorums.QuorumCount.initEmpty();
+    var copies: Quorums.QuorumCount = .{};
     for (repair_headers) |repair_header| {
         assert(repair_header.checksum == working_quorum.header.checksum);
         copies.set(repair_header.copy);

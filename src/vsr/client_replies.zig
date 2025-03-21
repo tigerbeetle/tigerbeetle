@@ -83,8 +83,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         writes: IOPSType(Write, constants.client_replies_iops_write_max) = .{},
 
         /// Track which slots have a write currently in progress.
-        writing: std.StaticBitSet(constants.clients_max) =
-            std.StaticBitSet(constants.clients_max).initEmpty(),
+        writing: stdx.BitSetType(constants.clients_max) = .{},
         /// Track which slots hold a corrupt reply, or are otherwise missing the reply
         /// that ClientSessions believes they should hold.
         ///
@@ -92,8 +91,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         /// - Set bits must correspond to occupied slots in ClientSessions.
         /// - Set bits must correspond to entries in ClientSessions with
         ///   `header.size > @sizeOf(vsr.Header)`.
-        faulty: std.StaticBitSet(constants.clients_max) =
-            std.StaticBitSet(constants.clients_max).initEmpty(),
+        faulty: stdx.BitSetType(constants.clients_max) = .{},
 
         /// Guard against multiple concurrent writes to the same slot.
         /// Pointers are into `writes`.
@@ -136,8 +134,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             client_replies: *const ClientReplies,
             slot: Slot,
         ) bool {
-            return !client_replies.faulty.isSet(slot.index) and
-                !client_replies.writing.isSet(slot.index);
+            return !client_replies.faulty.is_set(slot.index) and
+                !client_replies.writing.is_set(slot.index);
         }
 
         pub fn read_reply_sync(
@@ -147,7 +145,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         ) ?*Message.Reply {
             const client = session.header.client;
 
-            if (!client_replies.writing.isSet(slot.index)) return null;
+            if (!client_replies.writing.is_set(slot.index)) return null;
 
             var writes = client_replies.writes.iterate();
             var write_latest: ?*const Write = null;
@@ -171,11 +169,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 // We are writing a reply, but that's a wrong reply according to `client_sessions`.
                 // This happens after state sync, where we update `client_sessions` without
                 // waiting for the in-flight write requests to complete.
-                assert(client_replies.faulty.isSet(slot.index));
+                assert(client_replies.faulty.is_set(slot.index));
                 return null;
             }
 
-            assert(!client_replies.faulty.isSet(slot.index));
+            assert(!client_replies.faulty.is_set(slot.index));
             return write_latest.?.message;
         }
 
@@ -319,7 +317,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
         }
 
         pub fn remove_reply(client_replies: *ClientReplies, slot: Slot) void {
-            maybe(client_replies.faulty.isSet(slot.index));
+            maybe(client_replies.faulty.is_set(slot.index));
 
             client_replies.faulty.unset(slot.index);
         }
@@ -335,7 +333,7 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             assert(client_replies.ready_sync());
             assert(client_replies.ready_callback == null);
             assert(client_replies.writes.available() > 0);
-            maybe(client_replies.writing.isSet(slot.index));
+            maybe(client_replies.writing.is_set(slot.index));
             assert(client_replies.writing.count() + client_replies.write_queue.count ==
                 client_replies.writes.executing());
             assert(message.header.command == .reply);
@@ -346,11 +344,11 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             switch (trigger) {
                 .commit => {
                     assert(client_replies.checkpoint_callback == null);
-                    maybe(client_replies.faulty.isSet(slot.index));
+                    maybe(client_replies.faulty.is_set(slot.index));
                 },
                 .repair => {
                     maybe(client_replies.checkpoint_callback == null);
-                    assert(client_replies.faulty.isSet(slot.index));
+                    assert(client_replies.faulty.is_set(slot.index));
                 },
             }
 
@@ -403,12 +401,12 @@ pub fn ClientRepliesType(comptime Storage: type) type {
                 client_replies.write_reply_next();
             }
 
-            assert(client_replies.writing.isSet(write.slot.index));
+            assert(client_replies.writing.is_set(write.slot.index));
         }
 
         fn write_reply_next(client_replies: *ClientReplies) void {
             while (client_replies.write_queue.head()) |write| {
-                if (client_replies.writing.isSet(write.slot.index)) return;
+                if (client_replies.writing.is_set(write.slot.index)) return;
 
                 const message = write.message;
                 _ = client_replies.write_queue.pop();
@@ -433,8 +431,8 @@ pub fn ClientRepliesType(comptime Storage: type) type {
             const write: *ClientReplies.Write = @fieldParentPtr("completion", completion);
             const client_replies = write.client_replies;
             const message = write.message;
-            assert(client_replies.writing.isSet(write.slot.index));
-            maybe(client_replies.faulty.isSet(write.slot.index));
+            assert(client_replies.writing.is_set(write.slot.index));
+            maybe(client_replies.faulty.is_set(write.slot.index));
 
             var reads = client_replies.reads.iterate();
             while (reads.next()) |read| {

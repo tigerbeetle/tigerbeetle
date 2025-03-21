@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 
 pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayType;
 pub const RingBufferType = @import("./stdx/ring_buffer.zig").RingBufferType;
+pub const BitSetType = @import("./stdx/bit_set.zig").BitSetType;
 pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
 

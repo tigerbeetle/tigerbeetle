@@ -40,12 +40,12 @@ pub const ClientSessions = struct {
     /// Values are indexes into `entries`.
     const EntriesByClient = std.AutoHashMapUnmanaged(u128, usize);
 
-    const EntriesFree = std.StaticBitSet(constants.clients_max);
+    const EntriesPresent = stdx.BitSetType(constants.clients_max);
 
     /// Free entries are zeroed, both in `entries` and on-disk.
     entries: []Entry,
     entries_by_client: EntriesByClient,
-    entries_free: EntriesFree = EntriesFree.initFull(),
+    entries_present: EntriesPresent = .{},
 
     pub fn init(allocator: mem.Allocator) !ClientSessions {
         var entries_by_client: EntriesByClient = .{};
@@ -72,7 +72,7 @@ pub const ClientSessions = struct {
     pub fn reset(client_sessions: *ClientSessions) void {
         @memset(client_sessions.entries, std.mem.zeroes(Entry));
         client_sessions.entries_by_client.clearRetainingCapacity();
-        client_sessions.entries_free = EntriesFree.initFull();
+        client_sessions.entries_present = .{};
     }
 
     /// Size of the buffer needed to encode the client sessions on disk.
@@ -136,7 +136,7 @@ pub const ClientSessions = struct {
         source: []align(@alignOf(vsr.Header)) const u8,
     ) void {
         assert(client_sessions.count() == 0);
-        assert(client_sessions.entries_free.count() == constants.clients_max);
+        assert(client_sessions.entries_present.empty());
         for (client_sessions.entries) |*entry| {
             assert(entry.session == 0);
             assert(stdx.zeroed(std.mem.asBytes(&entry.header)));
@@ -174,7 +174,7 @@ pub const ClientSessions = struct {
                 assert(header.commit >= session);
 
                 client_sessions.entries_by_client.putAssumeCapacityNoClobber(header.client, i);
-                client_sessions.entries_free.unset(i);
+                client_sessions.entries_present.set(i);
                 client_sessions.entries[i] = .{
                     .session = session,
                     .header = header.*,
@@ -182,8 +182,9 @@ pub const ClientSessions = struct {
             }
         }
 
-        assert(constants.clients_max - client_sessions.entries_free.count() ==
-            client_sessions.entries_by_client.count());
+        assert(
+            client_sessions.entries_present.count() == client_sessions.entries_by_client.count(),
+        );
     }
 
     pub fn count(client_sessions: *const ClientSessions) usize {
@@ -238,7 +239,7 @@ pub const ClientSessions = struct {
         const entry_gop = client_sessions.entries_by_client.getOrPutAssumeCapacity(client);
         if (entry_gop.found_existing) {
             const entry_index = entry_gop.value_ptr.*;
-            assert(!client_sessions.entries_free.isSet(entry_index));
+            assert(client_sessions.entries_present.is_set(entry_index));
 
             const existing = &client_sessions.entries[entry_index];
             assert(existing.session == session);
@@ -249,8 +250,8 @@ pub const ClientSessions = struct {
             existing.header = header.*;
             return ReplySlot{ .index = entry_index };
         } else {
-            const entry_index = client_sessions.entries_free.findFirstSet().?;
-            client_sessions.entries_free.unset(entry_index);
+            const entry_index = client_sessions.entries_present.first_unset().?;
+            client_sessions.entries_present.set(entry_index);
 
             const e = &client_sessions.entries[entry_index];
             assert(e.session == 0);
@@ -272,7 +273,7 @@ pub const ClientSessions = struct {
     /// This ensures that we will always pick the entry with the oldest commit number.
     /// We also check that a client has only one entry in the hash map (or it's buggy).
     pub fn evictee(client_sessions: *const ClientSessions) u128 {
-        assert(client_sessions.entries_free.count() == 0);
+        assert(client_sessions.entries_present.full());
         assert(client_sessions.count() == constants.clients_max);
 
         var evictee_: ?*const vsr.Header.Reply = null;
@@ -302,8 +303,8 @@ pub const ClientSessions = struct {
     pub fn remove(client_sessions: *ClientSessions, client: u128) void {
         const entry_index = client_sessions.entries_by_client.fetchRemove(client).?.value;
 
-        assert(!client_sessions.entries_free.isSet(entry_index));
-        client_sessions.entries_free.set(entry_index);
+        assert(client_sessions.entries_present.is_set(entry_index));
+        client_sessions.entries_present.unset(entry_index);
 
         assert(client_sessions.entries[entry_index].header.client == client);
         client_sessions.entries[entry_index] = std.mem.zeroes(Entry);
@@ -321,9 +322,9 @@ pub const ClientSessions = struct {
 
                 const entry = &it.client_sessions.entries[it.index];
                 if (entry.session == 0) {
-                    assert(it.client_sessions.entries_free.isSet(it.index));
+                    assert(!it.client_sessions.entries_present.is_set(it.index));
                 } else {
-                    assert(!it.client_sessions.entries_free.isSet(it.index));
+                    assert(it.client_sessions.entries_present.is_set(it.index));
                     return entry;
                 }
             }
