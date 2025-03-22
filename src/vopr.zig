@@ -357,7 +357,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         },
     };
 
-    const network_options = .{
+    const network_options: Cluster.NetworkOptions = .{
         .node_count = node_count,
         .client_count = client_count,
 
@@ -381,7 +381,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
 
     const read_latency_min = prng.range_inclusive(u16, 0, 3);
     const write_latency_min = prng.range_inclusive(u16, 0, 3);
-    const storage_options = .{
+    const storage_options: Cluster.Storage.Options = .{
         .seed = prng.int(u64),
         .read_latency_min = read_latency_min,
         .read_latency_mean = prng.range_inclusive(u16, read_latency_min, 10),
@@ -392,7 +392,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .crash_fault_probability = ratio(prng.range_inclusive(u8, 80, 100), 100),
     };
-    const storage_fault_atlas = .{
+    const storage_fault_atlas: Cluster.StorageFaultAtlas.Options = .{
         .faulty_superblock = true,
         .faulty_wal_headers = replica_count > 1,
         .faulty_wal_prepares = replica_count > 1,
@@ -474,7 +474,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         },
     };
 
-    const network_options = .{
+    const network_options: Cluster.NetworkOptions = .{
         .node_count = cluster_options.replica_count,
         .client_count = cluster_options.client_count,
 
@@ -496,7 +496,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .unpartition_stability = 10,
     };
 
-    const storage_options = .{
+    const storage_options: Cluster.Storage.Options = .{
         .seed = prng.int(u64),
         .read_latency_min = 0,
         .read_latency_mean = 0,
@@ -507,7 +507,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .write_misdirect_probability = ratio(0, 100),
         .crash_fault_probability = ratio(0, 100),
     };
-    const storage_fault_atlas = .{
+    const storage_fault_atlas: Cluster.StorageFaultAtlas.Options = .{
         .faulty_superblock = false,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
