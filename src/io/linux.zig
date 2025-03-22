@@ -1656,21 +1656,40 @@ pub const IO = struct {
         // This means that when killing and starting a tigerbeetle process in an automated way, you
         // can see "another process holds the data file lock" errors, even though the process really
         // has terminated.
-        for (0..2) |_| {
-            posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
-                error.WouldBlock => {
-                    std.time.sleep(50 * std.time.ns_per_ms);
-                    continue;
-                },
-                else => return err,
-            };
-            break;
-        } else {
-            posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
-                error.WouldBlock => @panic("another process holds the data file lock"),
-                else => return err,
-            };
+        const lock_acquired = blk: {
+            for (0..2) |_| {
+                posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
+                    error.WouldBlock => {
+                        std.time.sleep(50 * std.time.ns_per_ms);
+                        continue;
+                    },
+                    else => return err,
+                };
+                break :blk true;
+            } else {
+                posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
+                    error.WouldBlock => break :blk false,
+                    else => return err,
+                };
+                break :blk true;
+            }
+        };
+
+        if (method == .open_read_only) {
+            assert(flags.ACCMODE == .RDONLY);
+            maybe(lock_acquired);
+
+            if (!lock_acquired) {
+                log.warn(
+                    "another process holds the data file lock - results may be inconsistent",
+                    .{},
+                );
+            }
+        } else if (!lock_acquired) {
+            @panic("another process holds the data file lock");
         }
+
+        assert(flags.ACCMODE == .RDONLY or lock_acquired);
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
