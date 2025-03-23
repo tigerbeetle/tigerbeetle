@@ -7278,11 +7278,21 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (self.journal.find_latest_headers_break_between(self.commit_max, self.op)) |range| {
+                log.debug("{}: repair_pipeline_read_callback: header break {}..{}", .{
+                    self.replica,
+                    range.op_min,
+                    range.op_max,
+                });
+                return;
+            }
+
             // We are in a state where we should be repairing the pipeline (cf. the end of repair).
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.commit_stage == .idle);
             assert(self.commit_min == self.commit_max);
+            assert(self.valid_hash_chain_between(self.commit_max, self.op));
 
             // But we still need to check that we are reparing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
