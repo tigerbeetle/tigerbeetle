@@ -184,6 +184,16 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         get_account_balances = @intFromEnum(Operation.get_account_balances),
         query_accounts = @intFromEnum(Operation.query_accounts),
         query_transfers = @intFromEnum(Operation.query_transfers),
+
+        deprecated_create_accounts = @intFromEnum(Operation.deprecated_create_accounts),
+        deprecated_create_transfers = @intFromEnum(Operation.deprecated_create_transfers),
+        deprecated_lookup_accounts = @intFromEnum(Operation.deprecated_lookup_accounts),
+        deprecated_lookup_transfers = @intFromEnum(Operation.deprecated_lookup_transfers),
+        deprecated_get_account_transfers = @intFromEnum(Operation
+            .deprecated_get_account_transfers),
+        deprecated_get_account_balances = @intFromEnum(Operation.deprecated_get_account_balances),
+        deprecated_query_accounts = @intFromEnum(Operation.deprecated_query_accounts),
+        deprecated_query_transfers = @intFromEnum(Operation.deprecated_query_transfers),
     };
 
     const Lookup = enum {
@@ -272,7 +282,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 allocator,
                 options.transfer_transient_errors_max,
             );
-            errdefer transient_errors.deinit();
+            errdefer transient_errors.deinit(allocator);
 
             return .{
                 .prng = prng,
@@ -299,13 +309,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         pub fn build_request(
             self: *Workload,
             client_index: usize,
-            body: []align(@alignOf(vsr.Header)) u8,
+            body_buffer: []align(@alignOf(vsr.Header)) u8,
         ) struct {
             operation: Operation,
             size: usize,
         } {
             assert(client_index < self.auditor.options.client_count);
-            assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
+            assert(body_buffer.len == constants.message_body_size_max);
 
             const action = action: {
                 if (!self.accounts_sent and self.prng.boolean()) {
@@ -317,34 +327,182 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 break :action self.prng.enum_weighted(Action, self.options.operations);
             };
 
-            const size = switch (action) {
-                .create_accounts => @sizeOf(tb.Account) * self.build_create_accounts(
+            const operation: Operation = @enumFromInt(@intFromEnum(action));
+            const event_size: u32 = AccountingStateMachine.event_size_bytes(operation);
+            const event_max: u32 = AccountingStateMachine.operation_event_max(
+                operation,
+                self.options.batch_size_limit,
+            );
+            assert(event_max > 0);
+            assert(body_buffer.len >= event_size * event_max);
+
+            const result_size: u32 = AccountingStateMachine.result_size_bytes(operation);
+            const result_max = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
+            assert(result_max > 0);
+            assert(AccountingStateMachine.constants.message_body_size_max >=
+                result_size * result_max);
+
+            if (!AccountingStateMachine.operation_is_multi_batch(operation)) {
+                const size = self.build_request_batch(
                     client_index,
-                    self.batch(tb.Account, action, body),
-                ),
-                .create_transfers => @sizeOf(tb.Transfer) * self.build_create_transfers(
+                    action,
+                    body_buffer,
+                    event_max,
+                );
+                assert(size <= body_buffer.len);
+                return .{
+                    .operation = operation,
+                    .size = size,
+                };
+            }
+            assert(AccountingStateMachine.operation_is_multi_batch(operation));
+
+            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(
+                body_buffer[0..self.options.batch_size_limit],
+                .{
+                    .element_size = event_size,
+                },
+            );
+            var event_count: u32 = 0;
+            var result_count: u32 = 0;
+            for (0..self.options.multi_batch_per_request_limit) |_| {
+                const writable = body_encoder.writable() orelse break;
+                if (writable.len == 0) break;
+
+                const event_count_remain: u32 =
+                    if (AccountingStateMachine.operation_is_batchable(operation))
+                    event_max - event_count
+                else
+                    1;
+                const batch_size = self.build_request_batch(
                     client_index,
-                    self.batch(tb.Transfer, action, body),
-                ),
-                .lookup_accounts => @sizeOf(u128) *
-                    self.build_lookup_accounts(self.batch(u128, action, body)),
-                .lookup_transfers => @sizeOf(u128) *
-                    self.build_lookup_transfers(self.batch(u128, action, body)),
-                .get_account_transfers, .get_account_balances => @sizeOf(tb.AccountFilter) *
-                    self.build_get_account_filter(self.batch(tb.AccountFilter, action, body)),
-                inline .query_accounts,
-                .query_transfers,
-                => |action_comptime| @sizeOf(tb.QueryFilter) * self.build_query_filter(
-                    action_comptime,
-                    self.batch(tb.QueryFilter, action, body),
-                ),
-            };
-            assert(size <= body.len);
+                    action,
+                    writable,
+                    event_count_remain,
+                );
+                assert(batch_size <= writable.len);
+
+                // Checking if the expected result will fit in the multi-batch reply.
+                const reply_trailer_size: u32 = vsr.multi_batch.trailer_total_size(.{
+                    .element_size = result_size,
+                    .batch_count = body_encoder.batch_count + 1,
+                });
+                const result_count_expected: u32 =
+                    AccountingStateMachine.operation_result_count_expected(
+                    operation,
+                    writable[0..batch_size],
+                );
+                const reply_message_size: u32 =
+                    ((result_count + result_count_expected) * result_size) +
+                    reply_trailer_size;
+                if (reply_message_size >
+                    AccountingStateMachine.constants.message_body_size_max)
+                {
+                    // For operations that produce 1:1 result per event
+                    // (e.g., `create_*` and `lookup_*`), this was already validated
+                    // when checking if `event_count` fits within the multi-batch request.
+                    assert(!AccountingStateMachine.operation_is_batchable(operation));
+                    break;
+                }
+                assert(result_count + result_count_expected <= result_max);
+
+                body_encoder.add(@intCast(batch_size));
+                event_count += @intCast(@divExact(batch_size, event_size));
+                assert(event_count <= event_max);
+
+                result_count += result_count_expected;
+                assert(result_count <= result_max);
+
+                // Maybe single-batch request.
+                if (body_encoder.batch_count == 1 and self.prng.boolean()) break;
+            }
+            maybe(event_count == 0);
+            assert(result_count == 0 or event_count > 0);
+            assert(body_encoder.batch_count > 0);
+            assert(body_encoder.batch_count <= self.options.multi_batch_per_request_limit);
+
+            const bytes_written = body_encoder.finish();
+            assert(bytes_written <= self.options.batch_size_limit);
 
             return .{
-                .operation = @as(Operation, @enumFromInt(@intFromEnum(action))),
-                .size = size,
+                .operation = operation,
+                .size = bytes_written,
             };
+        }
+
+        fn build_request_batch(
+            self: *Workload,
+            client_index: usize,
+            action: Action,
+            body: []u8,
+            batch_limit: u32,
+        ) usize {
+            switch (action) {
+                inline else => |action_comptime| {
+                    const operation_comptime = comptime std.enums.nameCast(
+                        Operation,
+                        action_comptime,
+                    );
+                    const Event = AccountingStateMachine.EventType(operation_comptime);
+                    const event_size: u32 = @sizeOf(Event);
+                    const batchable: []Event = self.batch(
+                        Event,
+                        action_comptime,
+                        body,
+                        batch_limit,
+                    );
+                    assert(batchable.len <= batch_limit);
+
+                    const count = switch (action_comptime) {
+                        .create_accounts,
+                        .deprecated_create_accounts,
+                        => self.build_create_accounts(
+                            client_index,
+                            batchable,
+                        ),
+                        .create_transfers,
+                        .deprecated_create_transfers,
+                        => self.build_create_transfers(
+                            client_index,
+                            batchable,
+                        ),
+                        .lookup_accounts,
+                        .deprecated_lookup_accounts,
+                        => self.build_lookup_accounts(batchable),
+                        .lookup_transfers,
+                        .deprecated_lookup_transfers,
+                        => self.build_lookup_transfers(batchable),
+                        .get_account_transfers,
+                        .get_account_balances,
+                        .deprecated_get_account_transfers,
+                        .deprecated_get_account_balances,
+                        => self.build_get_account_filter(
+                            client_index,
+                            action_comptime,
+                            batchable,
+                        ),
+                        .query_accounts,
+                        .query_transfers,
+                        .deprecated_query_accounts,
+                        .deprecated_query_transfers,
+                        => self.build_query_filter(
+                            client_index,
+                            action_comptime,
+                            batchable,
+                        ),
+                    };
+                    assert(count <= batchable.len);
+                    assert(count <= batch_limit);
+
+                    const batch_size: usize = count * event_size;
+                    assert(batch_size <= body.len);
+                    maybe(batch_size == 0);
+                    return batch_size;
+                },
+            }
         }
 
         /// `on_reply` is called for replies in commit order.
@@ -353,63 +511,154 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             client_index: usize,
             operation: AccountingStateMachine.Operation,
             timestamp: u64,
-            request_body: []align(@alignOf(vsr.Header)) const u8,
-            reply_body: []align(@alignOf(vsr.Header)) const u8,
+            request_body: []const u8,
+            reply_body: []const u8,
         ) void {
             assert(timestamp != 0);
-            assert(request_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
-            assert(reply_body.len <= constants.message_size_max - @sizeOf(vsr.Header));
+            assert(request_body.len <= constants.message_body_size_max);
+            assert(reply_body.len <= constants.message_body_size_max);
 
+            if (!AccountingStateMachine.operation_is_multi_batch(operation)) {
+                return self.on_reply_batch(
+                    client_index,
+                    operation,
+                    timestamp,
+                    request_body,
+                    reply_body,
+                );
+            }
+            assert(AccountingStateMachine.operation_is_multi_batch(operation));
+
+            const event_size: u32 = AccountingStateMachine.event_size_bytes(operation);
+            const result_size: u32 = AccountingStateMachine.result_size_bytes(operation);
+            var body_decoder = vsr.multi_batch.MultiBatchDecoder.init(request_body, .{
+                .element_size = event_size,
+            }) catch unreachable;
+            assert(body_decoder.batch_count() > 0);
+            var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(reply_body, .{
+                .element_size = result_size,
+            }) catch unreachable;
+            assert(reply_decoder.batch_count() > 0);
+            assert(body_decoder.batch_count() == reply_decoder.batch_count());
+
+            const prepare_nanoseconds = struct {
+                fn prepare_nanoseconds(
+                    operation_inner: AccountingStateMachine.Operation,
+                    input_len: usize,
+                    batch_size_limit: u32,
+                ) u64 {
+                    return switch (operation_inner) {
+                        .pulse => AccountingStateMachine.operation_event_max(
+                            .create_transfers,
+                            batch_size_limit,
+                        ),
+                        .create_accounts => @divExact(input_len, @sizeOf(tb.Account)),
+                        .create_transfers => @divExact(input_len, @sizeOf(tb.Transfer)),
+                        .lookup_accounts => 0,
+                        .lookup_transfers => 0,
+                        .get_account_transfers => 0,
+                        .get_account_balances => 0,
+                        .query_accounts => 0,
+                        .query_transfers => 0,
+                        else => unreachable,
+                    };
+                }
+            }.prepare_nanoseconds;
+            var batch_timestamp: u64 = timestamp - prepare_nanoseconds(
+                operation,
+                body_decoder.payload.len,
+                self.options.batch_size_limit,
+            );
+            while (body_decoder.pop()) |batch_body| {
+                const batch_reply = reply_decoder.pop().?;
+                batch_timestamp += prepare_nanoseconds(
+                    operation,
+                    batch_body.len,
+                    self.options.batch_size_limit,
+                );
+                self.on_reply_batch(
+                    client_index,
+                    operation,
+                    batch_timestamp,
+                    batch_body,
+                    batch_reply,
+                );
+            }
+            assert(reply_decoder.pop() == null);
+        }
+
+        pub fn on_reply_batch(
+            self: *Workload,
+            client_index: usize,
+            operation: AccountingStateMachine.Operation,
+            timestamp: u64,
+            request_body: []const u8,
+            reply_body: []const u8,
+        ) void {
             switch (operation) {
-                .create_accounts => self.auditor.on_create_accounts(
+                .create_accounts,
+                .deprecated_create_accounts,
+                => self.auditor.on_create_accounts(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.Account, request_body),
-                    std.mem.bytesAsSlice(tb.CreateAccountsResult, reply_body),
+                    stdx.bytes_as_slice(tb.Account, .exact, request_body),
+                    stdx.bytes_as_slice(tb.CreateAccountsResult, .exact, reply_body),
                 ),
-                .create_transfers => self.on_create_transfers(
+                .create_transfers,
+                .deprecated_create_transfers,
+                => self.on_create_transfers(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.Transfer, request_body),
-                    std.mem.bytesAsSlice(tb.CreateTransfersResult, reply_body),
+                    stdx.bytes_as_slice(tb.Transfer, .exact, request_body),
+                    stdx.bytes_as_slice(tb.CreateTransfersResult, .exact, reply_body),
                 ),
-                .lookup_accounts => self.auditor.on_lookup_accounts(
+                .lookup_accounts,
+                .deprecated_lookup_accounts,
+                => self.auditor.on_lookup_accounts(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(u128, request_body),
-                    std.mem.bytesAsSlice(tb.Account, reply_body),
+                    stdx.bytes_as_slice(u128, .exact, request_body),
+                    stdx.bytes_as_slice(tb.Account, .exact, reply_body),
                 ),
-                .lookup_transfers => self.on_lookup_transfers(
+                .lookup_transfers,
+                .deprecated_lookup_transfers,
+                => self.on_lookup_transfers(
                     client_index,
                     timestamp,
-                    std.mem.bytesAsSlice(u128, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    stdx.bytes_as_slice(u128, .exact, request_body),
+                    stdx.bytes_as_slice(tb.Transfer, .exact, reply_body),
                 ),
-                .get_account_transfers => self.on_get_account_transfers(
-                    client_index,
+                inline .get_account_transfers,
+                .deprecated_get_account_transfers,
+                => |operation_comptime| self.on_get_account_transfers(
+                    operation_comptime,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    stdx.bytes_as_slice(tb.AccountFilter, .exact, request_body),
+                    stdx.bytes_as_slice(tb.Transfer, .exact, reply_body),
                 ),
-                .get_account_balances => self.on_get_account_balances(
-                    client_index,
+                inline .get_account_balances,
+                .deprecated_get_account_balances,
+                => |operation_comptime| self.on_get_account_balances(
+                    operation_comptime,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.AccountFilter, request_body),
-                    std.mem.bytesAsSlice(tb.AccountBalance, reply_body),
+                    stdx.bytes_as_slice(tb.AccountFilter, .exact, request_body),
+                    stdx.bytes_as_slice(tb.AccountBalance, .exact, reply_body),
                 ),
-                .query_accounts => self.on_query(
-                    tb.Account,
-                    client_index,
+                inline .query_accounts,
+                .deprecated_query_accounts,
+                => |operation_comptime| self.on_query(
+                    operation_comptime,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Account, reply_body),
+                    stdx.bytes_as_slice(tb.QueryFilter, .exact, request_body),
+                    stdx.bytes_as_slice(tb.Account, .exact, reply_body),
                 ),
-                .query_transfers => self.on_query(
-                    tb.Transfer,
-                    client_index,
+                inline .query_transfers,
+                .deprecated_query_transfers,
+                => |operation_comptime| self.on_query(
+                    operation_comptime,
                     timestamp,
-                    std.mem.bytesAsSlice(tb.QueryFilter, request_body),
-                    std.mem.bytesAsSlice(tb.Transfer, reply_body),
+                    stdx.bytes_as_slice(tb.QueryFilter, .exact, request_body),
+                    stdx.bytes_as_slice(tb.Transfer, .exact, reply_body),
                 ),
                 //Not handled by the client.
                 .pulse, .get_events => unreachable,
@@ -621,7 +870,17 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return lookup_ids.len;
         }
 
-        fn build_get_account_filter(self: *const Workload, body: []tb.AccountFilter) usize {
+        fn build_get_account_filter(
+            self: *const Workload,
+            client_index: usize,
+            comptime action: Action,
+            body: []tb.AccountFilter,
+        ) usize {
+            _ = client_index;
+            comptime assert(action == .get_account_transfers or
+                action == .get_account_balances or
+                action == .deprecated_get_account_transfers or
+                action == .deprecated_get_account_balances);
             assert(body.len == 1);
             const account_filter = &body[0];
             account_filter.* = tb.AccountFilter{
@@ -683,23 +942,23 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     },
                 }
 
-                const batch_size = batch_size: {
-                    // This same function is used for both `get_account_{transfers,accounts}`.
-                    const batch_max = AccountingStateMachine.constants.batch_max;
-                    comptime assert(batch_max.get_account_transfers ==
-                        batch_max.get_account_balances);
-                    break :batch_size batch_max.get_account_transfers;
-                };
+                const operation = comptime std.enums.nameCast(Operation, action);
+                const batch_result_max = AccountingStateMachine.operation_result_max(
+                    operation,
+                    self.options.batch_size_limit,
+                );
                 account_filter.limit = switch (self.prng.enum_uniform(enum {
-                    none,
+                    zero,
                     one,
-                    batch,
-                    max,
+                    random,
+                    batch_max,
+                    int_max,
                 })) {
-                    .none => 0, // Testing invalid limit.
+                    .zero => 0,
                     .one => 1,
-                    .batch => batch_size,
-                    .max => std.math.maxInt(u32),
+                    .random => self.prng.int_inclusive(u32, batch_result_max),
+                    .batch_max => batch_result_max,
+                    .int_max => std.math.maxInt(u32),
                 };
             }
 
@@ -708,17 +967,35 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn build_query_filter(
             self: *const Workload,
+            client_index: usize,
             comptime action: Action,
             body: []tb.QueryFilter,
         ) usize {
-            comptime assert(action == .query_accounts or action == .query_transfers);
+            _ = client_index;
+            comptime assert(action == .query_accounts or
+                action == .query_transfers or
+                action == .deprecated_query_accounts or
+                action == .deprecated_query_transfers);
             assert(body.len == 1);
             const query_filter = &body[0];
 
-            const batch_max = switch (action) {
-                .query_accounts => AccountingStateMachine.constants.batch_max.query_accounts,
-                .query_transfers => AccountingStateMachine.constants.batch_max.query_accounts,
-                else => unreachable,
+            const operation = comptime std.enums.nameCast(Operation, action);
+            const batch_result_max = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
+            const limit: u32 = switch (self.prng.enum_uniform(enum {
+                zero,
+                one,
+                random,
+                batch_max,
+                int_max,
+            })) {
+                .zero => 0,
+                .one => 1,
+                .random => self.prng.int_inclusive(u32, batch_result_max),
+                .batch_max => batch_result_max,
+                .int_max => std.math.maxInt(u32),
             };
 
             if (self.prng.chance(self.options.query_filter_not_found_probability)) {
@@ -728,7 +1005,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = 0,
                     .code = 0,
                     .ledger = 999, // Non-existent ledger
-                    .limit = batch_max,
+                    .limit = limit,
                     .flags = .{
                         .reversed = false,
                     },
@@ -746,7 +1023,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = query_intersection.user_data_32,
                     .code = query_intersection.code,
                     .ledger = 0,
-                    .limit = self.prng.int(u32),
+                    .limit = limit,
                     .flags = .{
                         .reversed = self.prng.boolean(),
                     },
@@ -756,12 +1033,16 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 // Maybe filter by timestamp:
                 const state = switch (action) {
-                    .query_accounts => &query_intersection.accounts,
-                    .query_transfers => &query_intersection.transfers,
+                    .query_accounts,
+                    .deprecated_query_accounts,
+                    => &query_intersection.accounts,
+                    .query_transfers,
+                    .deprecated_query_transfers,
+                    => &query_intersection.transfers,
                     else => unreachable,
                 };
 
-                if (state.count > 1 and state.count <= batch_max and
+                if (state.count > 1 and state.count <= batch_result_max and
                     self.prng.chance(self.options.query_filter_timestamp_range_probability))
                 {
                     // Excluding the first or last object:
@@ -921,30 +1202,60 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         fn batch(
             self: *const Workload,
             comptime T: type,
-            action: Action,
-            body: []align(@alignOf(vsr.Header)) u8,
+            comptime action: Action,
+            body: []u8,
+            event_count_remain: u32,
         ) []T {
             const batch_min = switch (action) {
-                .create_accounts, .lookup_accounts => self.options.accounts_batch_size_min,
-                .create_transfers, .lookup_transfers => self.options.transfers_batch_size_min,
+                .create_accounts,
+                .lookup_accounts,
+                .deprecated_create_accounts,
+                .deprecated_lookup_accounts,
+                => self.options.accounts_batch_size_min,
+                .create_transfers,
+                .lookup_transfers,
+                .deprecated_create_transfers,
+                .deprecated_lookup_transfers,
+                => self.options.transfers_batch_size_min,
                 .get_account_transfers,
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
+                .deprecated_get_account_transfers,
+                .deprecated_get_account_balances,
+                .deprecated_query_accounts,
+                .deprecated_query_transfers,
                 => 1,
             };
             const batch_span = switch (action) {
-                .create_accounts, .lookup_accounts => self.options.accounts_batch_size_span,
-                .create_transfers, .lookup_transfers => self.options.transfers_batch_size_span,
+                .create_accounts,
+                .lookup_accounts,
+                .deprecated_create_accounts,
+                .deprecated_lookup_accounts,
+                => self.options.accounts_batch_size_span,
+                .create_transfers,
+                .lookup_transfers,
+                .deprecated_create_transfers,
+                .deprecated_lookup_transfers,
+                => self.options.transfers_batch_size_span,
                 .get_account_transfers,
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
+                .deprecated_get_account_transfers,
+                .deprecated_get_account_balances,
+                .deprecated_query_accounts,
+                .deprecated_query_transfers,
                 => 0,
             };
 
-            const batch_size = batch_min + self.prng.int_inclusive(usize, batch_span);
-            return std.mem.bytesAsSlice(T, body)[0..batch_size];
+            const slice: []T = stdx.bytes_as_slice(T, .inexact, body);
+            const batch_size = @min(
+                batch_min + self.prng.int_inclusive(usize, batch_span),
+                event_count_remain,
+            );
+
+            return slice[0..batch_size];
         }
 
         fn transfer_id_to_index(self: *const Workload, id: u128) usize {
@@ -1085,19 +1396,23 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn on_get_account_transfers(
             self: *Workload,
-            client_index: usize,
+            comptime operation: AccountingStateMachine.Operation,
             timestamp: u64,
             body: []const tb.AccountFilter,
             results: []const tb.Transfer,
         ) void {
-            _ = client_index;
             _ = timestamp;
+            comptime assert(operation == .get_account_transfers or
+                operation == .deprecated_get_account_transfers);
             assert(body.len == 1);
 
-            const batch_size = AccountingStateMachine.constants.batch_max.get_account_transfers;
+            const batch_result_max = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
             const account_filter = &body[0];
             assert(results.len <= account_filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             const account_state = self.auditor.get_account_state(
                 account_filter.account_id,
@@ -1117,7 +1432,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            validate_account_filter_result_count(
+            self.validate_account_filter_result_count(
+                operation,
                 account_state,
                 account_filter,
                 results.len,
@@ -1188,19 +1504,23 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn on_get_account_balances(
             self: *Workload,
-            client_index: usize,
+            comptime operation: AccountingStateMachine.Operation,
             timestamp: u64,
             body: []const tb.AccountFilter,
             results: []const tb.AccountBalance,
         ) void {
-            _ = client_index;
             _ = timestamp;
+            comptime assert(operation == .get_account_balances or
+                operation == .deprecated_get_account_balances);
             assert(body.len == 1);
 
-            const batch_size = AccountingStateMachine.constants.batch_max.get_account_balances;
+            const batch_result_max = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
             const account_filter = &body[0];
             assert(results.len <= account_filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             const account_state = self.auditor.get_account_state(
                 account_filter.account_id,
@@ -1221,7 +1541,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 return;
             }
 
-            validate_account_filter_result_count(
+            self.validate_account_filter_result_count(
+                operation,
                 account_state,
                 account_filter,
                 results.len,
@@ -1247,26 +1568,28 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         }
 
         fn validate_account_filter_result_count(
+            self: *const Workload,
+            comptime operation: AccountingStateMachine.Operation,
             account_state: *const Auditor.AccountState,
             account_filter: *const tb.AccountFilter,
             result_count: usize,
         ) void {
-            assert(account_filter.limit != 0);
+            comptime assert(operation == .get_account_transfers or
+                operation == .get_account_balances or
+                operation == .deprecated_get_account_transfers or
+                operation == .deprecated_get_account_balances);
+            maybe(account_filter.limit == 0);
 
-            const batch_size = batch_size: {
-                // This same function is used for both `get_account_{transfers,accounts}`.
-                const batch_max = AccountingStateMachine.constants.batch_max;
-                comptime assert(batch_max.get_account_transfers ==
-                    batch_max.get_account_balances);
-                break :batch_size batch_max.get_account_transfers;
-            };
-
+            const batch_result_max = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
             const transfer_count = account_state.transfers_count(account_filter.flags);
             if (account_filter.timestamp_min == 0 and account_filter.timestamp_max == 0) {
-                assert(account_filter.limit == 1 or
-                    account_filter.limit == batch_size or
+                assert(account_filter.limit <= batch_result_max or
                     account_filter.limit == std.math.maxInt(u32));
-                assert(result_count == @min(account_filter.limit, batch_size, transfer_count));
+                assert(result_count ==
+                    @min(account_filter.limit, batch_result_max, transfer_count));
             } else {
                 // If timestamp range is set, then the limit is exactly the number of transfer
                 // at the time the filter was generated, but new transfers could have been
@@ -1289,29 +1612,29 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 // Either `transfer_count` is greater than the batch size (so removing a result
                 // doesn't make a difference) or there is exactly one less result that was
                 // excluded by the timestamp filter.
-                assert((result_count == batch_size and transfer_count > batch_size) or
+                assert((result_count == batch_result_max and transfer_count > batch_result_max) or
                     result_count == account_filter.limit - 1);
             }
         }
 
         fn on_query(
             self: *Workload,
-            comptime Object: type,
-            client_index: usize,
+            comptime operation: AccountingStateMachine.Operation,
             timestamp: u64,
             body: []const tb.QueryFilter,
-            results: []const Object,
+            results: []const AccountingStateMachine.ResultType(operation),
         ) void {
-            _ = client_index;
             _ = timestamp;
+            comptime assert(operation == .query_accounts or
+                operation == .query_transfers or
+                operation == .deprecated_query_accounts or
+                operation == .deprecated_query_transfers);
             assert(body.len == 1);
 
-            const batch_size = switch (Object) {
-                tb.Account => AccountingStateMachine.constants.batch_max.query_accounts,
-                tb.Transfer => AccountingStateMachine.constants.batch_max.query_transfers,
-                else => unreachable,
-            };
-
+            const batch_result_max: u32 = AccountingStateMachine.operation_result_max(
+                operation,
+                self.options.batch_size_limit,
+            );
             const filter = &body[0];
 
             if (filter.ledger != 0) {
@@ -1331,14 +1654,18 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
             const query_intersection_index = filter.code - 1;
             const query_intersection = self.auditor.query_intersections[query_intersection_index];
-            const state = switch (Object) {
-                tb.Account => &query_intersection.accounts,
-                tb.Transfer => &query_intersection.transfers,
+            const state = switch (operation) {
+                .query_accounts,
+                .deprecated_query_accounts,
+                => &query_intersection.accounts,
+                .query_transfers,
+                .deprecated_query_transfers,
+                => &query_intersection.transfers,
                 else => unreachable,
             };
 
             assert(results.len <= filter.limit);
-            assert(results.len <= batch_size);
+            assert(results.len <= batch_result_max);
 
             if (filter.timestamp_min > 0 or filter.timestamp_max > 0) {
                 assert(filter.limit <= state.count);
@@ -1351,7 +1678,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             } else {
                 assert(results.len == @min(
                     filter.limit,
-                    batch_size,
+                    batch_result_max,
                     state.count,
                 ));
             }
@@ -1380,7 +1707,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 assert(result.user_data_32 == filter.user_data_32);
                 assert(result.code == filter.code);
 
-                if (Object == tb.Transfer) {
+                if (operation == .query_transfers or
+                    operation == .deprecated_query_transfers)
+                {
                     validate_transfer_checksum(result);
                 }
             }
@@ -1401,6 +1730,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Lookup: type) type {
     return struct {
         const Options = @This();
+
+        batch_size_limit: u32,
+        multi_batch_per_request_limit: u32,
 
         auditor_options: Auditor.Options,
         transfer_id_permutation: IdPermutation,
@@ -1446,27 +1778,58 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
 
         pub fn generate(prng: *stdx.PRNG, options: struct {
             batch_size_limit: u32,
+            multi_batch_per_request_limit: u32,
             client_count: usize,
             in_flight_max: usize,
         }) Options {
-            const batch_create_accounts_limit =
-                @divFloor(options.batch_size_limit, @sizeOf(tb.Account));
-            const batch_create_transfers_limit =
-                @divFloor(options.batch_size_limit, @sizeOf(tb.Transfer));
+            assert(options.batch_size_limit <= StateMachine.constants.message_body_size_max);
+
+            const batch_create_accounts_limit = @min(
+                StateMachine.operation_event_max(
+                    .create_accounts,
+                    options.batch_size_limit,
+                ),
+                StateMachine.operation_event_max(
+                    .deprecated_create_accounts,
+                    options.batch_size_limit,
+                ),
+            );
             assert(batch_create_accounts_limit > 0);
-            assert(batch_create_accounts_limit <= StateMachine.constants.batch_max.create_accounts);
+            assert(batch_create_accounts_limit <=
+                StateMachine.constants.batch_max.create_accounts);
+
+            const batch_create_transfers_limit = @min(
+                StateMachine.operation_event_max(
+                    .create_transfers,
+                    options.batch_size_limit,
+                ),
+                StateMachine.operation_event_max(
+                    .deprecated_create_transfers,
+                    options.batch_size_limit,
+                ),
+            );
             assert(batch_create_transfers_limit > 0);
             assert(batch_create_transfers_limit <=
                 StateMachine.constants.batch_max.create_transfers);
-
             return .{
+                .batch_size_limit = options.batch_size_limit,
+                .multi_batch_per_request_limit = options.multi_batch_per_request_limit,
                 .auditor_options = .{
                     .accounts_max = prng.range_inclusive(usize, 2, 128),
                     .account_id_permutation = IdPermutation.generate(prng),
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
                     .in_flight_max = options.in_flight_max,
-                    .batch_create_transfers_limit = batch_create_transfers_limit,
+                    .transfers_expiry_max = @max(
+                        StateMachine.operation_event_max(
+                            .create_transfers,
+                            options.batch_size_limit,
+                        ),
+                        StateMachine.operation_event_max(
+                            .deprecated_create_transfers,
+                            options.batch_size_limit,
+                        ),
+                    ),
                 },
                 .transfer_id_permutation = IdPermutation.generate(prng),
                 .operations = .{
@@ -1478,6 +1841,15 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .get_account_balances = prng.range_inclusive(u64, 1, 20),
                     .query_accounts = prng.range_inclusive(u64, 1, 20),
                     .query_transfers = prng.range_inclusive(u64, 1, 20),
+
+                    .deprecated_create_accounts = prng.range_inclusive(u64, 1, 10),
+                    .deprecated_create_transfers = prng.range_inclusive(u64, 1, 100),
+                    .deprecated_lookup_accounts = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_lookup_transfers = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_get_account_transfers = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_get_account_balances = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_query_accounts = prng.range_inclusive(u64, 1, 20),
+                    .deprecated_query_transfers = prng.range_inclusive(u64, 1, 20),
                 },
                 .create_account_invalid_probability = ratio(1, 100),
                 .create_transfer_invalid_probability = ratio(1, 100),
