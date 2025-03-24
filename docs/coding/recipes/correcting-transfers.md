@@ -35,7 +35,7 @@ Two specific recommendations for correcting transfers are:
 
 ### Example
 
-Let's say you had a couple of transfers, from account `A` to accounts `Y` and `Z`:
+Let's say you had a couple of transfers, from account `A` to accounts `X` and `Y`:
 
 | Ledger | Debit Account | Credit Account | Amount | `code` | `user_data_128` | `flags.linked` |
 | -----: | ------------: | -------------: | -----: | -----: | --------------: | -------------: |
