@@ -35,6 +35,7 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
+    .vsr_multi_batch = @import("./vsr/multi_batch_fuzz.zig"),
     .signal = @import("./clients/c/tb_client/signal_fuzz.zig"),
     .state_machine = @import("./state_machine_fuzz.zig"),
     // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
@@ -95,6 +96,7 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             .vsr_superblock_quorums,
             .storage,
             .signal,
+            .vsr_multi_batch,
             => null,
         };
 

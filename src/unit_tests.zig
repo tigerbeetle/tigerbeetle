@@ -80,6 +80,7 @@ comptime {
     _ = @import("vsr/free_set.zig");
     _ = @import("vsr/superblock_quorums.zig");
     _ = @import("vsr/sync.zig");
+    _ = @import("vsr/multi_batch.zig");
 
     _ = @import("scripts/release.zig");
     _ = @import("scripts/changelog.zig");
