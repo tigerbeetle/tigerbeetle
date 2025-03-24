@@ -376,7 +376,7 @@ pub const ByteSize = struct {
             value_input: []const u8,
             unit_input: []const u8,
         } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i])) {
+            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
                 break :split .{
                     .value_input = value[0..i],
                     .unit_input = value[i..],
@@ -457,6 +457,7 @@ test "ByteSize.parse_flag_value" {
         .{ 10 * mib, "10mib", 10, ByteUnit.mib },
         .{ 1 * kib, "1KiB", 1, ByteUnit.kib },
         .{ 10 * kib, "10kib", 10, ByteUnit.kib },
+        .{ 10 * kib, "1_0kib", 10, ByteUnit.kib },
     };
 
     inline for (cases) |case| {
@@ -464,7 +465,11 @@ test "ByteSize.parse_flag_value" {
         const input = case[1];
         const unit_val = case[2];
         const unit = case[3];
-        const got = ByteSize.parse_flag_value( input).ok;
+        const result = ByteSize.parse_flag_value(input);
+        if (result == .err) {
+            std.debug.panic("expected ok, got: '{s}'", .{result.err});
+        }
+        const got = result.ok;
         assert(bytes == got.bytes());
         assert(unit_val == got.value);
         assert(unit == got.unit);
@@ -1109,10 +1114,28 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=_1000KiB" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: invalid unit in size, needed KiB, MiB, GiB or TiB: '1_000KiB'
+        \\error: --size: expected a size, but found: '_1000KiB'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=1000_KiB" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found: '1000_KiB'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 1024000
+        \\boolean: false
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
