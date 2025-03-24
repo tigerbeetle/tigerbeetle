@@ -11,6 +11,9 @@ const stdx = vsr.stdx;
 const maybe = stdx.maybe;
 const Header = vsr.Header;
 
+const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
+const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
+
 const IO = vsr.io.IO;
 const FIFOType = vsr.fifo.FIFOType;
 const message_pool = vsr.message_pool;
@@ -345,23 +348,24 @@ pub fn ContextType(
             }
         }
 
-        /// Cancel the current inflight packet, as it won't be replied anymore.
+        /// Cancel the current inflight request (and the entire batched linked list of packets),
+        /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {
-                    const packet = @as(UserData, @bitCast(inflight.user_data)).packet;
+                    const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
                     packet.assert_phase(.sent);
                     self.packet_cancel(packet);
                 }
             }
         }
 
-        /// Calls the user callback when a packet is canceled due to the client
-        /// being either evicted or shutdown.
-        fn packet_cancel(self: *Context, packet: *Packet) void {
-            assert(packet.next == null);
-            assert(packet.phase != .complete);
-            packet.assert_phase(packet.phase);
+        /// Calls the user callback when a packet (the entire batched linked list of packets)
+        /// is canceled due to the client being either evicted or shutdown.
+        fn packet_cancel(self: *Context, packet_list: *Packet) void {
+            assert(packet_list.next == null);
+            assert(packet_list.phase != .complete);
+            packet_list.assert_phase(packet_list.phase);
 
             const result = if (self.eviction_reason) |reason| switch (reason) {
                 .reserved => unreachable,
@@ -373,10 +377,10 @@ pub fn ContextType(
                 break :result error.ClientShutdown;
             };
 
-            var it: ?*Packet = packet;
+            var it: ?*Packet = packet_list;
             while (it) |batched| {
-                if (batched != packet) batched.assert_phase(.batched);
-                it = batched.batch_next;
+                if (batched != packet_list) batched.assert_phase(.batched);
+                it = batched.multi_batch_next;
                 self.notify_completion(batched, result);
             }
         }
@@ -390,35 +394,60 @@ pub fn ContextType(
             }
 
             const operation: StateMachine.Operation = operation_from_int(packet.operation) orelse {
-                self.notify_completion(packet, error.InvalidOperation);
-                return;
+                return self.notify_completion(packet, error.InvalidOperation);
             };
 
-            // Get the size of each request structure in the packet.data.
-            // Make sure the packet.data wouldn't overflow a request, and that the corresponding
-            // results won't overflow a reply.
-            const event_size: usize, const events_batch_max: u32 = switch (operation) {
-                .pulse, .get_events => unreachable,
-                inline else => |operation_comptime| .{
-                    @sizeOf(StateMachine.EventType(operation_comptime)),
-                    StateMachine.operation_batch_max(
-                        operation_comptime,
-                        self.batch_size_limit.?,
-                    ),
-                },
+            // Make sure the packet.data wouldn't overflow a request,
+            // and that the corresponding results won't overflow a reply.
+            const batch: struct {
+                event_size: u32,
+                result_size: u32,
+                event_count: u32,
+                result_count_expected: u32,
+            } = batch: {
+                const event_size: u32 = StateMachine.event_size_bytes(operation);
+                assert(event_size > 0);
+
+                const result_size: u32 = StateMachine.result_size_bytes(operation);
+                assert(result_size > 0);
+
+                const slice: []const u8 = packet.slice();
+                assert(slice.len == packet.data_size);
+                maybe(slice.len == 0);
+                if (slice.len % event_size != 0) {
+                    return self.notify_completion(packet, error.InvalidDataSize);
+                }
+
+                const event_count: u32 = @intCast(@divExact(slice.len, event_size));
+                const event_max: u32 = StateMachine.operation_event_max(
+                    operation,
+                    self.batch_size_limit.?,
+                );
+                if (event_count > event_max) {
+                    return self.notify_completion(packet, error.TooMuchData);
+                }
+                const result_max: u32 = StateMachine.operation_result_max(
+                    operation,
+                    self.batch_size_limit.?,
+                );
+                const result_count_expected: u32 = StateMachine.operation_result_count_expected(
+                    operation,
+                    slice,
+                );
+                if (result_count_expected > result_max) {
+                    return self.notify_completion(packet, error.TooMuchData);
+                }
+
+                break :batch .{
+                    .event_size = event_size,
+                    .result_size = result_size,
+                    .event_count = @intCast(@divExact(slice.len, event_size)),
+                    .result_count_expected = result_count_expected,
+                };
             };
-            assert(self.batch_size_limit.? >= event_size * events_batch_max);
-
-            const events: []const u8 = packet.slice();
-            if (events.len % event_size != 0) {
-                self.notify_completion(packet, error.InvalidDataSize);
-                return;
-            }
-
-            if (@divExact(events.len, event_size) > events_batch_max) {
-                self.notify_completion(packet, error.TooMuchData);
-                return;
-            }
+            assert(packet.data_size == batch.event_count * batch.event_size);
+            maybe(batch.event_count == 0);
+            maybe(batch.result_count_expected == 0);
 
             // Avoid making a packet inflight by cancelling it if the client was shutdown.
             if (self.signal.status() != .running) {
@@ -430,97 +459,137 @@ pub fn ContextType(
             if (self.client.request_inflight == null) {
                 assert(self.pending.count == 0);
                 packet.phase = .pending;
-                packet.batch_size = packet.data_size;
-                packet.batch_allowed = false;
+                packet.multi_batch_count = 1;
+                packet.multi_batch_event_count = @intCast(batch.event_count);
+                packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
                 self.packet_send(packet);
                 return;
             }
 
-            const batch_allowed = batch_logical_allowed(
-                operation,
-                packet.data,
-                packet.data_size,
-            );
+            var it = self.pending.peek();
+            while (it) |root| {
+                root.assert_phase(.pending);
+                it = root.next;
 
-            // If allowed, try to batch the packet with another already in self.pending.
-            if (batch_allowed) {
-                var it = self.pending.peek();
-                while (it) |root| {
-                    root.assert_phase(.pending);
-                    it = root.next;
+                if (root.operation != packet.operation) continue;
 
-                    // Check for pending packets of the same operation which can be batched.
-                    if (root.operation != packet.operation) continue;
-                    if (!root.batch_allowed) continue;
+                // Check if the message has enough space for the submitted number of events:
+                const request_size: u32 = size: {
+                    const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                        .element_size = batch.event_size,
+                        .batch_count = root.multi_batch_count + 1,
+                    });
+                    const event_count: u32 = batch.event_count +
+                        root.multi_batch_event_count;
+                    break :size (event_count * batch.event_size) + trailer_size;
+                };
+                if (request_size > self.batch_size_limit.?) continue;
 
-                    const merged_events = @divExact(root.batch_size + packet.data_size, event_size);
-                    if (merged_events > events_batch_max) continue;
+                // Check if the reply has enough space for the maximum expected number of results:
+                const reply_size_expected: u32 = size: {
+                    const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                        .element_size = batch.result_size,
+                        .batch_count = root.multi_batch_count + 1,
+                    });
+                    const event_count: u32 = batch.result_count_expected +
+                        root.multi_batch_result_count_expected;
+                    break :size (event_count * batch.result_size) + trailer_size;
+                };
+                if (reply_size_expected > constants.message_body_size_max) continue;
 
-                    packet.phase = .batched;
-                    if (root.batch_next == null) {
-                        assert(root.batch_tail == null);
-                        root.batch_next = packet;
-                        root.batch_tail = packet;
-                    } else {
-                        assert(root.batch_tail != null);
-                        root.batch_tail.?.batch_next = packet;
-                        root.batch_tail = packet;
-                    }
-                    root.batch_size += packet.data_size;
-                    return;
+                packet.phase = .batched;
+                if (root.multi_batch_next == null) {
+                    assert(root.multi_batch_tail == null);
+                    assert(root.multi_batch_count == 1);
+                    root.multi_batch_next = packet;
+                    root.multi_batch_tail = packet;
+                } else {
+                    assert(root.multi_batch_tail != null);
+                    assert(root.multi_batch_count > 1);
+                    root.multi_batch_tail.?.multi_batch_next = packet;
+                    root.multi_batch_tail = packet;
                 }
+                root.multi_batch_count += 1;
+                root.multi_batch_event_count += @intCast(batch.event_count);
+                root.multi_batch_result_count_expected += @intCast(batch.result_count_expected);
+                return;
             }
 
             // Couldn't batch with existing packet so push to pending directly.
             packet.phase = .pending;
-            packet.batch_size = packet.data_size;
-            packet.batch_allowed = batch_allowed;
+            packet.multi_batch_count = 1;
+            packet.multi_batch_event_count = @intCast(batch.event_count);
+            packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
             self.pending.push(packet);
         }
 
         /// Sends the packet (the entire batched linked list of packets) through the vsr client.
         /// Always called by the io thread.
-        fn packet_send(self: *Context, packet: *Packet) void {
+        fn packet_send(self: *Context, packet_list: *Packet) void {
             assert(self.batch_size_limit != null);
             assert(self.client.request_inflight == null);
-            packet.assert_phase(.pending);
+            packet_list.assert_phase(.pending);
 
             // On shutdown, cancel this packet as well as any others batched onto it.
             if (self.signal.status() != .running) {
-                return self.packet_cancel(packet);
+                return self.packet_cancel(packet_list);
             }
 
             const message = self.client.get_message().build(.request);
             defer {
                 self.client.release_message(message.base());
-                packet.assert_phase(.sent);
+                packet_list.assert_phase(.sent);
             }
 
-            const bytes_writen: u32 = bytes_writen: {
-                // Copy all batched packet event data into the message buffer.
-                const buffer: []u8 = message.buffer[@sizeOf(Header)..];
-                assert(buffer.len >= packet.batch_size);
+            const operation: StateMachine.Operation = operation_from_int(packet_list.operation).?;
+            const event_size: u32 = StateMachine.event_size_bytes(operation);
+            const result_size: u32 = StateMachine.result_size_bytes(operation);
+            const request_size: u32 = request_size: {
+                var message_encoder = MultiBatchEncoder.init(message.buffer[@sizeOf(Header)..], .{
+                    .element_size = event_size,
+                });
 
-                var bytes_writen: u32 = 0;
-                var it: ?*Packet = packet;
+                var it: ?*Packet = packet_list;
+                var multi_batch_events_count: u16 = 0;
                 while (it) |batched| {
-                    if (batched != packet) batched.assert_phase(.batched);
-                    it = batched.batch_next;
+                    if (batched != packet_list) batched.assert_phase(.batched);
+                    it = batched.multi_batch_next;
 
-                    const events: []const u8 = batched.slice();
+                    const source: []const u8 = batched.slice();
+                    const target = message_encoder.writable().?;
+                    assert(target.len >= source.len);
                     stdx.copy_disjoint(
                         .exact,
                         u8,
-                        buffer[bytes_writen..][0..events.len],
-                        events,
+                        target[0..source.len],
+                        source,
                     );
-                    bytes_writen += @intCast(events.len);
-                }
-                assert(bytes_writen == packet.batch_size);
-                break :bytes_writen bytes_writen;
-            };
+                    message_encoder.add(@intCast(source.len));
 
-            const operation: StateMachine.Operation = operation_from_int(packet.operation).?;
+                    const events_count: u16 = @intCast(@divExact(source.len, event_size));
+                    multi_batch_events_count += events_count;
+                }
+                assert(multi_batch_events_count == packet_list.multi_batch_event_count);
+                assert(message_encoder.batch_count == packet_list.multi_batch_count);
+
+                break :request_size message_encoder.finish();
+            };
+            assert(request_size % event_size == 0);
+            assert(request_size <= self.batch_size_limit.?);
+
+            // Check if the reply has enough space for the maximum expected number of results.
+            const reply_size_max: u32 = reply_size: {
+                const trailer_size = vsr.multi_batch.trailer_total_size(.{
+                    .element_size = result_size,
+                    .batch_count = packet_list.multi_batch_count,
+                });
+                break :reply_size (packet_list.multi_batch_result_count_expected * result_size) +
+                    trailer_size;
+            };
+            assert(reply_size_max % result_size == 0);
+            assert(reply_size_max <= constants.message_body_size_max);
+
+            // Sending the request.
             message.header.* = .{
                 .release = self.client.release,
                 .client = self.client.id,
@@ -528,15 +597,15 @@ pub fn ContextType(
                 .cluster = self.client.cluster,
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
-                .size = @sizeOf(vsr.Header) + bytes_writen,
+                .size = @sizeOf(vsr.Header) + request_size,
             };
 
-            packet.phase = .sent;
+            packet_list.phase = .sent;
             self.client.raw_request(
                 Context.client_result_callback,
                 @bitCast(UserData{
                     .self = self,
-                    .packet = packet,
+                    .packet = packet_list,
                 }),
                 message.ref(),
             );
@@ -625,11 +694,11 @@ pub fn ContextType(
             reply: []const u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
-            const self = user_data.self;
-            const packet = user_data.packet;
-            assert(packet.operation == @intFromEnum(operation));
+            const self: *Context = user_data.self;
+            const packet_list: *Packet = user_data.packet;
+            assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
-            packet.assert_phase(.sent);
+            packet_list.assert_phase(.sent);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
@@ -638,46 +707,41 @@ pub fn ContextType(
                 if (self.client.request_inflight != null) break;
             }
 
-            switch (operation) {
-                .pulse, .get_events => unreachable,
-                inline else => |operation_comptime| {
-                    // on_result should never be called with an operation not green-lit by request()
-                    // This also guards from passing an unsupported operation into DemuxerType.
-                    if (comptime operation_from_int(@intFromEnum(operation_comptime)) == null) {
-                        unreachable;
-                    }
+            // The callback should never be called with an operation not in `allowed_operations`.
+            // This also guards from sending an unsupported operation.
+            assert(operation_from_int(@intFromEnum(operation)) != null);
 
-                    // Demuxer expects []u8 but VSR callback provides []const u8.
-                    // The bytes are known to come from a Message body that will be soon discarded
-                    // therefore it's safe to @constCast and potentially modify the data in-place.
-                    var demuxer = Client.DemuxerType(operation_comptime).init(@constCast(reply));
+            const result_size: u32 = StateMachine.result_size_bytes(operation);
+            assert(result_size > 0);
+            var reply_decoder = MultiBatchDecoder.init(reply, .{
+                .element_size = result_size,
+            }) catch unreachable;
+            assert(packet_list.multi_batch_count == reply_decoder.batch_count());
 
-                    var it: ?*Packet = packet;
-                    var event_offset: u32 = 0;
-                    while (it) |batched| {
-                        if (batched != packet) batched.assert_phase(.batched);
-                        it = batched.batch_next;
+            // Copying it because `packet` is no longer valid after the callback.
+            const multi_batch_results_expected: u16 =
+                packet_list.multi_batch_result_count_expected;
+            var multi_batch_results_actual: u16 = 0;
+            var it: ?*Packet = packet_list;
+            while (it) |batched| {
+                if (batched != packet_list) batched.assert_phase(.batched);
+                assert(batched.operation == @intFromEnum(operation));
 
-                        const event_count = @divExact(
-                            batched.data_size,
-                            @sizeOf(StateMachine.EventType(operation_comptime)),
-                        );
-                        const batched_reply = demuxer.decode(event_offset, event_count);
-                        event_offset += event_count;
+                // NB: The reference to `batched` isn't valid after `notify_completion`.
+                it = batched.multi_batch_next;
 
-                        if (!StateMachine.batch_logical_allowed.get(operation_comptime)) {
-                            assert(batched.batch_next == null);
-                            assert(batched_reply.len == reply.len);
-                        }
-
-                        assert(batched.operation == @intFromEnum(operation_comptime));
-                        self.notify_completion(batched, .{
-                            .timestamp = timestamp,
-                            .reply = batched_reply,
-                        });
-                    }
-                },
+                const batched_reply: []const u8 = reply_decoder.pop().?;
+                multi_batch_results_actual += @intCast(@divExact(
+                    batched_reply.len,
+                    result_size,
+                ));
+                self.notify_completion(batched, .{
+                    .timestamp = timestamp,
+                    .reply = batched_reply,
+                });
             }
+            assert(reply_decoder.pop() == null);
+            assert(multi_batch_results_actual <= multi_batch_results_expected);
         }
 
         fn notify_completion(
@@ -742,10 +806,11 @@ pub fn ContextType(
                 .user_tag = packet_extern.user_tag,
                 .status = .ok,
                 .next = null,
-                .batch_next = null,
-                .batch_tail = null,
-                .batch_size = 0,
-                .batch_allowed = false,
+                .multi_batch_next = null,
+                .multi_batch_tail = null,
+                .multi_batch_count = 0,
+                .multi_batch_event_count = 0,
+                .multi_batch_result_count_expected = 0,
                 .phase = .submitted,
             };
 
@@ -786,79 +851,6 @@ pub fn ContextType(
                 }
             }
             return null;
-        }
-
-        fn batch_logical_allowed(
-            operation: StateMachine.Operation,
-            data: ?*const anyopaque,
-            data_size: u32,
-        ) bool {
-            if (!StateMachine.batch_logical_allowed.get(operation)) return false;
-
-            // TODO(king): Remove this code once protocol batching is implemented.
-            //
-            // If the application submits an unclosed linked chain, it can inadvertently make
-            // the elements of the next batch part of it.
-            // To work around this issue, we don't allow unclosed linked chains to be batched.
-            if (data_size > 0) {
-                assert(data != null);
-                const linked_chain_open: bool = switch (operation) {
-                    inline .create_accounts,
-                    .create_transfers,
-                    => |tag| linked_chain_open: {
-                        const Event = StateMachine.EventType(tag);
-                        // Packet data isn't necessarily aligned.
-                        const events: [*]align(@alignOf(u8)) const Event = @ptrCast(data.?);
-                        const events_count: usize = @divExact(data_size, @sizeOf(Event));
-                        break :linked_chain_open events[events_count - 1].flags.linked;
-                    },
-                    else => false,
-                };
-
-                if (linked_chain_open) return false;
-            }
-
-            return true;
-        }
-
-        test "client_batch_linked_chain" {
-            inline for ([_]StateMachine.Operation{
-                .create_accounts,
-                .create_transfers,
-            }) |operation| {
-                const Event = StateMachine.EventType(operation);
-                var data = [_]Event{std.mem.zeroInit(Event, .{})} ** 3;
-
-                // Broken linked chain cannot be batched.
-                for (&data) |*item| item.flags.linked = true;
-                try std.testing.expect(!batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Valid linked chain.
-                data[data.len - 1].flags.linked = false;
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    data[0..],
-                    data.len * @sizeOf(Event),
-                ));
-
-                // Single element.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    &data[data.len - 1],
-                    1 * @sizeOf(Event),
-                ));
-
-                // No elements.
-                try std.testing.expect(batch_logical_allowed(
-                    operation,
-                    null,
-                    0,
-                ));
-            }
         }
     };
 }

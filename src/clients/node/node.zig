@@ -268,10 +268,11 @@ fn on_completion(
                     };
 
                     const Result = StateMachine.ResultType(operation_comptime);
-                    const results: []const Result = @alignCast(std.mem.bytesAsSlice(
+                    const results: []const Result = stdx.bytes_as_slice(
                         Result,
+                        .exact,
                         result_ptr.?[0..result_len],
-                    ));
+                    );
                     stdx.copy_disjoint(
                         .exact,
                         Result,
@@ -560,13 +561,13 @@ fn BufferType(comptime op: Operation) type {
 
         fn events(buffer: Buffer) []Event {
             const event_bytes = buffer.ptr[body_offset..][0 .. @sizeOf(Event) * buffer.count];
-            return @alignCast(std.mem.bytesAsSlice(Event, event_bytes));
+            return stdx.bytes_as_slice(Event, .exact, event_bytes);
         }
 
         fn results(buffer: Buffer) []Result {
             const result_size = @sizeOf(Result) * event_count(op, buffer.count);
             const result_bytes = buffer.ptr[body_offset..][0..result_size];
-            return @alignCast(std.mem.bytesAsSlice(Result, result_bytes));
+            return stdx.bytes_as_slice(Result, .exact, result_bytes);
         }
 
         fn event_count(operation: Operation, count: usize) usize {
