@@ -56,7 +56,7 @@ pub const Network = struct {
     ///
     /// At the moment, we require core members to have direct bidirectional connectivity, but this
     /// could be relaxed in the future to indirect connectivity.
-    pub const Core = std.StaticBitSet(constants.members_max);
+    pub const Core = stdx.BitSetType(constants.members_max);
 
     allocator: std.mem.Allocator,
 
@@ -141,9 +141,9 @@ pub const Network = struct {
         network.packet_simulator.options.partition_probability = ratio(0, 100);
         network.packet_simulator.options.unpartition_probability = ratio(0, 100);
 
-        var it_source = core.iterator(.{});
+        var it_source = core.iterate();
         while (it_source.next()) |replica_source| {
-            var it_target = core.iterator(.{});
+            var it_target = core.iterate();
             while (it_target.next()) |replica_target| {
                 if (replica_target != replica_source) {
                     const path = Path{

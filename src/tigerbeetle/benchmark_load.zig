@@ -268,8 +268,7 @@ const Benchmark = struct {
     print_batch_timings: bool,
 
     // State:
-    clients_busy: std.StaticBitSet(constants.clients_max) =
-        std.StaticBitSet(constants.clients_max).initEmpty(),
+    clients_busy: stdx.BitSetType(constants.clients_max) = .{},
     clients_request_ns: [constants.clients_max]u64 = .{undefined} ** constants.clients_max,
     client_requests: []align(constants.sector_size) [constants.message_body_size_max]u8,
     client_replies: []align(constants.sector_size) [constants.message_body_size_max]u8,
@@ -294,7 +293,7 @@ const Benchmark = struct {
     pub fn run(b: *Benchmark, stage: Stage) !void {
         assert(b.stage == .idle);
         assert(b.clients.len > 0);
-        assert(b.clients_busy.count() == 0);
+        assert(b.clients_busy.empty());
         assert(stdx.zeroed(std.mem.sliceAsBytes(b.request_latency_histogram)));
         assert(b.request_index == 0);
         assert(b.account_index == 0);
@@ -326,7 +325,7 @@ const Benchmark = struct {
 
     fn run_finish(b: *Benchmark) void {
         assert(b.stage != .idle);
-        assert(b.clients_busy.count() == 0);
+        assert(b.clients_busy.empty());
 
         b.stage = .idle;
         b.request_index = 0;
@@ -338,7 +337,7 @@ const Benchmark = struct {
 
     fn register(b: *Benchmark, client_index: usize) void {
         assert(b.stage == .register);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
 
         b.clients_busy.set(client_index);
         b.clients[client_index].register(register_callback, @bitCast(RequestContext{
@@ -353,19 +352,19 @@ const Benchmark = struct {
         const context: RequestContext = @bitCast(user_data);
         const b: *Benchmark = context.benchmark;
         assert(b.stage == .register);
-        assert(b.clients_busy.isSet(context.client_index));
+        assert(b.clients_busy.is_set(context.client_index));
 
         b.clients_busy.unset(context.client_index);
-        if (b.clients_busy.count() == 0) b.run_finish();
+        if (b.clients_busy.empty()) b.run_finish();
     }
 
     fn create_accounts(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .create_accounts);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
         assert(b.account_batch_size > 0);
 
         if (b.account_index >= b.account_count) {
-            if (b.clients_busy.count() == 0) b.run_finish();
+            if (b.clients_busy.empty()) b.run_finish();
         } else {
             const accounts_count = @min(b.account_count, b.account_batch_size);
             const accounts_bytes = &b.client_requests[client_index];
@@ -387,11 +386,11 @@ const Benchmark = struct {
 
     fn create_transfers(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .create_transfers);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
         assert(b.transfer_batch_size > 0);
 
         if (b.transfer_index >= b.transfer_count) {
-            if (b.clients_busy.count() == 0) b.create_transfers_finish();
+            if (b.clients_busy.empty()) b.create_transfers_finish();
         } else {
             const transfers_count = @min(b.transfer_count, b.transfer_batch_size);
             const transfers_bytes = &b.client_requests[client_index];
@@ -449,10 +448,10 @@ const Benchmark = struct {
 
     fn get_account_transfers(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .get_account_transfers);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
 
         if (b.query_index >= b.query_count) {
-            if (b.clients_busy.count() == 0) b.get_account_transfers_finish();
+            if (b.clients_busy.empty()) b.get_account_transfers_finish();
             return;
         }
         b.query_index += 1;
@@ -508,10 +507,10 @@ const Benchmark = struct {
 
     fn validate_accounts(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .validate_accounts);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
 
         if (b.account_index >= b.account_count) {
-            if (b.clients_busy.count() == 0) b.validate_accounts_finish();
+            if (b.clients_busy.empty()) b.validate_accounts_finish();
         } else {
             const account_count = @min(b.account_count, b.account_batch_size);
             const account_ids =
@@ -560,10 +559,10 @@ const Benchmark = struct {
 
     fn validate_transfers(b: *Benchmark, client_index: u32) void {
         assert(b.stage == .validate_transfers);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
 
         if (b.transfer_index >= b.transfer_count) {
-            if (b.clients_busy.count() == 0) b.validate_transfers_finish();
+            if (b.clients_busy.empty()) b.validate_transfers_finish();
         } else {
             const transfer_count = @min(b.transfer_count, b.transfer_batch_size);
             const transfer_ids =
@@ -635,7 +634,7 @@ const Benchmark = struct {
     ) void {
         assert(b.stage != .idle);
         assert(b.clients_busy.count() < b.clients.len);
-        assert(!b.clients_busy.isSet(client_index));
+        assert(!b.clients_busy.is_set(client_index));
 
         b.clients_busy.set(client_index);
         b.clients_request_ns[client_index] = b.timer.read();
@@ -662,7 +661,7 @@ const Benchmark = struct {
         const context: RequestContext = @bitCast(user_data);
         const client = context.client_index;
         const b: *Benchmark = context.benchmark;
-        assert(b.clients_busy.isSet(client));
+        assert(b.clients_busy.is_set(client));
         assert(b.stage != .idle);
         assert(timestamp > 0);
 
