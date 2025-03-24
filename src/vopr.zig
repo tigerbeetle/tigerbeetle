@@ -192,6 +192,13 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, &prng, options);
     defer simulator.deinit(allocator);
 
+    // Warm-up the cluster before performance testing to get past the initial view change.
+    if (cli_args.performance) {
+        simulator.options.request_probability = ratio(0, 100);
+        for (0..500) |_| simulator.tick();
+        simulator.options.request_probability = options.request_probability;
+    }
+
     for (0..simulator.cluster.clients.len) |client_index| {
         simulator.cluster.register(client_index);
     }
