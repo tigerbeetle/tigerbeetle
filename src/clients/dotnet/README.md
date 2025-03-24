@@ -330,9 +330,13 @@ foreach (var error in transferErrors)
 ## Batching
 
 TigerBeetle performance is maximized when you batch
-API requests. The client does not do this automatically for
-you. So, for example, you *can* insert 1 million transfers
-one at a time like so:
+API requests.
+A client instance shared across multiple threads/tasks can automatically
+batch concurrent requests, but the application must still send as many events
+as possible in a single call.
+For example, if you insert 1 million transfers sequentially, one at a time,
+the insert rate will be a *fraction* of the potential, because the client will
+wait for a reply between each one.
 
 ```cs
 var batch = new Transfer[] { }; // Array of transfer to create.
@@ -343,11 +347,8 @@ foreach (var t in batch)
 }
 ```
 
-But the insert rate will be a *fraction* of
-potential. Instead, **always batch what you can**.
-
-The maximum batch size is set in the TigerBeetle server. The default
-is 8189.
+Instead, **always batch as much as you can**.
+The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```cs
 var batch = new Transfer[] { }; // Array of transfer to create.
