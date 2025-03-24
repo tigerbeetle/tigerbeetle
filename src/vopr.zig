@@ -70,8 +70,11 @@ const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
     lite: bool = false,
     performance: bool = false,
+    // Feel free to add more runtime overrides here!
     ticks_max_requests: u32 = 40_000_000,
     ticks_max_convergence: u32 = 10_000_000,
+    packet_loss_ratio: ?Ratio = null,
+
     positional: struct {
         seed: ?[]const u8 = null,
     },
@@ -89,7 +92,7 @@ pub fn main() !void {
 
     const cli_args = flags.parse(&args, CLIArgs);
     if (cli_args.lite and cli_args.performance) {
-        return vsr.fatal(.cli, "--lite and --performance are mutially exclusive", .{});
+        return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
     log_performance_mode = cli_args.performance;
 
@@ -116,12 +119,16 @@ pub fn main() !void {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    const options = if (cli_args.lite)
+    var options = if (cli_args.lite)
         options_lite(&prng)
     else if (cli_args.performance)
         options_performance(&prng)
     else
         options_swarm(&prng);
+
+    if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
+        options.network.packet_loss_probability = packet_loss_ratio;
+    }
 
     log.info(
         \\
