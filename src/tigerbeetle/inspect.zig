@@ -24,8 +24,15 @@ const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
+const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
+const Grid = vsr.GridType(Storage);
 const allocate_block = vsr.grid.allocate_block;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
+
+const EventMetric = vsr.trace.EventMetric;
+const EventMetricAggregate = vsr.trace.EventMetricAggregate;
+const EventTiming = vsr.trace.EventTiming;
+const EventTimingAggregate = vsr.trace.EventTimingAggregate;
 
 pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
@@ -44,6 +51,7 @@ fn main_inspect(
 ) !void {
     const data_file = switch (cli_args.*) {
         .constants => return try inspect_constants(stdout),
+        .metrics => return try inspect_metrics(stdout),
         .data_file => |data_file| data_file,
     };
 
@@ -192,10 +200,82 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
         }
         try output.print("\n", .{});
     }
+
+    // Print the size required to store each object + indexes.
+    try output.print("StateMachine:\n", .{});
+    try print_objects(output);
+
+    // Memory usage is intentionally estimated from constants, rather than measured, to sanity
+    // check that our observed memory usage is reasonable.
+    try output.print("Memory (approximate):\n", .{});
+    const datafile_size = constants.storage_size_limit_max;
+    try print_header(output, 0, "datafile (on disk)");
+    try output.print("{}\n", .{
+        stdx.fmt_int_size_bin_exact(datafile_size),
+    });
+
+    {
+        try print_header(output, 0, "free_set");
+        const hashmap_entries = stdx.div_ceil(
+            100 * (StateMachine.Forest.compaction_blocks_released_per_pipeline_max() +
+                Grid.free_set_checkpoints_blocks_max(datafile_size) +
+                CheckpointTrailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size)),
+            std.hash_map.default_max_load_percentage,
+        );
+        try output.print("{:.2}\n", .{std.fmt.fmtIntSizeBin(
+            // HashMap of block addresses.
+            hashmap_entries * @sizeOf(u64) +
+                // Two bitsets with bit per block.
+                2 * stdx.div_ceil(vsr.block_count_max(datafile_size), 8),
+        )});
+    }
+}
+
+fn inspect_metrics(output: std.io.AnyWriter) !void {
+    const EventMetricTag = std.meta.Tag(EventMetric);
+    const EventTimingTag = std.meta.Tag(EventTiming);
+
+    const stats_per_gauge = std.meta.fields(EventMetricAggregate).len - 1; // -1 to ignore `event`.
+    const stats_per_timing = std.meta.fields(std.meta.FieldType(EventTimingAggregate, .values)).len;
+    var stats_total: usize = 0;
+
+    log.info("Format: [metric type]: [metric name]([metric tags])=[metric cardinality]", .{});
+
+    inline for (std.meta.fields(EventMetric)) |field| {
+        const metric_tag = std.meta.stringToEnum(EventMetricTag, field.name).?;
+        try output.print("gauge: {s}(", .{field.name});
+        if (field.type != void) {
+            inline for (std.meta.fields(field.type), 0..) |data_field, i| {
+                if (i != 0) try output.print(", ");
+                try output.print("{s}", .{data_field.name});
+            }
+        }
+        const metric_stats = EventMetric.slot_limits.get(metric_tag) * stats_per_gauge;
+        try output.print(")={}\n", .{metric_stats});
+        stats_total += metric_stats;
+    }
+    inline for (std.meta.fields(EventTiming)) |field| {
+        const timing_tag = std.meta.stringToEnum(EventTimingTag, field.name).?;
+        try output.print("timing: {s}(", .{field.name});
+        if (field.type != void) {
+            inline for (std.meta.fields(field.type), 0..) |data_field, i| {
+                if (i != 0) try output.print(", ");
+                try output.print("{s}", .{data_field.name});
+            }
+        }
+        const timing_stats = EventTiming.slot_limits.get(timing_tag) * stats_per_timing;
+        try output.print(")={}\n", .{timing_stats});
+        stats_total += timing_stats;
+    }
+    log.info("Total stats per replica: {}", .{stats_total});
+    log.info(
+        "(All stats are tagged with the replica, so the cluster has 6x as many stats.)",
+        .{},
+    );
 }
 
 fn print_header(output: std.io.AnyWriter, comptime level: u8, comptime header: []const u8) !void {
-    const width_total = 20;
+    const width_total = 32;
     const pad_left = "  " ** level;
     const pad_right = " " ** (width_total -| level * 2 -| header.len);
     try output.print(pad_left ++ header ++ pad_right, .{});
@@ -210,6 +290,49 @@ fn print_size_count(output: std.io.AnyWriter, comptime size: u64, comptime count
         else
             std.fmt.comptimePrint("{}", .{stdx.fmt_int_size_bin_exact(size)});
         try output.print("{s<8} x{}\n", .{ size_formatted, count });
+    }
+}
+
+fn print_objects(output: std.io.AnyWriter) !void {
+    const Grooves = StateMachine.Forest.Grooves;
+    inline for (std.meta.fields(Grooves)) |groove_field| {
+        const Groove = groove_field.type;
+        const ObjectTree = Groove.ObjectTree;
+
+        comptime var size_total: usize = 0;
+
+        const object_size = @sizeOf(ObjectTree.Table.Value);
+        size_total += object_size;
+
+        const id_size = if (Groove.IdTree == void) 0 else @sizeOf(Groove.IdTree.Table.Value);
+        size_total += id_size;
+
+        comptime {
+            for (std.meta.fields(Groove.IndexTrees)) |index_field| {
+                const IndexTree = index_field.type;
+                const index_size = @sizeOf(IndexTree.Table.Value);
+                size_total += index_size;
+            }
+        }
+
+        try print_header(output, 0, ObjectTree.tree_name());
+        try print_size_count(output, size_total, 1);
+
+        try print_header(output, 1, "object");
+        try print_size_count(output, object_size, 1);
+
+        try print_header(output, 1, "id");
+        try print_size_count(output, id_size, 1);
+
+        inline for (std.meta.fields(Groove.IndexTrees)) |index_field| {
+            const IndexTree = index_field.type;
+            const index_size = @sizeOf(IndexTree.Table.Value);
+
+            try print_header(output, 1, index_field.name);
+            try print_size_count(output, index_size, 1);
+        }
+
+        try output.print("\n", .{});
     }
 }
 
@@ -299,7 +422,6 @@ const Inspector = struct {
         std.posix.close(inspector.fd);
         std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
-        inspector.* = undefined;
     }
 
     fn work(inspector: *Inspector) !void {

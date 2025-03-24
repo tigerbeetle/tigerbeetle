@@ -32,7 +32,7 @@ fn go_type(comptime Type: type) []const u8 {
                 @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 1 => "bool",
                 8 => "uint8",
@@ -61,12 +61,12 @@ fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const 
     return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
-        var iterator = std.mem.tokenize(u8, input, "_");
+        var iterator = std.mem.tokenizeScalar(u8, input, '_');
         while (iterator.next()) |word| {
             if (is_upper_case(word)) {
                 _ = std.ascii.upperString(output[len..], word);
             } else {
-                @memcpy(output[len..][0..word.len], word);
+                @memcpy(output[len..][0..word.len], word); // Bypass tidy's ban, for go_bindings.
                 output[len] = std.ascii.toUpper(output[len]);
             }
             len += word.len;
@@ -115,6 +115,7 @@ fn emit_enum(
     const type_info = @typeInfo(Type).Enum;
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
         if (type_info.tag_type == u1) {
             try buffer.writer().print("\t{s} {s} = {s}\n", .{
@@ -159,6 +160,7 @@ fn emit_enum(
         try buffer.writer().print("\tswitch i {{\n", .{});
 
         inline for (type_info.fields) |field| {
+            if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
             const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
             try buffer.writer().print("\tcase {s}:\n" ++
                 "\t\treturn \"{s}\"\n", .{

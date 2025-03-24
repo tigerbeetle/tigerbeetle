@@ -1,8 +1,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-/// Take a u6 to limit to 64 items max (2^6 = 64)
-pub fn IOPSType(comptime T: type, comptime size: u6) type {
+/// Take a u8 to limit to 256 items max (2^8 = 256)
+pub fn IOPSType(comptime T: type, comptime size: u8) type {
     const Map = std.StaticBitSet(size);
     return struct {
         const IOPS = @This();
@@ -25,7 +25,7 @@ pub fn IOPSType(comptime T: type, comptime size: u6) type {
         }
 
         pub fn index(self: *IOPS, item: *T) usize {
-            const i = (@intFromPtr(item) - @intFromPtr(&self.items)) / @sizeOf(T);
+            const i = @divExact((@intFromPtr(item) - @intFromPtr(&self.items)), @sizeOf(T));
             assert(i < size);
             return i;
         }

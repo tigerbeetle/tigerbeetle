@@ -150,8 +150,8 @@
             <excludes>
               <!-- Excluding exceptions classes -->
               <exclude>com/tigerbeetle/InitializationException.class</exclude>
+              <exclude>com/tigerbeetle/ClientClosedException.class</exclude>
               <exclude>com/tigerbeetle/RequestException.class</exclude>
-              <exclude>com/tigerbeetle/ConcurrencyExceededException.class</exclude>
               <exclude>com/tigerbeetle/AssertionError.class</exclude>
 
               <!-- Excluding JNILoader platform specifics -->
@@ -163,6 +163,7 @@
               <exclude>com/tigerbeetle/PacketStatus.class</exclude>
               <exclude>com/tigerbeetle/PacketAcquireStatus.class</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.class</exclude>
+              <exclude>com/tigerbeetle/ClientStatus.class</exclude>
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
               <exclude>com/tigerbeetle/AccountFilterFlags.class</exclude>
               <exclude>com/tigerbeetle/QueryFilterFlags.class</exclude>
@@ -185,7 +186,9 @@
               <exclude>com/tigerbeetle/CreateTransferResult.java</exclude>
               <exclude>com/tigerbeetle/CreateTransferResultBatch.java</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.java</exclude>
+              <exclude>com/tigerbeetle/ClientStatus.java</exclude>
               <exclude>com/tigerbeetle/PacketStatus.java</exclude>
+              <exclude>com/tigerbeetle/TBClient.java</exclude>
               <exclude>com/tigerbeetle/TransferBatch.java</exclude>
               <exclude>com/tigerbeetle/TransferFlags.java</exclude>
               <exclude>com/tigerbeetle/AccountFilterFlags.java</exclude>

@@ -77,7 +77,7 @@ const type_mappings = .{
         .hidden_fields = &.{"reserved"},
         .docs_link = "reference/account-balances#",
     } },
-    .{ tb_client.tb_operation_t, TypeMapping{
+    .{ tb_client.Operation, TypeMapping{
         .name = "Operation",
         .hidden_fields = &.{ "reserved", "root", "register" },
     } },
@@ -97,7 +97,7 @@ fn typescript_type(comptime Type: type) []const u8 {
             ),
         },
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 16 => "number",
                 32 => "number",
@@ -128,6 +128,7 @@ fn emit_enum(
     try buffer.writer().print("export enum {s} {{\n", .{mapping.name});
 
     inline for (@typeInfo(Type).Enum.fields) |field| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime mapping.hidden(field.name)) continue;
 
         try emit_docs(buffer, mapping, 1, field.name);

@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -952,25 +953,34 @@ public class IntegrationTest {
     public void testClientEvicted() throws Throwable {
         final int CLIENTS_MAX = 64;
 
+        final var barrier = new CountDownLatch(CLIENTS_MAX);
+        final var executor = Executors.newFixedThreadPool(CLIENTS_MAX);
+
         // Use a separate server to avoid evicting the test's shared client.
         try (final var server = new Server("testClientEvicted")) {
+
             try (final var client_evict =
                     new Client(clusterId, new String[] {server.getAddress()})) {
                 var accounts_first = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
                 assertTrue(accounts_first.getLength() == 0);
 
-
                 for (int i = 0; i < CLIENTS_MAX; i++) {
-                    try (final var client =
-                            new Client(clusterId, new String[] {server.getAddress()})) {
-                        var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
-                        assertTrue(accounts.getLength() == 0);
-                    }
+                    executor.submit(() -> {
+                        try (final var client =
+                                new Client(clusterId, new String[] {server.getAddress()})) {
+                            var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
+                            assertTrue(accounts.getLength() == 0);
+                        } finally {
+                            barrier.countDown();
+                        }
+                    });
                 }
 
+                barrier.await();
+                executor.shutdown();
+
                 try {
-                    var accounts = client_evict.lookupAccounts(new IdBatch(UInt128.id()));
-                    assertTrue(accounts.getLength() == 0);
+                    client_evict.lookupAccounts(new IdBatch(UInt128.id()));
                     assert false;
                 } catch (RequestException requestException) {
                     assertEquals(PacketStatus.ClientEvicted.value, requestException.getStatus());
@@ -1218,7 +1228,7 @@ public class IntegrationTest {
 
     /**
      * This test asserts that submit a request after the client was closed will fail with
-     * IllegalStateException.
+     * ClientClosedException.
      */
     @Test
     public void testClose() throws Throwable {
@@ -1254,7 +1264,7 @@ public class IntegrationTest {
             assert false;
 
         } catch (Throwable any) {
-            assertEquals(IllegalStateException.class, any.getClass());
+            assertEquals(ClientClosedException.class, any.getClass());
         }
     }
 

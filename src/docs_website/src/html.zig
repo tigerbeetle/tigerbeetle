@@ -79,19 +79,6 @@ pub fn string(self: Html) []const u8 {
     return self.buffer.items;
 }
 
-/// Converts a string in markdown format to an HTML string.
-/// Currently handles only backtick (`) conversion to <code>.
-pub fn from_md(self: *Html, string_md: []const u8) ![]const u8 {
-    if (string_md[0] == '`') {
-        var buffer = std.ArrayList(u8).init(self.arena);
-        // try buffer.writer().print("<code>{s}</code>", .{std.mem.trim(u8, string_md, "`")});
-        try buffer.writer().print("{s}", .{std.mem.trim(u8, string_md, "`")});
-        return buffer.items;
-    } else {
-        return string_md;
-    }
-}
-
 pub fn redirect(arena: std.mem.Allocator, url: []const u8) ![]const u8 {
     const template = @embedFile("html/redirect.html");
     var html = try Html.create(arena);

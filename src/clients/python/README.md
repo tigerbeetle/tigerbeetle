@@ -370,7 +370,7 @@ batch = [] # Array of transfer to create.
 BATCH_SIZE = 8190 #FIXME
 for i in range(0, len(batch), BATCH_SIZE):
     transfer_errors = client.create_transfers(
-        batch[i:min(len(batch), BATCH_SIZE)],
+        batch[i:min(len(batch), i + BATCH_SIZE)],
     )
     # Error handling omitted.
 ```

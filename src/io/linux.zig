@@ -10,6 +10,7 @@ const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
+const common = @import("./common.zig");
 const FIFOType = @import("../fifo.zig").FIFOType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -86,7 +87,7 @@ pub const IO = struct {
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
-    pub fn tick(self: *IO) !void {
+    pub fn run(self: *IO) !void {
         assert(self.cancel_status != .done);
 
         // We assume that all timeouts submitted by `run_for_ns()` will be reaped by `run_for_ns()`
@@ -484,7 +485,7 @@ pub const IO = struct {
                     completion.callback(completion.context, completion, &result);
                 },
                 .accept => {
-                    const result: AcceptError!posix.socket_t = blk: {
+                    const result: AcceptError!socket_t = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
                                 .INTR => {
@@ -698,6 +699,8 @@ pub const IO = struct {
                                 .ALREADY => error.FastOpenAlreadyInProgress,
                                 .AFNOSUPPORT => error.AddressFamilyNotSupported,
                                 .BADF => error.FileDescriptorInvalid,
+                                // Can happen when send()'ing to a UDP socket.
+                                .CONNREFUSED => error.ConnectionRefused,
                                 .CONNRESET => error.ConnectionResetByPeer,
                                 .DESTADDRREQ => unreachable,
                                 .FAULT => unreachable,
@@ -801,7 +804,7 @@ pub const IO = struct {
             target: *Completion,
         },
         accept: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             address: posix.sockaddr = undefined,
             address_size: posix.socklen_t = @sizeOf(posix.sockaddr),
         },
@@ -809,7 +812,7 @@ pub const IO = struct {
             fd: fd_t,
         },
         connect: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             address: std.net.Address,
         },
         fsync: struct {
@@ -828,11 +831,11 @@ pub const IO = struct {
             offset: u64,
         },
         recv: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buffer: []u8,
         },
         send: struct {
-            socket: posix.socket_t,
+            socket: socket_t,
             buffer: []const u8,
         },
         statx: struct {
@@ -873,10 +876,10 @@ pub const IO = struct {
         comptime callback: fn (
             context: Context,
             completion: *Completion,
-            result: AcceptError!posix.socket_t,
+            result: AcceptError!socket_t,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
     ) void {
         completion.* = .{
             .io = self,
@@ -886,7 +889,7 @@ pub const IO = struct {
                     callback(
                         @ptrCast(@alignCast(ctx)),
                         comp,
-                        @as(*const AcceptError!posix.socket_t, @ptrCast(@alignCast(res))).*,
+                        @as(*const AcceptError!socket_t, @ptrCast(@alignCast(res))).*,
                     );
                 }
             }.wrapper,
@@ -970,7 +973,7 @@ pub const IO = struct {
             result: ConnectError!void,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         address: std.net.Address,
     ) void {
         completion.* = .{
@@ -1149,7 +1152,7 @@ pub const IO = struct {
             result: RecvError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []u8,
     ) void {
         completion.* = .{
@@ -1188,6 +1191,7 @@ pub const IO = struct {
         OperationNotSupported,
         BrokenPipe,
         ConnectionTimedOut,
+        ConnectionRefused,
     } || posix.UnexpectedError;
 
     pub fn send(
@@ -1200,7 +1204,7 @@ pub const IO = struct {
             result: SendError!usize,
         ) void,
         completion: *Completion,
-        socket: posix.socket_t,
+        socket: socket_t,
         buffer: []const u8,
     ) void {
         completion.* = .{
@@ -1223,6 +1227,16 @@ pub const IO = struct {
             },
         };
         self.enqueue(completion);
+    }
+
+    /// Best effort to synchroneously transfer bytes to the kernel.
+    pub fn send_now(self: *IO, socket: socket_t, buffer: []const u8) ?usize {
+        _ = self;
+        return posix.send(socket, buffer, posix.MSG.DONTWAIT) catch |err| switch (err) {
+            error.WouldBlock => return null,
+            // To avoid duplicating error handling, force the caller to fallback to normal send.
+            else => return null,
+        };
     }
 
     pub const StatxError = error{
@@ -1437,18 +1451,35 @@ pub const IO = struct {
         posix.close(event);
     }
 
+    pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !posix.socket_t {
+    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
         _ = self;
         return posix.socket(family, sock_type | posix.SOCK.CLOEXEC, protocol);
     }
 
     /// Closes a socket opened by the IO instance.
-    pub fn close_socket(self: *IO, socket: posix.socket_t) void {
+    pub fn close_socket(self: *IO, socket: socket_t) void {
         _ = self;
         posix.close(socket);
+    }
+
+    /// Listen on the given TCP socket.
+    /// Returns socket resolved address, which might be more specific
+    /// than the input address (e.g., listening on port 0).
+    pub fn listen(
+        _: *IO,
+        fd: socket_t,
+        address: std.net.Address,
+        options: common.ListenOptions,
+    ) !std.net.Address {
+        return common.listen(fd, address, options);
+    }
+
+    pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
+        return posix.shutdown(socket, how);
     }
 
     /// Opens a directory with read only access.

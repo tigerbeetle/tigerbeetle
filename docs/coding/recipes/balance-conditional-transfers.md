@@ -31,7 +31,7 @@ and out of the control account.
 ## Executing a Balance-Conditional Transfer
 
 The balance-conditional transfer consists of 3
-[linked transfers](../../reference/requests/README.md#linked-events).
+[linked transfers](../linked-events.md).
 
 We will refer to two amounts:
 

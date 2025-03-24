@@ -29,36 +29,33 @@ const compaction_input_tables_max = @import("compaction.zig").compaction_tables_
 pub const table_count_max = @import("tree.zig").table_count_max;
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
-    var groove_fields: []const std.builtin.Type.StructField = &.{};
-    var groove_options_fields: []const std.builtin.Type.StructField = &.{};
+    const groove_count = std.meta.fields(@TypeOf(groove_cfg)).len;
+    var groove_fields: [groove_count]std.builtin.Type.StructField = undefined;
+    var groove_options_fields: [groove_count]std.builtin.Type.StructField = undefined;
 
-    for (std.meta.fields(@TypeOf(groove_cfg))) |field| {
+    for (std.meta.fields(@TypeOf(groove_cfg)), 0..) |field, i| {
         const Groove = @field(groove_cfg, field.name);
-        groove_fields = groove_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = Groove,
-                .default_value = null,
-                .is_comptime = false,
-                .alignment = @alignOf(Groove),
-            },
+        groove_fields[i] = .{
+            .name = field.name,
+            .type = Groove,
+            .default_value = null,
+            .is_comptime = false,
+            .alignment = @alignOf(Groove),
         };
 
-        groove_options_fields = groove_options_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = field.name,
-                .type = Groove.Options,
-                .default_value = null,
-                .is_comptime = false,
-                .alignment = @alignOf(Groove),
-            },
+        groove_options_fields[i] = .{
+            .name = field.name,
+            .type = Groove.Options,
+            .default_value = null,
+            .is_comptime = false,
+            .alignment = @alignOf(Groove),
         };
     }
 
     const _Grooves = @Type(.{
         .Struct = .{
             .layout = .auto,
-            .fields = groove_fields,
+            .fields = &groove_fields,
             .decls = &.{},
             .is_tuple = false,
         },
@@ -67,7 +64,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     const _GroovesOptions = @Type(.{
         .Struct = .{
             .layout = .auto,
-            .fields = groove_options_fields,
+            .fields = &groove_options_fields,
             .decls = &.{},
             .is_tuple = false,
         },
@@ -102,6 +99,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     // - tree_infos[tree_id - tree_id_range.min].tree_id == tree_id
     // - tree_infos.len == tree_id_range.max - tree_id_range.min
     const _tree_infos = tree_infos: {
+        @setEvalBranchQuota(32_000);
+
         var tree_infos: []const TreeInfo = &[_]TreeInfo{};
         for (std.meta.fields(_Grooves)) |groove_field| {
             const Groove = groove_field.type;
@@ -155,16 +154,16 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     };
 
     const _TreeID = comptime tree_id: {
-        var fields: []const std.builtin.Type.EnumField = &.{};
-        for (_tree_infos) |tree_info| {
-            fields = fields ++ [1]std.builtin.Type.EnumField{.{
+        var fields: [_tree_infos.len]std.builtin.Type.EnumField = undefined;
+        for (_tree_infos, 0..) |tree_info, i| {
+            fields[i] = .{
                 .name = @ptrCast(tree_info.tree_name),
                 .value = tree_info.tree_id,
-            }};
+            };
         }
         break :tree_id @Type(.{ .Enum = .{
             .tag_type = u16,
-            .fields = fields,
+            .fields = &fields,
             .decls = &.{},
             .is_exhaustive = true,
         } });
@@ -329,10 +328,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @field(forest.grooves, field.name).reset();
             }
 
-            forest.grid.trace.reset(.lookup);
-            forest.grid.trace.reset(.lookup_worker);
-            forest.grid.trace.reset(.scan_tree);
-            forest.grid.trace.reset(.scan_tree_level);
+            forest.grid.trace.cancel(.lookup);
+            forest.grid.trace.cancel(.lookup_worker);
+            forest.grid.trace.cancel(.scan_tree);
+            forest.grid.trace.cancel(.scan_tree_level);
 
             forest.manifest_log.reset();
             forest.node_pool.reset();

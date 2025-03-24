@@ -103,7 +103,7 @@ To set up, we transfer 1000 from the Operator to the User on the Rate Limiting l
 | 1        | Rate Limiting |      Operator |           User |   1000 |
 
 For each transfer the user wants to do, we will create 2 transfers that are
-[linked](../../reference/requests/README.md#linked-events):
+[linked](../linked-events.md):
 
 | Transfer |        Ledger | Debit Account | Credit Account |          Amount | Timeout |                                                                        Flags (Note `\|` sets multiple flags) |
 | -------- | ------------: | ------------: | -------------: | --------------: | ------- | -----------------------------------------------------------------------------------------------------------: |

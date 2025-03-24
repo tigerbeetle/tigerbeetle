@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 const stdx = @import("../../stdx.zig");
+const ratio = stdx.PRNG.ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -67,6 +68,7 @@ pub const Network = struct {
     processes: std.ArrayListUnmanaged(u128),
     /// A pool of messages that are in the network (sent, but not yet delivered).
     message_pool: MessagePool,
+    message_summary: MessageSummary,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -111,6 +113,7 @@ pub const Network = struct {
             .buses_enabled = buses_enabled,
             .processes = processes,
             .message_pool = message_pool,
+            .message_summary = .{},
         };
     }
 
@@ -122,6 +125,10 @@ pub const Network = struct {
         network.message_pool.deinit(network.allocator);
     }
 
+    pub fn step(network: *Network) bool {
+        return network.packet_simulator.step();
+    }
+
     pub fn tick(network: *Network) void {
         network.packet_simulator.tick();
     }
@@ -129,10 +136,10 @@ pub const Network = struct {
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
         assert(core.count() > 0);
 
-        network.packet_simulator.options.packet_loss_probability = 0;
-        network.packet_simulator.options.packet_replay_probability = 0;
-        network.packet_simulator.options.partition_probability = 0;
-        network.packet_simulator.options.unpartition_probability = 0;
+        network.packet_simulator.options.packet_loss_probability = ratio(0, 100);
+        network.packet_simulator.options.packet_replay_probability = ratio(0, 100);
+        network.packet_simulator.options.partition_probability = ratio(0, 100);
+        network.packet_simulator.options.unpartition_probability = ratio(0, 100);
 
         var it_source = core.iterator(.{});
         while (it_source.next()) |replica_source| {
@@ -223,6 +230,7 @@ pub const Network = struct {
     }
 
     pub fn send_message(network: *Network, message: *Message, path: Path) void {
+        network.message_summary.add(message.header);
         log.debug("send_message: {} > {}: {}", .{
             path.source,
             path.target,
@@ -302,7 +310,8 @@ pub const Network = struct {
         });
 
         if (target_message.header.command == .request or
-            target_message.header.command == .prepare)
+            target_message.header.command == .prepare or
+            target_message.header.command == .block)
         {
             const sector_ceil = vsr.sector_ceil(target_message.header.size);
             if (target_message.header.size != sector_ceil) {
@@ -323,5 +332,56 @@ pub const Network = struct {
                 return .{ .client = raw };
             },
         }
+    }
+};
+
+pub const MessageSummary = struct {
+    map: Map = Map.initFill(.{ .count = 0, .size = 0 }),
+
+    const Map = std.EnumArray(vsr.Command, struct { count: u32, size: u64 });
+
+    pub fn add(summary: *MessageSummary, header: *const vsr.Header) void {
+        const entry = summary.map.getPtr(header.command);
+        entry.count += 1;
+        entry.size += header.size;
+    }
+
+    pub fn format(
+        summary: MessageSummary,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+
+        const slice = comptime std.enums.values(vsr.Command);
+        var commands = slice[0..slice.len].*;
+        std.mem.sort(vsr.Command, &commands, summary.map, greater_than);
+
+        var total_count: u32 = 0;
+        var total_size: u64 = 0;
+
+        for (commands) |command| {
+            const message_summary = summary.map.get(command);
+            total_count += message_summary.count;
+            total_size += message_summary.size;
+            if (message_summary.count > 0) {
+                try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+                    @tagName(command),
+                    message_summary.count,
+                    std.fmt.fmtIntSizeBin(message_summary.size),
+                });
+            }
+        }
+        try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+            "total",
+            total_count,
+            std.fmt.fmtIntSizeBin(total_size),
+        });
+    }
+
+    fn greater_than(map: Map, lhs: vsr.Command, rhs: vsr.Command) bool {
+        return map.get(lhs).count > map.get(rhs).count;
     }
 };

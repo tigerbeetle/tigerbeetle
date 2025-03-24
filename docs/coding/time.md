@@ -1,14 +1,23 @@
 # Time
 
 Time is a critical component of all distributed systems and databases. Within TigerBeetle, we keep
-track of two types of time: logical time and physical time.
+track of two types of time: logical time and physical time. Logical time is about ordering events
+relative to each other, and physical time is the everyday time, a numeric timestamp.
 
 ## Logical Time
 
-TigerBeetle uses [Viewstamped replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) for
-its consensus protocol. This ensures
-[strict serializability](http://www.bailis.org/blog/linearizability-versus-serializability/) for all
+TigerBeetle uses a consensus protocol ([Viewstamped
+Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)) to guarantee [strict
+serializability](http://www.bailis.org/blog/linearizability-versus-serializability/) for all
 operations.
+
+In other words, to an external observer, TigerBeetle cluster behaves as if it is just a single
+machine which processes the incoming requests in order. If an application submits a batch of
+transfers with transfer `T1`, receives a reply, and then submits a batch with another transfer `T2`,
+it is guaranteed that `T2` will observe the effects of `T1`. Note, however, that there could be
+concurrent requests from multiple applications, so, unless `T1` and `T2` are in the same batch of
+transfers, some other transfer could happen in between them. See the
+[reference](../reference/sessions.md) for precise guarantees.
 
 ## Physical Time
 
@@ -21,43 +30,32 @@ Financial transactions require physical time for multiple reasons, including:
 - **Compliance and Auditing** - For regulatory and security purposes, it is useful to have a
   specific idea of when (in terms of wall clock time) transfers took place.
 
-### Physical Time is Propagated Through Consensus
-
-TigerBeetle clusters are distributed systems, so we cannot rely on all replicas in a cluster keeping
-their system clocks perfectly in sync. Because of this, we "trust but verify".
-
-In the TigerBeetle consensus protocol messages, replicas exchange timestamp information and monitor
-the skew of their clock with respect to the other replicas. The system ensures that the clock skew
-is within an acceptable window and may choose to stop processing transactions if the clocks are far
-out of sync.
-
-Importantly, the goal is not to reimplement or replace clock synchronization protocols, but to
-verify that the cluster is operating within acceptable error bounds.
+TigerBeetle uses two-layered approach to physical time. On the basic layer, each replica asks the
+underling operating system about the current time. Then, timing information from several replicas is
+aggregated to make sure that the replicas roughly agree on the time, to prevent a replica with a bad
+clock from issuing incorrect timestamps. Additionally, this "cluster time" is made strictly
+monotonic, for end user's convenience.
 
 ## Why TigerBeetle Manages Timestamps
 
-Timestamps on [`Transfer`s](../reference/transfer.md#timestamp) and
-[`Account`s](../reference/account.md#timestamp) are **set by the primary node** in the
-TigerBeetle cluster when it receives the operation.
-
-The primary then propagates the operations to all replicas, including the timestamps it determined.
-All replicas process the state machine transitions deterministically, based on the primary's
-timestamp -- _not_ based on their own system time.
-
-Primary nodes monitor their clock skew with respect to the other replicas and may abdicate their
-role as primary if they appear to be far off the rest of the cluster.
-
-This is why the `timestamp` field must be set to `0` when operations are submitted, and it is then
-set by the primary.
+An important invariant is that the TigerBeetle cluster assigns all timestamps. In particular,
+timestamps on [`Transfer`s](../reference/transfer.md#timestamp) and
+[`Account`s](../reference/account.md#timestamp) are set by the cluster when the corresponding event
+arrives at the primary. This is why the `timestamp` field must be set to `0` when operations are
+submitted by the client.
 
 Similarly, the [`Transfer.timeout`](../reference/transfer.md#timeout) is given as an interval
 in seconds, rather than as an absolute timestamp, because it is also managed by the primary. The
 `timeout` is calculated relative to the `timestamp` when the operation arrives at the primary.
 
+This restriction is needed to make sure that any two timestamps always refer to the same underlying
+clock (cluster's physical time) and are directly comparable. This in turn provides a set of powerful
+guarantees.
+
 ### Timestamps are Totally Ordered
 
 All `timestamp`s within TigerBeetle are unique, immutable and
-[totally ordered](http://book.mixu.net/distsys/time.html). A transfer that is created before another
+[totally ordered](https://book.mixu.net/distsys/time.html). A transfer that is created before another
 transfer is guaranteed to have an earlier `timestamp` (even if they were created in the same
 request).
 
@@ -66,10 +64,8 @@ timestamp, or "system" timestamp.
 
 ## Further Reading
 
-Watch this talk on
-[Detecting Clock Sync Failure in Highly Available Systems](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
-on YouTube for more details.
+If you are curious how exactly it is that TigerBeetle achieves strictly monotonic physical time, we
+have a talk and a blog post with details:
 
-You can also read the blog post
-[Three Clocks are Better than One](https://tigerbeetle.com/blog/2021-08-30-three-clocks-are-better-than-one)
-for more on how nodes determine their own time and clock skew.
+* [Detecting Clock Sync Failure in Highly Available Systems (YouTube)](https://youtu.be/7R-Iz6sJG6Q?si=9sD2TpfD29AxUjOY)
+* [Three Clocks are Better than One (TigerBeetle Blog)](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/)

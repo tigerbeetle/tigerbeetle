@@ -255,7 +255,6 @@ pub const CreateTransferResult = enum(u32) {
 
     closing_transfer_must_be_pending = 64,
 
-    amount_must_not_be_zero = 18,
     ledger_must_not_be_zero = 19,
     code_must_not_be_zero = 20,
 
@@ -299,6 +298,8 @@ pub const CreateTransferResult = enum(u32) {
 
     exceeds_credits = 54,
     exceeds_debits = 55,
+
+    deprecated_18 = 18, // amount_must_not_be_zero.
 
     // Update this comment when adding a new value:
     // Last item: id_already_failed = 68.
@@ -357,7 +358,6 @@ pub const CreateTransferResult = enum(u32) {
             .pending_id_must_be_different,
             .timeout_reserved_for_pending_transfer,
             .closing_transfer_must_be_pending,
-            .amount_must_not_be_zero,
             .ledger_must_not_be_zero,
             .code_must_not_be_zero,
             .accounts_must_have_the_same_ledger,
@@ -380,6 +380,8 @@ pub const CreateTransferResult = enum(u32) {
             .overflows_credits,
             .overflows_timeout,
             => false,
+
+            .deprecated_18 => unreachable,
         };
     }
 

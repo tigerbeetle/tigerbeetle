@@ -259,17 +259,15 @@ pub fn GrooveType(
         };
     }
 
-    comptime var index_options_fields: []const std.builtin.Type.StructField = &.{};
-    for (index_fields) |index_field| {
+    comptime var index_options_fields: [index_fields.len]std.builtin.Type.StructField = undefined;
+    for (index_fields, 0..) |index_field, i| {
         const IndexTree = index_field.type;
-        index_options_fields = index_options_fields ++ [_]std.builtin.Type.StructField{
-            .{
-                .name = index_field.name,
-                .type = IndexTree.Options,
-                .default_value = null,
-                .is_comptime = false,
-                .alignment = @alignOf(IndexTree.Options),
-            },
+        index_options_fields[i] = .{
+            .name = index_field.name,
+            .type = IndexTree.Options,
+            .default_value = null,
+            .is_comptime = false,
+            .alignment = @alignOf(IndexTree.Options),
         };
     }
 
@@ -325,7 +323,7 @@ pub fn GrooveType(
     const _IndexTreeOptions = @Type(.{
         .Struct = .{
             .layout = .auto,
-            .fields = index_options_fields,
+            .fields = &index_options_fields,
             .decls = &.{},
             .is_tuple = false,
         },
@@ -605,11 +603,11 @@ pub fn GrooveType(
             groove.objects_cache = try ObjectsCache.init(allocator, .{
                 .cache_value_count_max = options.cache_entries_max,
 
-                // In the worst case, each Map must be able to store batch_value_count_limit per
+                // In the worst case, each stash must be able to store batch_value_count_limit per
                 // beat (to contain either TableMutable or TableImmutable) as well as the maximum
                 // number of prefetches a bar may perform, excluding prefetches already accounted
                 // for by batch_value_count_limit.
-                .map_value_count_max = constants.lsm_compaction_ops *
+                .stash_value_count_max = constants.lsm_compaction_ops *
                     (options.tree_options_object.batch_value_count_limit +
                     options.prefetch_entries_for_read_max),
 
@@ -617,7 +615,7 @@ pub fn GrooveType(
                 // single scope is batch_value_count_limit (total – not per beat).
                 .scope_value_count_max = options.tree_options_object.batch_value_count_limit,
 
-                .name = comptime tree_name(Object),
+                .name = ObjectTree.tree_name(),
             });
             errdefer groove.objects_cache.deinit(allocator);
 
@@ -628,7 +626,7 @@ pub fn GrooveType(
                 grid,
                 .{
                     .id = @field(groove_options.ids, "timestamp"),
-                    .name = comptime tree_name(Object),
+                    .name = ObjectTree.tree_name(),
                 },
                 options.tree_options_object,
             );
@@ -640,7 +638,7 @@ pub fn GrooveType(
                 grid,
                 .{
                     .id = @field(groove_options.ids, "id"),
-                    .name = comptime tree_name(Object) ++ ".id",
+                    .name = ObjectTree.tree_name() ++ ".id",
                 },
                 options.tree_options_id,
             );
@@ -666,7 +664,7 @@ pub fn GrooveType(
                     grid,
                     .{
                         .id = @field(groove_options.ids, field.name),
-                        .name = comptime tree_name(Object) ++ "." ++ field.name,
+                        .name = ObjectTree.tree_name() ++ "." ++ field.name,
                     },
                     @field(options.tree_options_index, field.name),
                 );
@@ -734,7 +732,7 @@ pub fn GrooveType(
         }
 
         pub fn get(groove: *const Groove, key: PrimaryKey) union(enum) {
-            found_object: *const Object,
+            found_object: Object,
             found_orphaned_id,
             not_found,
         } {
@@ -745,7 +743,7 @@ pub fn GrooveType(
                     return .found_orphaned_id;
                 }
 
-                return .{ .found_object = object };
+                return .{ .found_object = object.* };
             }
 
             return .not_found;
@@ -956,10 +954,9 @@ pub fn GrooveType(
             fn start_workers(context: *PrefetchContext) void {
                 assert(context.workers_pending == 0);
 
-                context.groove.grid.trace.start(
-                    .lookup,
-                    .{ .tree = context.groove.objects.config.name },
-                );
+                context.groove.grid.trace.start(.{
+                    .lookup = .{ .tree = @enumFromInt(context.groove.objects.config.id) },
+                });
 
                 // Track an extra "worker" that will finish after the loop.
                 // This allows the callback to be called asynchronously on `next_tick`
@@ -975,8 +972,10 @@ pub fn GrooveType(
                     };
 
                     context.groove.grid.trace.start(
-                        .{ .lookup_worker = .{ .index = worker.index } },
-                        .{ .tree = context.groove.objects.config.name },
+                        .{ .lookup_worker = .{
+                            .index = worker.index,
+                            .tree = @enumFromInt(context.groove.objects.config.id),
+                        } },
                     );
 
                     context.workers_pending += 1;
@@ -1017,10 +1016,9 @@ pub fn GrooveType(
                 context.groove.prefetch_keys.clearRetainingCapacity();
                 assert(context.groove.prefetch_keys.count() == 0);
 
-                context.groove.grid.trace.stop(
-                    .lookup,
-                    .{ .tree = context.groove.objects.config.name },
-                );
+                context.groove.grid.trace.stop(.{
+                    .lookup = .{ .tree = @enumFromInt(context.groove.objects.config.id) },
+                });
 
                 context.callback(context);
             }
@@ -1065,8 +1063,10 @@ pub fn GrooveType(
                 assert(worker.current == null);
                 const prefetch_entry = worker.context.key_iterator.next() orelse {
                     worker.context.groove.grid.trace.stop(
-                        .{ .lookup_worker = .{ .index = worker.index } },
-                        .{ .tree = worker.context.groove.objects.config.name },
+                        .{ .lookup_worker = .{
+                            .index = worker.index,
+                            .tree = @enumFromInt(worker.context.groove.objects.config.id),
+                        } },
                     );
 
                     worker.context.worker_finished();
@@ -1216,13 +1216,7 @@ pub fn GrooveType(
         pub fn insert(groove: *Groove, object: *const Object) void {
             assert(object.timestamp >= TimestampRange.timestamp_min);
             assert(object.timestamp <= TimestampRange.timestamp_max);
-
-            // Old clients may retry the same transient error many times.
-            // TODO: When client_release_min is bumped, replace this code with
-            // `assert(!groove.objects_cache.has(@field(object, primary_field)));`
-            if (groove.objects_cache.get(@field(object, primary_field))) |existing| {
-                assert(existing.timestamp == 0);
-            }
+            assert(!groove.objects_cache.has(@field(object, primary_field)));
 
             groove.objects_cache.upsert(object);
 
@@ -1255,12 +1249,7 @@ pub fn GrooveType(
 
             if (constants.verify) {
                 const old_from_cache = groove.objects_cache.get(@field(old, primary_field)).?;
-
-                // While all that's actually required is that the _contents_ of the old_from_cache
-                // and old objects are identical, in current usage they're always the same piece of
-                // memory. We'll assert that for now, and this can be weakened in future if
-                // required.
-                assert(old_from_cache == old);
+                assert(stdx.equal_bytes(Object, old_from_cache, old));
             }
 
             // Sanity check to ensure the caller didn't accidentally pass in an alias.
@@ -1356,14 +1345,7 @@ pub fn GrooveType(
             // We should not insert an orphaned `id` inside a scope.
             assert(!groove.objects_cache.scope_is_active);
             assert(groove.ids.active_scope == null);
-
-            // Old clients may retry the same transient error many times.
-            // TODO: When client_release_min is bumped, replace this code with
-            // `assert(!groove.objects_cache.has(id));`
-            if (groove.objects_cache.get(id)) |object| {
-                assert(object.timestamp == 0);
-                return;
-            }
+            assert(!groove.objects_cache.has(id));
 
             groove.objects_cache.upsert(&std.mem.zeroInit(Object, .{ .id = id }));
             groove.ids.put(&.{ .id = id, .timestamp = 0 });
@@ -1451,16 +1433,6 @@ pub fn GrooveType(
             }
         }
     };
-}
-
-// Returns the last segment of a type's fully-qualified name.
-fn tree_name(comptime Object: type) []const u8 {
-    const name_full = @typeName(Object);
-    if (std.mem.lastIndexOfScalar(u8, name_full, '.')) |offset| {
-        return name_full[offset + 1 ..];
-    } else {
-        return name_full;
-    }
 }
 
 test "Groove" {

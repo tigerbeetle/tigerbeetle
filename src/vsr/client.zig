@@ -109,7 +109,7 @@ pub fn ClientType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the client's ID.
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
 
         on_reply_context: ?*anyopaque = null,
         /// Used for testing. Called for replies to all operations (including `register`).
@@ -174,7 +174,7 @@ pub fn ClientType(
                     .id = options.id,
                     .after = 30000 / constants.tick_ms,
                 },
-                .prng = std.rand.DefaultPrng.init(@as(u64, @truncate(options.id))),
+                .prng = stdx.PRNG.from_seed(@as(u64, @truncate(options.id))),
                 .on_eviction_callback = options.eviction_callback,
             };
 
@@ -554,11 +554,11 @@ pub fn ClientType(
                 std.time.ns_per_ms,
             );
             if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
-                log.warn("{}: on_reply: request={} size={} {s} time={}ms", .{
+                log.warn("{}: on_reply: slow request, request={} size={} {s} time={}ms", .{
                     self.id,
-                    reply.header.request,
-                    reply.header.size,
-                    reply.header.operation.tag_name(StateMachine),
+                    inflight.message.header.request,
+                    inflight.message.header.size,
+                    inflight.message.header.operation.tag_name(StateMachine),
                     request_completion_time_ms,
                 });
             }
@@ -626,7 +626,7 @@ pub fn ClientType(
         }
 
         fn on_request_timeout(self: *Client) void {
-            self.request_timeout.backoff(self.prng.random());
+            self.request_timeout.backoff(&self.prng);
 
             const message = self.request_inflight.?.message;
             assert(message.header.command == .request);

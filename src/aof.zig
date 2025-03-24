@@ -467,7 +467,7 @@ pub const AOFReplayClient = struct {
 
 pub fn aof_merge(
     allocator: std.mem.Allocator,
-    input_paths: [][]const u8,
+    input_paths: []const []const u8,
     output_path: []const u8,
 ) !void {
     const stdout = std.io.getStdOut().writer();

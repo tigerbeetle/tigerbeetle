@@ -916,6 +916,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 if (!message.header.valid_checksum_body(message.body_used())) {
                     break :reason "corrupt body after read";
                 }
+
+                const message_padding =
+                    message.buffer[message.header.size..vsr.sector_ceil(message.header.size)];
+                if (!stdx.zeroed(message_padding)) {
+                    break :reason "corrupt sector padding";
+                }
                 break :reason null;
             };
 
@@ -933,7 +939,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 callback(replica, null, null);
             } else {
                 assert(message.header.checksum == checksum);
-
                 callback(replica, message, destination_replica);
             }
         }
@@ -1161,7 +1166,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             if (read.message.header.valid_checksum() and
                 read.message.header.valid_checksum_body(read.message.body_used()))
             {
-                journal.headers[slot.index] = read.message.header.*;
+                const message_size = read.message.header.size;
+                const message_padding =
+                    read.message.buffer[message_size..vsr.sector_ceil(message_size)];
+
+                if (stdx.zeroed(message_padding)) {
+                    journal.headers[slot.index] = read.message.header.*;
+                }
             }
 
             replica.message_bus.unref(read.message);
@@ -1207,17 +1218,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///
         /// Recovery decision table:
         ///
-        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M  @N
-        ///   header valid             0   1   1   0   0   0   1   1   1   1   1   1   1   1
-        ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0   0
-        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1   1
-        ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0   0
-        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _   _
-        ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   0   1
-        ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1   1  !1
-        ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !0  !1
-        ///   prepare.op < checkpoint  _   _   _   _   _   _   _   _   _   _   _   0   1   _
-        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr fix eql
+        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M
+        ///   header valid             0   1   1   0   0   0   1   1   1   1   1   1   1
+        ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0
+        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1
+        ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0
+        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _
+        ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
+        ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
+        ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
+        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr eql
         ///   decision (replicas=1)              fix fix
         ///
         /// Legend:
@@ -1504,7 +1514,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.?.checksum == prepare.?.checksum);
                     assert(journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
-                    journal.headers[slot.index] = header.?.*;
+                    journal.headers[slot.index] = header.?;
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1515,17 +1525,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare.?.operation == .reserved);
                     assert(header.?.checksum == prepare.?.checksum);
                     assert(
-                        header.?.checksum == Header.Prepare.reserved(cluster, slot.index).checksum,
+                        header.?.checksum == Header.Prepare.reserve(cluster, slot.index).checksum,
                     );
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
-                    journal.headers[slot.index] = header.?.*;
+                    journal.headers[slot.index] = header.?;
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
                 .fix => {
                     assert(prepare.?.command == .prepare);
-                    journal.headers[slot.index] = prepare.?.*;
+                    journal.headers[slot.index] = prepare.?;
                     journal.faulty.clear(slot);
                     assert(journal.dirty.bit(slot));
                     if (replica.solo()) {
@@ -1538,7 +1548,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     }
                 },
                 .vsr => {
-                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserve(cluster, slot.index);
                     assert(journal.dirty.bit(slot));
                     assert(journal.faulty.bit(slot));
                 },
@@ -1547,7 +1557,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(prepare == null);
                     assert(!journal.prepare_inhabited[slot.index]);
                     assert(journal.prepare_checksums[slot.index] == 0);
-                    journal.headers[slot.index] = Header.Prepare.reserved(cluster, slot.index);
+                    journal.headers[slot.index] = Header.Prepare.reserve(cluster, slot.index);
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
@@ -1555,7 +1565,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             journal.headers_redundant[slot.index] = journal.headers[slot.index];
             if (journal.faulty.bit(slot)) {
-                assert(journal.headers_redundant[slot.index].operation == .reserved);
                 journal.headers_redundant[slot.index].checksum = 0; // Invalidate the checksum.
             }
             assert(journal.faulty.bit(slot) !=
@@ -1680,7 +1689,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     assert(header.op % slot_count == index);
                     assert(journal.prepare_inhabited[index]);
                     assert(journal.prepare_checksums[index] == header.checksum);
-                    assert(!journal.faulty.bit(Slot{ .index = index }));
+                    maybe(journal.faulty.bit(Slot{ .index = index }));
                 }
             }
             callback(journal);
@@ -1710,7 +1719,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         pub fn remove_entry(journal: *Journal, slot: Slot) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 
-            const reserved = Header.Prepare.reserved(replica.cluster, slot.index);
+            const reserved = Header.Prepare.reserve(replica.cluster, slot.index);
             journal.headers[slot.index] = reserved;
             journal.headers_redundant[slot.index] = reserved;
             journal.dirty.clear(slot);
@@ -1763,7 +1772,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // faulty bit + nack this header.
                     journal.faulty.clear(slot);
                     journal.headers_redundant[slot.index] =
-                        Header.Prepare.reserved(header.cluster, slot.index);
+                        Header.Prepare.reserve(header.cluster, slot.index);
                 }
 
                 journal.headers[slot.index] = header.*;
@@ -2264,11 +2273,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 ///
 /// @L:
-/// The message was rewritten due to a view change, and belongs to the current checkpoint.
+/// Either:
+/// - The message was rewritten due to a view change.
+/// - The prepare write was lost, but the previous prepare had the same op (but a different view).
 ///
-/// Unlike @M (which has decision=fix), this case has decision=vsr.
-/// The prepare and header have different views, but regardless of which is greater, recovery can't
-/// distinguish which is actually *newer*.
+/// The prepare and header have different views, but regardless of which is greater (and in both of
+/// the above cases), recovery can't distinguish which is actually *newer*. Thus, we can't `fix`,
+/// despite having a valid prepare.
 ///
 /// For example, if the header.view=2 and prepare.view=4, any of these scenarios are possible:
 /// - Before crashing, we wrote the view=4 prepare, and then lost/misdirected the write for the
@@ -2279,17 +2290,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///   view=4 header. The view=2 header is left behind from view=2 or view=3.
 ///   (This last case is the most likely.)
 ///
+///
 /// @M:
-/// The message was rewritten due to a view change, but belongs to a previous checkpoint.
-/// Unlike @L, the decision is "fix" to avoid a replica entering `status=recovering_head` (via
-/// `!op_head_certain`).
-///
-/// This exact prepare is not necessarily committed – it might have been rewritten again, and then
-/// the replica skipped past it via state sync. But the replica won't replay this op anyway (since
-/// it precedes the checkpoint) so it doesn't matter.
-///
-///
-/// @N:
 /// The redundant header matches the message's header.
 /// This is the usual case: both the prepare and header are correct and equivalent.
 const recovery_cases = table: {
@@ -2311,25 +2313,23 @@ const recovery_cases = table: {
         //    op⌈  prepare.op is maximum of all prepare.ops
         //    op=  header.op == prepare.op
         //    op<  header.op  < prepare.op
-        //    op⌊  prepare.op < op_checkpoint
         //   view  header.view == prepare.view
         //
         //        Label  Decision      Header  Prepare Compare
-        //               R>1   R=1     ok  nil ok  nil op⌈ ✓∑  op= op< op⌊ view
-        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __, __ }),
-        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __, __ }),
-        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __, __ }),
-        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __, __ }),
-        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __, __ }),
-        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __, __ }),
-        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, __, __, __, __, __ }),
-        Case.init("@H", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __, __ }),
-        Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, __, a1 }), // normal path: reserved
-        Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __, __ }), // header.op < prepare.op
-        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __, __ }), // header.op > prepare.op
-        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, _0, a0 }), // header.op ≥ op_checkpoint
-        Case.init("@M", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _1, a0, _1, a0 }), // header.op < op_checkpoint
-        Case.init("@N", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, __, a1 }), // normal path: prepare
+        //               R>1   R=1     ok  nil ok  nil op⌈ ✓∑  op= op< view
+        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __ }),
+        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __ }),
+        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __ }),
+        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __ }),
+        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __ }),
+        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __ }),
+        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, __, __, __, __ }),
+        Case.init("@H", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __ }),
+        Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, a1 }), // normal path: reserved
+        Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __ }), // header.op < prepare.op
+        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __ }), // header.op > prepare.op
+        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, a0 }),
+        Case.init("@M", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, a1 }), // normal path: prepare
     };
 };
 
@@ -2370,15 +2370,16 @@ const Case = struct {
     /// 5: header.checksum == prepare.checksum
     /// 6: header.op == prepare.op
     /// 7: header.op < prepare.op
-    /// 8: prepare.op < op_checkpoint
-    /// 9: header.view == prepare.view
-    pattern: [10]Matcher,
+    /// 8: header.view == prepare.view
+    pattern: [pattern_size]Matcher,
+
+    const pattern_size = 9;
 
     fn init(
         label: []const u8,
         decision_multiple: RecoveryDecision,
         decision_single: RecoveryDecision,
-        pattern: [10]Matcher,
+        pattern: [pattern_size]Matcher,
     ) Case {
         return .{
             .label = label,
@@ -2388,14 +2389,14 @@ const Case = struct {
         };
     }
 
-    fn check(case: *const Case, parameters: [10]bool) !bool {
-        for (parameters, 0..) |b, i| {
-            switch (case.pattern[i]) {
+    fn check(case: *const Case, parameters: [pattern_size]bool) !bool {
+        for (case.pattern, parameters) |pattern, parameter| {
+            switch (pattern) {
                 .any => {},
-                .is_false => if (b) return false,
-                .is_true => if (!b) return false,
-                .assert_is_false => if (b) return error.ExpectFalse,
-                .assert_is_true => if (!b) return error.ExpectTrue,
+                .is_false => if (parameter) return false,
+                .is_true => if (!parameter) return false,
+                .assert_is_false => if (parameter) return error.ExpectFalse,
+                .assert_is_true => if (!parameter) return error.ExpectTrue,
             }
         }
         return true;
@@ -2411,8 +2412,8 @@ const Case = struct {
 };
 
 fn recovery_case(
-    header: ?*const Header.Prepare,
-    prepare: ?*const Header.Prepare,
+    header: ?Header.Prepare,
+    prepare: ?Header.Prepare,
     data: struct {
         prepare_op_max: u64,
         op_checkpoint: u64,
@@ -2424,7 +2425,7 @@ fn recovery_case(
     if (h_ok) assert(header.?.invalid() == null);
     if (p_ok) assert(prepare.?.invalid() == null);
 
-    const parameters = .{
+    const parameters: [Case.pattern_size]bool = .{
         h_ok,
         if (h_ok) header.?.operation == .reserved else false,
         p_ok,
@@ -2433,7 +2434,6 @@ fn recovery_case(
         if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
         if (h_ok and p_ok) header.?.op == prepare.?.op else false,
         if (h_ok and p_ok) header.?.op < prepare.?.op else false,
-        if (h_ok and p_ok) prepare.?.op < data.op_checkpoint else false,
         if (h_ok and p_ok) header.?.view == prepare.?.view else false,
     };
 
@@ -2466,7 +2466,7 @@ fn header_ok(
     cluster: u128,
     slot: Slot,
     header: *const Header.Prepare,
-) ?*const Header.Prepare {
+) ?Header.Prepare {
     // We must first validate the header checksum before accessing any fields.
     // Otherwise, we may hit undefined data or an out-of-bounds enum and cause a runtime crash.
     if (!header.valid_checksum()) return null;
@@ -2481,19 +2481,18 @@ fn header_ok(
     };
 
     // Do not check the checksum here, because that would run only after the other field accesses.
-    return if (valid_cluster_command_and_slot) header else null;
+    return if (valid_cluster_command_and_slot) header.* else null;
 }
 
 test "recovery_cases" {
-    const parameters_count = 10;
     // Verify that every pattern matches exactly one case.
     //
     // Every possible combination of parameters must either:
     // * have a matching case
     // * have a case that fails (which would result in a panic).
     var i: usize = 0;
-    while (i < (1 << parameters_count)) : (i += 1) {
-        var parameters: [parameters_count]bool = undefined;
+    while (i < (1 << Case.pattern_size)) : (i += 1) {
+        var parameters: [Case.pattern_size]bool = undefined;
         comptime var j: usize = 0;
         inline while (j < parameters.len) : (j += 1) {
             parameters[j] = i & (1 << j) != 0;
@@ -2586,7 +2585,7 @@ pub fn format_wal_headers(cluster: u128, offset_logical: u64, target: []u8) usiz
         if (slot == 0 and i == 0) {
             header.* = Header.Prepare.root(cluster);
         } else {
-            header.* = Header.Prepare.reserved(cluster, slot);
+            header.* = Header.Prepare.reserve(cluster, slot);
         }
     }
     return headers_count * @sizeOf(Header);
@@ -2631,7 +2630,7 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
                 if (message_slot == 0) {
                     sector_header.* = Header.Prepare.root(cluster);
                 } else {
-                    sector_header.* = Header.Prepare.reserved(cluster, message_slot);
+                    sector_header.* = Header.Prepare.reserve(cluster, message_slot);
                 }
             }
         }

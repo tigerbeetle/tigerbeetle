@@ -99,7 +99,7 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
     }
 
     inline for (comptime std.meta.fields(Commands)) |field| {
-        comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
+        comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
         if (std.mem.eql(u8, first_arg, field.name)) {
             return @unionInit(Commands, field.name, parse_flags(args, field.type));
         }
@@ -548,7 +548,7 @@ pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
 
         var result: []const u8 = "--";
         var index = 0;
-        while (std.mem.indexOf(u8, field.name[index..], "_")) |i| {
+        while (std.mem.indexOfScalar(u8, field.name[index..], '_')) |i| {
             result = result ++ field.name[index..][0..i] ++ "-";
             index = index + i + 1;
         }
@@ -563,7 +563,7 @@ test flag_name {
 }
 
 fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
-    comptime assert(std.mem.indexOf(u8, field.name, "_") == null);
+    comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
     return "<" ++ field.name ++ ">";
 }
 

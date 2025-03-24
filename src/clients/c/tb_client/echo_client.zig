@@ -238,7 +238,7 @@ test "Echo Demuxer" {
     const Time = vsr.time.Time;
     const Client = EchoClientType(StateMachine, MessageBus, Time);
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,
@@ -255,7 +255,7 @@ test "Echo Demuxer" {
             var events_offset: usize = 0;
             while (events_offset < events_total) {
                 const events_limit = events_total - events_offset;
-                const events_count = @max(1, prng.random().uintAtMost(usize, events_limit));
+                const events_count = prng.range_inclusive(usize, 1, events_limit);
                 defer events_offset += events_count;
 
                 const reply_bytes = demuxer.decode(@intCast(events_offset), @intCast(events_count));

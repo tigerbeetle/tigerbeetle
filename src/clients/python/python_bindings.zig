@@ -1,6 +1,6 @@
 const std = @import("std");
 const vsr = @import("vsr");
-const tb_client = vsr.tb_client;
+const exports = vsr.tb_client.exports;
 const assert = std.debug.assert;
 
 const constants = vsr.constants;
@@ -12,12 +12,14 @@ const tb = vsr.tigerbeetle;
 
 /// VSR type mappings: these will always be the same regardless of state machine.
 const mappings_vsr = .{
-    .{ tb_client.tb_operation_t, "Operation" },
-    .{ tb_client.tb_packet_status_t, "PacketStatus" },
-    .{ tb_client.tb_packet_t, "Packet" },
-    .{ tb_client.tb_client_t, "Client" },
-    .{ tb_client.tb_status_t, "Status" },
-    .{ tb_client.tb_register_log_callback_status_t, "RegisterLogCallbackStatus" },
+    .{ exports.tb_operation, "Operation" },
+    .{ exports.tb_packet_status, "PacketStatus" },
+    .{ exports.tb_packet_t, "Packet" },
+    .{ exports.tb_client_t, "Client" },
+    .{ exports.tb_init_status, "InitStatus" },
+    .{ exports.tb_client_status, "ClientStatus" },
+    .{ exports.tb_log_level, "LogLevel" },
+    .{ exports.tb_register_log_callback_status, "RegisterLogCallbackStatus" },
 };
 
 /// State machine specific mappings: in future, these should be pulled automatically from the state
@@ -168,6 +170,7 @@ fn emit_enum(
     }
 
     inline for (type_info.fields, 0..) |field, i| {
+        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         comptime var skip = false;
         inline for (skip_fields) |sf| {
             skip = skip or comptime std.mem.eql(u8, sf, field.name);
@@ -412,7 +415,7 @@ pub fn main() !void {
             },
             .Enum => |info| {
                 comptime var skip: []const []const u8 = &.{};
-                if (ZigType == tb_client.tb_operation_t) {
+                if (ZigType == exports.tb_operation) {
                     skip = &.{ "reserved", "root", "register" };
                 }
 
@@ -469,22 +472,22 @@ pub fn main() !void {
     // TODO: use `std.meta.declaractions` and generate with pub + export functions.
     buffer.print(
         \\# Don't be tempted to use c_char_p for bytes_ptr - it's for null terminated strings only.
-        \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, Client, ctypes.POINTER(CPacket),
+        \\OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CPacket),
         \\                                ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
-        \\LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint8, ctypes.c_void_p, ctypes.c_uint)
+        \\LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
         \\
         \\# Initialize a new TigerBeetle client which connects to the addresses provided and
         \\# completes submitted packets by invoking the callback with the given context.
         \\tb_client_init = tbclient.tb_client_init
-        \\tb_client_init.restype = Status
-        \\tb_client_init.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+        \\tb_client_init.restype = InitStatus
+        \\tb_client_init.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
         \\                           ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
         \\                           OnCompletion]
         \\
         \\# Initialize a new TigerBeetle client which echos back any data submitted.
         \\tb_client_init_echo = tbclient.tb_client_init_echo
-        \\tb_client_init_echo.restype = Status
-        \\tb_client_init_echo.argtypes = [ctypes.POINTER(Client), ctypes.POINTER(ctypes.c_uint8 * 16),
+        \\tb_client_init_echo.restype = InitStatus
+        \\tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
         \\                                ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
         \\                                OnCompletion]
         \\
@@ -492,15 +495,15 @@ pub fn main() !void {
         \\# `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
         \\# It is undefined behavior to use any functions on the client once deinit is called.
         \\tb_client_deinit = tbclient.tb_client_deinit
-        \\tb_client_deinit.restype = None
-        \\tb_client_deinit.argtypes = [Client]
+        \\tb_client_deinit.restype = ClientStatus
+        \\tb_client_deinit.argtypes = [ctypes.POINTER(CClient)]
         \\
         \\# Submit a packet with its operation, data, and data_size fields set.
         \\# Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
         \\# packet on the `tb_client` thread (separate from caller's thread).
         \\tb_client_submit = tbclient.tb_client_submit
-        \\tb_client_submit.restype = None
-        \\tb_client_submit.argtypes = [Client, ctypes.POINTER(CPacket)]
+        \\tb_client_submit.restype = ClientStatus
+        \\tb_client_submit.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(CPacket)]
         \\
         \\tb_client_register_log_callback = tbclient.tb_client_register_log_callback
         \\tb_client_register_log_callback.restype = RegisterLogCallbackStatus
@@ -523,9 +526,10 @@ pub fn main() !void {
         inline for (std.meta.fields(StateMachine.Operation)) |operation| {
             const op: StateMachine.Operation = @enumFromInt(operation.value);
             // TODO: Pulse shouldn't be hardcoded.
-            if (op != .pulse) {
-                emit_method(&buffer, operation, .{ .is_async = is_async });
-            }
+            if (op == .pulse) continue;
+            if (op == .get_events) continue;
+
+            emit_method(&buffer, operation, .{ .is_async = is_async });
         }
 
         buffer.print("\n\n", .{});

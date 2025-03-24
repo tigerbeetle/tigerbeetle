@@ -13,7 +13,7 @@ comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .superblock_quorums, .level = .err },
@@ -34,6 +34,7 @@ const Fuzzers = .{
     .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
+    .signal = @import("./clients/c/tb_client/signal_fuzz.zig"),
     // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
     .canary = {},
     // Quickly run all fuzzers as a smoke test
@@ -87,6 +88,7 @@ fn main_smoke() !void {
             .vsr_journal_format,
             .vsr_superblock_quorums,
             .storage,
+            .signal,
             => null,
         };
 

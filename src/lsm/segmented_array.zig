@@ -1067,7 +1067,7 @@ fn FuzzContextType(
             .unsorted => SegmentedArrayType(T, TestPool, element_count_max, options),
         };
 
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
 
         pool: TestPool,
         array: TestArray,
@@ -1080,10 +1080,10 @@ fn FuzzContextType(
         fn init(
             context: *FuzzContext,
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            prng: *stdx.PRNG,
         ) !void {
             context.* = .{
-                .random = random,
+                .prng = prng,
 
                 .pool = undefined,
                 .array = undefined,
@@ -1109,13 +1109,19 @@ fn FuzzContextType(
         }
 
         fn run(context: *FuzzContext) !void {
+            const Action = enum { insert, remove };
             {
                 var i: usize = 0;
                 while (i < element_count_max * 2) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...59 => try context.insert(),
-                        60...99 => try context.remove(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(
+                        Action,
+                        .{
+                            .insert = 60,
+                            .remove = 40,
+                        },
+                    )) {
+                        .insert => try context.insert(),
+                        .remove => try context.remove(),
                     }
                 }
             }
@@ -1123,10 +1129,15 @@ fn FuzzContextType(
             {
                 var i: usize = 0;
                 while (i < element_count_max * 2) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...39 => try context.insert(),
-                        40...99 => try context.remove(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(
+                        Action,
+                        .{
+                            .insert = 40,
+                            .remove = 60,
+                        },
+                    )) {
+                        .insert => try context.insert(),
+                        .remove => try context.remove(),
                     }
                 }
             }
@@ -1167,14 +1178,14 @@ fn FuzzContextType(
 
             var buffer: [TestArray.node_capacity * 3]T = undefined;
             const count_max = @min(count_free, TestArray.node_capacity * 3);
-            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
-            context.random.bytes(mem.sliceAsBytes(buffer[0..count]));
+            const count = context.prng.range_inclusive(u32, 1, count_max);
+            context.prng.fill(mem.sliceAsBytes(buffer[0..count]));
 
             assert(context.reference.items.len <= element_count_max);
 
             switch (element_order) {
                 .unsorted => {
-                    const index = context.random.uintAtMostBiased(u32, reference_len);
+                    const index = context.prng.int_inclusive(u32, reference_len);
 
                     context.array.insert_elements(&context.pool, index, buffer[0..count]);
                     // TODO the standard library could use an AssumeCapacity variant of this.
@@ -1199,10 +1210,10 @@ fn FuzzContextType(
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, TestArray.node_capacity * 3);
-            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+            const count = context.prng.range_inclusive(u32, 1, count_max);
 
             assert(context.reference.items.len <= element_count_max);
-            const index = context.random.uintAtMostBiased(u32, reference_len - count);
+            const index = context.prng.int_inclusive(u32, reference_len - count);
 
             context.array.remove_elements(&context.pool, index, count);
 
@@ -1219,7 +1230,7 @@ fn FuzzContextType(
             const insert_index = context.array.absolute_index_for_cursor(context.array.first());
 
             var element: T = undefined;
-            context.random.bytes(mem.asBytes(&element));
+            context.prng.fill(mem.asBytes(&element));
 
             context.array.insert_elements(&context.pool, insert_index, &.{element});
             context.reference.insert(insert_index, element) catch unreachable;
@@ -1338,7 +1349,7 @@ fn FuzzContextType(
 
         fn verify_search(context: *FuzzContext) !void {
             var queries: [20]Key = undefined;
-            context.random.bytes(mem.sliceAsBytes(&queries));
+            context.prng.fill(mem.sliceAsBytes(&queries));
 
             // Test min/max exceptional values on different SegmentedArray shapes.
             queries[0] = 0;
@@ -1391,8 +1402,7 @@ fn FuzzContextType(
 }
 
 pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Options) !void {
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
     const TableType = @import("table.zig").TableType;
@@ -1461,7 +1471,7 @@ pub fn run_fuzz(allocator: std.mem.Allocator, seed: u64, comptime options: Optio
             );
 
             var context: FuzzContext = undefined;
-            try context.init(allocator, random);
+            try context.init(allocator, &prng);
             defer context.deinit(allocator);
 
             try context.run();

@@ -3,6 +3,525 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.33
+
+Released: 2025-03-24
+
+Note that [#2824](https://github.com/tigerbeetle/tigerbeetle/pull/2824) bumps the oldest supported
+client version to 0.16.4, removing backward compatibility with various deprecated features. Please
+make sure that all of your clients are running on at least 0.16.4 before upgrading to this release!
+
+### Safety And Performance
+
+- [#2835](https://github.com/tigerbeetle/tigerbeetle/pull/2835)
+
+  Add performance mode to the VOPR, which tracks the number and aggregate size of each kind of
+  message during a run.
+
+### Features
+
+- [#2824](https://github.com/tigerbeetle/tigerbeetle/pull/2824)
+
+  Bump the oldest supported client version to 0.16.4, removing backward compatibility with various
+  deprecated features.
+
+### Internals
+
+- [#2826](https://github.com/tigerbeetle/tigerbeetle/pull/2826)
+
+  Simplify the idiom around adding elements to lists with comptime known lengths.
+
+- [#2827](https://github.com/tigerbeetle/tigerbeetle/pull/2827)
+
+  Better styling for links and block quotes in the documentation.
+
+- [#2831](https://github.com/tigerbeetle/tigerbeetle/pull/2831)
+
+  Change debug multiversion builds to encapsulate two versions as opposed to five.
+
+- [#2832](https://github.com/tigerbeetle/tigerbeetle/pull/2832)
+
+  Improve CFO efficacy by retaining Zig build cache across fuzzing iterations.
+
+- [#2836](https://github.com/tigerbeetle/tigerbeetle/pull/2836)
+
+  Update TigerStyle to add a new rule about using long form arguments in scripts (--force over -f).
+
+- [#2834](https://github.com/tigerbeetle/tigerbeetle/pull/2834),
+  [#2837](https://github.com/tigerbeetle/tigerbeetle/pull/2837),
+  [#2839](https://github.com/tigerbeetle/tigerbeetle/pull/2839),
+  [#2841](https://github.com/tigerbeetle/tigerbeetle/pull/2841),
+
+  Fix various VOPR false positives.
+
+### TigerTracks 🎧
+
+- [On The Way Home](https://open.spotify.com/track/4Fz1WWr5o0OrlIcZxcyZtK?si=4e48d9e99383409a)
+
+## TigerBeetle 0.16.32
+
+Released: 2025-03-17
+
+### Safety And Performance
+
+- [#2798](https://github.com/tigerbeetle/tigerbeetle/pull/2798),
+  [#2815](https://github.com/tigerbeetle/tigerbeetle/pull/2815)
+
+  Vendor the PRNG, and tweak the API to be less wordy.
+
+  PRNG algorithms tend to change, often for reasons not applicable to TigerBeetle. We need neither
+  the fastest, nor the most secure PRNG, and it's better if we rotate our PRNG algorithm at our own
+  pace.
+
+- [#2813](https://github.com/tigerbeetle/tigerbeetle/pull/2813)
+
+  Fix a case where, if a busy cluster's pipeline is full, the prepare_timeout was never reset.
+
+  This improves performance of a local benchmark for a 6-replica cluster with one replica down and 4
+  clients almost ~4x.
+
+### Internals
+
+- [#2804](https://github.com/tigerbeetle/tigerbeetle/pull/2804),
+  [#2806](https://github.com/tigerbeetle/tigerbeetle/pull/2806),
+  [#2803](https://github.com/tigerbeetle/tigerbeetle/pull/2803)
+
+  Add syntax highlighting to docs code snippets (thanks @nilskch!), fix Python example code (thanks
+  @IvoCrnkovic!) and update our HACKING.md with current practices.
+
+- [#2819](https://github.com/tigerbeetle/tigerbeetle/pull/2819),
+  [#2814](https://github.com/tigerbeetle/tigerbeetle/pull/2814),
+  [#2812](https://github.com/tigerbeetle/tigerbeetle/pull/2812)
+
+  Prepare for the [Zig 0.14 upgrade](https://github.com/tigerbeetle/tigerbeetle/pull/2705) by
+  applying as many changes that still work on 0.13 as possible. This includes vendoring AEGIS, to
+  keep hash stability, as 0.14 changes the implementation.
+
+### TigerTracks 🎧
+
+- [Get Ready](https://open.spotify.com/track/4tvOVmc2jorV20Z2hFDtDg?si=15eb0ed7536b4ab3)
+
+## TigerBeetle 0.16.31
+
+Released: 2025-03-09
+
+### Safety And Performance
+
+- [#2790](https://github.com/tigerbeetle/tigerbeetle/pull/2790)
+
+  Use LIFO instead of FIFO for free blocks during compaction for better temporal locality.
+
+- [#2799](https://github.com/tigerbeetle/tigerbeetle/pull/2799)
+
+  Disallow converting negative big integers to `UInt128` in the Java and Go clients, as they
+  would be incorrectly interpreted as unsigned big integers when converted back.
+
+- [#2801](https://github.com/tigerbeetle/tigerbeetle/pull/2801)
+
+  Remove spurious `write_reply_next()` after read completes in `client_replies`,
+  as reads and writes can happen concurrently.
+
+- [#2783](https://github.com/tigerbeetle/tigerbeetle/pull/2783)
+
+  Assert that `cache_map.stash` is not using any element beyond its defined capacity.
+
+### Features
+
+- [#2725](https://github.com/tigerbeetle/tigerbeetle/pull/2725)
+
+  Various REPL fixes and improvements.
+
+- [#2773](https://github.com/tigerbeetle/tigerbeetle/pull/2773)
+
+  Add single-page mode to the documentation website.
+
+### Internals
+
+- [#2791](https://github.com/tigerbeetle/tigerbeetle/pull/2791),
+  [#2792](https://github.com/tigerbeetle/tigerbeetle/pull/2792),
+  [#2793](https://github.com/tigerbeetle/tigerbeetle/pull/2793),
+  [#2794](https://github.com/tigerbeetle/tigerbeetle/pull/2794),
+  [#2795](https://github.com/tigerbeetle/tigerbeetle/pull/2795),
+  [#2796](https://github.com/tigerbeetle/tigerbeetle/pull/2796),
+  [#2807](https://github.com/tigerbeetle/tigerbeetle/pull/2807)
+
+  Miscellaneous documentation typo fixes, clarifications, and references.
+
+- [#2788](https://github.com/tigerbeetle/tigerbeetle/pull/2788),
+  [#2802](https://github.com/tigerbeetle/tigerbeetle/pull/2802)
+
+  Ban qualified `std.debug.assert` and `@memcpy`.
+
+- [#2776](https://github.com/tigerbeetle/tigerbeetle/pull/2776),
+  [#2800](https://github.com/tigerbeetle/tigerbeetle/pull/2800)
+
+  Fix code comment typos.
+
+- [#2595](https://github.com/tigerbeetle/tigerbeetle/pull/2595)
+
+  Add tracking of format time and startup time to the [devhub](https://devhub.tigerbeetle.com/).
+
+### TigerTracks 🎧
+
+- [The Hardest Button To Button](https://www.youtube.com/watch?v=K4dx42YzQCE)
+
+## TigerBeetle 0.16.30
+
+Released: 2025-03-03
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+
+### Safety And Performance
+
+- [#2774](https://github.com/tigerbeetle/tigerbeetle/pull/2774)
+
+  Fix TOCTOU bug in our hybrid set-associative cache and hash map structure, wherein a promotion
+  to the cache coupled with an eviction from the cache could lead to invalid pointer references.
+
+- [#2771](https://github.com/tigerbeetle/tigerbeetle/pull/2771)
+
+  Add logic to crash replica upon receiving unknown commands from clients and other replicas.
+
+- [#2766](https://github.com/tigerbeetle/tigerbeetle/pull/2766)
+
+  Fix upgrade bug wherein a replica does not detect a change in the binary if it is replaced during
+  its initialization in `Replica.open()`.
+
+- [#2761](https://github.com/tigerbeetle/tigerbeetle/pull/2761)
+
+  Alternate replication direction for even and odd ops to better detect breaks in the ring topology.
+
+### Internals
+
+- [#2770](https://github.com/tigerbeetle/tigerbeetle/pull/2770),
+  [#2781](https://github.com/tigerbeetle/tigerbeetle/pull/2781),
+  [#2779](https://github.com/tigerbeetle/tigerbeetle/pull/2779),
+  [#2778](https://github.com/tigerbeetle/tigerbeetle/pull/2778),
+  [#2769](https://github.com/tigerbeetle/tigerbeetle/pull/2769),
+
+  Add new docs content to `TigerBeetle Architecture`, fix miscellaneous typos and references.
+
+- [#2760](https://github.com/tigerbeetle/tigerbeetle/pull/2760)
+
+  Simplify idiom around a replica sending messages to itself.
+
+- [#2764](https://github.com/tigerbeetle/tigerbeetle/pull/2764)
+
+  Refactor MessageBus to remove platform-specific IO logic.
+
+### TigerTracks 🎧
+
+- [For Crying Out Loud](https://open.spotify.com/track/4nsd2DbMYqRwkvIQ51r4cp?si=411872dc9c444535)
+
+## TigerBeetle 0.16.29
+
+Released: 2025-02-24
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+
+### Safety And Performance
+
+- [#2763](https://github.com/tigerbeetle/tigerbeetle/pull/2763)
+
+  Explicitly ignore deprecated protocol messages.
+
+- [#2758](https://github.com/tigerbeetle/tigerbeetle/pull/2758)
+
+  Fix a crash when, during upgrade, replica's binary is changed the second time.
+
+### Features
+
+- [#2698](https://github.com/tigerbeetle/tigerbeetle/pull/2698)
+
+  Implement metrics, using statsd format.
+
+- [#2507](https://github.com/tigerbeetle/tigerbeetle/pull/2507)
+
+  Add new indexes to the account balances to enable CDC.
+
+- [#2521](https://github.com/tigerbeetle/tigerbeetle/pull/2521),
+  [#2751](https://github.com/tigerbeetle/tigerbeetle/pull/2751),
+  [#2756](https://github.com/tigerbeetle/tigerbeetle/pull/2756),
+  [#2757](https://github.com/tigerbeetle/tigerbeetle/pull/2757),
+  [#2754](https://github.com/tigerbeetle/tigerbeetle/pull/2754)
+
+  Restructure documentation.
+
+- [#2727](https://github.com/tigerbeetle/tigerbeetle/pull/2727)
+
+  Implement more standard shortcuts for REPL.
+
+### Internals
+
+- [#2742](https://github.com/tigerbeetle/tigerbeetle/pull/2742)
+
+  Refactor C client API to remove internal mutex.
+
+- [#2747](https://github.com/tigerbeetle/tigerbeetle/pull/2747)
+
+  Don't use deprecated NodeJS APIs in the samples.
+
+- [#2748](https://github.com/tigerbeetle/tigerbeetle/pull/2748),
+  [#2744](https://github.com/tigerbeetle/tigerbeetle/pull/2744)
+
+  Improve documentation search.
+
+- [#2734](https://github.com/tigerbeetle/tigerbeetle/pull/2734)
+
+  Switch to vale for documentation spell checking.
+
+
+### TigerTracks 🎧
+
+- [Зов Крови](https://open.spotify.com/track/6YS6ZOCL6KX9kDRQRzD9s0?si=46730a9a7a7842ab)
+
+## TigerBeetle 0.16.28
+
+Released: 2025-02-17
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+### Safety And Performance
+
+- [#2677](https://github.com/tigerbeetle/tigerbeetle/pull/2677)
+
+  Test misdirected writes in the VOPR.
+
+- [#2711](https://github.com/tigerbeetle/tigerbeetle/pull/2711)
+
+  Fix a recovery correctness bug caused by a misdirected write in the WAL
+  (discovered by the VOPR in #2677).
+
+- [#2728](https://github.com/tigerbeetle/tigerbeetle/pull/2728)
+
+  Refactor the tb_client packet interface, hiding private members in an opaque field.
+  Add assertions to enforce expectations for each packet field.
+
+- [#2717](https://github.com/tigerbeetle/tigerbeetle/pull/2717)
+
+  Fix a Node client crash when it was closed with outstanding requests.
+
+- [#2720](https://github.com/tigerbeetle/tigerbeetle/pull/2720)
+
+  Flush loopback queue before queueing another prepare_ok.
+
+- [#2730](https://github.com/tigerbeetle/tigerbeetle/pull/2730)
+
+  Fuzzer weights are now configurable.
+
+- [#2702](https://github.com/tigerbeetle/tigerbeetle/pull/2702)
+
+  The REPL now uses `StaticAllocator` on init and deinit.
+
+### Features
+
+- [#2716](https://github.com/tigerbeetle/tigerbeetle/pull/2716)
+
+  `tigerbeetle inspect constants` now prints a napkin math estimate for the memory usage.
+
+### Internals
+
+- [#2719](https://github.com/tigerbeetle/tigerbeetle/pull/2719),
+  [#2718](https://github.com/tigerbeetle/tigerbeetle/pull/2718),
+  [#2736](https://github.com/tigerbeetle/tigerbeetle/pull/2736)
+
+  Update docs with new talks, an updated illustration, and a new Slack invite link.
+
+- [#2724](https://github.com/tigerbeetle/tigerbeetle/pull/2724)
+
+  Don't expose VSR module to dependents in build.zig.
+
+### TigerTracks 🎧
+
+- [Formula 06](https://open.spotify.com/track/7rzRbj2WnmxcE5iQfGbhKN)
+
+## TigerBeetle 0.16.27
+
+Released: 2025-02-10
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+### Safety And Performance
+
+- [#2700](https://github.com/tigerbeetle/tigerbeetle/pull/2700)
+
+  Remove redundant calls to `IO.init()` and `IO.deinit()` during the `format` and `start` commands.
+
+  These redundant calls could lead to an assertion error in the Zig standard library when a failure
+  occurs after the second `IO.init()`.
+
+### Features
+
+- [#2701](https://github.com/tigerbeetle/tigerbeetle/pull/2701)
+
+  Enhance the docs search bar with arrow-key navigation over search results, and folder collapse
+  using the enter key.
+
+### Internals
+- [#2713](https://github.com/tigerbeetle/tigerbeetle/pull/2713)
+
+  Add [talks](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TALKS.md) from
+  SystemsDistributed '23, P99 CONF '23, Money2020 '24, and SYCL '24.
+
+- [#2710](https://github.com/tigerbeetle/tigerbeetle/pull/2710)
+
+  Improve CPU utilization of the CFO by spawning fuzzers more frequently.
+
+  Motivated by the measurement that the cumulative CPU was (on average) 40-45% idle.
+
+- [#2709](https://github.com/tigerbeetle/tigerbeetle/pull/2709)
+
+  Assert zeroed padding for WAL prepares in the VOPR.
+
+- [#2703](https://github.com/tigerbeetle/tigerbeetle/pull/2703)
+
+  Remove the deprecated version of the start_view message.
+
+  As part of [#2600](https://github.com/tigerbeetle/tigerbeetle/pull/2600), we rolled out a new
+  on-disk format for the CheckpointState. To avoid bumping the VSR version, we made it so that
+  replicas temporarily send two versions of the start_view message, with both the old and new
+  CheckpointState formats.
+
+- [#2697](https://github.com/tigerbeetle/tigerbeetle/pull/2697)
+
+  Add fair scheduler to the CFO to avoid starvation of short running fuzzers.
+
+  Earlier, long running LSM fuzzers ended up spending more than their fair share of time on the CPU,
+  with only 1-10% of CFO time being spent on short running VOPR fuzzers.
+
+
+### TigerTracks 🎧
+
+- [Neon](https://open.spotify.com/track/7Kohy4v3KLWfUXlv9N3feB?si=a1bb8f16679a44d3)
+
+## TigerBeetle 0.16.26
+
+Released: 2025-02-03
+
+Note: Before performing this upgrade, please make sure to check that no replicas are lagging and
+state syncing.
+
+You can ensure this by temporarily pausing load to the TigerBeetle cluster and waiting for all
+replicas to catch up. If some replicas in your cluster were indeed lagging, you should see
+`on_repair_sync_timeout: request sync; lagging behind cluster` in the logs, followed by
+`sync: ops=`, which indicates the end of state sync. If you don't see the former in the logs, then
+you are already safe to upgrade!
+
+This is to work around an issue in the upgrade between 0.16.25 → 0.16.26, wherein a state syncing
+replica goes into a crash loop when it upgrades to 0.16.26. If one of your replicas has already hit
+this crash loop, please reach out to us on the Community Slack so we can help you safely revive it.
+
+### Safety And Performance
+
+- [#2681](https://github.com/tigerbeetle/tigerbeetle/pull/2681)
+
+  Consider blocks and prepares with nonzero padding to be corrupt.
+  Previously blocks asserted zero padding, which can fail due to bitrot.
+
+  Also fix a similar bug in the superblock copy index handling. The copy index is not covered
+  by a checksum, so we must treat it carefully to avoid propagating bad data if it is corrupt.
+
+  VOPR now injects single-bit errors into storage rather than whole-sector errors.
+
+- [#2600](https://github.com/tigerbeetle/tigerbeetle/pull/2600)
+
+  The current checkpoint process immediately frees all blocks released in the previous checkpoint.
+  This can lead to cluster unavailability by prematurely freeing and overwriting released blocks.
+
+  To fix this, delay freeing blocks until the checkpoint is durable on a commit-quorum, ensuring
+  data integrity and preventing single-replica failures (in a 3 node cluster) from impacting
+  availability.
+
+- [#2692](https://github.com/tigerbeetle/tigerbeetle/pull/2692)
+
+  When state syncing, replicas would send prepare_oks only up to a point, to ensure they don't
+  falsely contribute to the durability of a non-durable checkpoint they've synced to.
+
+  However, the logic to send these prepare_oks after state sync has finished was missing, which
+  could lead to a situation where a primary was unavailable to advance. Add in the ability to send
+  these prepare_oks after syncing.
+
+- [#2689](https://github.com/tigerbeetle/tigerbeetle/pull/2689)
+
+  Recently, tb_client was reworked to use OS native signals instead of a socket for delivering
+  cross thread events.
+
+  Fix some incorrect asserts, and add a fuzz test.
+
+### Features
+
+- [#2694](https://github.com/tigerbeetle/tigerbeetle/pull/2694),
+  [#2695](https://github.com/tigerbeetle/tigerbeetle/pull/2695),
+  [#2686](https://github.com/tigerbeetle/tigerbeetle/pull/2686),
+  [#2688](https://github.com/tigerbeetle/tigerbeetle/pull/2688),
+  [#2685](https://github.com/tigerbeetle/tigerbeetle/pull/2685),
+  [#2676](https://github.com/tigerbeetle/tigerbeetle/pull/2676),
+  [#2684](https://github.com/tigerbeetle/tigerbeetle/pull/2684)
+
+  A few fixes and an "Edit this page" button for our new docs!
+
+### Internals
+
+- [#2674](https://github.com/tigerbeetle/tigerbeetle/pull/2674)
+
+  Allocate the reply buffer in the Go client once the reply has been received. This can save up to
+  1MB of memory.
+
+- [#2680](https://github.com/tigerbeetle/tigerbeetle/pull/2680)
+
+  Refactor parts of our CFO, the process responsible for running fuzzers and the VOPR and sending
+  the results to devhub, to better handle OOM in subprocesses and reduce false fuzz failures.
+
+### TigerTracks 🎧
+
+- [Like a Prayer](https://open.spotify.com/track/1z3ugFmUKoCzGsI6jdY4Ci)
+
 ## TigerBeetle 0.16.25
 
 Released: 2025-01-27
@@ -548,7 +1067,7 @@ Released: 2024-11-25
   since directly outputting to stderr is considered rude for a library, logging was disabled.
 
   This PR adds in scaffolding for sending these logs to the client language to be handled there,
-  tying in with native log libraries (eg, Log4j). No languages use it yet, however.
+  tying in with native log libraries (e.g., Log4j). No languages use it yet, however.
 
   Additionally, log `warn` and `err` directly to stderr, if there's no handler.
 
@@ -1321,7 +1840,7 @@ See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2
 
   [WAL repair](https://docs.tigerbeetle.com/about/internals/vsr#protocol-repair-wal) is used when
   the lagging replica's log still intersects with the cluster's current log, while
-  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when when the logs no
+  [state sync](https://docs.tigerbeetle.com/about/internals/sync) is used when the logs no
   longer intersect.
 
 - [#2244](https://github.com/tigerbeetle/tigerbeetle/pull/2244)
@@ -1342,7 +1861,7 @@ See the [**tracking issue**](https://github.com/tigerbeetle/tigerbeetle/issues/2
 - [#2259](https://github.com/tigerbeetle/tigerbeetle/pull/2259),
   [#2246](https://github.com/tigerbeetle/tigerbeetle/pull/2246)
 
-  A few `sysctl`s and security frameworks (eg, seccomp) might block io_uring. Print out a more
+  A few `sysctl`s and security frameworks (e.g., seccomp) might block io_uring. Print out a more
   helpful error message, rather than a generic "permission denied" or "system outdated".
 
 
@@ -2412,7 +2931,8 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1828](https://github.com/tigerbeetle/tigerbeetle/pull/1828)
 
-  Some of our comments had duplicate words - thanks @divdeploy for for noticing!
+  Some of our comments had duplicate words - thanks @divdeploy for
+  <!-- vale Vale.Repetition = NO -->for<!-- vale Vale.Repetition = YES --> noticing!
 
 ### TigerTracks 🎧
 

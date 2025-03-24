@@ -22,6 +22,8 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
+const Ratio = stdx.PRNG.Ratio;
+const ratio = stdx.PRNG.ratio;
 
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
@@ -109,7 +111,12 @@ const transfer_templates = table: {
     const Result = accounting_auditor.CreateTransferResultSet;
     const result = Result.init;
 
-    const two_phase_ok = .{
+    const InitValues = std.enums.EnumFieldStruct(
+        tb.CreateTransferResult.Ordered,
+        bool,
+        false,
+    );
+    const two_phase_ok: InitValues = .{
         .ok = true,
         .pending_transfer_already_posted = true,
         .pending_transfer_already_voided = true,
@@ -179,12 +186,19 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         query_transfers = @intFromEnum(Operation.query_transfers),
     };
 
+    const Lookup = enum {
+        /// Query a transfer that has either been committed or rejected.
+        delivered,
+        /// Query a transfer whose `create_transfers` is in-flight.
+        sending,
+    };
+
     return struct {
         const Workload = @This();
 
-        pub const Options = OptionsType(AccountingStateMachine, Action);
+        pub const Options = OptionsType(AccountingStateMachine, Action, Lookup);
 
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         auditor: Auditor,
         options: Options,
 
@@ -213,22 +227,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            prng: *stdx.PRNG,
             options: Options,
         ) !Workload {
-            assert(options.create_account_invalid_probability <= 100);
-            assert(options.create_transfer_invalid_probability <= 100);
-            assert(options.create_transfer_limit_probability <= 100);
-            assert(options.create_transfer_pending_probability <= 100);
-            assert(options.create_transfer_post_probability <= 100);
-            assert(options.create_transfer_void_probability <= 100);
-            assert(options.lookup_account_invalid_probability <= 100);
-
-            assert(options.account_limit_probability <= 100);
-            assert(options.account_history_probability <= 100);
-            assert(options.linked_valid_probability <= 100);
-            assert(options.linked_invalid_probability <= 100);
-
             assert(options.accounts_batch_size_span + options.accounts_batch_size_min <=
                 AccountingStateMachine.constants.batch_max.create_accounts);
             assert(options.accounts_batch_size_span >= 1);
@@ -236,7 +237,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 AccountingStateMachine.constants.batch_max.create_transfers);
             assert(options.transfers_batch_size_span >= 1);
 
-            var auditor = try Auditor.init(allocator, random, options.auditor_options);
+            var auditor = try Auditor.init(allocator, prng, options.auditor_options);
             errdefer auditor.deinit(allocator);
 
             var transfers_delivered_recently = TransferBatchQueue.init(allocator, {});
@@ -246,11 +247,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             );
 
             for (auditor.accounts, 0..) |*account, i| {
-                const query_intersection_index = random.uintLessThanBiased(
-                    usize,
-                    auditor.query_intersections.len,
-                );
-                const query_intersection = auditor.query_intersections[query_intersection_index];
+                const query_intersection =
+                    auditor.query_intersections[prng.index(auditor.query_intersections)];
 
                 account.* = std.mem.zeroInit(tb.Account, .{
                     .id = auditor.account_index_to_id(i),
@@ -260,13 +258,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .ledger = 1,
                 });
 
-                if (chance(random, options.account_limit_probability)) {
-                    const b = random.boolean();
+                if (prng.chance(options.account_limit_probability)) {
+                    const b = prng.boolean();
                     account.flags.debits_must_not_exceed_credits = b;
                     account.flags.credits_must_not_exceed_debits = !b;
                 }
 
-                account.flags.history = chance(random, options.account_history_probability);
+                account.flags.history = prng.chance(options.account_history_probability);
             }
 
             var transient_errors: std.AutoArrayHashMapUnmanaged(u128, void) = .{};
@@ -277,10 +275,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             errdefer transient_errors.deinit();
 
             return .{
-                .random = random,
+                .prng = prng,
                 .auditor = auditor,
                 .options = options,
-                .transfer_plan_seed = random.int(u64),
+                .transfer_plan_seed = prng.int(u64),
                 .transfers_delivered_recently = transfers_delivered_recently,
                 .transient_errors = transient_errors,
             };
@@ -310,22 +308,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(body.len == constants.message_size_max - @sizeOf(vsr.Header));
 
             const action = action: {
-                if (!self.accounts_sent and self.random.boolean()) {
+                if (!self.accounts_sent and self.prng.boolean()) {
                     // Early in the test make sure some accounts get created.
                     self.accounts_sent = true;
                     break :action .create_accounts;
                 }
 
-                break :action switch (sample_distribution(self.random, self.options.operations)) {
-                    .create_accounts => Action.create_accounts,
-                    .create_transfers => Action.create_transfers,
-                    .lookup_accounts => Action.lookup_accounts,
-                    .lookup_transfers => Action.lookup_transfers,
-                    .get_account_transfers => Action.get_account_transfers,
-                    .get_account_balances => Action.get_account_balances,
-                    .query_accounts => Action.query_accounts,
-                    .query_transfers => Action.query_transfers,
-                };
+                break :action self.prng.enum_weighted(Action, self.options.operations);
             };
 
             const size = switch (action) {
@@ -423,7 +412,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     std.mem.bytesAsSlice(tb.Transfer, reply_body),
                 ),
                 //Not handled by the client.
-                .pulse => unreachable,
+                .pulse, .get_events => unreachable,
             }
         }
 
@@ -446,8 +435,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         ) usize {
             const results = self.auditor.expect_create_accounts(client_index);
             for (accounts, 0..) |*account, i| {
-                const account_index =
-                    self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
+                const account_index = self.prng.index(self.auditor.accounts);
                 account.* = self.auditor.accounts[account_index];
                 account.debits_pending = 0;
                 account.debits_posted = 0;
@@ -456,7 +444,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account.timestamp = 0;
                 results[i] = accounting_auditor.CreateAccountResultSet{};
 
-                if (chance(self.random, self.options.create_account_invalid_probability)) {
+                if (self.prng.chance(self.options.create_account_invalid_probability)) {
                     account.ledger = 0;
                     // The result depends on whether the id already exists:
                     results[i].insert(.exists_with_different_ledger);
@@ -503,13 +491,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     // linked without altering any of their outcomes.
 
                     if (results[i].contains(.ok) and results[i - 1].contains(.ok) and
-                        chance(self.random, self.options.linked_valid_probability))
+                        self.prng.chance(self.options.linked_valid_probability))
                     {
                         transfers[i - 1].flags.linked = true;
                     }
 
                     if (!results[i].contains(.ok) and !results[i - 1].contains(.ok) and
-                        chance(self.random, self.options.linked_invalid_probability))
+                        self.prng.chance(self.options.linked_invalid_probability))
                     {
                         // Convert the previous transfer to a single-phase no-limit transfer, but
                         // link it to the current transfer — it will still fail.
@@ -571,13 +559,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     !transfers[i].flags.linked and
                     !transfers[i - 1].flags.linked;
                 if (can_retry and
-                    chance(
-                    self.random,
-                    self.options.create_transfer_retry_probability,
-                )) {
-                    const index = self.random.intRangeAtMost(
+                    self.prng.chance(self.options.create_transfer_retry_probability))
+                {
+                    const index = self.prng.int_inclusive(
                         usize,
-                        0,
                         self.transient_errors.count() - 1,
                     );
                     const id_failed = self.transient_errors.keys()[index];
@@ -593,13 +578,12 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn build_lookup_accounts(self: *Workload, lookup_ids: []u128) usize {
             for (lookup_ids) |*id| {
-                if (chance(self.random, self.options.lookup_account_invalid_probability)) {
+                if (self.prng.chance(self.options.lookup_account_invalid_probability)) {
                     // Pick an account with valid index (rather than "random.int(u128)") because the
                     // Auditor must decode the id to check for a matching account.
-                    id.* = self.auditor.account_index_to_id(self.random.int(usize));
+                    id.* = self.auditor.account_index_to_id(self.prng.int(usize));
                 } else {
-                    const account_index =
-                        self.random.uintLessThanBiased(usize, self.auditor.accounts.len);
+                    const account_index = self.prng.index(self.auditor.accounts);
                     id.* = self.auditor.accounts[account_index].id;
                 }
             }
@@ -608,22 +592,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
         fn build_lookup_transfers(self: *const Workload, lookup_ids: []u128) usize {
             const delivered = self.transfers_delivered_past;
-            const lookup_window = sample_distribution(self.random, self.options.lookup_transfer);
+            const lookup_window = self.prng.enum_weighted(Lookup, self.options.lookup_transfer);
             const lookup_window_start = switch (lookup_window) {
-                // +1 to avoid an error when delivered=0.
-                .delivered => self.random.uintLessThanBiased(usize, delivered + 1),
-                // +1 to avoid an error when delivered=transfers_sent.
-                .sending => self.random.intRangeLessThanBiased(
+                .delivered => self.prng.int_inclusive(usize, delivered),
+                .sending => self.prng.range_inclusive(
                     usize,
                     delivered,
-                    self.transfers_sent + 1,
+                    self.transfers_sent,
                 ),
             };
 
             // +1 to make the span-max inclusive.
             const lookup_window_size = @min(
                 fuzz.random_int_exponential(
-                    self.random,
+                    self.prng,
                     usize,
                     self.options.lookup_transfer_span_mean,
                 ),
@@ -633,7 +615,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
             for (lookup_ids) |*lookup_id| {
                 lookup_id.* = self.transfer_index_to_id(
-                    lookup_window_start + self.random.uintLessThanBiased(usize, lookup_window_size),
+                    lookup_window_start + self.prng.int_inclusive(usize, lookup_window_size - 1),
                 );
             }
             return lookup_ids.len;
@@ -665,20 +647,20 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             })) |account| account.id else
             // Pick an account with valid index (rather than "random.int(u128)") because the
             // Auditor must decode the id to check for a matching account.
-            self.auditor.account_index_to_id(self.random.int(usize));
+            self.auditor.account_index_to_id(self.prng.int(usize));
 
             // It may be an invalid account.
             const account_state: ?*const Auditor.AccountState = self.auditor.get_account_state(
                 account_filter.account_id,
             );
 
-            account_filter.flags.reversed = self.random.boolean();
+            account_filter.flags.reversed = self.prng.boolean();
 
             // The timestamp range is restrictive to the number of transfers inserted at the
             // moment the filter was generated. Only when this filter is in place we can assert
             // the expected result count.
             if (account_state != null and
-                chance(self.random, self.options.account_filter_timestamp_range_probability))
+                self.prng.chance(self.options.account_filter_timestamp_range_probability))
             {
                 account_filter.flags.credits = true;
                 account_filter.flags.debits = true;
@@ -691,7 +673,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 account_filter.timestamp_min += @intFromBool(!account_filter.flags.reversed);
                 account_filter.timestamp_max -|= @intFromBool(account_filter.flags.reversed);
             } else {
-                switch (self.random.enumValue(enum { none, debits, credits, all })) {
+                switch (self.prng.enum_uniform(enum { none, debits, credits, all })) {
                     .none => {}, // Testing invalid flags.
                     .debits => account_filter.flags.debits = true,
                     .credits => account_filter.flags.credits = true,
@@ -708,7 +690,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         batch_max.get_account_balances);
                     break :batch_size batch_max.get_account_transfers;
                 };
-                account_filter.limit = switch (self.random.enumValue(enum {
+                account_filter.limit = switch (self.prng.enum_uniform(enum {
                     none,
                     one,
                     batch,
@@ -739,7 +721,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 else => unreachable,
             };
 
-            if (chance(self.random, self.options.query_filter_not_found_probability)) {
+            if (self.prng.chance(self.options.query_filter_not_found_probability)) {
                 query_filter.* = .{
                     .user_data_128 = 0,
                     .user_data_64 = 0,
@@ -754,10 +736,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .timestamp_max = 0,
                 };
             } else {
-                const query_intersection_index = self.random.uintLessThanBiased(
-                    usize,
-                    self.auditor.query_intersections.len,
-                );
+                const query_intersection_index = self.prng.index(self.auditor.query_intersections);
                 const query_intersection =
                     self.auditor.query_intersections[query_intersection_index];
 
@@ -767,9 +746,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     .user_data_32 = query_intersection.user_data_32,
                     .code = query_intersection.code,
                     .ledger = 0,
-                    .limit = self.random.int(u32),
+                    .limit = self.prng.int(u32),
                     .flags = .{
-                        .reversed = self.random.boolean(),
+                        .reversed = self.prng.boolean(),
                     },
                     .timestamp_min = 0,
                     .timestamp_max = 0,
@@ -783,7 +762,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 };
 
                 if (state.count > 1 and state.count <= batch_max and
-                    chance(self.random, self.options.query_filter_timestamp_range_probability))
+                    self.prng.chance(self.options.query_filter_timestamp_range_probability))
                 {
                     // Excluding the first or last object:
                     if (query_filter.flags.reversed) {
@@ -837,8 +816,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             const index_method = @intFromEnum(method);
             const transfer_template = &transfer_templates[index_valid][index_limit][index_method];
 
-            const limit_debits = transfer_plan.limit and self.random.boolean();
-            const limit_credits = transfer_plan.limit and (self.random.boolean() or !limit_debits);
+            const limit_debits = transfer_plan.limit and self.prng.boolean();
+            const limit_credits = transfer_plan.limit and (self.prng.boolean() or !limit_debits);
             assert(transfer_plan.limit == (limit_debits or limit_credits));
 
             const debit_account = self.auditor.pick_account(.{
@@ -856,9 +835,8 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }) orelse return null;
             assert(!limit_credits or credit_account.flags.credits_must_not_exceed_debits);
 
-            const query_intersection_index = self.random.uintLessThanBiased(
-                usize,
-                self.auditor.query_intersections.len,
+            const query_intersection_index = self.prng.index(
+                self.auditor.query_intersections,
             );
             const query_intersection = self.auditor.query_intersections[query_intersection_index];
 
@@ -876,7 +854,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .ledger = transfer_template.ledger,
                 .flags = .{},
                 .timestamp = 0,
-                .amount = @as(u128, self.random.int(u8)),
+                .amount = self.prng.int_inclusive(u128, std.math.maxInt(u8)),
             };
 
             switch (method) {
@@ -887,7 +865,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     transfer.timeout = 1 + @as(u32, @min(
                         std.math.maxInt(u32) / 2,
                         fuzz.random_int_exponential(
-                            self.random,
+                            self.prng,
                             u32,
                             self.options.pending_timeout_mean,
                         ),
@@ -896,7 +874,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .post_pending, .void_pending => {
                     // Don't depend on `HashMap.keyIterator()` being deterministic.
                     // Pick a random "target" key, then post/void the id it is nearest to.
-                    const target = self.random.int(u128);
+                    const target = self.prng.int(u128);
                     var previous: ?u128 = null;
                     var iterator = self.auditor.pending_transfers.keyIterator();
                     while (iterator.next()) |id| {
@@ -925,7 +903,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     transfer.code = pending_query_intersection.code;
                     if (method == .post_pending) {
                         transfer.amount =
-                            self.random.intRangeAtMost(u128, 0, pending_transfer.amount);
+                            self.prng.range_inclusive(u128, 0, pending_transfer.amount);
                     } else {
                         transfer.amount = pending_transfer.amount;
                     }
@@ -965,8 +943,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 => 0,
             };
 
-            // +1 because the span is inclusive.
-            const batch_size = batch_min + self.random.uintLessThanBiased(usize, batch_span + 1);
+            const batch_size = batch_min + self.prng.int_inclusive(usize, batch_span);
             return std.mem.bytesAsSlice(T, body)[0..batch_size];
         }
 
@@ -984,23 +961,22 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         /// * `Workload.transfer_plan_seed`, and
         /// * the transfer `index`.
         fn transfer_index_to_plan(self: *const Workload, index: usize) TransferPlan {
-            var prng = std.rand.DefaultPrng.init(self.transfer_plan_seed ^ @as(u64, index));
-            const random = prng.random();
+            var prng = stdx.PRNG.from_seed(self.transfer_plan_seed ^ @as(u64, index));
             const method: TransferPlan.Method = blk: {
-                if (chance(random, self.options.create_transfer_pending_probability)) {
+                if (prng.chance(self.options.create_transfer_pending_probability)) {
                     break :blk .pending;
                 }
-                if (chance(random, self.options.create_transfer_post_probability)) {
+                if (prng.chance(self.options.create_transfer_post_probability)) {
                     break :blk .post_pending;
                 }
-                if (chance(random, self.options.create_transfer_void_probability)) {
+                if (prng.chance(self.options.create_transfer_void_probability)) {
                     break :blk .void_pending;
                 }
                 break :blk .single_phase;
             };
             return .{
-                .valid = !chance(random, self.options.create_transfer_invalid_probability),
-                .limit = chance(random, self.options.create_transfer_limit_probability),
+                .valid = !prng.chance(self.options.create_transfer_invalid_probability),
+                .limit = prng.chance(self.options.create_transfer_limit_probability),
                 .method = method,
             };
         }
@@ -1422,47 +1398,41 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     };
 }
 
-fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
+fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Lookup: type) type {
     return struct {
         const Options = @This();
 
         auditor_options: Auditor.Options,
         transfer_id_permutation: IdPermutation,
 
-        operations: std.enums.EnumFieldStruct(Action, usize, null),
+        operations: stdx.PRNG.EnumWeightsType(Action),
 
-        create_account_invalid_probability: u8, // ≤ 100
-        create_transfer_invalid_probability: u8, // ≤ 100
-        create_transfer_limit_probability: u8, // ≤ 100
-        create_transfer_pending_probability: u8, // ≤ 100
-        create_transfer_post_probability: u8, // ≤ 100
-        create_transfer_void_probability: u8, // ≤ 100
-        create_transfer_retry_probability: u8, // ≤ 100
-        lookup_account_invalid_probability: u8, // ≤ 100
+        create_account_invalid_probability: Ratio,
+        create_transfer_invalid_probability: Ratio,
+        create_transfer_limit_probability: Ratio,
+        create_transfer_pending_probability: Ratio,
+        create_transfer_post_probability: Ratio,
+        create_transfer_void_probability: Ratio,
+        create_transfer_retry_probability: Ratio,
+        lookup_account_invalid_probability: Ratio,
 
-        account_filter_invalid_account_probability: u8, // ≤ 100
-        account_filter_timestamp_range_probability: u8, // ≤ 100
+        account_filter_invalid_account_probability: Ratio,
+        account_filter_timestamp_range_probability: Ratio,
 
-        query_filter_not_found_probability: u8, // ≤ 100
-        query_filter_timestamp_range_probability: u8, // ≤ 100
-
-        lookup_transfer: std.enums.EnumFieldStruct(enum {
-            /// Query a transfer that has either been committed or rejected.
-            delivered,
-            /// Query a transfer whose `create_transfers` is in-flight.
-            sending,
-        }, usize, null),
+        query_filter_not_found_probability: Ratio,
+        query_filter_timestamp_range_probability: Ratio,
+        lookup_transfer: stdx.PRNG.EnumWeightsType(Lookup),
 
         // Size of timespan for querying, measured in transfers
         lookup_transfer_span_mean: usize,
 
-        account_limit_probability: u8, // ≤ 100
-        account_history_probability: u8, // ≤ 100
+        account_limit_probability: Ratio,
+        account_history_probability: Ratio,
 
         /// This probability is only checked for consecutive guaranteed-successful transfers.
-        linked_valid_probability: u8,
+        linked_valid_probability: Ratio,
         /// This probability is only checked for consecutive invalid transfers.
-        linked_invalid_probability: u8,
+        linked_invalid_probability: Ratio,
 
         pending_timeout_mean: u32,
 
@@ -1474,7 +1444,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
         /// Maximum number of failed transfer IDs to retry in the next request.
         transfer_transient_errors_max: usize,
 
-        pub fn generate(random: std.rand.Random, options: struct {
+        pub fn generate(prng: *stdx.PRNG, options: struct {
             batch_size_limit: u32,
             client_count: usize,
             in_flight_max: usize,
@@ -1491,100 +1461,74 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type) type {
 
             return .{
                 .auditor_options = .{
-                    .accounts_max = 2 + random.uintLessThan(usize, 128),
-                    .account_id_permutation = IdPermutation.generate(random),
+                    .accounts_max = prng.range_inclusive(usize, 2, 128),
+                    .account_id_permutation = IdPermutation.generate(prng),
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
                     .in_flight_max = options.in_flight_max,
                     .batch_create_transfers_limit = batch_create_transfers_limit,
                 },
-                .transfer_id_permutation = IdPermutation.generate(random),
+                .transfer_id_permutation = IdPermutation.generate(prng),
                 .operations = .{
-                    .create_accounts = 1 + random.uintLessThan(usize, 10),
-                    .create_transfers = 1 + random.uintLessThan(usize, 100),
-                    .lookup_accounts = 1 + random.uintLessThan(usize, 20),
-                    .lookup_transfers = 1 + random.uintLessThan(usize, 20),
-                    .get_account_transfers = 1 + random.uintLessThan(usize, 20),
-                    .get_account_balances = 1 + random.uintLessThan(usize, 20),
-                    .query_accounts = 1 + random.uintLessThan(usize, 20),
-                    .query_transfers = 1 + random.uintLessThan(usize, 20),
+                    .create_accounts = prng.range_inclusive(u64, 1, 10),
+                    .create_transfers = prng.range_inclusive(u64, 1, 100),
+                    .lookup_accounts = prng.range_inclusive(u64, 1, 20),
+                    .lookup_transfers = prng.range_inclusive(u64, 1, 20),
+                    .get_account_transfers = prng.range_inclusive(u64, 1, 20),
+                    .get_account_balances = prng.range_inclusive(u64, 1, 20),
+                    .query_accounts = prng.range_inclusive(u64, 1, 20),
+                    .query_transfers = prng.range_inclusive(u64, 1, 20),
                 },
-                .create_account_invalid_probability = 1,
-                .create_transfer_invalid_probability = 1,
-                .create_transfer_limit_probability = random.uintLessThan(u8, 101),
-                .create_transfer_pending_probability = 1 + random.uintLessThan(u8, 100),
-                .create_transfer_post_probability = 1 + random.uintLessThan(u8, 50),
-                .create_transfer_void_probability = 1 + random.uintLessThan(u8, 50),
-                .create_transfer_retry_probability = 1 + random.uintLessThan(u8, 10),
-                .lookup_account_invalid_probability = 1,
+                .create_account_invalid_probability = ratio(1, 100),
+                .create_transfer_invalid_probability = ratio(1, 100),
+                .create_transfer_limit_probability = ratio(prng.int_inclusive(u8, 100), 100),
+                .create_transfer_pending_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
+                .create_transfer_post_probability = ratio(prng.range_inclusive(u8, 1, 50), 100),
+                .create_transfer_void_probability = ratio(prng.range_inclusive(u8, 1, 50), 100),
+                .create_transfer_retry_probability = ratio(prng.range_inclusive(u8, 1, 10), 100),
+                .lookup_account_invalid_probability = ratio(1, 100),
 
-                .account_filter_invalid_account_probability = 1 + random.uintLessThan(u8, 20),
-                .account_filter_timestamp_range_probability = 1 + random.uintLessThan(u8, 80),
+                .account_filter_invalid_account_probability = ratio(
+                    prng.range_inclusive(u8, 1, 20),
+                    100,
+                ),
+                .account_filter_timestamp_range_probability = ratio(
+                    prng.range_inclusive(u8, 1, 80),
+                    100,
+                ),
 
-                .query_filter_not_found_probability = 1 + random.uintLessThan(u8, 20),
-                .query_filter_timestamp_range_probability = 1 + random.uintLessThan(u8, 80),
+                .query_filter_not_found_probability = ratio(prng.range_inclusive(u8, 1, 20), 100),
+                .query_filter_timestamp_range_probability = ratio(
+                    prng.range_inclusive(u8, 1, 80),
+                    100,
+                ),
 
                 .lookup_transfer = .{
-                    .delivered = 1 + random.uintLessThan(usize, 10),
-                    .sending = 1 + random.uintLessThan(usize, 10),
+                    .delivered = prng.range_inclusive(u64, 1, 10),
+                    .sending = prng.range_inclusive(u64, 1, 10),
                 },
-                .lookup_transfer_span_mean = 10 + random.uintLessThan(usize, 1000),
-                .account_limit_probability = random.uintLessThan(u8, 80),
-                .account_history_probability = random.uintLessThan(u8, 80),
-                .linked_valid_probability = random.uintLessThan(u8, 101),
+                .lookup_transfer_span_mean = prng.range_inclusive(usize, 10, 1000),
+                .account_limit_probability = ratio(prng.int_inclusive(u8, 80), 100),
+                .account_history_probability = ratio(prng.int_inclusive(u8, 80), 100),
+                .linked_valid_probability = ratio(prng.int_inclusive(u8, 100), 100),
                 // 100% chance: this only applies to consecutive invalid transfers, which are rare.
-                .linked_invalid_probability = 100,
+                .linked_invalid_probability = ratio(100, 100),
                 // One second.
                 .pending_timeout_mean = 1,
                 .accounts_batch_size_min = 0,
-                .accounts_batch_size_span = 1 + random.uintLessThan(
+                .accounts_batch_size_span = prng.range_inclusive(
                     usize,
+                    1,
                     batch_create_accounts_limit,
                 ),
                 .transfers_batch_size_min = 0,
-                .transfers_batch_size_span = 1 + random.uintLessThan(
+                .transfers_batch_size_span = prng.range_inclusive(
                     usize,
+                    1,
                     batch_create_transfers_limit,
                 ),
                 .transfer_transient_errors_max = 128,
             };
         }
     };
-}
-
-/// Sample from a discrete distribution.
-/// Use integers instead of floating-point numbers to avoid nondeterminism on different hardware.
-fn sample_distribution(
-    random: std.rand.Random,
-    distribution: anytype,
-) std.meta.FieldEnum(@TypeOf(distribution)) {
-    const SampleSpace = std.meta.FieldEnum(@TypeOf(distribution));
-    const Indexer = std.enums.EnumIndexer(SampleSpace);
-
-    const sum = sum: {
-        var sum: usize = 0;
-        comptime var i: usize = 0;
-        inline while (i < Indexer.count) : (i += 1) {
-            const key = comptime @tagName(Indexer.keyForIndex(i));
-            sum += @field(distribution, key);
-        }
-        break :sum sum;
-    };
-
-    var pick = random.uintLessThanBiased(usize, sum);
-    comptime var i: usize = 0;
-    inline while (i < Indexer.count) : (i += 1) {
-        const event = comptime Indexer.keyForIndex(i);
-        const weight = @field(distribution, @tagName(event));
-        if (pick < weight) return event;
-        pick -= weight;
-    }
-
-    @panic("sample_discrete: empty sample space");
-}
-
-/// Returns true, `p` percent of the time, else false.
-fn chance(random: std.rand.Random, p: u8) bool {
-    assert(p <= 100);
-    return random.uintLessThanBiased(u8, 100) < p;
 }

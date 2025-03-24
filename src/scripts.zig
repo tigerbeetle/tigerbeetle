@@ -11,6 +11,7 @@
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
 
+const stdx = @import("stdx.zig");
 const flags = @import("flags.zig");
 const Shell = @import("shell.zig");
 
@@ -20,6 +21,18 @@ const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
 const antithesis = @import("./scripts/antithesis.zig");
+
+pub fn log_fn(
+    comptime message_level: std.log.Level,
+    comptime scope: @Type(.EnumLiteral),
+    comptime format: []const u8,
+    args: anytype,
+) void {
+    if (comptime !std.log.logEnabled(message_level, scope)) return;
+    stdx.log_with_timestamp(message_level, scope, format, args);
+}
+
+pub const std_options: std.Options = .{ .logFn = log_fn };
 
 const CLIArgs = union(enum) {
     cfo: cfo.CLIArgs,
@@ -38,7 +51,8 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- cfo [--budget-minutes=<n>] [--hang-minutes=<n>] [--concurrency=<n>]
         \\
-        \\  zig build scripts -- ci [--language=<dotnet|go|java|node>] [--validate-release]
+        \\  zig build scripts -- ci [--language=<dotnet|go|java|node|python>] [--validate-release]
+        \\                          [--build-docs]
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
@@ -51,7 +65,7 @@ const CLIArgs = union(enum) {
         \\
         \\Options (release):
         \\
-        \\  --language=<dotnet|go|java|node|zig|docker>
+        \\  --language=<dotnet|go|java|node|python|zig|docker>
         \\        Build/publish only the specified language.
         \\        (If not set, cover all languages in sequence.)
         \\

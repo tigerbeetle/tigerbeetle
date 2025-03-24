@@ -41,6 +41,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         /// Tracks the latest op acked by a replica across restarts.
         replica_head_max: []ReplicaHead,
+
         pub fn init(allocator: mem.Allocator, options: struct {
             cluster_id: u128,
             replica_count: u8,
@@ -113,8 +114,9 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
             if (replica.status != .recovering_head) {
                 const head_max = &state_checker.replica_head_max[replica_index];
-                const wal_headers = replica.superblock.storage.wal_headers();
-                const head_max_journal = wal_headers[head_max.op % constants.journal_slot_count];
+                const wal_prepares = replica.superblock.storage.wal_prepares();
+                const head_max_journal =
+                    wal_prepares[head_max.op % constants.journal_slot_count].header;
 
                 assert(replica.view > head_max.view or
                     (replica.view == head_max.view and (replica.op >= head_max.op or
@@ -253,6 +255,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         }
 
         pub fn header_with_op(state_checker: *StateChecker, op: u64) vsr.Header.Prepare {
+            assert(op < state_checker.commits.items.len);
             const commit = &state_checker.commits.items[op];
             assert(commit.header.op == op);
             assert(commit.replicas.count() > 0);

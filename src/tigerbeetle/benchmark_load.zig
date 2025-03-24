@@ -18,6 +18,7 @@ const log = std.log.scoped(.benchmark);
 const vsr = @import("vsr");
 const constants = vsr.constants;
 const stdx = vsr.stdx;
+const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
@@ -27,7 +28,6 @@ const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 const tb = vsr.tigerbeetle;
-const StatsD = vsr.statsd.StatsD;
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
 const ZipfianShuffled = stdx.ZipfianShuffled;
@@ -125,17 +125,6 @@ pub fn main(
     );
     defer allocator.free(client_replies);
 
-    var statsd_opt: ?StatsD = null;
-    defer if (statsd_opt) |*statsd| statsd.deinit(allocator);
-
-    if (cli_args.statsd) {
-        statsd_opt = try StatsD.init(
-            allocator,
-            &io,
-            std.net.Address.parseIp4("127.0.0.1", 8125) catch unreachable,
-        );
-    }
-
     // If no seed was given, use a default seed for reproducibility.
     const seed = seed_from_arg: {
         const seed_argument = cli_args.seed orelse break :seed_from_arg 42;
@@ -144,11 +133,10 @@ pub fn main(
 
     log.info("Benchmark seed = {}", .{seed});
 
-    var rng = std.rand.DefaultPrng.init(seed);
-    const random = rng.random();
+    var prng = stdx.PRNG.from_seed(seed);
     const account_id_permutation: IdPermutation = switch (cli_args.id_order) {
         .sequential => .{ .identity = {} },
-        .random => .{ .random = random.int(u64) },
+        .random => .{ .random = prng.int(u64) },
         .reversed => .{ .inversion = {} },
     };
 
@@ -156,12 +144,12 @@ pub fn main(
     const account_generator = Generator.from_distribution(
         cli_args.account_distribution,
         cli_args.account_count - cli_args.account_count_hot,
-        random,
+        &prng,
     );
     const account_generator_hot = Generator.from_distribution(
         cli_args.account_distribution,
         cli_args.account_count_hot,
-        random,
+        &prng,
     );
 
     log.info("Account distribution: {s}", .{
@@ -170,8 +158,7 @@ pub fn main(
 
     var benchmark = Benchmark{
         .io = &io,
-        .statsd = if (statsd_opt) |*statsd| statsd else null,
-        .random = random,
+        .prng = &prng,
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),
         .clients = clients.slice(),
@@ -199,7 +186,7 @@ pub fn main(
 
     try benchmark.run(.register);
 
-    var rng_init = rng;
+    var prng_init = prng;
     {
         try benchmark.run(.create_accounts);
         try benchmark.run(.create_transfers);
@@ -210,7 +197,7 @@ pub fn main(
 
     if (benchmark.validate) {
         // Reset our state so we can check our work.
-        benchmark.random = rng_init.random();
+        benchmark.prng = &prng_init;
         try benchmark.run(.validate_accounts);
         try benchmark.run(.validate_transfers);
     }
@@ -218,7 +205,8 @@ pub fn main(
     if (cli_args.checksum_performance) {
         const buffer = try allocator.alloc(u8, constants.message_size_max);
         defer allocator.free(buffer);
-        benchmark.random.bytes(buffer);
+
+        benchmark.prng.fill(buffer);
 
         benchmark.timer.reset();
         _ = vsr.checksum(buffer);
@@ -243,10 +231,10 @@ const Generator = union(enum) {
     fn from_distribution(
         distribution: cli.Command.Benchmark.Distribution,
         count: u64,
-        random: std.Random,
+        prng: *stdx.PRNG,
     ) Generator {
         return switch (distribution) {
-            .zipfian => .{ .zipfian = ZipfianShuffled.init(count, random) },
+            .zipfian => .{ .zipfian = ZipfianShuffled.init(count, prng) },
             .latest => .{ .latest = ZipfianGenerator.init(count) },
             .uniform => .{ .uniform = count },
         };
@@ -255,8 +243,7 @@ const Generator = union(enum) {
 
 const Benchmark = struct {
     io: *IO,
-    statsd: ?*StatsD,
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     timer: std.time.Timer,
     output: std.io.AnyWriter,
     clients: []Client,
@@ -426,13 +413,6 @@ const Benchmark = struct {
         const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
         const transfers_created = @min(b.transfer_count, b.transfer_batch_size);
         b.transfers_created += transfers_created;
-
-        if (b.statsd) |statsd| {
-            statsd.gauge("benchmark.txns", transfers_created) catch {};
-            statsd.timing("benchmark.timings", request_duration_ns) catch {};
-            statsd.gauge("benchmark.batch", requests_complete) catch {};
-            statsd.gauge("benchmark.completed", b.transfers_created) catch {};
-        }
 
         if (b.print_batch_timings) {
             log.info("batch {}: {} tx in {} ms", .{
@@ -706,9 +686,9 @@ const Benchmark = struct {
         for (accounts) |*account| {
             account.* = .{
                 .id = b.account_id_permutation.encode(b.account_index + 1),
-                .user_data_128 = b.random.int(u128),
-                .user_data_64 = b.random.int(u64),
-                .user_data_32 = b.random.int(u32),
+                .user_data_128 = b.prng.int(u128),
+                .user_data_64 = b.prng.int(u64),
+                .user_data_32 = b.prng.int(u32),
                 .reserved = 0,
                 .ledger = 2,
                 .code = 1,
@@ -734,7 +714,7 @@ const Benchmark = struct {
             // debit and credit will be selected from an account >= `account_count_hot`.
 
             const debit_account_index = b.choose_account_index(
-                if (b.random.intRangeAtMost(usize, 1, 100) <= b.transfer_hot_percent)
+                if (b.prng.range_inclusive(usize, 1, 100) <= b.transfer_hot_percent)
                     .hot
                 else
                     .cold,
@@ -756,25 +736,25 @@ const Benchmark = struct {
             assert(debit_account_id != credit_account_id);
 
             // 30% of pending transfers.
-            const pending = b.transfer_pending and b.random.intRangeAtMost(u8, 0, 9) < 3;
+            const pending = b.transfer_pending and b.prng.chance(ratio(3, 10));
 
             transfer.* = .{
                 .id = b.transfer_id_permutation.encode(b.transfer_index + 1),
                 .debit_account_id = debit_account_id,
                 .credit_account_id = credit_account_id,
-                .user_data_128 = b.random.int(u128),
-                .user_data_64 = b.random.int(u64),
-                .user_data_32 = b.random.int(u32),
+                .user_data_128 = b.prng.int(u128),
+                .user_data_64 = b.prng.int(u64),
+                .user_data_32 = b.prng.int(u32),
                 // TODO Benchmark posting/voiding pending transfers.
                 .pending_id = 0,
                 .ledger = 2,
-                .code = b.random.int(u16) +| 1,
+                .code = b.prng.int(u16) +| 1,
                 .flags = .{
                     .pending = pending,
                     .imported = b.flag_imported,
                 },
-                .timeout = if (pending) b.random.intRangeAtMost(u32, 1, 60) else 0,
-                .amount = random_int_exponential(b.random, u64, 10_000) +| 1,
+                .timeout = if (pending) b.prng.range_inclusive(u32, 1, 60) else 0,
+                .amount = random_int_exponential(b.prng, u64, 10_000) +| 1,
                 .timestamp = if (b.flag_imported) b.account_index + b.transfer_index + 1 else 0,
             };
             b.transfer_index += 1;
@@ -805,18 +785,18 @@ const Benchmark = struct {
             .zipfian => |gen| index: {
                 // zipfian set size must be same as account set size
                 assert(account_count == gen.gen.n);
-                const index = gen.next(b.random);
+                const index = gen.next(b.prng);
                 assert(index < account_count);
                 break :index index;
             },
             .latest => |gen| index: {
                 assert(account_count == gen.n);
-                const index_rev = gen.next(b.random);
+                const index_rev = gen.next(b.prng);
                 assert(index_rev < account_count);
                 break :index account_count - index_rev - 1;
             },
             .uniform => |count| index: {
-                const index = b.random.uintLessThan(u64, count);
+                const index = b.prng.int_inclusive(u64, count - 1);
                 assert(index < account_count);
                 break :index index;
             },

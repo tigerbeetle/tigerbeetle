@@ -84,7 +84,7 @@ Constraints:
 
 The maximum number of results that can be returned by this query.
 
-Limited by the [maximum message size](./requests/README.md#batching-events).
+Limited by the [maximum message size](../coding/requests.md#batching-events).
 
 Constraints:
 

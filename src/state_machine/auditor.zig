@@ -3,6 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const log = std.log.scoped(.test_auditor);
 
@@ -24,6 +25,12 @@ pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Or
 const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
 const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
 
+const InFlightKey = struct {
+    client_index: usize,
+    /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
+    client_request: usize,
+};
+
 /// Store expected possible results for an in-flight request.
 /// This reply validation takes advantage of the Workload's additional context about the request.
 const InFlight = union(enum) {
@@ -31,11 +38,7 @@ const InFlight = union(enum) {
     create_transfers: [transfers_batch_size_max]CreateTransferResultSet,
 };
 
-const InFlightQueue = std.AutoHashMapUnmanaged(struct {
-    client_index: usize,
-    /// This index corresponds to Auditor.creates_sent/Auditor.creates_delivered.
-    client_request: usize,
-}, InFlight);
+const InFlightQueue = std.AutoHashMapUnmanaged(InFlightKey, InFlight);
 
 const PendingTransfer = struct {
     amount: u128,
@@ -146,7 +149,7 @@ pub const AccountingAuditor = struct {
         timestamp_max: u64 = 0,
     };
 
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     options: Options,
 
     /// The timestamp of the last processed reply.
@@ -191,7 +194,7 @@ pub const AccountingAuditor = struct {
 
     pub fn init(
         allocator: std.mem.Allocator,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
     ) !AccountingAuditor {
         assert(options.accounts_max >= 2);
@@ -244,7 +247,7 @@ pub const AccountingAuditor = struct {
         @memset(creates_delivered, 0);
 
         return .{
-            .random = random,
+            .prng = prng,
             .options = options,
             .accounts = accounts,
             .accounts_state = accounts_state,
@@ -590,7 +593,7 @@ pub const AccountingAuditor = struct {
             exclude: ?u128 = null,
         },
     ) ?*const tb.Account {
-        const offset = self.random.uintLessThanBiased(usize, self.accounts.len);
+        const offset = self.prng.int_inclusive(usize, self.accounts.len - 1);
         var i: usize = 0;
         // Iterate `accounts`, starting from a random offset.
         while (i < self.accounts.len) : (i += 1) {
@@ -641,7 +644,7 @@ pub const AccountingAuditor = struct {
     }
 
     fn take_in_flight(self: *AccountingAuditor, client_index: usize) InFlight {
-        const key = .{
+        const key: InFlightKey = .{
             .client_index = client_index,
             .client_request = self.creates_delivered[client_index],
         };

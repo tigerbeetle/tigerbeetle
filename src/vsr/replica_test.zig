@@ -14,8 +14,10 @@ const Message = @import("../message_pool.zig").MessagePool.Message;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
+const Release = @import("../testing/cluster.zig").Release;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
+const ratio = stdx.PRNG.ratio;
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
@@ -33,7 +35,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const log_level = std.log.Level.err;
 
-const releases = .{
+const releases = [_]Release{
     .{
         .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
         .release_client_min = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 10 }),
@@ -1449,8 +1451,8 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
     // Disable new read/write faults so that we can use `storage.faults` to track repairs.
     // (That is, as the scrubber runs, the number of faults will monotonically decrease.)
-    b2_storage.options.read_fault_probability = 0;
-    b2_storage.options.write_fault_probability = 0;
+    b2_storage.options.read_fault_probability = ratio(0, 100);
+    b2_storage.options.write_fault_probability = ratio(0, 100);
 
     // Tick until B2's grid repair stops making progress.
     {
@@ -1496,41 +1498,47 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
 // Compat(v0.15.3)
 test "Cluster: client: empty command=request operation=register body" {
-    const t = try TestContext.init(.{ .replica_count = 3 });
-    defer t.deinit();
+    const run_test = struct {
+        fn run_test(
+            client_release: vsr.Release,
+            eviction_reason: vsr.Header.Eviction.Reason,
+        ) !void {
+            const t = try TestContext.init(.{ .replica_count = 1 });
+            defer t.deinit();
 
-    // Wait for the primary to settle, since this test doesn't implement request retries.
-    t.run();
+            // Wait for the primary to settle, since this test doesn't implement request retries.
+            t.run();
 
-    var client_bus = try t.client_bus(0);
-    defer client_bus.deinit();
+            var client_bus = try t.client_bus(0);
+            defer client_bus.deinit();
 
-    var request_header = vsr.Header.Request{
-        .cluster = t.cluster.options.cluster_id,
-        .size = @sizeOf(vsr.Header),
-        .client = client_bus.client_id,
-        .request = 0,
-        .command = .request,
-        .operation = .register,
-        .release = releases[0].release,
-    };
-    request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
-    request_header.set_checksum();
+            var request_header = vsr.Header.Request{
+                .cluster = t.cluster.options.cluster_id,
+                .size = @sizeOf(vsr.Header),
+                .client = client_bus.client_id,
+                .request = 0,
+                .command = .request,
+                .operation = .register,
+                .release = client_release,
+            };
+            request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
+            request_header.set_checksum();
 
-    client_bus.request(t.replica(.A0).index(), &request_header, &.{});
-    t.run();
+            client_bus.request(t.replica(.A0).index(), &request_header, &.{});
+            t.run();
 
-    const Reply = extern struct {
-        header: vsr.Header.Reply,
-        body: vsr.RegisterResult,
-    };
+            const reply = std.mem.bytesAsValue(
+                vsr.Header.Eviction,
+                client_bus.reply.?.buffer[0..@sizeOf(vsr.Header.Eviction)],
+            );
+            try expectEqual(reply.command, .eviction);
+            try expectEqual(reply.size, @sizeOf(vsr.Header.Eviction));
+            try expectEqual(reply.reason, eviction_reason);
+        }
+    }.run_test;
 
-    const reply = std.mem.bytesAsValue(Reply, client_bus.reply.?.buffer[0..@sizeOf(Reply)]);
-    try expectEqual(reply.header.command, .reply);
-    try expectEqual(reply.header.operation, .register);
-    try expectEqual(reply.header.size, @sizeOf(Reply));
-    try expectEqual(reply.header.request, 0);
-    try expect(stdx.zeroed(std.mem.asBytes(&reply.body)));
+    try run_test(vsr.Release.minimum, .client_release_too_low);
+    try run_test(releases[0].release_client_min, .invalid_request_body_size);
 }
 
 test "Cluster: eviction: no_session" {
@@ -1852,28 +1860,33 @@ const TestContext = struct {
     }) !*TestContext {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
-        var prng = std.rand.DefaultPrng.init(options.seed);
-        const random = prng.random();
+        var prng = stdx.PRNG.from_seed(options.seed);
 
         const cluster = try Cluster.init(allocator, .{
-            .cluster_id = 0,
-            .replica_count = options.replica_count,
-            .standby_count = options.standby_count,
-            .client_count = options.client_count,
-            .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
-            .seed = random.int(u64),
-            .releases = &releases,
-            .client_release = options.client_release,
+            .cluster = .{
+                .cluster_id = 0,
+                .replica_count = options.replica_count,
+                .standby_count = options.standby_count,
+                .client_count = options.client_count,
+                .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
+                .seed = prng.int(u64),
+                .releases = &releases,
+                .client_release = options.client_release,
+                .state_machine = .{
+                    .batch_size_limit = constants.message_body_size_max,
+                    .lsm_forest_node_count = 4096,
+                },
+            },
             .network = .{
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
-                .seed = random.int(u64),
-                .one_way_delay_mean = 3 + random.uintLessThan(u16, 10),
-                .one_way_delay_min = random.uintLessThan(u16, 3),
+                .seed = prng.int(u64),
+                .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
+                .one_way_delay_min = prng.int_inclusive(u16, 2),
 
                 .path_maximum_capacity = 128,
                 .path_clog_duration_mean = 0,
-                .path_clog_probability = 0,
+                .path_clog_probability = ratio(0, 100),
                 .recorded_count_max = 16,
             },
             .storage = .{
@@ -1889,11 +1902,9 @@ const TestContext = struct {
                 .faulty_client_replies = false,
                 .faulty_grid = false,
             },
-            .state_machine = .{
-                .batch_size_limit = constants.message_body_size_max,
-                .lsm_forest_node_count = 4096,
+            .callbacks = .{
+                .on_client_reply = TestContext.on_client_reply,
             },
-            .on_client_reply = TestContext.on_client_reply,
         });
         errdefer cluster.deinit();
 
@@ -2345,7 +2356,6 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).insert(command);
-        if (command == .start_view) t.pass(peer, direction, .start_view_deprecated);
     }
 
     pub fn drop(
@@ -2356,7 +2366,6 @@ const TestReplicas = struct {
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
-        if (command == .start_view) t.drop(peer, direction, .start_view_deprecated);
     }
 
     pub fn filter(
@@ -2585,7 +2594,7 @@ const TestClientBus = struct {
         assert(message.header.cluster == t.context.cluster.options.cluster_id);
 
         switch (message.header.command) {
-            .reply => {
+            .reply, .eviction => {
                 assert(t.reply == null);
                 t.reply = message.ref();
             },

@@ -19,12 +19,13 @@
 //! with whatever chunks of bytes we receieve immediately, instead of collecting a buffer with a
 //! full message before piping it through.
 const std = @import("std");
-const arbitrary = @import("./arbitrary.zig");
+const stdx = @import("../../stdx.zig");
 const IO = @import("../../io.zig").IO;
 const constants = @import("./constants.zig");
 
 const assert = std.debug.assert;
 const log = std.log.scoped(.faulty_network);
+const Ratio = stdx.PRNG.Ratio;
 
 const Faults = struct {
     const Delay = struct {
@@ -32,17 +33,9 @@ const Faults = struct {
         jitter_ms: u32,
     };
 
-    const Lose = struct {
-        percentage: u8,
-    };
-
-    const Corrupt = struct {
-        percentage: u8,
-    };
-
     delay: ?Delay = null,
-    lose: ?Lose = null,
-    corrupt: ?Corrupt = null,
+    lose: ?Ratio = null,
+    corrupt: ?Ratio = null,
 
     // Others not implemented: duplication, reordering, rate
 
@@ -139,7 +132,7 @@ const Pipe = struct {
         }
 
         if (pipe.connection.network.faults.lose) |lose| {
-            if (arbitrary.odds(pipe.connection.network.random, lose.percentage, 100)) {
+            if (pipe.connection.network.prng.chance(lose)) {
                 log.debug("losing {d} bytes ({d},{d})", .{
                     pipe.recv_count,
                     pipe.connection.replica_index,
@@ -151,15 +144,15 @@ const Pipe = struct {
         }
 
         if (pipe.connection.network.faults.corrupt) |corrupt| {
-            if (arbitrary.odds(pipe.connection.network.random, corrupt.percentage, 100)) {
-                switch (pipe.connection.network.random.enumValue(enum { shuffle, zero })) {
+            if (pipe.connection.network.prng.chance(corrupt)) {
+                switch (pipe.connection.network.prng.enum_uniform(enum { shuffle, zero })) {
                     .shuffle => {
                         log.debug("shuffling {d} bytes ({d},{d})", .{
                             pipe.recv_count,
                             pipe.connection.replica_index,
                             pipe.connection.connection_index,
                         });
-                        pipe.connection.network.random.shuffle(u8, pipe.buffer[0..pipe.recv_count]);
+                        pipe.connection.network.prng.shuffle(u8, pipe.buffer[0..pipe.recv_count]);
                     },
                     .zero => {
                         log.debug("zeroing {d} bytes ({d},{d})", .{
@@ -175,11 +168,12 @@ const Pipe = struct {
 
         if (pipe.connection.network.faults.delay) |delay| {
             assert(delay.jitter_ms <= delay.time_ms);
-            const jitter_diff_ms: i32 = pipe.connection.network.random.intRangeAtMost(
-                i32,
-                -@as(i32, @intCast(delay.jitter_ms)),
-                @as(i32, @intCast(delay.jitter_ms)),
+            const jitter_size = pipe.connection.network.prng.int_inclusive(
+                u32,
+                delay.jitter_ms,
             );
+            const jitter_diff_ms: i32 = @as(i32, @intCast(jitter_size)) *
+                (if (pipe.connection.network.prng.boolean()) @as(i32, 1) else -1);
             const timeout_duration_ns = @as(
                 u63,
                 @intCast(@as(i32, @intCast(delay.time_ms)) + jitter_diff_ms),
@@ -471,7 +465,7 @@ const Proxy = struct {
 
 pub const Network = struct {
     io: *IO,
-    random: std.Random,
+    prng: *stdx.PRNG,
     proxies: []Proxy,
     faults: Faults,
 
@@ -479,7 +473,7 @@ pub const Network = struct {
         allocator: std.mem.Allocator,
         io: *IO,
         address_mappings: []Mapping,
-        random: std.Random,
+        prng: *stdx.PRNG,
     ) !*Network {
         assert(address_mappings.len == constants.replica_count);
 
@@ -491,7 +485,7 @@ pub const Network = struct {
 
         network.* = .{
             .io = io,
-            .random = random,
+            .prng = prng,
             .proxies = proxies,
             .faults = std.mem.zeroes(Faults),
         };

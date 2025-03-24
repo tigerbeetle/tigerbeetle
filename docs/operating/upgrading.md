@@ -16,6 +16,12 @@ gradually as any change to the client code might.
 NOTE: if you are upgrading from 0.15.3 (the first stable version), the upgrade procedure is more
 involved, see the [release notes for 0.15.4](https://github.com/tigerbeetle/tigerbeetle/releases/tag/0.15.4).
 
+## API Stability
+
+At the moment, TigerBeetle doesn't guarantee complete API stability, subscribe to the
+[tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
+to receive notifications about breaking changes!
+
 ## Planning for upgrades
 When upgrading TigerBeetle, each release specifies two important versions:
 * the oldest release that can be upgraded from and,
@@ -65,7 +71,7 @@ systemctl restart tigerbeetle # or, however you are managing TigerBeetle.
 ```
 
 ## Upgrading Docker-based installations
-If you're running TigerBeetle inside Kubernetes or Docker, update the tag that is pointed to to the
+If you're running TigerBeetle inside Kubernetes or Docker, update the tag that is pointed to the
 release you wish to upgrade to. Before beginning, it's strongly recommend to have a rolling deploy
 strategy set up.
 

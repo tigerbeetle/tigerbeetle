@@ -4,6 +4,7 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
+const exports = tb_client.exports;
 const assert = std.debug.assert;
 
 const TypeMapping = struct {
@@ -137,10 +138,14 @@ const type_mappings = .{
         .visibility = .internal,
         .private_fields = &.{"reserved"},
     } },
-    .{ tb_client.tb_status_t, TypeMapping{
+    .{ exports.tb_init_status, TypeMapping{
         .name = "InitializationStatus",
     } },
-    .{ tb_client.tb_packet_status_t, TypeMapping{
+    .{ exports.tb_client_status, TypeMapping{
+        .name = "ClientStatus",
+        .visibility = .internal,
+    } },
+    .{ exports.tb_packet_status, TypeMapping{
         .name = "PacketStatus",
     } },
 };
@@ -170,7 +175,7 @@ fn java_type(
             // For better API ergonomy,
             // we expose 16-bit unsigned integers in Java as "int" instead of "short".
             // Even though, the backing fields are always stored as "short".
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 1 => "byte",
                 8 => "byte",
@@ -204,7 +209,7 @@ fn to_case(
             break :blk stdx.comptime_slice(&output, len);
         } else {
             var len: usize = 0;
-            var iterator = std.mem.tokenize(u8, input, "_");
+            var iterator = std.mem.tokenizeScalar(u8, input, '_');
             while (iterator.next()) |word| {
                 _ = std.ascii.lowerString(output[len..], word);
                 output[len] = std.ascii.toUpper(output[len]);
@@ -240,10 +245,19 @@ fn emit_enum(
         .name = mapping.name,
     });
 
-    const type_info = @typeInfo(Type).Enum;
-    inline for (type_info.fields, 0..) |field, i| {
-        if (comptime mapping.is_private(field.name)) continue;
+    const fields = comptime fields: {
+        const EnumField = std.builtin.Type.EnumField;
+        const type_info = @typeInfo(Type).Enum;
+        var fields: []const EnumField = &[_]EnumField{};
+        for (type_info.fields) |field| {
+            if (mapping.is_private(field.name)) continue;
+            if (std.mem.startsWith(u8, field.name, "deprecated_")) continue;
+            fields = fields ++ [_]EnumField{field};
+        }
+        break :fields fields;
+    };
 
+    inline for (fields, 0..) |field, i| {
         if (mapping.docs_link) |docs_link| {
             try buffer.writer().print(
                 \\
@@ -264,7 +278,7 @@ fn emit_enum(
             .enum_name = to_case(field.name, .pascal),
             .int_type = int_type,
             .value = @intFromEnum(@field(Type, field.name)),
-            .separator = if (i == type_info.fields.len - 1) ';' else ',',
+            .separator = if (i == fields.len - 1) ';' else ',',
         });
     }
 
@@ -272,34 +286,37 @@ fn emit_enum(
         \\
         \\    public final {[int_type]s} value;
         \\
-        \\    static final {[name]s}[] enumByValue;
-        \\    static {{
-        \\    final var values = values();
-        \\      enumByValue = new {[name]s}[values.length];
-        \\       for (final var item : values) {{
-        \\          enumByValue[item.value] = item;
-        \\      }}
-        \\    }}
-        \\
         \\    {[name]s}({[int_type]s} value) {{
         \\        this.value = value;
         \\    }}
         \\
         \\    public static {[name]s} fromValue({[int_type]s} value) {{
-        \\        if (value < 0 || value >= enumByValue.length)
-        \\            throw new IllegalArgumentException(
-        \\                    String.format("Invalid {[name]s} value=%d", value));
+        \\        switch (value) {{
         \\
-        \\        final var item = enumByValue[value];
-        \\        AssertionError.assertTrue(item.value == value,
-        \\          "Unexpected {[name]s}: found=%d expected=%d", item.value, value);
-        \\        return item;
+    , .{
+        .int_type = int_type,
+        .name = mapping.name,
+    });
+
+    inline for (fields) |field| {
+        try buffer.writer().print(
+            \\            case {[value]d}: return {[enum_name]s};
+            \\
+        , .{
+            .enum_name = to_case(field.name, .pascal),
+            .value = @intFromEnum(@field(Type, field.name)),
+        });
+    }
+
+    try buffer.writer().print(
+        \\            default: throw new IllegalArgumentException(
+        \\                String.format("Invalid {[name]s} value=%d", value));
+        \\        }}
         \\    }}
         \\}}
         \\
         \\
     , .{
-        .int_type = int_type,
         .name = mapping.name,
     });
 }
@@ -377,7 +394,7 @@ fn emit_packed_enum(
 fn batch_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             switch (info.bits) {
                 16 => return "UInt16",
                 32 => return "UInt32",
@@ -955,6 +972,26 @@ pub fn main() !void {
 
         try target_dir.writeFile(.{
             .sub_path = mapping.name ++ ".java",
+            .data = buffer.items,
+        });
+    }
+
+    {
+        var buffer = std.ArrayList(u8).init(allocator);
+        try buffer.writer().print(
+            \\package com.tigerbeetle;
+            \\
+            \\interface TBClient {{
+            \\    int SIZE = {};
+            \\    int ALIGNMENT = {};
+            \\}}
+            \\
+        , .{
+            @sizeOf(exports.tb_client_t),
+            @alignOf(exports.tb_client_t),
+        });
+        try target_dir.writeFile(.{
+            .sub_path = "TBClient.java",
             .data = buffer.items,
         });
     }

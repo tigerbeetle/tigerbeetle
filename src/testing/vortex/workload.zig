@@ -29,16 +29,17 @@
 
 const std = @import("std");
 const stdx = @import("../../stdx.zig");
-const arbitrary = @import("./arbitrary.zig");
 const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const RingBufferType = stdx.RingBufferType;
+const TestingStorage = @import("../storage.zig").Storage;
+const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.workload);
 const assert = std.debug.assert;
 const testing = std.testing;
-const StateMachine = StateMachineType(void, constants.state_machine_config);
+const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
 
 const events_count_max = 8190;
 const pending_transfers_count_max = 1024;
@@ -60,14 +61,13 @@ pub fn main(
     try model.pending_transfers.ensureTotalCapacity(allocator, pending_transfers_count_max);
 
     const seed = std.crypto.random.int(u64);
-    var prng = std.Random.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     const stdout = std.io.getStdOut().writer().any();
 
     for (0..std.math.maxInt(u64)) |i| {
         const command_timestamp_start: u64 = @intCast(std.time.microTimestamp());
-        const command = random_command(random, &model);
+        const command = random_command(&prng, &model);
         const result = try execute(command, driver) orelse break;
         try reconcile(result, &command, &model);
         const command_timestamp_end: u64 = @intCast(std.time.microTimestamp());
@@ -332,25 +332,25 @@ fn debits_credits_difference(accounts: []tb.Account) i128 {
     return balance;
 }
 
-fn random_command(random: std.Random, model: *const Model) Command {
-    const command_tag = arbitrary.weighted(random, std.meta.Tag(Command), .{
+fn random_command(prng: *stdx.PRNG, model: *const Model) Command {
+    const command_tag = prng.enum_weighted(std.meta.Tag(Command), .{
         .create_accounts = if (model.accounts.items.len < accounts_count_max) 1 else 0,
         .create_transfers = if (model.accounts.items.len > 2) 10 else 0,
         .lookup_all_accounts = 0,
         .lookup_latest_transfers = 5,
-    }).?;
+    });
     switch (command_tag) {
-        .create_accounts => return random_create_accounts(random, model),
-        .create_transfers => return random_create_transfers(random, model),
+        .create_accounts => return random_create_accounts(prng, model),
+        .create_transfers => return random_create_transfers(prng, model),
         .lookup_latest_transfers => return lookup_latest_transfers(model),
         .lookup_all_accounts => unreachable,
     }
 }
 
-fn random_create_accounts(random: std.Random, model: *const Model) Command {
+fn random_create_accounts(prng: *stdx.PRNG, model: *const Model) Command {
     // NOTE: we're not generating closed or imported accounts yet.
 
-    const events_count = random.intRangeAtMost(
+    const events_count = prng.range_inclusive(
         usize,
         1,
         accounts_count_max - model.accounts.items.len,
@@ -361,20 +361,20 @@ fn random_create_accounts(random: std.Random, model: *const Model) Command {
     for (events, 0..) |*event, i| {
         var flags = std.mem.zeroes(tb.AccountFlags);
 
-        flags.history = arbitrary.odds(random, 1, 10);
+        flags.history = prng.chance(ratio(1, 10));
 
-        if (arbitrary.odds(random, 1, 10)) {
-            flags.debits_must_not_exceed_credits = random.boolean();
+        if (prng.chance(ratio(1, 10))) {
+            flags.debits_must_not_exceed_credits = prng.boolean();
             flags.credits_must_not_exceed_debits = !flags.debits_must_not_exceed_credits;
         }
 
         // The last account in a batch can't be linked.
-        flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
+        flags.linked = i < events_count - 1 and prng.chance(ratio(1, 100));
 
         event.* = std.mem.zeroInit(tb.Account, .{
-            .id = random.intRangeAtMost(u128, 1, std.math.maxInt(u128)),
+            .id = prng.range_inclusive(u128, 1, std.math.maxInt(u128)),
             .ledger = 1,
-            .code = random.intRangeAtMost(u16, 1, 100),
+            .code = prng.range_inclusive(u16, 1, 100),
             .flags = flags,
         });
     }
@@ -382,41 +382,39 @@ fn random_create_accounts(random: std.Random, model: *const Model) Command {
     return .{ .create_accounts = events[0..events_count] };
 }
 
-fn random_create_transfers(random: std.Random, model: *const Model) Command {
-    const events_count = random.intRangeAtMost(usize, 1, events_count_max);
+fn random_create_transfers(prng: *stdx.PRNG, model: *const Model) Command {
+    const events_count = prng.range_inclusive(usize, 1, events_count_max);
     assert(events_count <= events_count_max);
 
     var buffer = command_buffers.create_transfers[0..events_count];
     for (buffer, 0..) |*event, i| {
         var flags = std.mem.zeroes(tb.TransferFlags);
         var pending_id: u128 = 0;
-        var code = random.intRangeAtMost(u16, 1, 100);
+        var code = prng.range_inclusive(u16, 1, 100);
 
-        var debit_account_id = arbitrary.element(random, tb.Account, model.accounts.items).id;
+        var debit_account_id = model.accounts.items[prng.index(model.accounts.items)].id;
         var credit_account_id: u128 = 0;
         while (credit_account_id == 0 or credit_account_id == debit_account_id) {
-            credit_account_id = arbitrary.element(random, tb.Account, model.accounts.items).id;
+            credit_account_id = model.accounts.items[prng.index(model.accounts.items)].id;
         }
 
-        if (arbitrary.odds(random, 1, 10) and model.pending_transfers.count() > 0) {
-            flags.post_pending_transfer = random.boolean();
+        if (prng.chance(ratio(1, 10)) and model.pending_transfers.count() > 0) {
+            flags.post_pending_transfer = prng.boolean();
             flags.void_pending_transfer = !flags.post_pending_transfer;
-        } else if (arbitrary.odds(random, 1, 100_000)) {
-            flags.closing_debit = random.boolean();
+        } else if (prng.chance(ratio(1, 100_000))) {
+            flags.closing_debit = prng.boolean();
             flags.closing_credit = !flags.closing_debit;
         } else {
-            flags = arbitrary.flags(random, tb.TransferFlags, .{
-                .pending,
-                .balancing_debit,
-                .balancing_credit,
-            });
+            inline for (.{ .pending, .balancing_debit, .balancing_credit }) |flag| {
+                @field(flags, @tagName(flag)) = prng.boolean();
+            }
         }
 
         // The last transfer in a batch can't be linked.
-        flags.linked = i < events_count - 1 and arbitrary.odds(random, 1, 100);
+        flags.linked = i < events_count - 1 and prng.chance(ratio(1, 100));
 
         if (flags.post_pending_transfer or flags.void_pending_transfer) {
-            pending_id = arbitrary.set_element(random, u128, model.pending_transfers);
+            pending_id = random_pending_transfer(prng, &model.pending_transfers);
             code = 0;
             debit_account_id = 0;
             credit_account_id = 0;
@@ -428,13 +426,27 @@ fn random_create_transfers(random: std.Random, model: *const Model) Command {
             .ledger = 1,
             .debit_account_id = debit_account_id,
             .credit_account_id = credit_account_id,
-            .amount = random.uintAtMost(u128, 1 << 32),
+            .amount = prng.int_inclusive(u128, 1 << 32),
             .code = code,
             .pending_id = pending_id,
         });
     }
 
     return .{ .create_transfers = buffer[0..events_count] };
+}
+
+fn random_pending_transfer(
+    prng: *stdx.PRNG,
+    pending_transfers: *const std.AutoHashMapUnmanaged(u128, void),
+) u128 {
+    assert(pending_transfers.count() > 0);
+    var pick = prng.int_inclusive(usize, pending_transfers.count() - 1);
+    var iterator = pending_transfers.keyIterator();
+    while (iterator.next()) |item| {
+        if (pick == 0) return item.*;
+        pick -= 1;
+    }
+    unreachable;
 }
 
 fn lookup_all_accounts(model: *const Model) Command {

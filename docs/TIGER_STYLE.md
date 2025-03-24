@@ -1,4 +1,4 @@
-# Tiger Style
+# TigerStyle
 
 ## The Essence Of Style
 
@@ -280,8 +280,10 @@ Beyond these rules:
   consistent.
 
 - Do not abbreviate variable names, unless the variable is a primitive integer type used as an
-  argument to a sort function or matrix calculation. Use proper capitalization for acronyms
-  (`VSRState`, not `VsrState`).
+  argument to a sort function or matrix calculation. Use long form arguments in scripts: `--force`,
+  not `-f`. Single letter flags are for interactive usage.
+
+- Use proper capitalization for acronyms (`VSRState`, not `VsrState`).
 
 - For the rest, follow the Zig style guide.
 

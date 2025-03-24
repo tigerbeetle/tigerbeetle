@@ -1,6 +1,7 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
-const maybe = @import("../stdx.zig").maybe;
+const maybe = stdx.maybe;
 const math = std.math;
 const mem = std.mem;
 
@@ -314,7 +315,7 @@ fn TestContextType(comptime streams_max: u32) type {
             try testing.expectEqualSlices(Value, expect, actual.items);
         }
 
-        fn fuzz(random: std.rand.Random, stream_key_count_max: u32) !void {
+        fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
             if (log) std.debug.print("\n", .{});
             const allocator = testing.allocator;
 
@@ -332,9 +333,9 @@ fn TestContextType(comptime streams_max: u32) type {
                 {
                     var i: u32 = 0;
                     while (i < k) : (i += 1) {
-                        const len = fuzz_stream_len(random, stream_key_count_max);
+                        const len = fuzz_stream_len(prng, stream_key_count_max);
                         streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
-                        fuzz_stream_keys(random, streams[i]);
+                        fuzz_stream_keys(prng, streams[i]);
 
                         if (log) {
                             std.debug.print("stream {} = ", .{i});
@@ -386,22 +387,24 @@ fn TestContextType(comptime streams_max: u32) type {
             }
         }
 
-        fn fuzz_stream_len(random: std.rand.Random, stream_key_count_max: u32) u32 {
-            return switch (random.uintLessThanBiased(u8, 100)) {
-                0...4 => 0,
-                5...9 => stream_key_count_max,
-                else => random.uintAtMostBiased(u32, stream_key_count_max),
+        fn fuzz_stream_len(prng: *stdx.PRNG, stream_key_count_max: u32) u32 {
+            const Len = enum { zero, max, random };
+            return switch (prng.enum_weighted(Len, .{ .zero = 5, .max = 5, .random = 90 })) {
+                .zero => 0,
+                .max => stream_key_count_max,
+                .random => prng.int_inclusive(u32, stream_key_count_max),
             };
         }
 
-        fn fuzz_stream_keys(random: std.rand.Random, stream: []u32) void {
-            const key_max = random.intRangeLessThanBiased(u32, 512, 1024);
-            switch (random.uintLessThanBiased(u8, 100)) {
-                0...4 => {
-                    @memset(stream, random.int(u32));
+        fn fuzz_stream_keys(prng: *stdx.PRNG, stream: []u32) void {
+            const key_max = prng.range_inclusive(u32, 512, 1023);
+            const Key = enum { all_same, random };
+            switch (prng.enum_weighted(Key, .{ .all_same = 5, .random = 95 })) {
+                .all_same => {
+                    @memset(stream, prng.int(u32));
                 },
-                else => {
-                    random.bytes(mem.sliceAsBytes(stream));
+                .random => {
+                    prng.fill(mem.sliceAsBytes(stream));
                 },
             }
             for (stream) |*key| key.* = key.* % key_max;
@@ -493,8 +496,6 @@ test "k_way_merge: fuzz" {
     const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
-
-    try TestContextType(32).fuzz(random, 256);
+    var prng = stdx.PRNG.from_seed(seed);
+    try TestContextType(32).fuzz(&prng, 256);
 }

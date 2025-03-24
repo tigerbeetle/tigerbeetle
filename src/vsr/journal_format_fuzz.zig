@@ -3,6 +3,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_journal_format);
 
+const stdx = @import("../stdx.zig");
+
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
@@ -12,11 +14,11 @@ const allocator = fuzz.allocator;
 const cluster = 0;
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = stdx.PRNG.from_seed(args.seed);
 
     // +10 to occasionally test formatting into a buffer larger than the total data size.
     const write_sectors_max = @divExact(constants.journal_size_headers, constants.sector_size);
-    const write_sectors = 1 + prng.random().uintLessThan(usize, write_sectors_max + 10);
+    const write_sectors = prng.range_inclusive(usize, 1, write_sectors_max + 10);
     const write_size = write_sectors * constants.sector_size;
 
     log.info("write_size={} write_sectors={}", .{ write_size, write_sectors });

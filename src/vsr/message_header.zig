@@ -88,7 +88,6 @@ pub const Header = extern struct {
             .commit => Commit,
             .start_view_change => StartViewChange,
             .do_view_change => DoViewChange,
-            .start_view_deprecated => StartView,
             .start_view => StartView,
             .request_start_view => RequestStartView,
             .request_headers => RequestHeaders,
@@ -98,6 +97,10 @@ pub const Header = extern struct {
             .eviction => Eviction,
             .request_blocks => RequestBlocks,
             .block => Block,
+            .deprecated_12 => Deprecated,
+            .deprecated_21 => Deprecated,
+            .deprecated_22 => Deprecated,
+            .deprecated_23 => Deprecated,
         };
     }
 
@@ -209,6 +212,10 @@ pub const Header = extern struct {
             .prepare => return .unknown,
             .block => return .unknown,
             .reply => return .unknown,
+            .deprecated_12 => return .unknown,
+            .deprecated_21 => return .unknown,
+            .deprecated_22 => return .unknown,
+            .deprecated_23 => return .unknown,
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
             // All other messages identify the peer as a replica:
@@ -220,7 +227,6 @@ pub const Header = extern struct {
             .start_view_change,
             .do_view_change,
             .start_view,
-            .start_view_deprecated,
             .request_start_view,
             .request_headers,
             .request_prepare,
@@ -297,6 +303,33 @@ pub const Header = extern struct {
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
             return "reserved is invalid";
+        }
+    };
+
+    /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
+    /// type for each command.
+    pub const Deprecated = extern struct {
+        pub usingnamespace HeaderFunctionsType(@This());
+
+        checksum: u128,
+        checksum_padding: u128 = 0,
+        checksum_body: u128,
+        checksum_body_padding: u128 = 0,
+        nonce_reserved: u128,
+        cluster: u128,
+        size: u32,
+        epoch: u32 = 0,
+        view: u32 = 0,
+        release: vsr.Release,
+        protocol: u16 = vsr.Version,
+        command: Command,
+        replica: u8 = 0,
+        reserved_frame: [12]u8,
+
+        reserved: [128]u8 = [_]u8{0} ** 128,
+
+        fn invalid_header(_: *const @This()) ?[]const u8 {
+            return "deprecated message type";
         }
     };
 
@@ -473,7 +506,7 @@ pub const Header = extern struct {
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
         /// - A session's subsequent requests (operation≠register) set `parent` to the checksum of
-        ///   the preceding request.
+        ///   the preceding reply.
         parent: u128 = 0,
         parent_padding: u128 = 0,
         /// Each client process generates a unique, random and ephemeral client ID at
@@ -520,7 +553,9 @@ pub const Header = extern struct {
                     if (self.parent != 0) return "register: parent != 0";
                     if (self.session != 0) return "register: session != 0";
                     if (self.request != 0) return "register: request != 0";
-                    if (self.size != @sizeOf(Header) and // Compat(v0.15.3)
+                    // Support `register` requests without the body to correctly
+                    // reply with `client_release_too_low` for clients <= v0.15.3.
+                    if (self.size != @sizeOf(Header) and
                         self.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
                     {
                         return "register: size != @sizeOf(Header) [+ @sizeOf(vsr.RegisterRequest)]";
@@ -688,7 +723,7 @@ pub const Header = extern struct {
             return null;
         }
 
-        pub fn reserved(cluster: u128, slot: u64) Prepare {
+        pub fn reserve(cluster: u128, slot: u64) Prepare {
             assert(slot < constants.journal_slot_count);
 
             var header = Prepare{
@@ -844,7 +879,9 @@ pub const Header = extern struct {
         /// The checksum of the corresponding Request.
         request_checksum: u128,
         request_checksum_padding: u128 = 0,
-        /// The checksum of the prepare message to which this message refers.
+        /// The checksum to be included with the next request as parent checksum.
+        /// It's almost exactly the same as entire header's checksum, except that it is computed
+        /// with a fixed view and remains stable if reply is retransmitted in a newer view.
         /// This allows for strong guarantees beyond request, op, and commit numbers, which
         /// have low entropy and may otherwise collide in the event of any correctness bugs.
         context: u128 = 0,
@@ -1037,7 +1074,7 @@ pub const Header = extern struct {
         reserved: [88]u8 = [_]u8{0} ** 88,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
-            assert(self.command == .start_view_deprecated or self.command == .start_view);
+            assert(self.command == .start_view);
             if (self.release.value != 0) return "release != 0";
             if (self.op < self.commit_max) return "op < commit_max";
             if (self.commit_max < self.checkpoint_op) return "commit_max < checkpoint_op";

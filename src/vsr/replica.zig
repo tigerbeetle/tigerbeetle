@@ -70,6 +70,41 @@ pub const ReplicaEvent = union(enum) {
     client_evicted: u128,
 };
 
+pub const CommitStage = union(enum) {
+    pub const Tag = std.meta.Tag(CommitStage);
+
+    const CheckpointData = enum {
+        aof,
+        state_machine,
+        client_replies,
+        client_sessions,
+        grid,
+    };
+
+    const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
+
+    /// Not committing.
+    idle,
+    /// Get the next prepare to commit from the journal or pipeline and...
+    start,
+    /// ...if there isn't any, break out of commit loop.
+    check_prepare,
+    /// Load required data from LSM tree on disk into memory.
+    prefetch,
+    /// Ensure that the ClientReplies has at least one Write available.
+    reply_setup,
+    /// Execute state machine logic.
+    execute,
+    /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
+    checkpoint_durable,
+    /// Run one beat of LSM compaction.
+    compact,
+    /// Every vsr_checkpoint_ops, persist the current state to disk and...
+    checkpoint_data: CheckpointDataProgress,
+    /// ...update the superblock.
+    checkpoint_superblock,
+};
+
 const Nonce = u128;
 
 const Prepare = struct {
@@ -130,11 +165,6 @@ pub fn ReplicaType(
         const BlockWrite = struct {
             write: Grid.Write = undefined,
             replica: *Replica,
-        };
-
-        const RepairTable = struct {
-            replica: *Replica,
-            table: Grid.RepairTable,
         };
 
         /// We use this allocator during open/init and then disable it.
@@ -268,7 +298,8 @@ pub fn ReplicaType(
 
         grid: Grid,
         grid_reads: IOPSType(BlockRead, constants.grid_repair_reads_max) = .{},
-        grid_repair_tables: IOPSType(RepairTable, constants.grid_missing_tables_max) = .{},
+        grid_repair_tables: IOPSType(Grid.RepairTable, constants.grid_missing_tables_max) = .{},
+        grid_repair_table_bitsets: [constants.grid_repair_writes_max]std.DynamicBitSetUnmanaged,
         grid_repair_writes: IOPSType(BlockWrite, constants.grid_repair_writes_max) = .{},
         grid_repair_write_blocks: [constants.grid_repair_writes_max]BlockPtr,
         grid_scrubber: GridScrubber,
@@ -523,7 +554,7 @@ pub fn ReplicaType(
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
 
         /// Used by `Cluster` in the simulator.
         test_context: ?*anyopaque,
@@ -534,6 +565,7 @@ pub fn ReplicaType(
         commit_prepare: ?*Message.Prepare = null,
 
         trace: vsr.trace.Tracer,
+        trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
 
@@ -595,7 +627,7 @@ pub fn ReplicaType(
             // Open the superblock:
             self.opened = false;
             self.superblock.open(superblock_open_callback, &self.superblock_context);
-            while (!self.opened) self.superblock.storage.tick();
+            while (!self.opened) self.superblock.storage.run();
             self.superblock.working.vsr_state.assert_internally_consistent();
 
             const replica_id = self.superblock.working.vsr_state.replica_id;
@@ -612,7 +644,12 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
-            self.trace = try vsr.trace.Tracer.init(allocator, replica, options.tracer_options);
+            self.trace = try vsr.trace.Tracer.init(
+                allocator,
+                self.superblock.working.cluster,
+                replica,
+                options.tracer_options,
+            );
             errdefer if (!initialized) self.trace.deinit(allocator);
 
             // Initialize the replica:
@@ -658,12 +695,7 @@ pub fn ReplicaType(
 
             self.opened = false;
             self.journal.recover(journal_recover_callback);
-            while (!self.opened) self.superblock.storage.tick();
-            for (self.journal.headers, 0..constants.journal_slot_count) |*header, slot| {
-                if (self.journal.faulty.bit(.{ .index = slot })) {
-                    assert(header.operation == .reserved);
-                }
-            }
+            while (!self.opened) self.superblock.storage.run();
 
             // Abort if all slots are faulty, since something is very wrong.
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
@@ -820,6 +852,8 @@ pub fn ReplicaType(
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
             // can repair grid blocks if necessary:
             self.grid.open(grid_open_callback);
+            self.trace_emit_timeout.start();
+            self.invariants();
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -932,7 +966,7 @@ pub fn ReplicaType(
             self.state_machine_opened = true;
             if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
-            self.grid_scrubber.open(self.prng.random());
+            self.grid_scrubber.open(&self.prng);
             if (self.superblock.working.vsr_state.sync_op_max > 0) {
                 self.sync_content();
             }
@@ -1077,16 +1111,6 @@ pub fn ReplicaType(
             });
             errdefer client_replies.deinit();
 
-            self.message_bus = try MessageBus.init(
-                allocator,
-                options.cluster,
-                .{ .replica = options.replica_index },
-                options.message_pool,
-                Replica.on_message_from_bus,
-                options.message_bus_options,
-            );
-            errdefer self.message_bus.deinit(allocator);
-
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
                 .trace = &self.trace,
@@ -1099,6 +1123,13 @@ pub fn ReplicaType(
                     CheckpointTrailer.block_count_for_trailer_size(ClientSessions.encode_size),
             });
             errdefer self.grid.deinit(allocator);
+
+            for (&self.grid_repair_table_bitsets, 0..) |*bitset, i| {
+                errdefer for (self.grid_repair_table_bitsets[0..i]) |*b| b.deinit(allocator);
+                bitset.* = try std.DynamicBitSetUnmanaged
+                    .initEmpty(allocator, constants.lsm_table_data_blocks_max);
+            }
+            errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
 
             for (&self.grid_repair_write_blocks, 0..) |*block, i| {
                 errdefer for (self.grid_repair_write_blocks[0..i]) |b| allocator.free(b);
@@ -1119,6 +1150,22 @@ pub fn ReplicaType(
                 &self.client_sessions_checkpoint,
             );
             errdefer self.grid_scrubber.deinit(allocator);
+
+            // Initialize the MessageBus last. This brings the time when the replica can be
+            // externally spoken to (ie, MessageBus will accept TCP connections) closer to the time
+            // when Replica is actually listening for messages and won't simply drop them.
+            //
+            // Specifically, the grid cache in Grid.init above can take a long period of time while
+            // faulting in.
+            self.message_bus = try MessageBus.init(
+                allocator,
+                options.cluster,
+                .{ .replica = options.replica_index },
+                options.message_pool,
+                Replica.on_message_from_bus,
+                options.message_bus_options,
+            );
+            errdefer self.message_bus.deinit(allocator);
 
             self.* = .{
                 .static_allocator = self.static_allocator,
@@ -1152,6 +1199,7 @@ pub fn ReplicaType(
                 .state_machine = self.state_machine,
                 .superblock = self.superblock,
                 .grid = self.grid,
+                .grid_repair_table_bitsets = self.grid_repair_table_bitsets,
                 .grid_repair_write_blocks = self.grid_repair_write_blocks,
                 .grid_scrubber = self.grid_scrubber,
                 .opened = self.opened,
@@ -1248,7 +1296,12 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 500,
                 },
-                .prng = std.rand.DefaultPrng.init(replica_index),
+                .trace_emit_timeout = Timeout{
+                    .name = "trace_emit_timeout",
+                    .id = replica_index,
+                    .after = 1000,
+                },
+                .prng = stdx.PRNG.from_seed(replica_index),
 
                 .trace = self.trace,
                 .test_context = options.test_context,
@@ -1306,10 +1359,15 @@ pub fn ReplicaType(
             while (grid_reads.next()) |read| self.message_bus.unref(read.message);
 
             for (self.grid_repair_write_blocks) |block| allocator.free(block);
+            for (&self.grid_repair_table_bitsets) |*bit_set| bit_set.deinit(allocator);
 
             for (self.do_view_change_from_all_replicas) |message| {
                 if (message) |m| self.message_bus.unref(m);
             }
+        }
+
+        pub fn invariants(self: *const Replica) void {
+            assert(self.journal.header_with_op(self.op) != null);
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -1321,6 +1379,7 @@ pub fn ReplicaType(
             // delay the delivery of messages (e.g. a prepare_ok from the primary to itself) and
             // decrease throughput significantly.
             assert(self.loopback_queue == null);
+            defer self.invariants();
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
@@ -1346,6 +1405,7 @@ pub fn ReplicaType(
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
+                .{ &self.trace_emit_timeout, on_trace_emit_timeout },
             };
 
             inline for (timeouts) |timeout| {
@@ -1372,6 +1432,7 @@ pub fn ReplicaType(
             assert(self.opened);
             assert(self.loopback_queue == null);
             assert(message.references > 0);
+            defer self.invariants();
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
@@ -1432,7 +1493,6 @@ pub fn ReplicaType(
                 .commit => |m| self.on_commit(m),
                 .start_view_change => |m| self.on_start_view_change(m),
                 .do_view_change => |m| self.on_do_view_change(m),
-                .start_view_deprecated => |m| self.on_start_view(m),
                 .start_view => |m| self.on_start_view(m),
                 .request_start_view => |m| self.on_request_start_view(m),
                 .request_prepare => |m| self.on_request_prepare(m),
@@ -1450,6 +1510,10 @@ pub fn ReplicaType(
                     return;
                 },
                 .reserved => unreachable,
+                .deprecated_12 => unreachable,
+                .deprecated_21 => unreachable,
+                .deprecated_22 => unreachable,
+                .deprecated_23 => unreachable,
             }
 
             if (self.loopback_queue) |loopback_message| {
@@ -1592,7 +1656,7 @@ pub fn ReplicaType(
                     return;
                 };
 
-            const request = .{
+            const request: Request = .{
                 .message = message.ref(),
                 .realtime = realtime,
             };
@@ -1634,6 +1698,18 @@ pub fn ReplicaType(
             assert(message.header.command == .prepare);
             assert(message.header.replica < self.replica_count);
             assert(message.header.operation != .reserved);
+
+            // Sanity check --- if the prepare is definitely from the current log-wrap, it should be
+            // appended.
+            defer {
+                if (self.status == .normal and self.syncing == .idle and
+                    message.header.view == self.view and
+                    message.header.op > self.op_checkpoint() and
+                    message.header.op <= self.op_checkpoint_next_trigger())
+                {
+                    assert(self.journal.has_header(message.header));
+                }
+            }
 
             // Replication balances two goals:
             // - replicate anything that the next replica is likely missing,
@@ -1861,7 +1937,8 @@ pub fn ReplicaType(
             assert(self.primary_abdicate_timeout.ticking);
             assert(!self.primary_abdicating);
             if (self.primary_pipeline_pending()) |prepare_pending| {
-                if (prepare_pending == prepare) {
+                assert(prepare != prepare_pending);
+                if (prepare.message.header.op < prepare_pending.message.header.op) {
                     self.prepare_timeout.reset();
                 }
             } else {
@@ -2036,8 +2113,7 @@ pub fn ReplicaType(
                 log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
 
                 self.send_prepare_ok(message.header);
-                defer self.flush_loopback_queue();
-                return;
+                return self.flush_loopback_queue();
             }
 
             if (self.repair_header(message.header)) {
@@ -2262,8 +2338,7 @@ pub fn ReplicaType(
         // haven’t executed previously, advance their commit number, and update the information in
         // their client table.
         fn on_start_view(self: *Replica, message: *Message.StartView) void {
-            assert(message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+            assert(message.header.command == .start_view);
             if (self.ignore_view_change_message(message.base_const())) return;
 
             if (self.status == .recovering_head) {
@@ -2354,16 +2429,6 @@ pub fn ReplicaType(
         }
 
         fn on_start_view_set_checkpoint(self: *Replica, message: *Message.StartView) bool {
-            // Accept SV messages for state sync only from replicas that are on the new
-            // CheckpointState.
-            if (message.header.command == .start_view_deprecated) {
-                log.warn("{}: on_start_view_set_checkpoint: ignoring {s}", .{
-                    self.replica,
-                    @tagName(message.header.command),
-                });
-                return false;
-            }
-
             const view_checkpoint = start_view_message_checkpoint(message);
 
             if (vsr.Checkpoint.trigger_for_checkpoint(view_checkpoint.header.op)) |trigger| {
@@ -2468,14 +2533,7 @@ pub fn ReplicaType(
                             break;
                         }
                     }
-                } else {
-                    assert(message.header.command == .start_view_deprecated);
-                    log.warn("{}: on_start_view_set_journal: {s} headers too far ahead", .{
-                        self.replica,
-                        @tagName(message.header.command),
-                    });
-                    return;
-                }
+                } else unreachable;
 
                 for (view_headers) |*header| {
                     if (header.op <= self.op_prepare_max_sync()) {
@@ -2548,24 +2606,16 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
             assert(self.primary());
 
-            const start_view_messages = self.create_start_view_message(message.header.nonce);
-            defer self.message_bus.unref(start_view_messages.deprecated);
-            defer self.message_bus.unref(start_view_messages.next);
+            const start_view_message = self.create_start_view_message(message.header.nonce);
+            defer self.message_bus.unref(start_view_message);
 
-            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
-            assert(start_view_messages.next.header.command == .start_view);
-
-            for ([_]*Message.StartView{
-                start_view_messages.deprecated,
-                start_view_messages.next,
-            }) |start_view_message| {
-                assert(start_view_message.references == 1);
-                assert(start_view_message.header.view == self.view);
-                assert(start_view_message.header.op == self.op);
-                assert(start_view_message.header.commit_max == self.commit_max);
-                assert(start_view_message.header.nonce == message.header.nonce);
-                self.send_message_to_replica(message.header.replica, start_view_message);
-            }
+            assert(start_view_message.header.command == .start_view);
+            assert(start_view_message.references == 1);
+            assert(start_view_message.header.view == self.view);
+            assert(start_view_message.header.op == self.op);
+            assert(start_view_message.header.commit_max == self.commit_max);
+            assert(start_view_message.header.nonce == message.header.nonce);
+            self.send_message_to_replica(message.header.replica, start_view_message);
         }
 
         /// If the requested prepare has been guaranteed by this replica:
@@ -3130,7 +3180,7 @@ pub fn ReplicaType(
 
                 if (self.primary_pipeline_pending()) |prepare_pending| {
                     if (prepare_pending == prepare) {
-                        self.prepare_timeout.backoff(self.prng.random());
+                        self.prepare_timeout.backoff(&self.prng);
                     } else {
                         self.prepare_timeout.reset();
                     }
@@ -3147,13 +3197,16 @@ pub fn ReplicaType(
                 return self.commit_pipeline();
             }
 
+            const ring_direction = replicate_direction(prepare.message);
+
             // The list of remote replicas yet to send a prepare_ok:
             var waiting: [constants.replicas_max]u8 = undefined;
             var waiting_len: usize = 0;
             for (1..self.replica_count) |ring_index| {
-                const replica: u8 = @intCast(
-                    (@as(usize, self.replica) + ring_index) % self.replica_count,
-                );
+                const replica: u8 = @intCast(@mod(
+                    @as(i16, self.replica) + ring_direction * @as(i16, @intCast(ring_index)),
+                    self.replica_count,
+                ));
                 assert(replica != self.replica);
                 if (!prepare.ok_from_all_replicas.isSet(replica)) {
                     waiting[waiting_len] = replica;
@@ -3184,7 +3237,7 @@ pub fn ReplicaType(
                 return;
             }
 
-            self.prepare_timeout.backoff(self.prng.random());
+            self.prepare_timeout.backoff(&self.prng);
 
             assert(waiting_len <= self.replica_count);
             for (waiting[0..waiting_len]) |replica| {
@@ -3413,6 +3466,13 @@ pub fn ReplicaType(
                 const scrub_next = self.grid_scrubber.read_next();
                 if (!scrub_next) break;
             } else unreachable;
+        }
+
+        fn on_trace_emit_timeout(self: *Replica) void {
+            assert(self.trace_emit_timeout.ticking);
+            self.trace_emit_timeout.reset();
+
+            self.trace.emit_metrics();
         }
 
         fn on_pulse_timeout(self: *Replica) void {
@@ -3749,8 +3809,9 @@ pub fn ReplicaType(
 
             // Carefully select any replica if we are a standby,
             // and any different replica if we are active.
-            const pool = if (self.standby()) self.replica_count else self.replica_count - 1;
-            const shift = self.prng.random().intRangeAtMost(u8, 1, pool);
+            const pool_count = if (self.standby()) self.replica_count else self.replica_count - 1;
+            assert(pool_count > 0);
+            const shift = 1 + self.prng.int_inclusive(u8, pool_count - 1);
             const other_replica = @mod(self.replica + shift, self.replica_count);
             assert(other_replica != self.replica);
             return other_replica;
@@ -3826,39 +3887,6 @@ pub fn ReplicaType(
             self.commit_dispatch_enter();
         }
 
-        const CommitStage = union(enum) {
-            const CheckpointData = enum {
-                aof,
-                state_machine,
-                client_replies,
-                client_sessions,
-                grid,
-            };
-
-            const CheckpointDataProgress = std.enums.EnumSet(CheckpointData);
-
-            /// Not committing.
-            idle,
-            /// Get the next prepare to commit from the journal or pipeline and...
-            start,
-            /// ...if there isn't any, break out of commit loop.
-            check_prepare,
-            /// Load required data from LSM tree on disk into memory.
-            prefetch,
-            /// Ensure that the ClientReplies has at least one Write available.
-            reply_setup,
-            /// Execute state machine logic.
-            execute,
-            /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
-            checkpoint_durable,
-            /// Run one beat of LSM compaction.
-            compact,
-            /// Every vsr_checkpoint_ops, persist the current state to disk and...
-            checkpoint_data: CheckpointDataProgress,
-            /// ...update the superblock.
-            checkpoint_superblock,
-        };
-
         /// Commit flow.
         ///
         /// This is a manual desugaring of asynchronous function of the following shape:
@@ -3913,81 +3941,79 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
                     self.commit_completion_timer.reset();
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_prefetch() == .pending) return;
                 }
 
                 if (self.commit_stage == .prefetch) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .reply_setup;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_reply_setup() == .pending) return;
                 }
 
                 if (self.commit_stage == .reply_setup) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .execute;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     self.commit_execute();
                 }
 
                 if (self.commit_stage == .execute) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .checkpoint_durable;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_durable() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_durable) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .compact;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
                     if (self.commit_compact() == .pending) return;
                 }
 
                 if (self.commit_stage == .compact) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .{ .checkpoint_data = .{} };
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_data() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_data) {
-                    self.trace.stop(.replica_commit, .{ .stage = @tagName(self.commit_stage) });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .checkpoint_superblock;
-                    self.trace.start(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
-                    });
+                    } });
 
                     if (self.commit_checkpoint_superblock() == .pending) return;
                 }
 
                 if (self.commit_stage == .checkpoint_superblock) {
-                    self.trace.stop(.replica_commit, .{
-                        .stage = @tagName(self.commit_stage),
-                    });
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .idle;
                     self.commit_finish();
 
@@ -4043,7 +4069,7 @@ pub fn ReplicaType(
             assert(self.commit_dispatch_entered);
 
             if (self.commit_prepare) |prepare| self.message_bus.unref(prepare);
-            self.trace.reset(.replica_commit);
+            self.trace.cancel(.replica_commit);
             self.commit_prepare = null;
             self.commit_stage = .idle;
             self.commit_dispatch_entered = false;
@@ -4225,7 +4251,6 @@ pub fn ReplicaType(
                 self.state_machine.prefetch_timestamp = prepare.header.timestamp;
                 self.state_machine.prefetch(
                     commit_prefetch_callback,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare_operation,
                     prepare.body_used(),
@@ -4652,7 +4677,7 @@ pub fn ReplicaType(
                 std.time.ns_per_ms,
             );
             if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
-                log.warn("{}: commit_dispatch: request={} size={} {s} time={}ms", .{
+                log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.replica,
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
@@ -4734,13 +4759,13 @@ pub fn ReplicaType(
             // It should be impossible for a client to receive a response without the request
             // being logged by at least one replica.
             if (self.aof) |aof| {
-                self.trace.start(.replica_aof_write, .{
+                self.trace.start(.{ .replica_aof_write = .{
                     .op = prepare.header.op,
-                });
+                } });
                 aof.write(prepare) catch @panic("aof failure");
-                self.trace.stop(.replica_aof_write, .{
+                self.trace.stop(.{ .replica_aof_write = .{
                     .op = prepare.header.op,
-                });
+                } });
             }
 
             const reply_body_size = switch (prepare.header.operation) {
@@ -4753,7 +4778,6 @@ pub fn ReplicaType(
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
                 else => self.state_machine.commit(
                     prepare.header.client,
-                    prepare.header.release,
                     prepare.header.op,
                     prepare.header.timestamp,
                     prepare.header.operation.cast(StateMachine),
@@ -4872,30 +4896,20 @@ pub fn ReplicaType(
                 output_buffer[0..@sizeOf(vsr.RegisterResult)],
             );
 
-            if (prepare.header.size == @sizeOf(vsr.Header)) {
-                // Old clients which don't send a RegisterRequest also don't check
-                // `batch_size_limit`.
-                result.* = .{
-                    .batch_size_limit = 0,
-                };
-            } else {
-                assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(prepare.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit > 0);
+            assert(register_request.batch_size_limit <= constants.message_body_size_max);
+            assert(register_request.batch_size_limit <=
+                self.request_size_limit - @sizeOf(vsr.Header));
+            assert(stdx.zeroed(&register_request.reserved));
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    prepare.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit > 0);
-                assert(register_request.batch_size_limit <= constants.message_body_size_max);
-                assert(register_request.batch_size_limit <=
-                    self.request_size_limit - @sizeOf(vsr.Header));
-                assert(stdx.zeroed(&register_request.reserved));
-
-                result.* = .{
-                    .batch_size_limit = register_request.batch_size_limit,
-                };
-            }
-
+            result.* = .{
+                .batch_size_limit = register_request.batch_size_limit,
+            };
             return @sizeOf(vsr.RegisterResult);
         }
 
@@ -5104,10 +5118,7 @@ pub fn ReplicaType(
 
         /// Construct a SV message, including attached headers from the current log_view.
         /// The caller owns the returned message, if any, which has exactly 1 reference.
-        fn create_start_view_message(self: *Replica, nonce: u128) struct {
-            deprecated: *Message.StartView,
-            next: *Message.StartView,
-        } {
+        fn create_start_view_message(self: *Replica, nonce: u128) *Message.StartView {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.syncing != .updating_checkpoint);
             assert(self.replica == self.primary_index(self.view));
@@ -5161,68 +5172,8 @@ pub fn ReplicaType(
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
-            const message_deprecated = self.message_bus.get_message(.start_view_deprecated);
-            defer self.message_bus.unref(message_deprecated);
-
-            message_deprecated.header.* = message.header.*;
-            message_deprecated.header.command = .start_view_deprecated;
-
-            const checkpoint_new: *const vsr.CheckpointState =
-                &self.superblock.working.vsr_state.checkpoint;
-            const checkpoint_old: vsr.CheckpointStateOld = vsr.CheckpointStateOld{
-                .header = checkpoint_new.header,
-                .parent_checkpoint_id = checkpoint_new.parent_checkpoint_id,
-                .grandparent_checkpoint_id = checkpoint_new.grandparent_checkpoint_id,
-
-                .free_set_checksum = checkpoint_new.free_set_blocks_acquired_checksum,
-                .free_set_last_block_checksum = checkpoint_new
-                    .free_set_blocks_acquired_last_block_checksum,
-                .free_set_last_block_address = checkpoint_new
-                    .free_set_blocks_acquired_last_block_address,
-                .free_set_size = checkpoint_new.free_set_blocks_acquired_size,
-
-                .client_sessions_checksum = checkpoint_new.client_sessions_checksum,
-                .client_sessions_last_block_checksum = checkpoint_new
-                    .client_sessions_last_block_checksum,
-                .client_sessions_last_block_address = checkpoint_new
-                    .client_sessions_last_block_address,
-                .client_sessions_size = checkpoint_new.client_sessions_size,
-
-                .manifest_oldest_checksum = checkpoint_new.manifest_oldest_checksum,
-                .manifest_oldest_address = checkpoint_new.manifest_oldest_address,
-                .manifest_newest_checksum = checkpoint_new.manifest_newest_checksum,
-                .manifest_newest_address = checkpoint_new.manifest_newest_address,
-                .manifest_block_count = checkpoint_new.manifest_block_count,
-
-                .snapshots_block_checksum = checkpoint_new.snapshots_block_checksum,
-                .snapshots_block_address = checkpoint_new.snapshots_block_address,
-
-                .storage_size = checkpoint_new.storage_size,
-                .release = checkpoint_new.release,
-            };
-            assert(@sizeOf(vsr.CheckpointState) == @sizeOf(vsr.CheckpointStateOld));
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                message_deprecated.body_used()[0..@sizeOf(vsr.CheckpointState)],
-                std.mem.asBytes(&checkpoint_old),
-            );
-
-            stdx.copy_disjoint(
-                .exact,
-                u8,
-                message_deprecated.body_used()[@sizeOf(vsr.CheckpointState)..],
-                message.body_used()[@sizeOf(vsr.CheckpointState)..],
-            );
-            message_deprecated.header.set_checksum_body(message_deprecated.body_used());
-            message_deprecated.header.set_checksum();
-
             assert(message.header.invalid() == null);
-            assert(message_deprecated.header.invalid() == null);
-            return .{
-                .deprecated = message_deprecated.ref(),
-                .next = message.ref(),
-            };
+            return message.ref();
         }
 
         fn update_start_view_headers(self: *Replica) void {
@@ -5356,12 +5307,42 @@ pub fn ReplicaType(
             assert(self.loopback_queue == null);
         }
 
-        fn ignore_ping_client(self: *const Replica, message: *const Message.PingClient) bool {
+        fn ignore_ping_client(self: *Replica, message: *const Message.PingClient) bool {
             assert(message.header.command == .ping_client);
             assert(message.header.client != 0);
 
             if (self.standby()) {
                 log.warn("{}: on_ping_client: misdirected message (standby)", .{self.replica});
+                return true;
+            }
+
+            if (message.header.release.value < self.release_client_min.value) {
+                log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
+                    " (client={} version={}<{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release_client_min,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .client_release_too_low,
+                );
+                return true;
+            }
+
+            if (message.header.release.value > self.release.value) {
+                log.warn("{}: on_ping_client: ignoring unsupported client version; too high " ++
+                    "(client={} version={}>{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .client_release_too_high,
+                );
                 return true;
             }
 
@@ -5607,7 +5588,6 @@ pub fn ReplicaType(
             }
             if (StateMachine.operation_from_vsr(message.header.operation)) |operation| {
                 if (!self.state_machine.input_valid(
-                    message.header.release,
                     operation,
                     message.body_used(),
                 )) {
@@ -5625,6 +5605,30 @@ pub fn ReplicaType(
                     );
                     return true;
                 }
+            }
+
+            // For compatibility with clients <= 0.15.3, `Request.invalid_header()`
+            // considers a `.register` without body as valid, evicting the client with
+            // `client_release_too_low` instead of silently dropping the invalid request.
+            //
+            // This code is a safeguard against **malformed** requests that have the
+            // expected release number but lack a `RegisterRequest`.
+            // TODO: Remove this code once `invalid_header()` starts rejecting the request.
+            if (message.header.operation == .register and
+                message.header.size != @sizeOf(Header) + @sizeOf(vsr.RegisterRequest))
+            {
+                log.warn("{}: on_request: ignoring register without body" ++
+                    " (client={} version={}<{})", .{
+                    self.replica,
+                    message.header.client,
+                    message.header.release,
+                    self.release_client_min,
+                });
+                self.send_eviction_message_to_client(
+                    message.header.client,
+                    .invalid_request_body_size,
+                );
+                return true;
             }
 
             if (self.view_durable_updating()) {
@@ -6042,8 +6046,7 @@ pub fn ReplicaType(
 
         fn ignore_view_change_message(self: *const Replica, message: *const Message) bool {
             assert(message.header.command == .do_view_change or
-                message.header.command == .start_view or
-                message.header.command == .start_view_deprecated);
+                message.header.command == .start_view);
             assert(self.status != .recovering); // Single node clusters don't have view changes.
             assert(message.header.replica < self.replica_count);
 
@@ -6055,7 +6058,7 @@ pub fn ReplicaType(
             }
 
             switch (message.header.into_any()) {
-                .start_view, .start_view_deprecated => |message_header| {
+                .start_view => |message_header| {
                     // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: misdirected message (self)", .{
@@ -6281,7 +6284,7 @@ pub fn ReplicaType(
         }
 
         /// Returns the op that will be `op_checkpoint` after the next checkpoint.
-        fn op_checkpoint_next(self: *const Replica) u64 {
+        pub fn op_checkpoint_next(self: *const Replica) u64 {
             assert(vsr.Checkpoint.valid(self.op_checkpoint()));
             assert(self.op_checkpoint() <= self.commit_min);
             assert(self.op_checkpoint() <= self.op or
@@ -6520,7 +6523,6 @@ pub fn ReplicaType(
                 },
                 else => {
                     self.state_machine.prepare(
-                        request.message.header.release,
                         request.message.header.operation.cast(StateMachine),
                         request.message.body_used(),
                     );
@@ -6611,26 +6613,22 @@ pub fn ReplicaType(
             assert(request.header.operation == .register);
             assert(request.header.request == 0);
 
-            if (request.header.size == @sizeOf(vsr.Header)) {
-                // Old clients don't send a RegisterRequest.
-            } else {
-                assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
+            assert(request.header.size == @sizeOf(vsr.Header) + @sizeOf(vsr.RegisterRequest));
 
-                const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
-                assert(batch_size_limit > 0);
-                assert(batch_size_limit <= constants.message_body_size_max);
+            const batch_size_limit = self.request_size_limit - @sizeOf(vsr.Header);
+            assert(batch_size_limit > 0);
+            assert(batch_size_limit <= constants.message_body_size_max);
 
-                const register_request = std.mem.bytesAsValue(
-                    vsr.RegisterRequest,
-                    request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
-                );
-                assert(register_request.batch_size_limit == 0);
-                assert(stdx.zeroed(&register_request.reserved));
+            const register_request = std.mem.bytesAsValue(
+                vsr.RegisterRequest,
+                request.body_used()[0..@sizeOf(vsr.RegisterRequest)],
+            );
+            assert(register_request.batch_size_limit == 0);
+            assert(stdx.zeroed(&register_request.reserved));
 
-                register_request.* = .{
-                    .batch_size_limit = batch_size_limit,
-                };
-            }
+            register_request.* = .{
+                .batch_size_limit = batch_size_limit,
+            };
         }
 
         fn primary_prepare_reconfiguration(
@@ -7280,11 +7278,21 @@ pub fn ReplicaType(
                 return;
             }
 
+            if (self.journal.find_latest_headers_break_between(self.commit_max, self.op)) |range| {
+                log.debug("{}: repair_pipeline_read_callback: header break {}..{}", .{
+                    self.replica,
+                    range.op_min,
+                    range.op_max,
+                });
+                return;
+            }
+
             // We are in a state where we should be repairing the pipeline (cf. the end of repair).
             assert(self.status == .view_change);
             assert(self.primary_index(self.view) == self.replica);
             assert(self.commit_stage == .idle);
             assert(self.commit_min == self.commit_max);
+            assert(self.valid_hash_chain_between(self.commit_max, self.op));
 
             // But we still need to check that we are reparing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
@@ -7642,6 +7650,17 @@ pub fn ReplicaType(
             if (!self.journal.has_header(header)) self.journal.set_header_as_dirty(header);
         }
 
+        /// Even ops replicate clockwise.
+        /// Odd ops replicate counter-clockwise.
+        ///
+        /// This means that if the first backup after the primary is down, replication
+        /// doesn't necessarily need to wait for prepare_timeout, since the next prepare
+        /// (routed backwards) could trigger repair in the other replicas.
+        /// TODO Once we use health data to skip faulty replicas, then this isn't needed.
+        fn replicate_direction(message: *const Message.Prepare) i16 {
+            return if (message.header.op % 2 == 0) 1 else -1;
+        }
+
         /// Replicates to the next replica in the configuration (until we get back to the primary):
         /// Replication starts and ends with the primary, we never forward back to the primary.
         /// Does not flood the network with prepares that have already committed.
@@ -7668,10 +7687,12 @@ pub fn ReplicaType(
                 return;
             }
 
+            const ring_direction = replicate_direction(message);
             const next = next: {
                 // Replication in the ring of active replicas.
                 if (!self.standby()) {
-                    const next_replica = @mod(self.replica + 1, self.replica_count);
+                    const next_replica: u8 =
+                        @intCast(@mod(@as(i16, self.replica) + ring_direction, self.replica_count));
                     if (next_replica != self.primary_index(message.header.view)) {
                         break :next next_replica;
                     }
@@ -7872,6 +7893,20 @@ pub fn ReplicaType(
             self.send_prepare_oks_from(self.commit_max + 1);
         }
 
+        fn send_prepare_oks_after_syncing_tables(self: *Replica) void {
+            assert(self.status == .normal or self.status == .view_change or
+                self.status == .recovering_head);
+            assert(self.syncing == .idle);
+            assert(self.sync_tables == null);
+
+            const op_checkpoint_trigger =
+                vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?;
+            self.send_prepare_oks_from(@max(
+                self.commit_max + 1,
+                op_checkpoint_trigger + constants.pipeline_prepare_queue_max + 1,
+            ));
+        }
+
         fn send_prepare_oks_after_checkpoint(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
@@ -7894,7 +7929,8 @@ pub fn ReplicaType(
                 // This is safe only because the primary can verify against the prepare checksum.
                 if (self.journal.header_with_op(op)) |header| {
                     self.send_prepare_ok(header);
-                    defer self.flush_loopback_queue();
+                    if (self.loopback_queue != null) assert(self.journal.has_prepare(header));
+                    self.flush_loopback_queue();
                 }
             }
         }
@@ -7916,7 +7952,7 @@ pub fn ReplicaType(
 
             if (!self.start_view_change_from_all_replicas.isSet(self.replica)) {
                 self.send_header_to_replica(self.replica, header.frame_const().*);
-                defer self.flush_loopback_queue();
+                return self.flush_loopback_queue();
             }
         }
 
@@ -8053,7 +8089,7 @@ pub fn ReplicaType(
                 self.do_view_change_from_all_replicas[self.replica] == null)
             {
                 self.send_message_to_replica(self.replica, message);
-                defer self.flush_loopback_queue();
+                return self.flush_loopback_queue();
             }
         }
 
@@ -8229,6 +8265,11 @@ pub fn ReplicaType(
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.into_any()) {
                 .reserved => unreachable,
+                // Deprecated messages are always `invalid()`.
+                .deprecated_12 => unreachable,
+                .deprecated_21 => unreachable,
+                .deprecated_22 => unreachable,
+                .deprecated_23 => unreachable,
                 .request => {
                     assert(!self.standby());
                     // Do not assert message.header.replica because we forward .request messages.
@@ -8278,7 +8319,7 @@ pub fn ReplicaType(
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
                 },
-                .start_view, .start_view_deprecated => |header| {
+                .start_view => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
                     assert(self.replica == self.primary_index(self.view));
@@ -8382,7 +8423,6 @@ pub fn ReplicaType(
                 // - A SV or a prepare_ok imply the log_view.
                 if (message.header.command == .do_view_change or
                     message.header.command == .start_view or
-                    message.header.command == .start_view_deprecated or
                     message.header.command == .prepare_ok)
                 {
                     if (self.log_view_durable() < self.log_view) {
@@ -8561,17 +8601,13 @@ pub fn ReplicaType(
             // to guarantee freshness of the message.
             const nonce = 0;
 
-            const start_view_messages = self.create_start_view_message(nonce);
-            defer self.message_bus.unref(start_view_messages.deprecated);
-            defer self.message_bus.unref(start_view_messages.next);
+            const start_view_message = self.create_start_view_message(nonce);
+            defer self.message_bus.unref(start_view_message);
 
-            assert(start_view_messages.deprecated.header.command == .start_view_deprecated);
-            assert(start_view_messages.next.header.command == .start_view);
-            assert(start_view_messages.deprecated.header.nonce == 0);
-            assert(start_view_messages.next.header.nonce == 0);
+            assert(start_view_message.header.command == .start_view);
+            assert(start_view_message.header.nonce == 0);
 
-            self.send_message_to_other_replicas(start_view_messages.deprecated);
-            self.send_message_to_other_replicas(start_view_messages.next);
+            self.send_message_to_other_replicas(start_view_message);
         }
 
         fn view_durable_update_callback(context: *SuperBlock.Context) void {
@@ -8600,6 +8636,14 @@ pub fn ReplicaType(
                     if (checkpoint.header.op == self.op_checkpoint()) {
                         self.sync_superblock_update_finish();
                         assert(self.syncing == .idle);
+                        if (self.release.value <
+                            self.superblock.working.vsr_state.checkpoint.release.value)
+                        {
+                            // sync_superblock_update_finish triggered `release_transition`,
+                            // short-circuite for VOPR.
+                            assert(Forest.Storage == TestStorage);
+                            return;
+                        }
                     }
                 },
                 else => {},
@@ -9687,11 +9731,13 @@ pub fn ReplicaType(
                         snapshot_from_commit(sync_op_max),
                     });
 
-                    const table = self.grid_repair_tables.acquire().?;
-                    table.* = .{ .replica = self, .table = undefined };
+                    const table: *Grid.RepairTable = self.grid_repair_tables.acquire().?;
+                    const table_bitset: *std.DynamicBitSetUnmanaged =
+                        &self.grid_repair_table_bitsets[self.grid_repair_tables.index(table)];
 
                     const enqueue_result = self.grid.blocks_missing.enqueue_table(
-                        &table.table,
+                        table,
+                        table_bitset,
                         table_info.address,
                         table_info.checksum,
                     );
@@ -9699,7 +9745,7 @@ pub fn ReplicaType(
                     switch (enqueue_result) {
                         .insert => self.trace.start(.{ .replica_sync_table = .{
                             .index = self.grid_repair_tables.index(table),
-                        } }, .{}),
+                        } }),
                         .duplicate => {
                             // Duplicates are only possible due to move-table.
                             assert(table_info.label.level > 0);
@@ -9729,26 +9775,28 @@ pub fn ReplicaType(
                 });
 
                 self.sync_tables = null;
+
+                // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
+                self.send_prepare_oks_after_syncing_tables();
             }
         }
 
         fn sync_reclaim_tables(self: *Replica) void {
-            while (self.grid.blocks_missing.reclaim_table()) |queue_table| {
+            while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
                     "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
                     .{
-                        queue_table.index_address,
-                        queue_table.index_checksum,
-                        queue_table.table_blocks_written,
-                        queue_table.table_blocks_total,
+                        table.index_address,
+                        table.index_checksum,
+                        table.table_blocks_written,
+                        table.table_blocks_total,
                     },
                 );
 
-                const table: *RepairTable = @fieldParentPtr("table", queue_table);
                 self.grid_repair_tables.release(table);
                 self.trace.stop(.{ .replica_sync_table = .{
                     .index = self.grid_repair_tables.index(table),
-                } }, .{});
+                } });
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 
@@ -9771,8 +9819,6 @@ pub fn ReplicaType(
                 // The replica just started in the newest available release, but discovered that its
                 // superblock has not upgraded to that release yet.
                 assert(self.commit_min == self.op_checkpoint());
-                assert(self.release.value ==
-                    self.releases_bundled.get(self.releases_bundled.count() - 1).value);
                 assert(self.journal.status == .init);
             }
 
@@ -9967,7 +10013,7 @@ pub fn ReplicaType(
                 => if (self.status == .recovering_head) Status.normal else .view_change,
                 // on_start_view() handles the (possible) transition to view-change manually, before
                 // transitioning to normal.
-                .start_view, .start_view_deprecated => return,
+                .start_view => return,
                 else => return,
             };
 
@@ -10115,8 +10161,10 @@ pub fn ReplicaType(
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;
 
+            // repair() may send prepare_ok's to ourself if we are the primary, so we must flush
+            // the loopback queue immediately.
             self.send_prepare_ok(message.header);
-            defer self.flush_loopback_queue();
+            self.flush_loopback_queue();
 
             switch (trigger) {
                 .append => {},
@@ -10276,7 +10324,7 @@ pub fn ReplicaType(
             request.header.set_checksum();
 
             self.send_message_to_replica(self.replica, request);
-            defer self.flush_loopback_queue();
+            return self.flush_loopback_queue();
         }
 
         fn upgrading(self: *const Replica) bool {
@@ -10867,8 +10915,7 @@ fn start_view_message_checkpoint(message: *const Message.StartView) *const vsr.C
 }
 
 fn start_view_message_headers(message: *const Message.StartView) []const Header.Prepare {
-    assert(message.header.command == .start_view or
-        message.header.command == .start_view_deprecated);
+    assert(message.header.command == .start_view);
 
     // Body must contain at least one header.
     assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));

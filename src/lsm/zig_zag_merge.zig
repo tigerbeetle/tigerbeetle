@@ -334,7 +334,7 @@ fn TestContextType(comptime streams_max: u32) type {
             }
         }
 
-        fn fuzz(random: std.rand.Random, stream_key_count_max: u32) !void {
+        fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
             const allocator = testing.allocator;
             var streams: [streams_max][]Value = undefined;
 
@@ -348,7 +348,7 @@ fn TestContextType(comptime streams_max: u32) type {
             for (2..streams_max + 1) |streams_count| {
                 var stream_len_min: u32 = stream_key_count_max;
                 for (0..streams_count) |stream_index| {
-                    const len = random.intRangeAtMostBiased(
+                    const len = prng.range_inclusive(
                         u32,
                         intersection_len_min,
                         stream_key_count_max,
@@ -359,7 +359,7 @@ fn TestContextType(comptime streams_max: u32) type {
                         streams_buffer[stream_index * stream_key_count_max ..][0..len];
                 }
 
-                const intersection = intersection_buffer[0..random.intRangeAtMostBiased(
+                const intersection = intersection_buffer[0..prng.range_inclusive(
                     u32,
                     intersection_len_min,
                     stream_len_min,
@@ -368,7 +368,7 @@ fn TestContextType(comptime streams_max: u32) type {
                     intersection.len <= stream_len_min);
 
                 fuzz_make_intersection(
-                    random,
+                    prng,
                     streams[0..streams_count],
                     intersection,
                 );
@@ -397,7 +397,7 @@ fn TestContextType(comptime streams_max: u32) type {
         }
 
         fn fuzz_make_intersection(
-            random: std.rand.Random,
+            prng: *stdx.PRNG,
             streams: []const []Value,
             intersection: []Value,
         ) void {
@@ -408,7 +408,7 @@ fn TestContextType(comptime streams_max: u32) type {
             }.less_than;
 
             // Starting with the values we want to be the intersection:
-            random.bytes(mem.sliceAsBytes(intersection));
+            prng.fill(mem.sliceAsBytes(intersection));
             std.mem.sort(
                 Value,
                 intersection,
@@ -420,9 +420,9 @@ fn TestContextType(comptime streams_max: u32) type {
             // random values:
             for (streams) |stream| {
                 assert(intersection.len <= stream.len);
-                @memcpy(stream[0..intersection.len], intersection);
+                stdx.copy_disjoint(.exact, Value, stream[0..intersection.len], intersection);
                 if (stream.len > intersection.len) {
-                    random.bytes(mem.sliceAsBytes(stream[intersection.len..]));
+                    prng.fill(mem.sliceAsBytes(stream[intersection.len..]));
                 }
                 std.mem.sort(
                     Value,
@@ -558,8 +558,6 @@ test "zig_zag_merge: fuzz" {
     const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
-
-    try TestContextType(32).fuzz(random, 256);
+    var prng = stdx.PRNG.from_seed(seed);
+    try TestContextType(32).fuzz(&prng, 256);
 }

@@ -45,7 +45,7 @@ pub fn log_runtime(
     }
 }
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     // The comptime log_level. This needs to be debug - otherwise messages are compiled out.
     // The runtime filtering is handled by log_level_runtime.
     .log_level = .debug,
@@ -197,9 +197,6 @@ const Command = struct {
             .direct_io_optional
         else
             .direct_io_required;
-
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
 
         const basename = std.fs.path.basename(path);
         command.fd = try command.io.open_data_file(
@@ -394,7 +391,6 @@ const Command = struct {
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
                 .cache_entries_posted = args.cache_transfers_pending,
-                .cache_entries_account_balances = args.cache_account_balances,
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
@@ -402,7 +398,13 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer_options = .{ .writer = if (trace_writer) |writer| writer.any() else null },
+            .tracer_options = .{
+                .writer = if (trace_writer) |writer| writer.any() else null,
+                .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
+                    .io = &command.io,
+                    .address = statsd_address,
+                } } else .log,
+            },
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
                 .star = args.replicate_star,
@@ -614,9 +616,6 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     // the invariant is that this code is running _before_ we've finished opening, that is,
     // release_transition is called in open().
     if (release.value < replica.release.value) {
-        assert(replica.release.value ==
-            replica.releases_bundled.get(replica.releases_bundled.count() - 1).value);
-
         multiversion.exec_release(
             release,
         ) catch |err| {

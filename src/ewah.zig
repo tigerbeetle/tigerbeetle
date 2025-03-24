@@ -301,13 +301,13 @@ pub fn ewah(comptime Word: type) type {
 
 test "ewah encode→decode cycle" {
     const fuzz = @import("./ewah_fuzz.zig");
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = stdx.PRNG.from_seed(123);
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
+        const Context = fuzz.ContextType(Word);
         for ([_]usize{ 1, 2, 4, 5, 8, 16, 17, 32 }) |chunk_count| {
             var decoded: [4096]Word = undefined;
-
-            const fuzz_options = .{
+            const fuzz_options: Context.TestOptions = .{
                 .encode_chunk_words_count = @divFloor(decoded.len, chunk_count),
                 .decode_chunk_words_count = @divFloor(decoded.len, chunk_count),
             };
@@ -318,7 +318,7 @@ test "ewah encode→decode cycle" {
             @memset(&decoded, std.math.maxInt(Word));
             try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded, fuzz_options);
 
-            prng.random().bytes(std.mem.asBytes(&decoded));
+            prng.fill(std.mem.asBytes(&decoded));
             try fuzz.fuzz_encode_decode(Word, std.testing.allocator, &decoded, fuzz_options);
         }
     }

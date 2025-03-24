@@ -31,20 +31,20 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
     const TreeTableIterators = iterator: {
         const StructField = std.builtin.Type.StructField;
 
-        var fields: []const StructField = &[_]StructField{};
-        for (Forest.tree_infos) |tree_info| {
-            fields = fields ++ &[_]StructField{.{
+        var fields: [Forest.tree_infos.len]StructField = undefined;
+        for (Forest.tree_infos, 0..) |tree_info, i| {
+            fields[i] = .{
                 .name = @ptrCast(tree_info.tree_name),
                 .type = TreeTableIteratorType(tree_info.Tree),
                 .default_value = null,
                 .is_comptime = false,
                 .alignment = @alignOf(TreeTableIteratorType(tree_info.Tree)),
-            }};
+            };
         }
 
         break :iterator @Type(.{ .Struct = .{
             .layout = .auto,
-            .fields = fields,
+            .fields = &fields,
             .decls = &.{},
             .is_tuple = false,
         } });

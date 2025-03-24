@@ -9,6 +9,7 @@
 //! - The key part: this JSON is then stored in a "distributed database" for our visualization
 //!   front-end to pick up. This "database" is just a newline-delimited JSON file in a git repo
 const std = @import("std");
+const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -19,11 +20,17 @@ const log = std.log;
 
 pub const CLIArgs = struct {
     sha: []const u8,
+    skip_kcov: bool = false,
 };
 
 pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     try devhub_metrics(shell, cli_args);
-    try devhub_coverage(shell);
+
+    if (!cli_args.skip_kcov) {
+        try devhub_coverage(shell);
+    } else {
+        log.info("--skip-kcov enabled, not computing coverage.", .{});
+    }
 }
 
 fn devhub_coverage(shell: *Shell) !void {
@@ -103,12 +110,12 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     if (no_changelog_flag) {
         try shell.exec_zig(
             \\build scripts -- release --build --no-changelog --sha={sha}
-            \\    --language=zig
+            \\    --language=zig --devhub
         , .{ .sha = cli_args.sha });
     } else {
         try shell.exec_zig(
             \\build scripts -- release --build --sha={sha}
-            \\    --language=zig
+            \\    --language=zig --devhub
         , .{ .sha = cli_args.sha });
     }
     try shell.project_root.deleteFile("tigerbeetle");
@@ -129,8 +136,111 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         "checksum message size max",
         "us",
     );
+    const format_time_ms = blk: {
+        timer.reset();
 
-    const ci_pipeline_duration_s = blk: {
+        try shell.exec(
+            "./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 datafile-devhub",
+            .{},
+        );
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
+    defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
+
+    const stats_count = blk: {
+        var process = try shell.spawn(
+            .{
+                .stdin_behavior = .Pipe,
+                .stdout_behavior = .Pipe,
+                .stderr_behavior = .Ignore,
+            },
+            "./tigerbeetle inspect metrics",
+            .{},
+        );
+
+        defer {
+            process.stdin.?.close();
+            process.stdin = null;
+            _ = process.wait() catch {};
+        }
+
+        var stats_buffer: [1024]u8 = undefined;
+        const stats_buffer_size = try process.stdout.?.readAll(&stats_buffer);
+        var stats_count: u32 = 0;
+        var lines = std.mem.split(u8, stats_buffer[0..stats_buffer_size], "\n");
+        while (lines.next()) |line| {
+            if (line.len != 0) {
+                std.debug.print("LINE: {s}\n", .{line});
+                stats_count += try std.fmt.parseInt(u32, stdx.cut(line, "=").?.suffix, 10);
+            }
+        }
+        break :blk stats_count;
+    };
+
+    const startup_time_ms = blk: {
+        timer.reset();
+
+        var process = try shell.spawn(
+            .{
+                .stdin_behavior = .Pipe,
+                .stdout_behavior = .Pipe,
+                .stderr_behavior = .Ignore,
+            },
+            "./tigerbeetle start --addresses=0 --cache-grid=8GiB datafile-devhub",
+            .{},
+        );
+
+        defer {
+            process.stdin.?.close();
+            process.stdin = null;
+            _ = process.wait() catch {};
+        }
+
+        var port_buffer: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
+        const port_buffer_len = try process.stdout.?.readAll(&port_buffer);
+        const port = try std.fmt.parseInt(u16, port_buffer[0 .. port_buffer_len - 1], 10);
+
+        // TODO: This sends a ping manually; once register connection speed has been fixed, this can
+        // use the benchmark or repl via CLI.
+        //
+        // Use Header directly with a blocking TCP connection here, to avoid pulling in half of TB.
+        const Header = @import("../vsr/message_header.zig").Header;
+
+        var ping = Header.PingClient{
+            .command = .ping_client,
+            .cluster = 0,
+            .release = Release.minimum,
+            .client = 1,
+            .ping_timestamp_monotonic = 0,
+        };
+        ping.set_checksum_body(&[0]u8{});
+        ping.set_checksum();
+
+        // The release of the built binary is not readily available, since it's set by
+        // `zig build scripts -- release`. Instead, the ping above is sent with
+        // .release == Release.minimum. This will always be below a release build's
+        // release_client_min, so expect the eviction.
+        var eviction: Header.Eviction = undefined;
+
+        const peer = try std.net.Address.parseIp4("127.0.0.1", port);
+        const stream = try std.net.tcpConnectToAddress(peer);
+        defer stream.close();
+
+        var writer = stream.writer();
+        try writer.writeAll(std.mem.asBytes(&ping)[0..@sizeOf(Header)]);
+
+        const reader = stream.reader();
+        _ = try reader.readAll(std.mem.asBytes(&eviction)[0..@sizeOf(Header)]);
+
+        assert(eviction.command == .eviction);
+        assert(eviction.valid_checksum());
+        assert(eviction.valid_checksum_body(&[0]u8{}));
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
+
+    const ci_pipeline_duration_s: ?u64 = blk: {
         const times_gh = try shell.exec_stdout("gh run list -c {sha} -e merge_group " ++
             "--json startedAt,updatedAt -L 1 --template {template}", .{
             .sha = cli_args.sha,
@@ -143,6 +253,14 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         const epoch_updated_at = try shell.iso8601_to_timestamp_seconds(iso8601_updated_at);
 
         break :blk epoch_updated_at - epoch_started_at;
+    } orelse blk: {
+        // Return 0 instead of null when running locally or without DEVHUBDB_PAT set - the results
+        // won't be uploaded, and this allows the rest of the code to succeed.
+        if ((shell.env_get("DEVHUBDB_PAT") catch null) == null) {
+            break :blk 0;
+        } else {
+            break :blk null;
+        }
     };
 
     const batch = MetricBatch{
@@ -167,14 +285,23 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
                 .unit = "us",
             },
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
+            .{ .name = "format time", .value = format_time_ms, .unit = "ms" },
+            .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
+            .{ .name = "stats count", .value = stats_count, .unit = "count" },
         },
     };
 
-    try upload_run(shell, &batch);
+    upload_run(shell, &batch) catch |err| {
+        log.err("failed to upload devhubdb metrics: {}", .{err});
+    };
 
     upload_nyrkio(shell, &batch) catch |err| {
         log.err("failed to upload Nyrkiö metrics: {}", .{err});
     };
+
+    for (batch.metrics) |metric| {
+        std.log.info("{s} = {} {s}", .{ metric.name, metric.value, metric.unit });
+    }
 }
 
 fn get_measurement(

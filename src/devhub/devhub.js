@@ -134,9 +134,7 @@ async function mainSeeds() {
       : "";
     rowDom.innerHTML = `
           <td>
-            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}">
-              ${record.commit_sha.substring(0, 7)}
-            </a>
+            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${record.commit_sha.substring(0, 7)}</code></a>
             ${prLink}
           </td>
           <td>${pull ? pull.user.login : ""}</td>
@@ -144,7 +142,7 @@ async function mainSeeds() {
           <td><code>${record.command}</code></td>
           <td><time>${seedDuration}</time></td>
           <td><time>${seedFreshness} ago</time></td>
-          <td>${record.count}</td>
+          <td>${record.count.toLocaleString('en-US').replace(/,/g, '&nbsp;')}</td>
       `;
     tableDom.appendChild(rowDom);
   }

@@ -11,10 +11,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const jni = @import("jni.zig");
+const JNIThreadCleaner = @import("jni_thread_cleaner.zig").JNIThreadCleaner;
 
-// When referenced from unit_test.zig, there is no vsr import module. So use relative path instead.
-pub const vsr =
-    if (builtin.is_test) @import("../../../vsr.zig") else @import("vsr");
+comptime {
+    if (!builtin.link_libc) {
+        @compileError("JNI client must be built with libc");
+    }
+}
+
+pub const vsr = @import("vsr");
 
 const tb = vsr.tb_client;
 
@@ -23,20 +28,11 @@ const assert = std.debug.assert;
 
 const jni_version = jni.jni_version_10;
 
-const global_allocator = if (builtin.link_libc)
-    std.heap.c_allocator
-else
-    @compileError("tb_client must be built with libc");
+const global_allocator = std.heap.c_allocator;
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .debug,
-    .logFn = tb.Logging.application_logger,
-};
-
-/// Context for a client instance.
-const Context = struct {
-    jvm: *jni.JavaVM,
-    client: tb.tb_client_t,
+    .logFn = tb.exports.Logging.application_logger,
 };
 
 /// NativeClient implementation.
@@ -58,54 +54,45 @@ const NativeClient = struct {
     fn client_init(
         comptime echo_client: bool,
         env: *jni.JNIEnv,
+        client: *tb.ClientInterface,
         cluster_id: u128,
         addresses_obj: jni.JString,
-    ) ?*Context {
+    ) void {
         const addresses = JNIHelper.get_string_utf(env, addresses_obj) orelse {
             ReflectionHelper.initialization_exception_throw(
                 env,
-                tb.tb_status_t.address_invalid,
+                tb.exports.tb_init_status.address_invalid,
             );
-            return null;
+            return;
         };
         defer env.release_string_utf_chars(addresses_obj, addresses.ptr);
 
-        const context = global_allocator.create(Context) catch {
-            ReflectionHelper.initialization_exception_throw(env, tb.tb_status_t.out_of_memory);
-            return null;
-        };
-        errdefer global_allocator.destroy(context);
-
         const init_fn = if (echo_client) tb.init_echo else tb.init;
-        const client = init_fn(
+        const jvm = JNIHelper.get_java_vm(env);
+        init_fn(
             global_allocator,
+            client,
             cluster_id,
             addresses,
-            @intFromPtr(context),
+            @intFromPtr(jvm),
             on_completion,
         ) catch |err| {
-            const status = tb.init_error_to_status(err);
+            const status = tb.exports.init_error_to_status(err);
             ReflectionHelper.initialization_exception_throw(env, status);
-            return null;
         };
-
-        context.* = .{
-            .jvm = JNIHelper.get_java_vm(env),
-            .client = client,
-        };
-        return context;
     }
 
     /// Native clientDeinit implementation.
-    fn client_deinit(context: *Context) void {
-        defer global_allocator.destroy(context);
-        tb.deinit(context.client);
+    fn client_deinit(client: *tb.ClientInterface) void {
+        client.deinit() catch {
+            // Ignore multiple calls to `deinit`.
+        };
     }
 
     /// Native submit implementation.
     fn submit(
         env: *jni.JNIEnv,
-        context: *Context,
+        client: *tb.ClientInterface,
         request_obj: jni.JObject,
     ) void {
         assert(request_obj != null);
@@ -116,48 +103,42 @@ const NativeClient = struct {
                 env,
                 "Request.sendBuffer is null or invalid",
             );
-            return undefined;
+            return;
         };
 
-        const packet = global_allocator.create(tb.tb_packet_t) catch {
+        const packet: *tb.Packet = global_allocator.create(tb.Packet) catch {
             ReflectionHelper.assertion_error_throw(env, "Request could not allocate a packet");
-            return undefined;
+            return;
         };
 
         // Holds a global reference to prevent GC before the callback.
         const global_ref = JNIHelper.new_global_reference(env, request_obj);
-
         packet.* = .{
-            .next = undefined,
             .user_data = global_ref,
             .operation = operation,
-            .status = undefined,
             .data_size = @intCast(send_buffer.len),
             .data = send_buffer.ptr,
-            .batch_next = undefined,
-            .batch_tail = undefined,
-            .batch_size = undefined,
-            .batch_allowed = undefined,
-            .reserved = undefined,
+            .user_tag = 0,
+            .status = undefined,
         };
 
-        tb.submit(context.client, packet);
+        client.submit(packet) catch |err| switch (err) {
+            error.ClientInvalid => ReflectionHelper.client_closed_exception_throw(env),
+        };
     }
 
     /// Completion callback, always called from the native thread.
     fn on_completion(
         context_ptr: usize,
-        client: tb.tb_client_t,
-        packet: *tb.tb_packet_t,
+        packet: *tb.Packet,
         timestamp: u64,
         result_ptr: ?[*]const u8,
         result_len: u32,
     ) callconv(.C) void {
-        _ = client;
-        const context: *Context = @ptrFromInt(context_ptr);
+        const jvm: *jni.JavaVM = @ptrFromInt(context_ptr);
 
-        const env = JNIHelper.try_get_env(context.jvm) orelse
-            JNIThreadHelper.attach_current_thread_with_cleanup(context.jvm);
+        const env = JNIHelper.try_get_env(jvm) orelse
+            JNIThreadCleaner.attach_current_thread_with_cleanup(jvm);
 
         // Retrieves the request instance, and drops the GC reference.
         assert(packet.user_data != null);
@@ -216,66 +197,68 @@ comptime {
         fn client_init(
             env: *jni.JNIEnv,
             class: jni.JClass,
+            tb_client_buffer: jni.JObject,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-        ) callconv(jni.JNICALL) jni.JLong {
+        ) callconv(jni.JNICALL) void {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
 
             const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
             defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
 
-            const context = NativeClient.client_init(
+            NativeClient.client_init(
                 false,
                 env,
+                ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
                 @bitCast(cluster_id_elements[0..16].*),
                 addresses,
             );
-            return @bitCast(@intFromPtr(context));
         }
 
         fn client_init_echo(
             env: *jni.JNIEnv,
             class: jni.JClass,
+            tb_client_buffer: jni.JObject,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-        ) callconv(jni.JNICALL) jni.JLong {
+        ) callconv(jni.JNICALL) void {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
 
             const cluster_id_elements = env.get_byte_array_elements(cluster_id, null).?;
             defer env.release_byte_array_elements(cluster_id, cluster_id_elements, .abort);
 
-            const context = NativeClient.client_init(
+            NativeClient.client_init(
                 true,
                 env,
+                ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
                 @as(u128, @bitCast(cluster_id_elements[0..16].*)),
                 addresses,
             );
-            return @bitCast(@intFromPtr(context));
         }
 
         fn client_deinit(
             env: *jni.JNIEnv,
             class: jni.JClass,
-            context_handle: jni.JLong,
+            tb_client_buffer: jni.JObject,
         ) callconv(jni.JNICALL) void {
-            _ = env;
             _ = class;
-            NativeClient.client_deinit(@ptrFromInt(@as(usize, @bitCast(context_handle))));
+            NativeClient.client_deinit(
+                ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
+            );
         }
 
         fn submit(
             env: *jni.JNIEnv,
             class: jni.JClass,
-            context_handle: jni.JLong,
+            tb_client_buffer: jni.JObject,
             request_obj: jni.JObject,
         ) callconv(jni.JNICALL) void {
             _ = class;
-            assert(context_handle != 0);
             NativeClient.submit(
                 env,
-                @ptrFromInt(@as(usize, @bitCast(context_handle))),
+                ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
                 request_obj,
             );
         }
@@ -294,6 +277,7 @@ comptime {
 const ReflectionHelper = struct {
     var initialization_exception_class: jni.JClass = null;
     var initialization_exception_ctor_id: jni.JMethodID = null;
+    var client_closed_exception_class: jni.JClass = null;
     var assertion_error_class: jni.JClass = null;
 
     var request_class: jni.JClass = null;
@@ -307,6 +291,7 @@ const ReflectionHelper = struct {
         // Asserting we are not initialized yet:
         assert(initialization_exception_class == null);
         assert(initialization_exception_ctor_id == null);
+        assert(client_closed_exception_class == null);
         assert(assertion_error_class == null);
         assert(request_class == null);
         assert(request_send_buffer_field_id == null);
@@ -324,6 +309,11 @@ const ReflectionHelper = struct {
             initialization_exception_class,
             "<init>",
             "(I)V",
+        );
+
+        client_closed_exception_class = JNIHelper.find_class(
+            env,
+            "com/tigerbeetle/ClientClosedException",
         );
 
         assertion_error_class = JNIHelper.find_class(
@@ -369,6 +359,7 @@ const ReflectionHelper = struct {
         // Asserting we are full initialized:
         assert(initialization_exception_class != null);
         assert(initialization_exception_ctor_id != null);
+        assert(client_closed_exception_class != null);
         assert(assertion_error_class != null);
         assert(request_class != null);
         assert(request_send_buffer_field_id != null);
@@ -380,11 +371,13 @@ const ReflectionHelper = struct {
 
     pub fn unload(env: *jni.JNIEnv) void {
         env.delete_global_ref(initialization_exception_class);
+        env.delete_global_ref(client_closed_exception_class);
         env.delete_global_ref(assertion_error_class);
         env.delete_global_ref(request_class);
 
         initialization_exception_class = null;
         initialization_exception_ctor_id = null;
+        client_closed_exception_class = null;
         assertion_error_class = null;
         request_class = null;
         request_send_buffer_field_id = null;
@@ -394,7 +387,10 @@ const ReflectionHelper = struct {
         request_end_request_method_id = null;
     }
 
-    pub fn initialization_exception_throw(env: *jni.JNIEnv, status: tb.tb_status_t) void {
+    pub fn initialization_exception_throw(
+        env: *jni.JNIEnv,
+        status: tb.exports.tb_init_status,
+    ) void {
         assert(initialization_exception_class != null);
         assert(initialization_exception_ctor_id != null);
 
@@ -419,7 +415,21 @@ const ReflectionHelper = struct {
             "Unexpected error throwing InitializationException.",
             .{},
         );
+        assert(env.exception_check() == .jni_true);
+    }
 
+    pub fn client_closed_exception_throw(
+        env: *jni.JNIEnv,
+    ) void {
+        assert(client_closed_exception_class != null);
+
+        const jni_result = env.throw_new(client_closed_exception_class, null);
+        JNIHelper.check_jni_result(
+            env,
+            jni_result,
+            "Unexpected error throwing ClientClosedException.",
+            .{},
+        );
         assert(env.exception_check() == .jni_true);
     }
 
@@ -434,6 +444,27 @@ const ReflectionHelper = struct {
             .{},
         );
         assert(env.exception_check() == .jni_true);
+    }
+
+    pub fn get_client_from_buffer(env: *jni.JNIEnv, buffer: jni.JObject) *tb.ClientInterface {
+        // The Java buffer isn't aligned,
+        // so it is allocated with extra bytes to accommodate a potential `alignForward`.
+        const buffer_capacity = env.get_direct_buffer_capacity(buffer);
+        assert(buffer_capacity >= @sizeOf(tb.ClientInterface) + @alignOf(tb.ClientInterface));
+
+        const address = env.get_direct_buffer_address(buffer) orelse {
+            // Unexpected here: `tb_client_buffer` should be initialized by the Java side.
+            JNIHelper.vm_panic(
+                env,
+                "Unexpected tb_client direct nio buffer.",
+                .{},
+            );
+        };
+        return @ptrFromInt(std.mem.alignForward(
+            usize,
+            @intFromPtr(address),
+            @alignOf(tb.ClientInterface),
+        ));
     }
 
     pub fn get_send_buffer_slice(env: *jni.JNIEnv, this_obj: jni.JObject) ?[]u8 {
@@ -528,7 +559,7 @@ const ReflectionHelper = struct {
         env: *jni.JNIEnv,
         this_obj: jni.JObject,
         packet_operation: u8,
-        packet_status: tb.tb_packet_status_t,
+        packet_status: tb.PacketStatus,
         timestamp: u64,
     ) void {
         assert(this_obj != null);
@@ -591,33 +622,6 @@ const JNIHelper = struct {
                 @panic("JNI: " ++ message);
             },
         };
-    }
-
-    pub inline fn attach_current_thread(jvm: *jni.JavaVM) *jni.JNIEnv {
-        var env: *jni.JNIEnv = undefined;
-        const jni_result = jvm.attach_current_thread_as_daemon(&env, null);
-        if (jni_result != .ok) {
-            const message = "Unexpected result calling JavaVM.AttachCurrentThreadAsDaemon";
-            log.err(
-                message ++ "; Error = {} ({s})",
-                .{ @intFromEnum(jni_result), @tagName(jni_result) },
-            );
-            @panic("JNI: " ++ message);
-        }
-
-        return env;
-    }
-
-    pub inline fn detach_current_thread(jvm: *jni.JavaVM) void {
-        const jni_result = jvm.detach_current_thread();
-        if (jni_result != .ok) {
-            const message = "Unexpected result calling JavaVM.DetachCurrentThread";
-            log.err(
-                message ++ "; Error = {} ({s})",
-                .{ @intFromEnum(jni_result), @tagName(jni_result) },
-            );
-            @panic("JNI: " ++ message);
-        }
     }
 
     pub inline fn get_java_vm(env: *jni.JNIEnv) *jni.JavaVM {
@@ -742,187 +746,3 @@ const JNIHelper = struct {
         return @ptrCast(address[0..@as(usize, @intCast(length))]);
     }
 };
-
-/// Helper for managing the `AttachCurrentThread`/`DetachCurrentThread` lifecycle
-/// when the JNI layer is unaware of when the native thread exits.
-/// https://developer.android.com/training/articles/perf-jni#threads
-const JNIThreadHelper = struct {
-    var tls_key: ?tls.Key = null;
-    var create_key_once = std.once(create_key);
-
-    /// This function calls `AttachCurrentThreadAsDaemon` to attach the current native thread to
-    /// the JVM as a daemon thread. It also registers a callback to call `DetachCurrentThread`
-    /// when the thread exits (e.g., when the client is closed or evicted).
-    pub fn attach_current_thread_with_cleanup(jvm: *jni.JavaVM) *jni.JNIEnv {
-        // Create the tls key once per JVM.
-        create_key_once.call();
-
-        // Set the JVM handler to the thread-local storage slot for each time a native
-        // thread is started.
-        tls.set_key(tls_key.?, jvm);
-
-        return JNIHelper.attach_current_thread(jvm);
-    }
-
-    /// Create the thread-local storage key and the corresponding destructor callback.
-    /// Note: We don't need to delete the key because the JNI module cannot be unloaded,
-    /// so it will always be available for the duration of the JVM process.
-    fn create_key() void {
-        assert(tls_key == null);
-        tls_key = tls.create_key(&destructor_callback);
-    }
-
-    // Will be called by the OS with the JVM handler when the thread finalizes.
-    fn destructor_callback(jvm: *anyopaque) callconv(.C) void {
-        assert(tls_key != null);
-        JNIHelper.detach_current_thread(@ptrCast(jvm));
-    }
-
-    /// Thread-local storage abstraction,
-    /// based on `pthread_key_create` for Linux/MacOS and `FlsAlloc` for Windows.
-    const tls = switch (builtin.os.tag) {
-        .linux, .macos => struct {
-            /// TODO(zig) Should use `std.c` instead, redeclaring because of macos.
-            /// https://github.com/ziglang/zig/issues/13950.
-            const c = struct {
-                const pthread_key_t = c_uint;
-                extern "c" fn pthread_key_create(
-                    key: *pthread_key_t,
-                    destructor: ?*const fn (value: *anyopaque) callconv(.C) void,
-                ) std.c.E;
-                extern "c" fn pthread_setspecific(key: pthread_key_t, value: ?*anyopaque) c_int;
-            };
-
-            const Key = c.pthread_key_t;
-
-            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
-                var key: Key = undefined;
-                const ret = c.pthread_key_create(&key, destructor);
-                if (ret != .SUCCESS) {
-                    const message = "Unexpected result calling pthread_key_create";
-                    log.err(message ++ "; Error = {} ({s})", .{
-                        @intFromEnum(ret),
-                        @tagName(ret),
-                    });
-                    @panic("JNI: " ++ message);
-                }
-
-                return key;
-            }
-
-            fn set_key(key: Key, value: *anyopaque) void {
-                const ret = c.pthread_setspecific(key, value);
-                if (ret != 0) {
-                    const message = "Unexpected result calling pthread_setspecific";
-                    log.err(message ++ "; Error = {}", .{ret});
-                    @panic("JNI: " ++ message);
-                }
-            }
-        },
-        .windows => struct {
-            const windows = struct {
-                const FLS_OUT_OF_INDEXES: std.os.windows.DWORD = 0xffffffff;
-
-                // Declaring the function with an alternative name because `CamelCase` functions are
-                // by convention, used for building generic types.
-                const fls_alloc = @extern(
-                    *const fn (
-                        ?*const fn (value: *anyopaque) callconv(.C) void,
-                    ) callconv(.C) std.os.windows.DWORD,
-                    .{
-                        .library_name = "kernel32",
-                        // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsalloc
-                        .name = "FlsAlloc",
-                    },
-                );
-
-                const fls_set_value = @extern(
-                    *const fn (
-                        std.os.windows.DWORD,
-                        *anyopaque,
-                    ) callconv(.C) std.os.windows.BOOL,
-                    .{
-                        .library_name = "kernel32",
-                        // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flssetvalue
-                        .name = "FlsSetValue",
-                    },
-                );
-            };
-
-            const Key = std.os.windows.DWORD;
-
-            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
-                const key = windows.fls_alloc(destructor);
-                if (key == windows.FLS_OUT_OF_INDEXES) {
-                    const message = "Unexpected result calling FlsAlloc";
-                    log.err(message ++ "; Error = {}", .{key});
-                    @panic("JNI: " ++ message);
-                }
-
-                return key;
-            }
-
-            fn set_key(key: Key, value: *anyopaque) void {
-                const ret = windows.fls_set_value(key, value);
-                if (ret == std.os.windows.FALSE) {
-                    const message = "Unexpected result calling FlsSetValue";
-                    log.err(message ++ "; Error = {}", .{ret});
-                    @panic("JNI: " ++ message);
-                }
-            }
-        },
-        else => unreachable,
-    };
-};
-
-test "JNIThreadHelper:tls" {
-    const tls = JNIThreadHelper.tls;
-    const TestContext = struct {
-        const TestContext = @This();
-
-        var tls_key: ?tls.Key = null;
-        var event: std.Thread.ResetEvent = .{};
-
-        counter: std.atomic.Value(u32),
-
-        fn init() TestContext {
-            if (tls_key == null) {
-                tls_key = tls.create_key(&destructor_callback);
-            }
-
-            return .{
-                .counter = std.atomic.Value(u32).init(0),
-            };
-        }
-
-        fn thread_main(self: *TestContext) void {
-            tls.set_key(tls_key.?, self);
-            event.wait();
-        }
-
-        fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
-            assert(tls_key != null);
-
-            const self: *TestContext = @alignCast(@ptrCast(tls_value));
-            _ = self.counter.fetchAdd(1, .monotonic);
-        }
-    };
-
-    var context = TestContext.init();
-    var threads: [10]std.Thread = undefined;
-    for (&threads) |*thread| {
-        thread.* = try std.Thread.spawn(.{}, TestContext.thread_main, .{&context});
-    }
-
-    // Assert that the callback only fires when the thread finishes.
-    try std.testing.expect(context.counter.load(.monotonic) == 0);
-
-    // Signal all threads to complete and wait for them.
-    TestContext.event.set();
-    for (&threads) |*thread| {
-        thread.join();
-    }
-
-    // Assert that all callbacks have fired.
-    try std.testing.expect(context.counter.load(.monotonic) == threads.len);
-}

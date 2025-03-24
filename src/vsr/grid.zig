@@ -123,6 +123,9 @@ pub fn GridType(comptime Storage: type) type {
             unexpected_command,
             /// The block is valid, but it is not the block we expected.
             unexpected_checksum,
+            /// The block is valid, and it is the block we expected, but the last sector's padding
+            /// is corrupt, so we will repair it just to be safe.
+            invalid_padding,
         };
 
         const ReadPending = struct {
@@ -819,7 +822,7 @@ pub fn GridType(comptime Storage: type) type {
         fn write_block_with(grid: *Grid, iop: *WriteIOP, write: *Write) void {
             assert(!grid.free_set.is_free(write.address));
 
-            grid.trace.start(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } }, .{});
+            grid.trace.start(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } });
 
             iop.* = .{
                 .grid = grid,
@@ -872,7 +875,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(cache_block_header.address == completed_write.address);
             grid.assert_coherent(completed_write.address, cache_block_header.checksum);
 
-            grid.trace.stop(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } }, .{});
+            grid.trace.stop(.{ .grid_write = .{ .iop = grid.write_iops.index(iop) } });
 
             if (grid.callback == .cancel) {
                 assert(grid.write_queue.empty());
@@ -1072,7 +1075,7 @@ pub fn GridType(comptime Storage: type) type {
             // block.
             assert(!grid.read_resolving);
 
-            grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } }, .{});
+            grid.trace.start(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
             iop.* = .{
                 .completion = undefined,
@@ -1095,7 +1098,7 @@ pub fn GridType(comptime Storage: type) type {
             const grid = read.grid;
             const iop_block = &grid.read_iop_blocks[grid.read_iops.index(iop)];
 
-            grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } }, .{});
+            grid.trace.stop(.{ .grid_read = .{ .iop = grid.read_iops.index(iop) } });
 
             if (grid.callback == .cancel) {
                 grid.read_iops.release(iop);
@@ -1179,8 +1182,8 @@ pub fn GridType(comptime Storage: type) type {
 
             if (header.checksum != expect.checksum) return .unexpected_checksum;
 
-            if (constants.verify) {
-                assert(stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)]));
+            if (!stdx.zeroed(block[header.size..vsr.sector_ceil(header.size)])) {
+                return .invalid_padding;
             }
 
             assert(header.address == expect.address);

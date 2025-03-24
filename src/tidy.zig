@@ -74,6 +74,7 @@ test "tidy" {
 
             if (tidy_dead_declarations(&tree, &dead_declarations)) |name| {
                 std.debug.print("{s}: error: '{s}' is dead code\n", .{ source_file.path, name });
+                return error.DeadDeclaration;
             }
 
             function_line_count_longest = @max(
@@ -125,6 +126,14 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.BoundedArrayType instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
+        return "use stdx.Duration instead of std veresion";
+    }
+
+    if (std.mem.indexOf(u8, source, "std.time." ++ "Instant") != null) {
+        return "use stdx.Instant instead of std veresion";
+    }
+
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
         return "use stdx.has_unique_representation instead of std version";
     }
@@ -141,8 +150,24 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.copy_right instead of std version";
     }
 
+    if (std.mem.indexOf(u8, source, "@memcpy(") != null) {
+        if (std.mem.indexOf(u8, source, "// Bypass tidy's ban, for stdx.") == null and
+            std.mem.indexOf(u8, source, "// Bypass tidy's ban, for go_bindings.") == null)
+        {
+            return "use stdx.copy_disjoint instead of @memcpy";
+        }
+    }
+
     if (std.mem.indexOf(u8, source, "posix." ++ "unexpectedErrno(") != null) {
         return "use stdx.unexpected_errno instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "uint" ++ "LessThan") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeLessThan") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeAtMost") != null or
+        std.mem.indexOf(u8, source, "int" ++ "RangeAtMostBiased") != null)
+    {
+        return "use stdx.PRNG instead of std.Random";
     }
 
     // Ban "fixme" comments. This allows using fixme as reminders with teeth --- when working on
@@ -168,12 +193,16 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use ! inside comptime";
     }
 
+    if (std.mem.indexOf(u8, source, "debug." ++ "assert(") != null) {
+        return "use unqualified assert()";
+    }
+
     return null;
 }
 
 fn tidy_long_line(file: SourceFile) !?u32 {
     if (std.mem.endsWith(u8, file.path, "low_level_hash_vectors.zig")) return null;
-    var line_iterator = mem.split(u8, file.text, "\n");
+    var line_iterator = mem.splitScalar(u8, file.text, '\n');
     var line_index: u32 = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         const line_length = try std.unicode.utf8CountCodepoints(line);
@@ -201,7 +230,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
 
                 // trace.zig's JSON snapshot test.
-                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":0,\"ph\":")) continue;
+                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
             }
 
             return line_index;
@@ -338,7 +367,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 414; // fn check in state_machine.zig
+const function_line_count_max = 413; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -405,7 +434,7 @@ fn tidy_long_functions(
         const function_body_first_token = tree.firstToken(@intCast(function_body_node));
         const function_body_last_token = tree.lastToken(@intCast(function_body_node));
 
-        const innermost_function = .{
+        const innermost_function: Function = .{
             .fn_decl_line = tree.tokenLocation(0, function_decl_first_token).line,
             .first_token_location = tree.tokenLocation(0, function_body_first_token),
             .last_token_location = tree.tokenLocation(0, function_body_last_token),
@@ -459,7 +488,7 @@ fn tidy_generic_functions(
     name: []const u8,
 } {
     var line_count: u32 = 0;
-    var it = std.mem.split(u8, file.text, "\n");
+    var it = std.mem.splitScalar(u8, file.text, '\n');
     while (it.next()) |line| {
         line_count += 1;
         // Zig fmt enforces that the pattern `fn Foo(` is not split across multiple lines.
@@ -513,7 +542,7 @@ fn tidy_markdown_title(text: []const u8) !void {
     var fenced_block = false; // Avoid interpreting `# ` shell comments as titles.
     var heading_count: u32 = 0;
     var line_count: u32 = 0;
-    var it = std.mem.split(u8, text, "\n");
+    var it = std.mem.splitScalar(u8, text, '\n');
     while (it.next()) |line| {
         line_count += 1;
         if (mem.startsWith(u8, line, "```")) fenced_block = !fenced_block;
@@ -601,9 +630,9 @@ const DeadFilesDetector = struct {
             "node.zig",
             "vopr.zig",
             "tb_client_header.zig",
+            "libtb_client.zig",
             "unit_tests.zig",
             "scripts.zig",
-            "tb_client_exports.zig",
             "dotnet_bindings.zig",
             "go_bindings.zig",
             "node_bindings.zig",
@@ -614,6 +643,7 @@ const DeadFilesDetector = struct {
             "vortex.zig",
             "file_checker.zig",
             "page_writer.zig",
+            "single_page_writer.zig",
             "search_index_writer.zig",
             "service_worker_writer.zig",
         };
@@ -631,7 +661,7 @@ test "tidy changelog" {
     const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
     defer allocator.free(changelog);
 
-    var line_iterator = mem.split(u8, changelog, "\n");
+    var line_iterator = mem.splitScalar(u8, changelog, '\n');
     var line_index: usize = 0;
     while (line_iterator.next()) |line| : (line_index += 1) {
         if (std.mem.endsWith(u8, line, " ")) {
@@ -671,7 +701,7 @@ test "tidy no large blobs" {
     );
 
     var has_large_blobs = false;
-    var lines = std.mem.split(u8, objects, "\n");
+    var lines = std.mem.splitScalar(u8, objects, '\n');
     while (lines.next()) |line| {
         // Parsing lines like
         //     blob 1032 client/package.json
@@ -705,6 +735,8 @@ test "tidy extensions" {
     const exceptions = std.StaticStringMap(void).initComptime(.{
         .{".editorconfig"},
         .{".gitignore"},
+        .{".nojekyll"},
+        .{"CNAME"},
         .{"exclude-pmd.properties"},
         .{"favicon.png"},
         .{"notfound-light.webp"},
@@ -715,9 +747,11 @@ test "tidy extensions" {
         .{"anchor-links.lua"},
         .{"markdown-links.lua"},
         .{"table-wrapper.lua"},
+        .{"code-block-buttons.lua"},
+        .{"edit-link-footer.lua"},
+        .{"src/docs_website/.vale.ini"},
         .{"zig/download.sh"},
         .{"src/scripts/cfo_supervisor.sh"},
-        .{".github/ci/docs_check.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
     });

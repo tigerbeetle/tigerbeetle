@@ -43,7 +43,7 @@ The operator account will be used to fund the Control Account.
 
 ## Executing a Transfer with a Balance Bounds Check
 
-This consists of 5 [linked transfers](../../reference/requests/README.md#linked-events).
+This consists of 5 [linked transfers](../linked-events.md).
 
 We will refer to two amounts:
 
@@ -81,7 +81,7 @@ In this case, we are keeping the Destination Account's balance between the bound
 
 ### Understanding the Mechanism
 
-Each of the 5 transfers is [linked](../../reference/requests/README.md#linked-events) so that all of
+Each of the 5 transfers is [linked](../linked-events.md) so that all of
 them will succeed or all of them will fail.
 
 The first transfer is the one we actually want to send.

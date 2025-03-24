@@ -14,6 +14,10 @@ pub const memory_lock_allocated = @import("./stdx/mlock.zig").memory_lock_alloca
 pub const timeit = @import("./stdx/debug.zig").timeit;
 pub const dbg = @import("./stdx/debug.zig").dbg;
 
+pub const aegis = @import("./stdx/aegis.zig");
+
+pub const PRNG = @import("./stdx/prng.zig");
+
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
@@ -123,8 +127,15 @@ pub inline fn copy_disjoint(
         .inexact => assert(target.len >= source.len),
     }
 
+    // disjoint_slices() doesn't work in comptime, because of limitations with @intFromPtr:
+    // https://github.com/ziglang/zig/issues/23072.
+    //
+    // It's also possible to construct slices into an array at comptime that are _not_ disjoint,
+    // which would violate the intention of this function, so it can't just be skipped.
+    assert(!@inComptime());
     assert(disjoint_slices(T, T, target, source));
-    @memcpy(target[0..source.len], source);
+
+    @memcpy(target[0..source.len], source); // Bypass tidy's ban, for stdx.
 }
 
 pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, b: []const B) bool {
@@ -203,21 +214,6 @@ pub fn cut_prefix(haystack: []const u8, needle: []const u8) ?[]const u8 {
 /// coverage.
 pub fn maybe(ok: bool) void {
     assert(ok or !ok);
-}
-
-/// Signal that something is not yet fully implemented, and abort the process.
-///
-/// In VOPR, this will exit with status 0, to make it easy to find "real" failures by running
-/// the simulator in a loop.
-pub fn unimplemented(comptime message: []const u8) noreturn {
-    const full_message = "unimplemented: " ++ message;
-    const root = @import("root");
-    if (@hasDecl(root, "Simulator")) {
-        root.output.info(full_message, .{});
-        root.output.info("not crashing in VOPR", .{});
-        std.process.exit(0);
-    }
-    @panic(full_message);
 }
 
 pub const log = if (builtin.is_test)
@@ -736,18 +732,18 @@ pub fn EnumUnionType(
 ) type {
     const UnionField = std.builtin.Type.UnionField;
 
-    var fields: []const UnionField = &[_]UnionField{};
-    for (std.enums.values(Enum)) |enum_variant| {
-        fields = fields ++ &[_]UnionField{.{
+    var fields: [std.enums.values(Enum).len]UnionField = undefined;
+    for (std.enums.values(Enum), 0..) |enum_variant, i| {
+        fields[i] = .{
             .name = @tagName(enum_variant),
             .type = TypeForVariant(enum_variant),
             .alignment = @alignOf(TypeForVariant(enum_variant)),
-        }};
+        };
     }
 
     return @Type(.{ .Union = .{
         .layout = .auto,
-        .fields = fields,
+        .fields = &fields,
         .decls = &.{},
         .tag_type = Enum,
     } });
@@ -763,7 +759,7 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
 pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
-    comptime assert(value % 1024 == 0);
+    comptime assert(value < 1024 or value % 1024 == 0);
     return .{ .data = value };
 }
 
@@ -785,22 +781,31 @@ fn format_int_size_bin_exact(
     var buf: [23]u8 = undefined;
 
     var magnitude: u8 = 0;
-    var val = value;
-    while (val % 1024 == 0) : (magnitude += 1) {
-        val = @divExact(val, 1024);
+    var value_unit = value;
+    while (value_unit % 1024 == 0) : (magnitude += 1) {
+        value_unit = @divExact(value_unit, 1024);
     }
 
-    const mags_iec = " KMGTPEZY";
-    const suffix = mags_iec[magnitude];
+    const magnitudes_iec = "BKMGTPEZY";
+    const suffix = magnitudes_iec[magnitude];
 
-    const i = std.fmt.formatIntBuf(&buf, val, 10, .lower, .{});
-    buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+    const length: usize = length: {
+        const i = std.fmt.formatIntBuf(&buf, value_unit, 10, .lower, .{});
+        if (magnitude == 0) {
+            buf[i] = suffix;
+            break :length i + 1;
+        } else {
+            buf[i..][0..3].* = [_]u8{ suffix, 'i', 'B' };
+            break :length i + 3;
+        }
+    };
 
-    return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
+    return std.fmt.formatBuf(buf[0..length], options, writer);
 }
 
 test fmt_int_size_bin_exact {
     try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
+    try std.testing.expectFmt("128B", "{}", .{fmt_int_size_bin_exact(128)});
     try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
     try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
     try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
@@ -837,6 +842,57 @@ pub fn array_print(
     return std.fmt.bufPrint(buffer, fmt, args) catch |err| switch (err) {
         error.NoSpaceLeft => unreachable,
     };
+}
+
+pub const Instant = struct {
+    // Sneak the std version of Instant past tidy.
+    const time = std.time;
+
+    base: time.Instant,
+
+    pub fn now() Instant {
+        const instant = time.Instant.now() catch @panic("std.time." ++ "Instant.now() unsupported");
+        return .{ .base = instant };
+    }
+
+    pub fn duration_since(now_: Instant, earlier: Instant) Duration {
+        if (now_.base.order(earlier.base) == .lt) {
+            return .{ .nanoseconds = 0 };
+        } else {
+            const elapsed_ns = now_.base.since(earlier.base);
+            return .{ .nanoseconds = elapsed_ns };
+        }
+    }
+};
+
+pub const Duration = struct {
+    nanoseconds: u64,
+
+    pub fn microseconds(duration: Duration) u64 {
+        return @divFloor(duration.nanoseconds, std.time.ns_per_us);
+    }
+
+    pub fn milliseconds(duration: Duration) u64 {
+        return @divFloor(duration.nanoseconds, std.time.ns_per_ms);
+    }
+};
+
+test "Instant/Duration" {
+    const instant_1 = Instant.now();
+    const instant_2 = Instant.now();
+    assert(instant_1.duration_since(instant_2).nanoseconds == 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+
+    if (builtin.os.tag == .linux) {
+        var instant_3 = instant_1;
+        instant_3.base.timestamp.tv_sec += 1;
+        assert(instant_1.duration_since(instant_3).nanoseconds == 0);
+
+        const duration = instant_3.duration_since(instant_1);
+        assert(duration.nanoseconds == 1_000_000_000);
+        assert(duration.microseconds() == 1_000_000);
+        assert(duration.milliseconds() == 1_000);
+    }
 }
 
 // DateTime in UTC, intended primarily for logging.

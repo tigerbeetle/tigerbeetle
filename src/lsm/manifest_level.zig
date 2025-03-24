@@ -811,7 +811,7 @@ pub fn TestContextType(
         const TestLevel = ManifestLevelType(TestPool, Key, TableInfo, table_count_max_tree);
         const KeyRange = TestLevel.KeyRange;
 
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
 
         pool: TestPool,
         level: TestLevel,
@@ -826,9 +826,9 @@ pub fn TestContextType(
         inserts: u64 = 0,
         removes: u64 = 0,
 
-        fn init(context: *TestContext, random: std.rand.Random) !void {
+        fn init(context: *TestContext, prng: *stdx.PRNG) !void {
             context.* = .{
-                .random = random,
+                .prng = prng,
 
                 .pool = undefined,
                 .level = undefined,
@@ -858,17 +858,21 @@ pub fn TestContextType(
         }
 
         fn run(context: *TestContext) !void {
+            const Action = enum { insert_tables, create_snapshot, delete_tables, drop_snapshot };
             if (log) std.debug.print("\n", .{});
-
             {
                 var i: usize = 0;
                 while (i < table_count_max_tree * 2) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...59 => try context.insert_tables(),
-                        60...69 => try context.create_snapshot(),
-                        70...94 => try context.delete_tables(),
-                        95...99 => try context.drop_snapshot(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(Action, .{
+                        .insert_tables = 60,
+                        .create_snapshot = 10,
+                        .delete_tables = 25,
+                        .drop_snapshot = 5,
+                    })) {
+                        .insert_tables => try context.insert_tables(),
+                        .create_snapshot => try context.create_snapshot(),
+                        .delete_tables => try context.delete_tables(),
+                        .drop_snapshot => try context.drop_snapshot(),
                     }
                 }
             }
@@ -876,12 +880,16 @@ pub fn TestContextType(
             {
                 var i: usize = 0;
                 while (i < table_count_max_tree * 2) : (i += 1) {
-                    switch (context.random.uintLessThanBiased(u32, 100)) {
-                        0...34 => try context.insert_tables(),
-                        35...39 => try context.create_snapshot(),
-                        40...89 => try context.delete_tables(),
-                        90...99 => try context.drop_snapshot(),
-                        else => unreachable,
+                    switch (context.prng.enum_weighted(Action, .{
+                        .insert_tables = 35,
+                        .create_snapshot = 5,
+                        .delete_tables = 50,
+                        .drop_snapshot = 10,
+                    })) {
+                        .insert_tables => try context.insert_tables(),
+                        .create_snapshot => try context.create_snapshot(),
+                        .delete_tables => try context.delete_tables(),
+                        .drop_snapshot => try context.drop_snapshot(),
                     }
                 }
             }
@@ -897,10 +905,10 @@ pub fn TestContextType(
             var buffer: [13]TableInfo = undefined;
 
             const count_max = @min(count_free, 13);
-            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+            const count = context.prng.range_inclusive(u32, 1, count_max);
 
             {
-                var key: Key = context.random.uintAtMostBiased(Key, table_count_max_tree * 64);
+                var key: Key = context.prng.int_inclusive(Key, table_count_max_tree * 64);
 
                 for (buffer[0..count]) |*table| {
                     table.* = context.random_greater_non_overlapping_table(key);
@@ -934,8 +942,7 @@ pub fn TestContextType(
         }
 
         fn random_greater_non_overlapping_table(context: *TestContext, key: Key) TableInfo {
-            var new_key_min = key + context.random.uintLessThanBiased(Key, 31) + 1;
-
+            var new_key_min = key + context.prng.range_inclusive(Key, 1, 31);
             assert(new_key_min > key);
 
             const i = binary_search.binary_search_values_upsert_index(
@@ -962,15 +969,15 @@ pub fn TestContextType(
             } else math.maxInt(Key);
 
             const max_delta = @min(32, next_key_min - 1 - new_key_min);
-            const new_key_max = new_key_min + context.random.uintAtMostBiased(Key, max_delta);
+            const new_key_max = new_key_min + context.prng.int_inclusive(Key, max_delta);
 
             return .{
-                .checksum = context.random.int(u128),
-                .address = context.random.int(u64),
+                .checksum = context.prng.int(u128),
+                .address = context.prng.int(u64),
                 .snapshot_min = context.take_snapshot(),
                 .key_min = new_key_min,
                 .key_max = new_key_max,
-                .value_count = context.random.int(u32),
+                .value_count = context.prng.int(u32),
             };
         }
 
@@ -1000,7 +1007,7 @@ pub fn TestContextType(
         fn drop_snapshot(context: *TestContext) !void {
             if (context.snapshots.empty()) return;
 
-            const index = context.random.uintLessThanBiased(usize, context.snapshots.count());
+            const index = context.prng.index(context.snapshots.const_slice());
 
             _ = context.snapshots.swap_remove(index);
             var tables = context.snapshot_tables.swap_remove(index);
@@ -1012,7 +1019,7 @@ pub fn TestContextType(
             const snapshots = context.snapshots.slice();
 
             // Ensure that iteration with a null key range in both directions is tested.
-            if (context.random.boolean()) {
+            if (context.prng.boolean()) {
                 var it = context.level.iterator(.invisible, snapshots, .ascending, null);
                 while (it.next()) |table| try tables.append(table.*);
             } else {
@@ -1033,10 +1040,10 @@ pub fn TestContextType(
             if (reference_len == 0) return;
 
             const count_max = @min(reference_len, 13);
-            const count = context.random.uintAtMostBiased(u32, count_max - 1) + 1;
+            const count = context.prng.range_inclusive(u32, 1, count_max);
 
             assert(context.reference.items.len <= table_count_max_tree);
-            const index = context.random.uintAtMostBiased(u32, reference_len - count);
+            const index = context.prng.int_inclusive(u32, reference_len - count);
 
             const snapshot = context.take_snapshot();
 
@@ -1197,8 +1204,8 @@ pub fn TestContextType(
 
             if (reference.len > 0) {
                 const reference_len: u32 = @intCast(reference.len);
-                const start = context.random.uintLessThanBiased(u32, reference_len);
-                const end = context.random.uintLessThanBiased(u32, reference_len - start) + start;
+                const start = context.prng.int_inclusive(u32, reference_len - 1);
+                const end = context.prng.range_inclusive(u32, start, reference_len - 1);
 
                 const key_min = reference[start].key_min;
                 const key_max = reference[end].key_max;
@@ -1248,9 +1255,7 @@ pub fn TestContextType(
 test "ManifestLevel" {
     const seed = 42;
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
-
+    var prng = stdx.PRNG.from_seed(seed);
     const Options = struct {
         key_type: type,
         node_size: u32,
@@ -1271,7 +1276,7 @@ test "ManifestLevel" {
         );
 
         var context: TestContext = undefined;
-        try context.init(random);
+        try context.init(&prng);
         defer context.deinit();
 
         try context.run();

@@ -587,6 +587,8 @@ pub const Multiversion = struct {
     target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
     /// This list is referenced by `Replica.releases_bundled`.
+    /// Note that this only contains the advertisable releases, which are a subset of the actual
+    /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
     releases_bundled: ReleaseList = .{},
 
     completion: IO.Completion = undefined,
@@ -685,7 +687,7 @@ pub const Multiversion = struct {
         };
         errdefer posix.close(target_fd);
 
-        const args_envp = switch (builtin.target.os.tag) {
+        const args_envp: ArgsEnvp = switch (builtin.target.os.tag) {
             .linux, .macos => blk: {
                 // We can pass through our env as-is to exec. We have to manipulate the types
                 // here somewhat: they're cast in start.zig and we can't access `argc_argv_ptr`
@@ -761,12 +763,15 @@ pub const Multiversion = struct {
         assert(self.stage == .init);
         assert(!self.timeout.ticking);
 
-        self.binary_open();
-
+        if (comptime builtin.target.os.tag == .linux) {
+            self.binary_statx();
+        } else {
+            self.binary_open();
+        }
         assert(self.stage != .init);
 
         while (self.stage != .ready and self.stage != .err) {
-            self.io.tick() catch |e| {
+            self.io.run() catch |e| {
                 assert(self.stage != .ready);
                 self.stage = .{ .err = e };
             };
@@ -779,6 +784,14 @@ pub const Multiversion = struct {
             self.releases_bundled.append_assume_capacity(constants.config.process.release);
 
             return self.stage.err;
+        }
+
+        assert(self.stage == .ready);
+        assert(self.target_header != null);
+        assert(self.releases_bundled.count() >= 1);
+
+        if (comptime builtin.target.os.tag == .linux) {
+            assert(self.timeout_statx_previous != .none);
         }
     }
 
@@ -816,6 +829,13 @@ pub const Multiversion = struct {
             .init, .ready, .err => {},
         }
 
+        self.stage = .init;
+        self.binary_statx();
+    }
+
+    fn binary_statx(self: *Multiversion) void {
+        assert(self.stage == .init);
+
         self.stage = .source_stat;
         self.io.statx(
             *Multiversion,
@@ -831,6 +851,8 @@ pub const Multiversion = struct {
     }
 
     fn binary_statx_callback(self: *Multiversion, _: *IO.Completion, result: anyerror!void) void {
+        assert(self.stage == .source_stat);
+
         _ = result catch |e| {
             self.timeout_statx_previous = .err;
 
@@ -844,18 +866,20 @@ pub const Multiversion = struct {
         // Zero the atime, so we can compare the rest of the struct directly.
         self.timeout_statx.atime = std.mem.zeroes(os.linux.statx_timestamp);
 
-        if (self.timeout_statx_previous == .err or
-            (self.timeout_statx_previous == .previous and !stdx.equal_bytes(
+        if (self.timeout_statx_previous == .previous and
+            stdx.equal_bytes(
             os.linux.Statx,
             &self.timeout_statx_previous.previous,
             &self.timeout_statx,
-        ))) {
-            log.info("binary change detected: {s}", .{self.exe_path});
+        )) {
+            self.stage = .init;
+        } else {
+            if (self.timeout_statx_previous != .none) {
+                log.info("binary change detected: {s}", .{self.exe_path});
+            }
 
             self.stage = .init;
             self.binary_open();
-        } else {
-            self.stage = .init;
         }
 
         self.timeout_statx_previous = .{ .previous = self.timeout_statx };
@@ -932,6 +956,7 @@ pub const Multiversion = struct {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
+        assert(self.source_offset.? < self.source_buffer.len);
 
         defer {
             if (self.stage != .source_read) {
@@ -1114,7 +1139,7 @@ pub const Multiversion = struct {
         // populated by checking that target_header has been set.
         assert(self.target_header != null);
 
-        // The release_taget is only used as a sanity check, and doesn't control the exec path here.
+        // `release_target` is only used as a sanity check, and doesn't control the exec path here.
         // There are two possible cases:
         // * release_target == target_header.current_release:
         //   The latest release will be executed, and it won't do any more re-execs from there
@@ -1130,8 +1155,7 @@ pub const Multiversion = struct {
             release_target.value,
         ) != null;
 
-        assert(!(release_target_current and release_target_past));
-        assert(release_target_current or release_target_past);
+        assert(release_target_current != release_target_past);
 
         // The trailing newline is intentional - it provides visual separation in the logs when
         // exec'ing new versions.
@@ -1142,7 +1166,7 @@ pub const Multiversion = struct {
             });
         } else if (release_target_past) {
             log.info("executing current release {} (target: {}) via {s}...\n", .{
-                self.target_header.?.current_release,
+                Release{ .value = self.target_header.?.current_release },
                 release_target,
                 self.exe_path,
             });
@@ -1161,6 +1185,30 @@ pub const Multiversion = struct {
         assert(self.stage == .ready);
 
         const header = &self.target_header.?;
+
+        if (header.current_release == constants.config.process.release.value) {
+            // Normally if we are downgrading, it means that we are running the newest release
+            // in the list of bundled releases.
+            assert(constants.config.process.release.value ==
+                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+        } else {
+            // Scenario:
+            // 1. Replica starts on release A.
+            // 2. Replica detects that its binary has been replaced by B.
+            //    It reads the binary of B into a memfd.
+            // 3. Replica decides to upgrade to B, so it exec()'s the memfd.
+            // 4. (Swap B's binary on disk with C.)
+            // 5. Replica starts up, running B's binary.
+            // 6. During open, replica reads the binary's header from disk.
+            // But that's C's binary/header, so B is unexpectedly not the latest release in it.
+            log.warn("binary changed unexpectedly (expected={} found={})", .{
+                constants.config.process.release,
+                Release{ .value = header.current_release },
+            });
+
+            assert(constants.config.process.release.value !=
+                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+        }
 
         // It should never happen that index is null: the caller must (and does, in the case of
         // replica_release_execute) ensure that exec_release is only called if the release
@@ -1235,12 +1283,12 @@ pub const Multiversion = struct {
                 unreachable;
             },
             .windows => {
-                // Includes the null byte, that utf8ToUtf16LeWithNull needs.
+                // Includes the null byte, that utf8ToUtf16LeAllocZ needs.
                 var buffer: [std.fs.max_path_bytes]u8 = undefined;
                 var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
                 const allocator = fixed_allocator.allocator();
 
-                const target_path_w = std.unicode.utf8ToUtf16LeWithNull(
+                const target_path_w = std.unicode.utf8ToUtf16LeAllocZ(
                     allocator,
                     self.target_path,
                 ) catch unreachable;
@@ -1254,7 +1302,14 @@ pub const Multiversion = struct {
                 // That said, with how CreateProcessW is called, this should _never_ happen, since
                 // its both provided a full lpApplicationName, and because GetCommandLineW actually
                 // points to a copy of memory from the PEB.
-                const cmd_line_w = os.windows.kernel32.GetCommandLineW();
+                const get_command_line_w = @extern(
+                    *const fn () callconv(.C) std.os.windows.LPWSTR,
+                    .{
+                        .library_name = "kernel32",
+                        .name = "GetCommandLineW",
+                    },
+                );
+                const cmd_line_w = get_command_line_w();
 
                 var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
                 lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);

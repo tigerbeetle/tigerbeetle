@@ -136,7 +136,6 @@ typedef enum TB_CREATE_TRANSFER_RESULT {
     TB_CREATE_TRANSFER_PENDING_ID_MUST_BE_DIFFERENT = 16,
     TB_CREATE_TRANSFER_TIMEOUT_RESERVED_FOR_PENDING_TRANSFER = 17,
     TB_CREATE_TRANSFER_CLOSING_TRANSFER_MUST_BE_PENDING = 64,
-    TB_CREATE_TRANSFER_AMOUNT_MUST_NOT_BE_ZERO = 18,
     TB_CREATE_TRANSFER_LEDGER_MUST_NOT_BE_ZERO = 19,
     TB_CREATE_TRANSFER_CODE_MUST_NOT_BE_ZERO = 20,
     TB_CREATE_TRANSFER_DEBIT_ACCOUNT_NOT_FOUND = 21,
@@ -226,6 +225,26 @@ typedef enum TB_QUERY_FILTER_FLAGS {
     TB_QUERY_FILTER_REVERSED = 1 << 0,
 } TB_QUERY_FILTER_FLAGS;
 
+// Opaque struct serving as a handle for the client instance.
+// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+// throughout the lifetime of the client instance.
+typedef struct tb_client_t {
+    uint64_t opaque[4];
+} tb_client_t;
+
+// Struct containing the state of a request submitted through the client.
+// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+// throughout the lifetime of the request.
+typedef struct tb_packet_t {
+    void* user_data;
+    void* data;
+    uint32_t data_size;
+    uint16_t user_tag;
+    uint8_t operation;
+    uint8_t status;
+    uint8_t opaque[32];
+} tb_packet_t;
+
 typedef enum TB_OPERATION {
     TB_OPERATION_PULSE = 128,
     TB_OPERATION_CREATE_ACCOUNTS = 129,
@@ -236,6 +255,7 @@ typedef enum TB_OPERATION {
     TB_OPERATION_GET_ACCOUNT_BALANCES = 134,
     TB_OPERATION_QUERY_ACCOUNTS = 135,
     TB_OPERATION_QUERY_TRANSFERS = 136,
+    TB_OPERATION_GET_EVENTS = 137,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {
@@ -249,72 +269,87 @@ typedef enum TB_PACKET_STATUS {
     TB_PACKET_INVALID_DATA_SIZE = 7,
 } TB_PACKET_STATUS;
 
-typedef struct tb_packet_t {
-    struct tb_packet_t* next;
-    void* user_data;
-    uint8_t operation;
-    uint8_t status;
-    uint32_t data_size;
-    void* data;
-    struct tb_packet_t* batch_next;
-    struct tb_packet_t* batch_tail;
-    uint32_t batch_size;
-    uint8_t batch_allowed;
-    uint8_t reserved[7];
-} tb_packet_t;
+typedef enum TB_INIT_STATUS {
+    TB_INIT_SUCCESS = 0,
+    TB_INIT_UNEXPECTED = 1,
+    TB_INIT_OUT_OF_MEMORY = 2,
+    TB_INIT_ADDRESS_INVALID = 3,
+    TB_INIT_ADDRESS_LIMIT_EXCEEDED = 4,
+    TB_INIT_SYSTEM_RESOURCES = 5,
+    TB_INIT_NETWORK_SUBSYSTEM = 6,
+} TB_INIT_STATUS;
 
-typedef void* tb_client_t; 
+typedef enum TB_CLIENT_STATUS {
+    TB_CLIENT_OK = 0,
+    TB_CLIENT_INVALID = 1,
+} TB_CLIENT_STATUS;
 
-typedef enum TB_STATUS {
-    TB_STATUS_SUCCESS = 0,
-    TB_STATUS_UNEXPECTED = 1,
-    TB_STATUS_OUT_OF_MEMORY = 2,
-    TB_STATUS_ADDRESS_INVALID = 3,
-    TB_STATUS_ADDRESS_LIMIT_EXCEEDED = 4,
-    TB_STATUS_SYSTEM_RESOURCES = 5,
-    TB_STATUS_NETWORK_SUBSYSTEM = 6,
-} TB_STATUS;
+typedef enum TB_REGISTER_LOG_CALLBACK_STATUS {
+    TB_REGISTER_LOG_CALLBACK_SUCCESS = 0,
+    TB_REGISTER_LOG_CALLBACK_ALREADY_REGISTERED = 1,
+    TB_REGISTER_LOG_CALLBACK_NOT_REGISTERED = 2,
+} TB_REGISTER_LOG_CALLBACK_STATUS;
+
+typedef enum TB_LOG_LEVEL {
+    TB_LOG_ERR = 0,
+    TB_LOG_WARN = 1,
+    TB_LOG_INFO = 2,
+    TB_LOG_DEBUG = 3,
+} TB_LOG_LEVEL;
 
 // Initialize a new TigerBeetle client which connects to the addresses provided and
 // completes submitted packets by invoking the callback with the given context.
-TB_STATUS tb_client_init(
-    tb_client_t* out_client,
+TB_INIT_STATUS tb_client_init(
+    tb_client_t *client_out,
+    // 128-bit unsigned integer represented as a 16-byte little-endian array.
     const uint8_t cluster_id[16],
-    const char* address_ptr,
+    const char *address_ptr,
     uint32_t address_len,
-    uintptr_t on_completion_ctx,
-    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+    uintptr_t completion_ctx,
+    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
 );
 
-// Initialize a new TigerBeetle client which echos back any data submitted.
-TB_STATUS tb_client_init_echo(
-    tb_client_t* out_client,
+// Initialize a new TigerBeetle client that echoes back any submitted data.
+TB_INIT_STATUS tb_client_init_echo(
+    tb_client_t *client_out,
+    // 128-bit unsigned integer represented as a 16-byte little-endian array.
     const uint8_t cluster_id[16],
-    const char* address_ptr,
+    const char *address_ptr,
     uint32_t address_len,
-    uintptr_t on_completion_ctx,
-    void (*on_completion)(uintptr_t, tb_client_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+    uintptr_t completion_ctx,
+    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
 );
 
-// Retrieve the callback context initially passed into `tb_client_init` or
-// `tb_client_init_echo`.
-uintptr_t tb_client_completion_context(
-    tb_client_t client
+// Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.
+// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+// not initialized or has already been closed.
+TB_CLIENT_STATUS tb_client_completion_context(
+    tb_client_t* client,
+    uintptr_t* completion_ctx_out
 );
 
-// Submit a packet with its operation, data, and data_size fields set.
-// Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
-// packet on the `tb_client` thread (separate from caller's thread).
-void tb_client_submit(
-    tb_client_t client,
-    tb_packet_t* packet
+// Submit a packet with its `operation`, `data`, and `data_size` fields set.
+// Once completed, `completion_callback` will be invoked with `completion_ctx`
+// and the given packet on the `tb_client` thread (separate from the caller's thread).
+// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+// not initialized or has already been closed.
+TB_CLIENT_STATUS tb_client_submit(
+    tb_client_t *client,
+    tb_packet_t *packet
 );
 
 // Closes the client, causing any previously submitted packets to be completed with
 // `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
-// It is undefined behavior to use any functions on the client once deinit is called.
-void tb_client_deinit(
-    tb_client_t client
+// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+// not initialized or has already been closed.
+TB_CLIENT_STATUS tb_client_deinit(
+    tb_client_t *client
+);
+
+// Registers or unregisters the application log callback.
+TB_REGISTER_LOG_CALLBACK_STATUS register_log_callback(
+    void (*callback)(TB_LOG_LEVEL, const uint8_t*, uint32_t),
+    bool debug
 );
 
 #ifdef __cplusplus

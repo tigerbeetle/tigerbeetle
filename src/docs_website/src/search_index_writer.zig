@@ -13,8 +13,6 @@ pub fn main() !void {
     var args = std.process.args();
     _ = args.skip();
 
-    const target_path = args.next().?;
-
     var entries = std.ArrayList(Entry).init(allocator);
     while (args.next()) |path| {
         const html = args.next().?;
@@ -26,6 +24,5 @@ pub fn main() !void {
     }
 
     const json_string = try std.json.stringifyAlloc(allocator, entries.items, .{});
-    const json_string_newline = try std.mem.concat(allocator, u8, &.{ json_string, "\n" });
-    try std.fs.cwd().writeFile(.{ .sub_path = target_path, .data = json_string_newline });
+    try std.io.getStdOut().writer().print("{s}\n", .{json_string});
 }

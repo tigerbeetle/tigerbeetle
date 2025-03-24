@@ -38,6 +38,8 @@ pub const CLIArgs = struct {
     //
     // This flag is used to test the release process on the main branch.
     no_changelog: bool = false,
+    // Allow targeting only production x86_64 Linux, to speed up when invoked via devhub.
+    devhub: bool = false,
 };
 
 const VersionInfo = struct {
@@ -60,6 +62,12 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         LanguageSet.initOne(language)
     else
         LanguageSet.initFull();
+
+    if (cli_args.devhub) {
+        if (cli_args.language == null or cli_args.language.? != .zig) {
+            @panic("--devhub is only supported with --languages=zig.");
+        }
+    }
 
     const changelog_text = try shell.project_root.readFileAlloc(
         shell.arena.allocator(),
@@ -116,8 +124,8 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     // will be very inconvenient for operators.
     const release_triple_client_min = .{
         .major = 0,
-        .minor = 15,
-        .patch = 3,
+        .minor = 16,
+        .patch = 4,
     };
 
     const version_info = VersionInfo{
@@ -151,16 +159,17 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     }
 
     if (cli_args.build) {
-        try build(shell, languages, version_info);
+        try build(shell, languages, version_info, cli_args.devhub);
     }
 
     if (cli_args.publish) {
         assert(!cli_args.no_changelog);
+        assert(!cli_args.devhub);
         try publish(shell, languages, changelog_body, version_info);
     }
 }
 
-fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
+fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool) !void {
     var section = try shell.open_section("build all");
     defer section.close();
 
@@ -176,7 +185,11 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
         var dist_dir_tigerbeetle = try dist_dir.makeOpenPath("tigerbeetle", .{});
         defer dist_dir_tigerbeetle.close();
 
-        try build_tigerbeetle(shell, info, dist_dir_tigerbeetle);
+        if (devhub) {
+            try build_tigerbeetle_target(shell, info, dist_dir_tigerbeetle, false, "x86_64-linux");
+        } else {
+            try build_tigerbeetle(shell, info, dist_dir_tigerbeetle);
+        }
     }
 
     if (languages.contains(.dotnet)) {
@@ -216,12 +229,6 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo) !void {
 }
 
 fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
-    var section = try shell.open_section("build tigerbeetle");
-    defer section.close();
-
-    // We shell out to `zip` for creating archives, so we need an absolute path here.
-    const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-
     const targets = .{
         "x86_64-linux",
         "x86_64-windows",
@@ -229,65 +236,83 @@ fn build_tigerbeetle(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !vo
         "aarch64-macos", // Will build a universal binary.
     };
 
+    inline for (.{ true, false }) |debug| {
+        inline for (targets) |target| {
+            try build_tigerbeetle_target(shell, info, dist_dir, debug, target);
+        }
+    }
+}
+
+fn build_tigerbeetle_target(
+    shell: *Shell,
+    info: VersionInfo,
+    dist_dir: std.fs.Dir,
+    comptime debug: bool,
+    comptime target: []const u8,
+) !void {
+    var section = try shell.open_section(
+        "build tigerbeetle - " ++ target ++ " debug: " ++ if (debug) "true" else "false",
+    );
+    defer section.close();
+
+    // We shell out to `zip` for creating archives, so we need an absolute path here.
+    const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
+
     const sha_date = try shell.exec_stdout("git show --no-patch --no-notes --pretty=%cI {sha}", .{
         .sha = info.sha,
     });
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`.
-    inline for (.{ true, false }) |debug| {
-        inline for (targets) |target| {
-            try shell.exec_zig(
-                \\build
-                \\    -Dtarget={target}
-                \\    -Drelease={release}
-                \\    -Dgit-commit={commit}
-                \\    -Dconfig-release={release_triple}
-                \\    -Dconfig-release-client-min={release_triple_client_min}
-                \\    -Dmultiversion={tag_multiversion}
-            , .{
-                .target = target,
-                .release = if (debug) "false" else "true",
-                .commit = info.sha,
-                .release_triple = info.release_triple,
-                .release_triple_client_min = info.release_triple_client_min,
-                .tag_multiversion = info.tag_multiversion,
-            });
+    try shell.exec_zig(
+        \\build
+        \\    -Dtarget={target}
+        \\    -Drelease={release}
+        \\    -Dgit-commit={commit}
+        \\    -Dconfig-release={release_triple}
+        \\    -Dconfig-release-client-min={release_triple_client_min}
+        \\    -Dmultiversion={tag_multiversion}
+    , .{
+        .target = target,
+        .release = if (debug) "false" else "true",
+        .commit = info.sha,
+        .release_triple = info.release_triple,
+        .release_triple_client_min = info.release_triple_client_min,
+        .tag_multiversion = info.tag_multiversion,
+    });
 
-            const windows = comptime std.mem.eql(u8, target, "x86_64-windows");
-            const macos = comptime std.mem.eql(u8, target, "aarch64-macos");
+    const windows = comptime std.mem.eql(u8, target, "x86_64-windows");
+    const macos = comptime std.mem.eql(u8, target, "aarch64-macos");
 
-            const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
-            const zip_name = "tigerbeetle-" ++
-                (if (macos) "universal-macos" else target) ++
-                (if (debug) "-debug" else "") ++
-                ".zip";
+    const exe_name = "tigerbeetle" ++ if (windows) ".exe" else "";
+    const zip_name = "tigerbeetle-" ++
+        (if (macos) "universal-macos" else target) ++
+        (if (debug) "-debug" else "") ++
+        ".zip";
 
-            if ((std.mem.eql(u8, target, "x86_64-linux") and builtin.target.os.tag == .linux) or
-                (macos and builtin.target.os.tag == .macos) or
-                (windows and builtin.target.os.tag == .windows))
-            {
-                const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
-                    .exe_name = exe_name,
-                });
-                assert(std.mem.indexOf(u8, output, "process.verify=true") != null);
-                const build_mode = if (debug)
-                    "build.mode=builtin.OptimizeMode.Debug"
-                else
-                    "build.mode=builtin.OptimizeMode.ReleaseSafe";
-                assert(std.mem.indexOf(u8, output, build_mode) != null);
-            }
-
-            try shell.exec("touch -d {sha_date} {exe_name}", .{
-                .sha_date = sha_date,
-                .exe_name = exe_name,
-            });
-            try shell.exec("zip -9 {zip_path} {exe_name}", .{
-                .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
-                .exe_name = exe_name,
-            });
-        }
+    if ((std.mem.eql(u8, target, "x86_64-linux") and builtin.target.os.tag == .linux) or
+        (macos and builtin.target.os.tag == .macos) or
+        (windows and builtin.target.os.tag == .windows))
+    {
+        const output = try shell.exec_stdout("./{exe_name} version --verbose", .{
+            .exe_name = exe_name,
+        });
+        assert(std.mem.indexOf(u8, output, "process.verify=true") != null);
+        const build_mode = if (debug)
+            "build.mode=builtin.OptimizeMode.Debug"
+        else
+            "build.mode=builtin.OptimizeMode.ReleaseSafe";
+        assert(std.mem.indexOf(u8, output, build_mode) != null);
     }
+
+    try shell.exec("touch -d {sha_date} {exe_name}", .{
+        .sha_date = sha_date,
+        .exe_name = exe_name,
+    });
+    try shell.exec("zip -9 {zip_path} {exe_name}", .{
+        .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
+        .exe_name = exe_name,
+    });
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
@@ -338,7 +363,7 @@ fn build_go(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     });
 
     const files = try shell.exec_stdout("git ls-files", .{});
-    var files_lines = std.mem.tokenize(u8, files, "\n");
+    var files_lines = std.mem.tokenizeScalar(u8, files, '\n');
     var copied_count: u32 = 0;
     while (files_lines.next()) |file| {
         assert(file.len > 3);
@@ -526,7 +551,7 @@ fn publish(
             "gh release list --json tagName --jq {query}",
             .{ .query = ".[].tagName" },
         );
-        var it = std.mem.split(u8, tags_exiting, "\n");
+        var it = std.mem.splitScalar(u8, tags_exiting, '\n');
         while (it.next()) |tag_existing| {
             assert(std.mem.trim(u8, tag_existing, " \t\n\r").len == tag_existing.len);
             if (std.mem.eql(u8, tag_existing, info.release_triple)) {
@@ -773,11 +798,24 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
         \\  versions:set -DnewVersion={tag}
     , .{ .tag = info.tag });
 
-    try shell.exec(
-        \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
-        \\  -Dmaven.test.skip -Djacoco.skip
-        \\  deploy
-    , .{});
+    // Retrying in case of timeout:
+    const attempts_max = 5;
+    for (0..attempts_max) |index| {
+        const timeout_ns: u64 = 5 * std.time.ns_per_min;
+        return shell.exec_options(.{ .timeout_ns = timeout_ns },
+            \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
+            \\  -Dmaven.test.skip -Djacoco.skip
+            \\  deploy
+        , .{}) catch |err| switch (err) {
+            error.ExecTimeout => {
+                const attempt = index + 1;
+                log.warn("java deploy timed out. Attempt={}", .{attempt});
+                if (attempt == attempts_max) return err;
+                continue;
+            },
+            else => err,
+        };
+    } else unreachable;
 }
 
 fn publish_node(shell: *Shell, info: VersionInfo) !void {

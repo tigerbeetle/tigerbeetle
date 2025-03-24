@@ -1,10 +1,13 @@
 const std = @import("std");
+const stdx = @import("../../stdx.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
-const StateMachine = StateMachineType(void, constants.state_machine_config);
+const TestingStorage = @import("../storage.zig").Storage;
+const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
 
+// We could have used the idiomatic Zig API exposed by `vsr.tb_client`,
+// but we want to test the actual FFI exposed by `libtb_client`.
 const c = @cImport({
-    _ = @import("../../tb_client_exports.zig"); // Needed for the @export()'ed C ffi functions.
     @cInclude("tb_client.h");
 });
 
@@ -33,7 +36,7 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
     const cluster_id = args.positional.@"cluster-id";
 
     var tb_client: c.tb_client_t = undefined;
-    const result = c.tb_client_init(
+    const init_status = c.tb_client_init(
         &tb_client,
         std.mem.asBytes(&cluster_id),
         args.positional.addresses.ptr,
@@ -41,10 +44,13 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
         0,
         on_complete,
     );
-    if (result != c.TB_STATUS_SUCCESS) {
+    if (init_status != c.TB_INIT_SUCCESS) {
         return error.ClientInitError;
     }
-    defer c.tb_client_deinit(tb_client);
+    defer {
+        const client_status = c.tb_client_deinit(&tb_client);
+        assert(client_status == c.TB_CLIENT_OK);
+    }
 
     const stdin = std.io.getStdIn().reader().any();
     const stdout = std.io.getStdOut().writer().any();
@@ -69,10 +75,11 @@ pub fn main(_: std.mem.Allocator, args: CLIArgs) !void {
             packet.user_data = @constCast(@ptrCast(&context));
             packet.data = @constCast(events.ptr);
             packet.data_size = @intCast(events.len);
-            packet.next = null;
+            packet.user_tag = 0;
             packet.status = c.TB_PACKET_OK;
 
-            c.tb_client_submit(tb_client, &packet);
+            const client_status = c.tb_client_submit(&tb_client, &packet);
+            assert(client_status == c.TB_CLIENT_OK);
 
             while (!context.completed) {
                 context.condition.wait(&context.lock);
@@ -101,14 +108,12 @@ const RequestContext = struct {
 
 pub fn on_complete(
     tb_context: usize,
-    tb_client: c.tb_client_t,
     tb_packet: [*c]c.tb_packet_t,
     timestamp: u64,
     result_ptr: [*c]const u8,
     result_len: u32,
 ) callconv(.C) void {
     _ = tb_context;
-    _ = tb_client;
     _ = timestamp;
     const context: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
 
@@ -118,7 +123,7 @@ pub fn on_complete(
     assert(tb_packet.*.status == c.TB_PACKET_OK);
     assert(result_ptr != null);
 
-    @memcpy(context.result[0..result_len], result_ptr[0..result_len]);
+    stdx.copy_disjoint(.exact, u8, context.result[0..result_len], result_ptr[0..result_len]);
     context.result_size = result_len;
     context.completed = true;
     context.condition.signal();

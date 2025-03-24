@@ -1,4 +1,5 @@
 const assert = require("assert");
+const process = require("process");
 
 const {
     createClient,
@@ -49,7 +50,7 @@ async function main() {
   for (const error of accountErrors) {
     console.error(`Batch account at ${error.index} failed to create: ${CreateAccountError[error.result]}.`);
   }
-  assert.equal(accountErrors.length, 0);
+  assert.strictEqual(accountErrors.length, 0);
 
   // Start a pending transfer
   let transferErrors = await client.createTransfers([
@@ -72,22 +73,22 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
   let accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 500);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 500n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 500);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 500n);
     } else {
       assert.fail("Unexpected account: " + JSON.stringify(account, null, 2));
     }
@@ -114,16 +115,16 @@ async function main() {
   for (const error of transferErrors) {
     console.error(`Batch transfer at ${error.index} failed to create: ${CreateTransferError[error.result]}.`);
   }
-  assert.equal(transferErrors.length, 0);
+  assert.strictEqual(transferErrors.length, 0);
 
   // Validate the contents of all transfers
   let transfers = await client.lookupTransfers([1n, 2n]);
-  assert.equal(transfers.length, 2);
+  assert.strictEqual(transfers.length, 2);
   for (let transfer of transfers) {
     if (transfer.id === 1n) {
-      assert.equal(transfer.flags & TransferFlags.pending, TransferFlags.pending);
+      assert.strictEqual(transfer.flags & TransferFlags.pending, TransferFlags.pending);
     } else if (transfer.id === 2n) {
-      assert.equal(transfer.flags & TransferFlags.post_pending_transfer, TransferFlags.post_pending_transfer);
+      assert.strictEqual(transfer.flags & TransferFlags.post_pending_transfer, TransferFlags.post_pending_transfer);
     } else {
       assert.fail("Unexpected transfer: " + transfer.id);
     }
@@ -131,18 +132,18 @@ async function main() {
 
   // Validate accounts pending and posted debits/credits after finishing the two-phase transfer
   accounts = await client.lookupAccounts([1n, 2n]);
-  assert.equal(accounts.length, 2);
+  assert.strictEqual(accounts.length, 2);
   for (let account of accounts) {
     if (account.id === 1n) {
-      assert.equal(account.debits_posted, 500);
-      assert.equal(account.credits_posted, 0);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 500n);
+      assert.strictEqual(account.credits_posted, 0n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else if (account.id === 2n) {
-      assert.equal(account.debits_posted, 0);
-      assert.equal(account.credits_posted, 500);
-      assert.equal(account.debits_pending, 0);
-      assert.equal(account.credits_pending, 0);
+      assert.strictEqual(account.debits_posted, 0n);
+      assert.strictEqual(account.credits_posted, 500n);
+      assert.strictEqual(account.debits_pending, 0n);
+      assert.strictEqual(account.credits_pending, 0n);
     } else {
       assert.fail("Unexpected account: " + account.id);
     }

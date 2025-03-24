@@ -24,7 +24,6 @@ pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
 pub const repl = @import("repl.zig");
-pub const statsd = @import("statsd.zig");
 pub const lsm = .{
     .tree = @import("lsm/tree.zig"),
     .groove = @import("lsm/groove.zig"),
@@ -215,34 +214,17 @@ pub const Command = enum(u8) {
     request_blocks = 19,
     block = 20,
 
-    // Historical version of SV, with the CheckpointStateOld format. Currently, both
-    // `start_view_deprecated` and `start_view` are handled. Next release will ignore
-    // `start_view_deprecated`.
-    start_view_deprecated = 23,
-
     start_view = 24,
 
     // If a command is removed from the protocol, its ordinal is added here and can't be re-used.
-    const gaps = .{
-        12, // start_view without checkpoint
-        21, // request_sync_checkpoint
-        22, // sync_checkpoint
-    };
+    deprecated_12 = 12, // start_view without checkpoint
+    deprecated_21 = 21, // request_sync_checkpoint
+    deprecated_22 = 22, // sync_checkpoint
+    deprecated_23 = 23, // start_view with an older version of CheckpointState
 
     comptime {
-        var value_previous: ?u8 = null;
         for (std.enums.values(Command)) |command| {
-            const value_current = @intFromEnum(command);
-            assert(std.mem.indexOfScalar(u8, &gaps, value_current) == null);
-            if (value_previous == null) {
-                assert(value_current == 0);
-            } else {
-                assert(value_previous.? < value_current);
-                for (value_previous.? + 1..value_current) |value_gap| {
-                    assert(std.mem.indexOfScalar(u8, &gaps, value_gap) != null);
-                }
-            }
-            value_previous = value_current;
+            assert(@intFromEnum(command) < std.enums.values(Command).len);
         }
     }
 };
@@ -689,14 +671,14 @@ pub const Timeout = struct {
     /// Allows the attempts counter to wrap from time to time.
     /// The overflow period is kept short to surface any related bugs sooner rather than later.
     /// We do not saturate the counter as this would cause round-robin retries to get stuck.
-    pub fn backoff(self: *Timeout, random: std.rand.Random) void {
+    pub fn backoff(self: *Timeout, prng: *stdx.PRNG) void {
         assert(self.ticking);
 
         self.ticks = 0;
         self.attempts +%= 1;
 
         log.debug("{}: {s} backing off", .{ self.id, self.name });
-        self.set_after_for_rtt_and_attempts(random);
+        self.set_after_for_rtt_and_attempts(prng);
     }
 
     /// It's important to check that when fired() is acted on that the timeout is stopped/started,
@@ -725,13 +707,13 @@ pub const Timeout = struct {
     /// Sets the value of `after` as a function of `rtt` and `attempts`.
     /// Adds exponential backoff and jitter.
     /// May be called only after a timeout has been stopped or reset, to prevent backward jumps.
-    fn set_after_for_rtt_and_attempts(self: *Timeout, random: std.rand.Random) void {
+    fn set_after_for_rtt_and_attempts(self: *Timeout, prng: *stdx.PRNG) void {
         // If `after` is reduced by this function to less than `ticks`, then `fired()` will panic:
         assert(self.ticks == 0);
         assert(self.rtt > 0);
 
         const after = (self.rtt * self.rtt_multiple) + exponential_backoff_with_jitter(
-            random,
+            prng,
             constants.backoff_min_ticks,
             constants.backoff_max_ticks,
             self.attempts,
@@ -797,13 +779,12 @@ pub const Timeout = struct {
 
 /// Calculates exponential backoff with jitter to prevent cascading failure due to thundering herds.
 pub fn exponential_backoff_with_jitter(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     min: u64,
     max: u64,
     attempt: u64,
 ) u64 {
-    const range = max - min;
-    assert(range > 0);
+    assert(max > min);
 
     // Do not use `@truncate(u6, attempt)` since that only discards the high bits:
     // We want a saturating exponent here instead.
@@ -820,8 +801,8 @@ pub fn exponential_backoff_with_jitter(
     assert(power > 0);
 
     // Calculate the capped exponential backoff component, `min(range, min * 2 ^ attempt)`:
-    const backoff = @min(range, min_non_zero * power);
-    const jitter = random.uintAtMostBiased(u64, backoff);
+    const backoff = @min(max - min, min_non_zero * power);
+    const jitter = prng.int_inclusive(u64, backoff);
 
     const result: u64 = @intCast(min + jitter);
     assert(result >= min);
@@ -831,8 +812,7 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    var prng = std.rand.DefaultPrng.init(0);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(0);
 
     const attempts = 1000;
     const max: u64 = std.math.maxInt(u64);
@@ -840,7 +820,7 @@ test "exponential_backoff_with_jitter" {
 
     var attempt = max - attempts;
     while (attempt < max) : (attempt += 1) {
-        const ebwj = exponential_backoff_with_jitter(random, min, max, attempt);
+        const ebwj = exponential_backoff_with_jitter(&prng, min, max, attempt);
         try std.testing.expect(ebwj >= min);
         try std.testing.expect(ebwj <= max);
     }
@@ -861,7 +841,7 @@ pub fn parse_addresses(
     if (address_count > out_buffer.len) return error.AddressLimitExceeded;
 
     var index: usize = 0;
-    var comma_iterator = std.mem.split(u8, raw, ",");
+    var comma_iterator = std.mem.splitScalar(u8, raw, ',');
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
@@ -1044,16 +1024,15 @@ test "parse_addresses: fuzz" {
 
     const seed = std.crypto.random.int(u64);
 
-    var prng = std.rand.DefaultPrng.init(seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(seed);
 
     var input_max: [len_max]u8 = .{0} ** len_max;
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
-        const len = random.uintAtMost(usize, len_max);
+        const len = prng.int_inclusive(usize, len_max);
         const input = input_max[0..len];
         for (input) |*c| {
-            c.* = alphabet[random.uintAtMost(usize, alphabet.len)];
+            c.* = alphabet[prng.index(alphabet)];
         }
         if (parse_addresses(input, &buffer)) |addresses| {
             assert(addresses.len > 0);

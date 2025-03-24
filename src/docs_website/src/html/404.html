@@ -19,6 +19,9 @@
   <title id="title">Page not found | TigerBeetle</title>
   <link rel="icon" href="$url_prefix/img/favicon.png">
   <link rel="stylesheet" type="text/css" href="$url_prefix/style/style.css">
+  <script defer data-domain="docs.tigerbeetle.com" src="https://plausible.io/js/script.js"></script>
+  <script>window.plausible = window.plausible || function() { (window.plausible.q = window.plausible.q || []).push(arguments) }</script>
+  <script>document.addEventListener('DOMContentLoaded', function () { plausible('404', { props: { path: document.location.pathname } }); });</script>
   <style>
     article>.content {
       padding: 0;
@@ -49,6 +52,7 @@
       max-width: 100vw;
       image-rendering: pixelated;
       transition: width 0.5s ease-in-out;
+      cursor: pointer;
     }
 
     #resources {

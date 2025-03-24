@@ -151,6 +151,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         },
         .tigerbeetle_past = options.tigerbeetle_past,
         .output = sections.body,
+        .debug = options.debug,
     });
 
     // Use objcopy to add in our new body, as well as its header - even though the
@@ -266,6 +267,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         .arch = .aarch64,
         .tigerbeetle_past = options.tigerbeetle_past,
         .output = sections.aarch64.body,
+        .debug = options.debug,
     });
 
     const past_versions_x86_64 = try build_multiversion_body(shell, .{
@@ -275,6 +277,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
         .arch = .x86_64,
         .tigerbeetle_past = options.tigerbeetle_past,
         .output = sections.x86_64.body,
+        .debug = options.debug,
     });
     assert(past_versions_aarch64.past_releases.count == past_versions_x86_64.past_releases.count);
 
@@ -423,6 +426,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     arch: Target.Arch,
     tigerbeetle_past: []const u8,
     output: []const u8,
+    debug: bool,
 }) !struct {
     past_releases: MultiversionHeader.PastReleases,
     unpacked: []const []const u8,
@@ -532,7 +536,10 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     // No size limits are explicitly checked here; they're validated later by using the
     // `multiversion` subcommand to test the final built binary against all past binaries that are
     // included.
-    const past_count: u32 = @min(3, header.past.count);
+    //
+    // For debug builds, due to their size, this is limited to only the old current release and the
+    // current release. Nothing is taken from the past pack.
+    const past_count: u32 = if (options.debug) 0 else @min(3, header.past.count);
 
     const past_starting_index = header.past.count - past_count;
 

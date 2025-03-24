@@ -2,6 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_quorums);
 
+const stdx = @import("../stdx.zig");
+
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
 const fuzz = @import("./superblock_quorums_fuzz.zig");
@@ -374,26 +376,26 @@ pub fn QuorumsType(comptime options: Options) type {
 }
 
 test "Quorums.working" {
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = stdx.PRNG.from_seed(123);
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 
-    try fuzz.fuzz_quorums_working(prng.random());
+    try fuzz.fuzz_quorums_working(&prng);
 }
 
 test "Quorum.repairs" {
-    var prng = std.rand.DefaultPrng.init(123);
+    var prng = stdx.PRNG.from_seed(123);
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;
     std.testing.log_level = std.log.Level.err;
     defer std.testing.log_level = level;
 
-    try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 4 });
+    try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 4 });
     // TODO: Enable these once SuperBlockHeader is generic over its Constants.
-    // try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 6 });
-    // try fuzz.fuzz_quorum_repairs(prng.random(), .{ .superblock_copies = 8 });
+    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 6 });
+    // try fuzz.fuzz_quorum_repairs(&prng, .{ .superblock_copies = 8 });
 }

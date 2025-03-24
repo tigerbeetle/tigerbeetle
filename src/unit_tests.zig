@@ -4,24 +4,29 @@ comptime {
     _ = @import("ewah_benchmark.zig");
     _ = @import("ewah.zig");
     _ = @import("fifo.zig");
+    _ = @import("stack.zig");
     _ = @import("flags.zig");
     _ = @import("io.zig");
     _ = @import("list.zig");
     _ = @import("shell.zig");
     _ = @import("stdx.zig");
+    _ = @import("stdx/aegis.zig");
     _ = @import("stdx/bounded_array.zig");
     _ = @import("stdx/ring_buffer.zig");
     _ = @import("stdx/sort_test.zig");
     _ = @import("stdx/zipfian.zig");
+    _ = @import("stdx/prng.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("trace.zig");
+    _ = @import("trace/event.zig");
+    _ = @import("trace/statsd.zig");
 
     _ = @import("clients/c/test.zig");
+    _ = @import("clients/c/tb_client/context.zig");
     _ = @import("clients/c/tb_client/echo_client.zig");
     _ = @import("clients/c/tb_client/signal.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
-    _ = @import("clients/java/src/client.zig");
 
     _ = @import("io/test.zig");
 
@@ -51,6 +56,7 @@ comptime {
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
+    _ = @import("testing/exhaustigen.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
     _ = @import("testing/snaptest.zig");

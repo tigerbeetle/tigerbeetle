@@ -16,28 +16,22 @@ public enum InitializationStatus {
 
     public final int value;
 
-    static final InitializationStatus[] enumByValue;
-    static {
-    final var values = values();
-      enumByValue = new InitializationStatus[values.length];
-       for (final var item : values) {
-          enumByValue[item.value] = item;
-      }
-    }
-
     InitializationStatus(int value) {
         this.value = value;
     }
 
     public static InitializationStatus fromValue(int value) {
-        if (value < 0 || value >= enumByValue.length)
-            throw new IllegalArgumentException(
-                    String.format("Invalid InitializationStatus value=%d", value));
-
-        final var item = enumByValue[value];
-        AssertionError.assertTrue(item.value == value,
-          "Unexpected InitializationStatus: found=%d expected=%d", item.value, value);
-        return item;
+        switch (value) {
+            case 0: return Success;
+            case 1: return Unexpected;
+            case 2: return OutOfMemory;
+            case 3: return AddressInvalid;
+            case 4: return AddressLimitExceeded;
+            case 5: return SystemResources;
+            case 6: return NetworkSubsystem;
+            default: throw new IllegalArgumentException(
+                String.format("Invalid InitializationStatus value=%d", value));
+        }
     }
 }
 

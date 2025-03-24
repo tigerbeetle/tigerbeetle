@@ -18,10 +18,11 @@ const Storage = vsr.storage.StorageType(vsr.io.IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;
+const stdx = vsr.stdx;
 
-pub const std_options = .{
+pub const std_options: std.Options = .{
     .log_level = .debug,
-    .logFn = tb_client.Logging.application_logger,
+    .logFn = tb_client.exports.Logging.application_logger,
 };
 
 // Cached value for JS (null).
@@ -140,12 +141,14 @@ fn create(
         std.log.warn("Failed to release allocated thread-safe function on error.", .{});
     };
 
-    if (c.napi_acquire_threadsafe_function(completion_tsfn) != c.napi_ok) {
-        return translate.throw(env, "Failed to acquire reference to thread-safe function.");
-    }
+    const client = allocator.create(tb_client.ClientInterface) catch {
+        return translate.throw(env, "Failed to allocated the client interface.");
+    };
+    errdefer allocator.destroy(client);
 
-    const client = tb_client.init(
+    tb_client.init(
         allocator,
+        client,
         cluster_id,
         addresses,
         @intFromPtr(completion_tsfn),
@@ -158,7 +161,7 @@ fn create(
         error.SystemResources => return translate.throw(env, "Failed to reserve system resources."),
         error.NetworkSubsystemFailed => return translate.throw(env, "Network stack failure."),
     };
-    errdefer tb_client.deinit(client);
+    errdefer client.deinit() catch unreachable;
 
     return try translate.create_external(env, client);
 }
@@ -170,13 +173,18 @@ fn destroy(env: c.napi_env, context: c.napi_value) !void {
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
-    defer tb_client.deinit(client);
+    const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
+    defer {
+        client.deinit() catch unreachable;
+        allocator.destroy(client);
+    }
 
-    const completion_ctx = tb_client.completion_context(client);
+    const completion_ctx = client.completion_context() catch |err| switch (err) {
+        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+    };
+
     const completion_tsfn: c.napi_threadsafe_function = @ptrFromInt(completion_ctx);
-
-    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_abort) != c.napi_ok) {
+    if (c.napi_release_threadsafe_function(completion_tsfn, c.napi_tsfn_release) != c.napi_ok) {
         return translate.throw(env, "Failed to release allocated thread-safe function on error.");
     }
 }
@@ -193,7 +201,7 @@ fn request(
         context,
         "Failed to get client context pointer.",
     );
-    const client: tb_client.tb_client_t = @ptrCast(@alignCast(client_ptr.?));
+    const client: *tb_client.ClientInterface = @ptrCast(@alignCast(client_ptr.?));
 
     // Create a reference to the callback so it stay alive until the packet completes.
     var callback_ref: c.napi_ref = undefined;
@@ -219,72 +227,63 @@ fn request(
             const packet = buffer.packet();
             break :blk .{ packet, std.mem.sliceAsBytes(events) };
         },
-        .pulse => unreachable,
+        .pulse, .get_events => unreachable,
     };
 
     packet.* = .{
-        .next = undefined,
         .user_data = callback_ref,
         .operation = @intFromEnum(operation),
-        .status = undefined,
-        .data_size = @intCast(packet_data.len),
         .data = packet_data.ptr,
-        .batch_next = undefined,
-        .batch_tail = undefined,
-        .batch_size = undefined,
-        .batch_allowed = undefined,
-        .reserved = undefined,
+        .data_size = @intCast(packet_data.len),
+        .user_tag = 0,
+        .status = undefined,
     };
 
-    tb_client.submit(client, packet);
+    client.submit(packet) catch |err| switch (err) {
+        error.ClientInvalid => return translate.throw(env, "Client was closed."),
+    };
 }
-
-// Packet only has one size field which normally tracks `BufferType(op).events().len`.
-// However, completion of the packet can write results.len < `BufferType(op).results().len`.
-// Therefore, we stuff both `BufferType(op).count` and results.len into the packet's size field.
-// Storing both allows reconstruction of `BufferType(op)` while knowing how many results completed.
-const BufferSize = packed struct(u32) {
-    event_count: u16,
-    result_count: u16,
-};
 
 fn on_completion(
     completion_ctx: usize,
-    client: tb_client.tb_client_t,
-    packet: *tb_client.tb_packet_t,
+    packet: *tb_client.Packet,
     timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
 ) callconv(.C) void {
-    _ = client;
     _ = timestamp;
 
     switch (packet.status) {
         .ok => {
-            switch (@as(Operation, @enumFromInt(packet.operation))) {
-                inline else => |op| {
+            const operation: Operation = @enumFromInt(packet.operation);
+            switch (operation) {
+                inline else => |operation_comptime| {
                     const event_count = @divExact(
                         packet.data_size,
-                        @sizeOf(StateMachine.EventType(op)),
+                        @sizeOf(StateMachine.EventType(operation_comptime)),
                     );
-                    const buffer: BufferType(op) = .{
+                    const buffer: BufferType(operation_comptime) = .{
                         .ptr = @ptrCast(packet),
                         .count = event_count,
                     };
 
-                    const Result = StateMachine.ResultType(op);
+                    const Result = StateMachine.ResultType(operation_comptime);
                     const results: []const Result = @alignCast(std.mem.bytesAsSlice(
                         Result,
                         result_ptr.?[0..result_len],
                     ));
-                    @memcpy(buffer.results()[0..results.len], results);
+                    stdx.copy_disjoint(
+                        .exact,
+                        Result,
+                        buffer.results()[0..results.len],
+                        results,
+                    );
 
-                    packet.data_size = @bitCast(BufferSize{
-                        .event_count = @intCast(event_count),
-                        .result_count = @intCast(results.len),
-                    });
+                    // Store the size of the results in the `tag` field, so we can access it back
+                    // during `on_completion_js`.
+                    packet.user_tag = @intCast(results.len);
                 },
-                .pulse => unreachable,
+                .pulse, .get_events => unreachable,
             }
         },
         .client_evicted,
@@ -318,23 +317,33 @@ fn on_completion_js(
     _ = unused_context;
 
     // Extract the remaining packet information from the packet before it's freed.
-    const packet: *tb_client.tb_packet_t = @ptrCast(@alignCast(packet_argument.?));
+    const packet: *tb_client.Packet = @ptrCast(@alignCast(packet_argument.?));
     const callback_ref: c.napi_ref = @ptrCast(@alignCast(packet.user_data.?));
 
     // Decode the packet's Buffer results into an array then free the packet/Buffer.
-    const array_or_error = switch (@as(Operation, @enumFromInt(packet.operation))) {
-        inline else => |op| blk: {
-            const buffer_size: BufferSize = @bitCast(packet.data_size);
-            const buffer: BufferType(op) = .{
+    const operation: Operation = @enumFromInt(packet.operation);
+    const array_or_error = switch (operation) {
+        inline else => |operation_comptime| blk: {
+            const event_count = @divExact(
+                packet.data_size,
+                @sizeOf(StateMachine.EventType(operation_comptime)),
+            );
+            const buffer: BufferType(operation_comptime) = .{
                 .ptr = @ptrCast(packet),
-                .count = buffer_size.event_count,
+                .count = event_count,
             };
             defer buffer.free();
 
             switch (packet.status) {
                 .ok => {
-                    const results = buffer.results()[0..buffer_size.result_count];
-                    break :blk encode_array(StateMachine.ResultType(op), env, results);
+                    const result_buffer = buffer.results();
+                    const result_count = packet.user_tag;
+                    assert(result_count <= result_buffer.len);
+                    break :blk encode_array(
+                        StateMachine.ResultType(operation_comptime),
+                        env,
+                        result_buffer[0..result_count],
+                    );
                 },
                 .client_shutdown => {
                     break :blk translate.throw(env, "Client was shutdown.");
@@ -351,7 +360,7 @@ fn on_completion_js(
                 else => unreachable, // all other packet status' handled in previous callback.
             }
         },
-        .pulse => unreachable,
+        .pulse, .get_events => unreachable,
     };
 
     // Parse Result array out of packet data, freeing it in the process.
@@ -497,7 +506,7 @@ fn BufferType(comptime op: Operation) type {
         const Result = StateMachine.ResultType(op);
 
         const body_align = @max(@alignOf(Event), @alignOf(Result));
-        const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.tb_packet_t), body_align);
+        const body_offset = std.mem.alignForward(usize, @sizeOf(tb_client.Packet), body_align);
 
         ptr: [*]u8,
         count: u32,
@@ -512,7 +521,7 @@ fn BufferType(comptime op: Operation) type {
                 return translate.throw(env, "Batch is larger than the maximum message size.");
             }
 
-            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.Packet));
             const max_bytes = body_offset + body_size;
 
             const bytes = allocator.alignedAlloc(u8, max_align, max_bytes) catch |e| switch (e) {
@@ -535,14 +544,14 @@ fn BufferType(comptime op: Operation) type {
                 @sizeOf(Result) * event_count(op, buffer.count),
             );
 
-            const max_align = @max(body_align, @alignOf(tb_client.tb_packet_t));
+            const max_align = @max(body_align, @alignOf(tb_client.Packet));
             const max_bytes = body_offset + body_size;
 
             const bytes: []align(max_align) u8 = @alignCast(buffer.ptr[0..max_bytes]);
             allocator.free(bytes);
         }
 
-        fn packet(buffer: Buffer) *tb_client.tb_packet_t {
+        fn packet(buffer: Buffer) *tb_client.Packet {
             return @alignCast(@ptrCast(buffer.ptr));
         }
 

@@ -185,12 +185,10 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             state_machine: *const StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
             _ = state_machine;
-            _ = client_release;
             _ = operation;
             _ = input;
             return true;
@@ -198,12 +196,10 @@ pub fn StateMachineType(
 
         pub fn prepare(
             state_machine: *StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
             _ = state_machine;
-            _ = client_release;
             _ = operation;
             _ = input;
         }
@@ -211,12 +207,10 @@ pub fn StateMachineType(
         pub fn prefetch(
             state_machine: *StateMachine,
             callback: *const fn (*StateMachine) void,
-            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            _ = client_release;
             _ = operation;
             _ = input;
 
@@ -243,7 +237,6 @@ pub fn StateMachineType(
         pub fn commit(
             state_machine: *StateMachine,
             client: u128,
-            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
@@ -261,7 +254,6 @@ pub fn StateMachineType(
                     value.add(std.mem.asBytes(&op));
                     value.add(std.mem.asBytes(&timestamp));
                     value.add(std.mem.asBytes(&operation));
-                    value.add(std.mem.asBytes(&client_release));
                     value.add(input);
 
                     state_machine.forest.grooves.things.insert(&.{
@@ -321,20 +313,20 @@ fn WorkloadType(comptime StateMachine: type) type {
         const Workload = @This();
         const constants = StateMachine.constants;
 
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         options: Options,
         requests_sent: usize = 0,
         requests_delivered: usize = 0,
 
         pub fn init(
             allocator: std.mem.Allocator,
-            random: std.rand.Random,
+            prng: *stdx.PRNG,
             options: Options,
         ) !Workload {
             _ = allocator;
 
             return Workload{
-                .random = random,
+                .prng = prng,
                 .options = options,
             };
         }
@@ -360,9 +352,8 @@ fn WorkloadType(comptime StateMachine: type) type {
 
             workload.requests_sent += 1;
 
-            // +1 for inclusive limit.
-            const size = workload.random.uintAtMost(usize, workload.options.batch_size_limit);
-            workload.random.bytes(body[0..size]);
+            const size = workload.prng.int_inclusive(usize, workload.options.batch_size_limit);
+            workload.prng.fill(body[0..size]);
 
             return .{
                 .operation = .echo,
@@ -404,12 +395,12 @@ fn WorkloadType(comptime StateMachine: type) type {
         pub const Options = struct {
             batch_size_limit: u32,
 
-            pub fn generate(random: std.rand.Random, options: struct {
+            pub fn generate(prng: *stdx.PRNG, options: struct {
                 batch_size_limit: u32,
                 client_count: usize,
                 in_flight_max: usize,
             }) Options {
-                _ = random;
+                _ = prng;
 
                 return .{
                     .batch_size_limit = options.batch_size_limit,

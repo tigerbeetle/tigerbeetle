@@ -23,9 +23,11 @@ const Direction = @import("direction.zig").Direction;
 const TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange;
 
 const Account = tb.Account;
+const AccountFlags = tb.AccountFlags;
 const AccountBalance = tb.AccountBalance;
 
 const Transfer = tb.Transfer;
+const TransferFlags = tb.TransferFlags;
 const TransferPendingStatus = tb.TransferPendingStatus;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
@@ -36,6 +38,53 @@ const CreateTransferResult = tb.CreateTransferResult;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
+
+pub const tree_ids = struct {
+    pub const Account = .{
+        .id = 1,
+        .user_data_128 = 2,
+        .user_data_64 = 3,
+        .user_data_32 = 4,
+        .ledger = 5,
+        .code = 6,
+        .timestamp = 7,
+        .imported = 23,
+        .closed = 25,
+    };
+
+    pub const Transfer = .{
+        .id = 8,
+        .debit_account_id = 9,
+        .credit_account_id = 10,
+        .amount = 11,
+        .pending_id = 12,
+        .user_data_128 = 13,
+        .user_data_64 = 14,
+        .user_data_32 = 15,
+        .ledger = 16,
+        .code = 17,
+        .timestamp = 18,
+        .expires_at = 19,
+        .imported = 24,
+        .closing = 26,
+    };
+
+    pub const TransferPending = .{
+        .timestamp = 20,
+        .status = 21,
+    };
+
+    pub const AccountEvents = .{
+        .timestamp = 22,
+        .account_timestamp = 27,
+        .transfer_pending_status = 28,
+        .dr_account_id_expired = 29,
+        .cr_account_id_expired = 30,
+        .transfer_pending_id_expired = 31,
+        .ledger_expired = 32,
+        .prunable = 33,
+    };
+};
 
 pub fn StateMachineType(
     comptime Storage: type,
@@ -70,6 +119,9 @@ pub fn StateMachineType(
                     operation_batch_max(.query_accounts, config.message_body_size_max);
                 pub const query_transfers =
                     operation_batch_max(.query_transfers, config.message_body_size_max);
+                pub const get_events =
+                    // Zero sized events.
+                    @divFloor(constants.message_body_size_max, @sizeOf(ResultType(.get_events)));
 
                 comptime {
                     assert(create_accounts > 0);
@@ -80,47 +132,8 @@ pub fn StateMachineType(
                     assert(get_account_balances > 0);
                     assert(query_accounts > 0);
                     assert(query_transfers > 0);
+                    assert(get_events > 0);
                 }
-            };
-
-            pub const tree_ids = struct {
-                pub const accounts = .{
-                    .id = 1,
-                    .user_data_128 = 2,
-                    .user_data_64 = 3,
-                    .user_data_32 = 4,
-                    .ledger = 5,
-                    .code = 6,
-                    .timestamp = 7,
-                    .imported = 23,
-                    .closed = 25,
-                };
-
-                pub const transfers = .{
-                    .id = 8,
-                    .debit_account_id = 9,
-                    .credit_account_id = 10,
-                    .amount = 11,
-                    .pending_id = 12,
-                    .user_data_128 = 13,
-                    .user_data_64 = 14,
-                    .user_data_32 = 15,
-                    .ledger = 16,
-                    .code = 17,
-                    .timestamp = 18,
-                    .expires_at = 19,
-                    .imported = 24,
-                    .closing = 26,
-                };
-
-                pub const transfers_pending = .{
-                    .timestamp = 20,
-                    .status = 21,
-                };
-
-                pub const account_balances = .{
-                    .timestamp = 22,
-                };
             };
         };
 
@@ -137,6 +150,7 @@ pub fn StateMachineType(
             .get_account_balances = false,
             .query_accounts = false,
             .query_transfers = false,
+            .get_events = false,
         });
 
         pub fn DemuxerType(comptime operation: Operation) type {
@@ -191,7 +205,7 @@ pub fn StateMachineType(
             Storage,
             Account,
             .{
-                .ids = constants.tree_ids.accounts,
+                .ids = tree_ids.Account,
                 .batch_value_count_max = batch_value_count_max.accounts,
                 .ignored = &[_][]const u8{
                     "debits_posted",
@@ -226,7 +240,7 @@ pub fn StateMachineType(
             Storage,
             Transfer,
             .{
-                .ids = constants.tree_ids.transfers,
+                .ids = tree_ids.Transfer,
                 .batch_value_count_max = batch_value_count_max.transfers,
                 .ignored = &[_][]const u8{ "timeout", "flags" },
                 .optional = &[_][]const u8{
@@ -267,10 +281,16 @@ pub fn StateMachineType(
             Storage,
             TransferPending,
             .{
-                .ids = constants.tree_ids.transfers_pending,
+                .ids = tree_ids.TransferPending,
                 .batch_value_count_max = batch_value_count_max.transfers_pending,
                 .ignored = &[_][]const u8{"padding"},
-                .optional = &[_][]const u8{"status"},
+                .optional = &[_][]const u8{
+                    // Index the current status of a pending transfer.
+                    // Examples:
+                    //   "Pending transfers that are still pending."
+                    //   "Pending transfers that were voided or expired."
+                    "status",
+                },
                 .derived = .{},
                 .orphaned_ids = false,
             },
@@ -288,12 +308,12 @@ pub fn StateMachineType(
             }
         };
 
-        const AccountBalancesGroove = GrooveType(
+        const AccountEventsGroove = GrooveType(
             Storage,
-            AccountBalancesGrooveValue,
+            AccountEvent,
             .{
-                .ids = constants.tree_ids.account_balances,
-                .batch_value_count_max = batch_value_count_max.account_balances,
+                .ids = tree_ids.AccountEvents,
+                .batch_value_count_max = batch_value_count_max.account_events,
                 .ignored = &[_][]const u8{
                     "dr_account_id",
                     "dr_debits_pending",
@@ -305,15 +325,102 @@ pub fn StateMachineType(
                     "cr_debits_posted",
                     "cr_credits_pending",
                     "cr_credits_posted",
+                    "dr_account_timestamp",
+                    "cr_account_timestamp",
+                    "dr_account_flags",
+                    "cr_account_flags",
+                    "transfer_flags",
+                    "transfer_pending_flags",
+                    "transfer_pending_id",
+                    "amount_requested",
+                    "amount",
+                    "ledger",
                     "reserved",
                 },
                 .optional = &[_][]const u8{},
-                .derived = .{},
+                .derived = .{
+                    // Placeholder derived index (will be inserted during `account_event`).
+                    //
+                    // This index stores two values per object (the credit and debit accounts).
+                    // It is used for balance as-of queries and to search events related to a
+                    // particular account.
+                    // Examples:
+                    //   "Balance where account=X and timestamp=Y".
+                    //   "Last time account=X was updated".
+                    .account_timestamp = struct {
+                        fn account_timestamp(_: *const AccountEvent) ?u64 {
+                            return null;
+                        }
+                    }.account_timestamp,
+
+                    // Events related to transfers can be searched using `Transfers.dr_account_id`
+                    // and `Transfers.cr_account_id`.
+                    // However, expired events require a specific index to be searchable by both
+                    // debit and credit accounts.
+                    // Example: "All expired debits where account=X".
+                    .dr_account_id_expired = struct {
+                        fn dr_account_id_expired(object: *const AccountEvent) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.dr_account_id
+                            else
+                                null;
+                        }
+                    }.dr_account_id_expired,
+                    .cr_account_id_expired = struct {
+                        fn cr_account_id_expired(object: *const AccountEvent) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.cr_account_id
+                            else
+                                null;
+                        }
+                    }.cr_account_id_expired,
+
+                    // Events related to voiding or posting pending transfers can be searched using
+                    // `Transfers.pending_id`.
+                    // However, expired events require a specific index to be searchable by the
+                    // transfer.
+                    // Example: "When transfer=X has expired".
+                    .transfer_pending_id_expired = struct {
+                        fn transfer_pending_id_expired(object: *const AccountEvent) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.transfer_pending_id
+                            else
+                                null;
+                        }
+                    }.transfer_pending_id_expired,
+
+                    // Events related to transfers can be searched using `Transfers.ledger`.
+                    // However, expired events require a specific index to be searchable
+                    // by ledger.
+                    // Example: "All expiry events where ledger=X".
+                    .ledger_expired = struct {
+                        fn transfer_expired_ledger(object: *const AccountEvent) ?u128 {
+                            return if (object.transfer_pending_status == .expired)
+                                object.ledger
+                            else
+                                null;
+                        }
+                    }.transfer_expired_ledger,
+
+                    // Tracks events for accounts without the history flag,
+                    // enabling a cleanup job to delete them after CDC.
+                    .prunable = struct {
+                        fn prunable(object: *const AccountEvent) ?void {
+                            if (object.dr_account_flags.history or
+                                object.cr_account_flags.history)
+                            {
+                                return null;
+                            } else {
+                                return {};
+                            }
+                        }
+                    }.prunable,
+                },
                 .orphaned_ids = false,
             },
         );
 
-        pub const AccountBalancesGrooveValue = extern struct {
+        pub const AccountEvent = extern struct {
             dr_account_id: u128,
             dr_debits_pending: u128,
             dr_debits_posted: u128,
@@ -324,13 +431,42 @@ pub fn StateMachineType(
             cr_debits_posted: u128,
             cr_credits_pending: u128,
             cr_credits_posted: u128,
-            timestamp: u64 = 0,
-            reserved: [88]u8 = [_]u8{0} ** 88,
+            timestamp: u64,
+            dr_account_timestamp: u64,
+            cr_account_timestamp: u64,
+            dr_account_flags: AccountFlags,
+            cr_account_flags: AccountFlags,
+            transfer_flags: TransferFlags,
+            transfer_pending_flags: TransferFlags,
+            transfer_pending_id: u128,
+            amount_requested: u128,
+            amount: u128,
+            ledger: u32,
+
+            /// Although similar to `TransferPending.status`, this index tracks the event,
+            /// not the original pending transfer.
+            /// Examples: (No such index exists in `Transfers.flags`)
+            ///   "All voided or expired events today."
+            ///   "All single-phase or posted events today."
+            ///
+            ///  Value   | Description
+            /// ---------|-----------------------------------------------------
+            /// `none`   | This event is a regular transfer.
+            /// `pending`| This event is a pending transfer.
+            /// `posted` | This event posted a pending transfer.
+            /// `voided` | This event voided a pending transfer.
+            /// `expired`| This event expired a pending transfer,
+            ///            the `timestamp` does not relate to a transfer.
+            ///
+            /// See `transfer_pending_id` for tracking the pending transfer.
+            /// It will be `zero` for `none` and `pending`.
+            transfer_pending_status: TransferPendingStatus,
+            reserved: [11]u8 = [_]u8{0} ** 11,
 
             comptime {
-                assert(stdx.no_padding(AccountBalancesGrooveValue));
-                assert(@sizeOf(AccountBalancesGrooveValue) == 256);
-                assert(@alignOf(AccountBalancesGrooveValue) == 16);
+                assert(stdx.no_padding(AccountEvent));
+                assert(@sizeOf(AccountEvent) == 256);
+                assert(@alignOf(AccountEvent) == 16);
             }
         };
 
@@ -340,7 +476,7 @@ pub fn StateMachineType(
             .accounts = AccountsGroove,
             .transfers = TransfersGroove,
             .transfers_pending = TransfersPendingGroove,
-            .account_balances = AccountBalancesGroove,
+            .account_events = AccountEventsGroove,
         });
 
         const AccountsScanLookup = ScanLookupType(
@@ -356,9 +492,15 @@ pub fn StateMachineType(
         );
 
         const AccountBalancesScanLookup = ScanLookupType(
-            AccountBalancesGroove,
+            AccountEventsGroove,
             // Both Objects use the same timestamp, so we can use the TransfersGroove's indexes.
             TransfersGroove.ScanBuilder.Scan,
+            Storage,
+        );
+
+        const EventsScanLookup = ScanLookupType(
+            AccountEventsGroove,
+            AccountEventsGroove.ScanBuilder.Scan,
             Storage,
         );
 
@@ -375,6 +517,7 @@ pub fn StateMachineType(
             get_account_balances = config.vsr_operations_reserved + 6,
             query_accounts = config.vsr_operations_reserved + 7,
             query_transfers = config.vsr_operations_reserved + 8,
+            get_events = config.vsr_operations_reserved + 9,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
@@ -395,6 +538,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountFilter,
                 .query_accounts => QueryFilter,
                 .query_transfers => QueryFilter,
+                .get_events => void,
             };
         }
 
@@ -409,6 +553,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountBalance,
                 .query_accounts => Account,
                 .query_transfers => Transfer,
+                .get_events => AccountEvent,
             };
         }
 
@@ -425,6 +570,7 @@ pub fn StateMachineType(
                 .get_account_balances => false,
                 .query_accounts => false,
                 .query_transfers => false,
+                .get_events => false,
             };
         }
 
@@ -432,7 +578,7 @@ pub fn StateMachineType(
         /// when used as a variable.
         pub fn event_name(operation: Operation) []const u8 {
             return switch (operation) {
-                .pulse => "none",
+                .pulse, .get_events => "none",
                 .create_accounts => "accounts",
                 .create_transfers => "transfers",
                 .lookup_accounts => "accounts",
@@ -451,7 +597,6 @@ pub fn StateMachineType(
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
             cache_entries_posted: u32,
-            cache_entries_account_balances: u32,
         };
 
         /// Since prefetch contexts are used one at a time, it's safe to access
@@ -496,6 +641,7 @@ pub fn StateMachineType(
             accounts: AccountsScanLookup,
             account_balances: AccountBalancesScanLookup,
             expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
+            events: EventsScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -662,7 +808,8 @@ pub fn StateMachineType(
 
             self.scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, @max(
                 constants.batch_max.get_account_transfers * @sizeOf(Transfer),
-                constants.batch_max.get_account_balances * @sizeOf(AccountBalancesGrooveValue),
+                constants.batch_max.get_account_balances * @sizeOf(AccountEvent),
+                constants.batch_max.get_events * @sizeOf(AccountEvent),
             ));
             errdefer allocator.free(self.scan_lookup_buffer);
         }
@@ -707,33 +854,34 @@ pub fn StateMachineType(
 
         pub fn input_valid(
             self: *const StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) bool {
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(input.len <= self.batch_size_limit);
 
             switch (operation) {
-                .pulse => {
+                .pulse, .get_events => {
                     if (input.len != 0) return false;
                 },
-                .get_account_transfers, .get_account_balances => {
-                    const event_size: u32 = if (AccountFilterFormer.required(client_release))
-                        @sizeOf(AccountFilterFormer)
-                    else
-                        @sizeOf(AccountFilter);
-
-                    if (input.len != event_size) return false;
+                inline .get_account_transfers,
+                .get_account_balances,
+                .query_accounts,
+                .query_transfers,
+                => |operation_comptime| {
+                    if (input.len != @sizeOf(EventType(operation_comptime))) return false;
                 },
-                .query_accounts, .query_transfers => {
-                    if (input.len != @sizeOf(QueryFilter)) return false;
-                },
-                inline else => |comptime_operation| {
-                    const event_size = @sizeOf(EventType(comptime_operation));
+                inline .create_accounts,
+                .create_transfers,
+                .lookup_accounts,
+                .lookup_transfers,
+                => |operation_comptime| {
+                    const event_size = @sizeOf(EventType(operation_comptime));
                     comptime assert(event_size > 0);
 
                     const batch_limit: u32 =
-                        operation_batch_max(comptime_operation, self.batch_size_limit);
+                        operation_batch_max(operation_comptime, self.batch_size_limit);
                     assert(batch_limit > 0);
 
                     // Clients do not validate batch size == 0,
@@ -751,15 +899,14 @@ pub fn StateMachineType(
         /// Updates `prepare_timestamp` to the highest timestamp of the response.
         pub fn prepare(
             self: *StateMachine,
-            client_release: vsr.Release,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
             self.prepare_timestamp += switch (operation) {
-                .pulse => 0,
+                .pulse => constants.batch_max.create_transfers, // Max transfers to expire.
                 .create_accounts => mem.bytesAsSlice(Account, input).len,
                 .create_transfers => mem.bytesAsSlice(Transfer, input).len,
                 .lookup_accounts => 0,
@@ -768,6 +915,7 @@ pub fn StateMachineType(
                 .get_account_balances => 0,
                 .query_accounts => 0,
                 .query_transfers => 0,
+                .get_events => 0,
             };
         }
 
@@ -782,15 +930,16 @@ pub fn StateMachineType(
         pub fn prefetch(
             self: *StateMachine,
             callback: *const fn (*StateMachine) void,
-            client_release: vsr.Release,
             op: u64,
             operation: Operation,
             input: []align(16) const u8,
         ) void {
-            _ = op;
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
+            assert(op > 0);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(input.len <= self.batch_size_limit);
 
             self.prefetch_input = input;
@@ -822,16 +971,20 @@ pub fn StateMachineType(
                     self.prefetch_lookup_transfers(mem.bytesAsSlice(u128, input));
                 },
                 .get_account_transfers => {
-                    self.prefetch_get_account_transfers(account_filter_from_input(input));
+                    self.prefetch_get_account_transfers(mem.bytesToValue(AccountFilter, input));
                 },
                 .get_account_balances => {
-                    self.prefetch_get_account_balances(account_filter_from_input(input));
+                    self.prefetch_get_account_balances(mem.bytesToValue(AccountFilter, input));
                 },
                 .query_accounts => {
                     self.prefetch_query_accounts(mem.bytesToValue(QueryFilter, input));
                 },
                 .query_transfers => {
                     self.prefetch_query_transfers(mem.bytesToValue(QueryFilter, input));
+                },
+                .get_events => {
+                    assert(input.len == 0);
+                    self.prefetch_get_events();
                 },
             };
         }
@@ -1082,7 +1235,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             self.prefetch_context = .null;
 
-            const filter = account_filter_from_input(self.prefetch_input.?);
+            const filter = std.mem.bytesToValue(AccountFilter, self.prefetch_input.?);
             self.prefetch_get_account_balances_scan(filter);
         }
 
@@ -1096,14 +1249,14 @@ pub fn StateMachineType(
                         assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                         var scan_lookup_buffer = std.mem.bytesAsSlice(
-                            AccountBalancesGrooveValue,
-                            self.scan_lookup_buffer[0 .. @sizeOf(AccountBalancesGrooveValue) *
+                            AccountEvent,
+                            self.scan_lookup_buffer[0 .. @sizeOf(AccountEvent) *
                                 constants.batch_max.get_account_balances],
                         );
 
                         var scan_lookup = self.scan_lookup.get(.account_balances);
                         scan_lookup.* = AccountBalancesScanLookup.init(
-                            &self.forest.grooves.account_balances,
+                            &self.forest.grooves.account_events,
                             scan,
                         );
 
@@ -1140,7 +1293,7 @@ pub fn StateMachineType(
 
         fn prefetch_get_account_balances_scan_callback(
             scan_lookup: *AccountBalancesScanLookup,
-            results: []const AccountBalancesGrooveValue,
+            results: []const AccountEvent,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.account_balances, scan_lookup);
             assert(self.scan_lookup_result_count == null);
@@ -1152,56 +1305,6 @@ pub fn StateMachineType(
 
             self.prefetch_finish();
         }
-
-        fn account_filter_from_input(
-            input: []const u8,
-        ) AccountFilter {
-            if (input.len == @sizeOf(AccountFilterFormer)) {
-                const filter = mem.bytesAsValue(AccountFilterFormer, input);
-                return .{
-                    .account_id = filter.account_id,
-                    .user_data_128 = 0,
-                    .user_data_64 = 0,
-                    .user_data_32 = 0,
-                    .code = 0,
-                    .timestamp_min = filter.timestamp_min,
-                    .timestamp_max = filter.timestamp_max,
-                    .limit = filter.limit,
-                    .flags = filter.flags,
-                };
-            }
-
-            assert(input.len == @sizeOf(AccountFilter));
-            return mem.bytesToValue(AccountFilter, input);
-        }
-
-        const AccountFilterFormer = extern struct {
-            account_id: u128,
-            timestamp_min: u64,
-            timestamp_max: u64,
-            limit: u32,
-            flags: tb.AccountFilterFlags,
-            reserved: [24]u8 = [_]u8{0} ** 24,
-
-            fn required(client_release: vsr.Release) bool {
-                const release_min_inclusive =
-                    vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-                const release_max_exclusive =
-                    vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 2 });
-
-                return client_release.value >= release_min_inclusive.value and
-                    client_release.value < release_max_exclusive.value;
-            }
-
-            comptime {
-                assert(@sizeOf(AccountFilterFormer) == 64);
-                assert(stdx.no_padding(AccountFilterFormer));
-
-                const release_max_transition =
-                    vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-                assert(config.release.value < release_max_transition.value);
-            }
-        };
 
         fn get_scan_from_account_filter(
             self: *StateMachine,
@@ -1438,6 +1541,51 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
+        fn prefetch_get_events(self: *StateMachine) void {
+            assert(self.scan_lookup_result_count == null);
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
+            const groove: *AccountEventsGroove = &self.forest.grooves.account_events;
+            const scan = groove.scan_builder.scan_timestamp(
+                self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                snapshot_latest,
+                TimestampRange.all(),
+                .ascending,
+            );
+            assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+
+            const scan_lookup_buffer = std.mem.bytesAsSlice(
+                AccountEvent,
+                self.scan_lookup_buffer[0 .. constants.batch_max.get_events *
+                    @sizeOf(AccountEvent)],
+            );
+            var scan_lookup = self.scan_lookup.get(.events);
+            scan_lookup.* = EventsScanLookup.init(
+                groove,
+                scan,
+            );
+
+            scan_lookup.read(
+                scan_lookup_buffer,
+                &prefetch_get_events_scan_callback,
+            );
+        }
+
+        fn prefetch_get_events_scan_callback(
+            scan_lookup: *EventsScanLookup,
+            results: []const AccountEvent,
+        ) void {
+            const self: *StateMachine = ScanLookup.parent(.events, scan_lookup);
+            assert(self.scan_lookup_result_count == null);
+            self.scan_lookup_result_count = @intCast(results.len);
+
+            self.forest.scan_buffer_pool.reset();
+            self.forest.grooves.account_events.scan_builder.reset();
+            self.scan_lookup = .null;
+
+            self.prefetch_finish();
+        }
+
         fn get_scan_from_query_filter(
             self: *StateMachine,
             comptime Groove: type,
@@ -1612,18 +1760,19 @@ pub fn StateMachineType(
         pub fn commit(
             self: *StateMachine,
             client: u128,
-            client_release: vsr.Release,
             op: u64,
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
         ) usize {
-            _ = client;
+            // NB: This function should never accept `client_release` as an argument.
+            // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op != 0);
-            assert(self.input_valid(client_release, operation, input));
+            assert(self.input_valid(operation, input));
             assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
             assert(input.len <= self.batch_size_limit);
+            if (client == 0) assert(operation == .pulse);
 
             maybe(self.scan_lookup_result_count != null);
             defer assert(self.scan_lookup_result_count == null);
@@ -1632,14 +1781,12 @@ pub fn StateMachineType(
                 .pulse => self.execute_expire_pending_transfers(timestamp),
                 .create_accounts => self.execute_create(
                     .create_accounts,
-                    client_release,
                     timestamp,
                     input,
                     output,
                 ),
                 .create_transfers => self.execute_create(
                     .create_transfers,
-                    client_release,
                     timestamp,
                     input,
                     output,
@@ -1650,22 +1797,14 @@ pub fn StateMachineType(
                 .get_account_balances => self.execute_get_account_balances(input, output),
                 .query_accounts => self.execute_query_accounts(input, output),
                 .query_transfers => self.execute_query_transfers(input, output),
+                .get_events => self.execute_get_events(input, output),
             };
 
             @setEvalBranchQuota(10_000);
             switch (operation) {
-                .pulse => {},
-                inline else => |comptime_operation| {
-                    const event_size: usize = switch (operation) {
-                        .get_account_transfers, .get_account_balances => blk: {
-                            break :blk if (AccountFilterFormer.required(client_release))
-                                @sizeOf(AccountFilterFormer)
-                            else
-                                @sizeOf(AccountFilter);
-                        },
-                        else => @sizeOf(EventType(comptime_operation)),
-                    };
-
+                .pulse, .get_events => {},
+                inline else => |operation_comptime| {
+                    const event_size: usize = @sizeOf(EventType(operation_comptime));
                     const count_batch = @divExact(
                         input.len,
                         event_size,
@@ -1673,7 +1812,7 @@ pub fn StateMachineType(
                     const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
 
                     self.metrics.record(
-                        std.meta.stringToEnum(Metrics.MetricEnum, @tagName(comptime_operation)).?,
+                        std.meta.stringToEnum(Metrics.MetricEnum, @tagName(operation_comptime)).?,
                         duration_us,
                         count_batch,
                     );
@@ -1740,7 +1879,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
                     self.forest.grooves.transfers_pending.scope_open();
-                    self.forest.grooves.account_balances.scope_open();
+                    self.forest.grooves.account_events.scope_open();
                 },
                 else => unreachable,
             }
@@ -1755,7 +1894,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
                     self.forest.grooves.transfers_pending.scope_close(mode);
-                    self.forest.grooves.account_balances.scope_close(mode);
+                    self.forest.grooves.account_events.scope_close(mode);
                 },
                 else => unreachable,
             }
@@ -1764,7 +1903,6 @@ pub fn StateMachineType(
         fn execute_create(
             self: *StateMachine,
             comptime operation: Operation,
-            client_release: vsr.Release,
             timestamp: u64,
             input: []align(16) const u8,
             output: *align(16) [constants.message_body_size_max]u8,
@@ -1823,7 +1961,7 @@ pub fn StateMachineType(
 
                     break :blk switch (operation) {
                         .create_accounts => self.create_account(&event),
-                        .create_transfers => self.create_transfer(client_release, &event),
+                        .create_transfers => self.create_transfer(&event),
                         else => unreachable,
                     };
                 };
@@ -1919,7 +2057,7 @@ pub fn StateMachineType(
             var results_count: usize = 0;
             for (batch) |id| {
                 if (self.get_account(id)) |account| {
-                    results[results_count] = account.*;
+                    results[results_count] = account;
                     results_count += 1;
                 }
             }
@@ -1938,7 +2076,7 @@ pub fn StateMachineType(
             var results_count: usize = 0;
             for (batch) |id| {
                 if (self.get_transfer(id)) |result| {
-                    results[results_count] = result.*;
+                    results[results_count] = result;
                     results_count += 1;
                 }
             }
@@ -1981,12 +2119,11 @@ pub fn StateMachineType(
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0; // no results found
 
-            const filter = account_filter_from_input(input);
-
-            const scan_results: []const AccountBalancesGrooveValue = mem.bytesAsSlice(
-                AccountBalancesGrooveValue,
+            const filter = std.mem.bytesAsValue(AccountFilter, input);
+            const scan_results: []const AccountEvent = mem.bytesAsSlice(
+                AccountEvent,
                 self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? *
-                    @sizeOf(AccountBalancesGrooveValue)],
+                    @sizeOf(AccountEvent)],
             );
 
             const output_slice: []AccountBalance = mem.bytesAsSlice(AccountBalance, output);
@@ -2067,6 +2204,30 @@ pub fn StateMachineType(
             return result_size;
         }
 
+        fn execute_get_events(
+            self: *StateMachine,
+            input: []const u8,
+            output: *align(16) [constants.message_body_size_max]u8,
+        ) usize {
+            _ = input;
+            assert(self.scan_lookup_result_count != null);
+            assert(self.scan_lookup_result_count.? <= constants.batch_max.get_events);
+
+            defer self.scan_lookup_result_count = null;
+            if (self.scan_lookup_result_count.? == 0) return 0; // no results found
+
+            const result_size: usize = self.scan_lookup_result_count.? * @sizeOf(AccountEvent);
+            assert(result_size <= output.len);
+            assert(result_size <= self.scan_lookup_buffer.len);
+            stdx.copy_disjoint(
+                .exact,
+                u8,
+                output[0..result_size],
+                self.scan_lookup_buffer[0..result_size],
+            );
+            return result_size;
+        }
+
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
             assert(a.timestamp > self.commit_timestamp or
                 a.flags.imported or
@@ -2079,7 +2240,7 @@ pub fn StateMachineType(
             if (a.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.accounts.get(a.id)) {
-                .found_object => |e| return create_account_exists(a, e),
+                .found_object => |e| return create_account_exists(a, &e),
                 .found_orphaned_id => unreachable,
                 .not_found => {},
             }
@@ -2131,7 +2292,6 @@ pub fn StateMachineType(
 
         fn create_transfer(
             self: *StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.timestamp > self.commit_timestamp or
@@ -2144,15 +2304,13 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(client_release, t, e),
-                .found_orphaned_id => if (!retry_transient_error(client_release)) {
-                    return .id_already_failed;
-                },
+                .found_object => |e| return self.create_transfer_exists(t, &e),
+                .found_orphaned_id => return .id_already_failed,
                 .not_found => {},
             }
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(client_release, t);
+                return self.post_or_void_pending_transfer(t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -2170,11 +2328,6 @@ pub fn StateMachineType(
                 if (t.timeout != 0) return .timeout_reserved_for_pending_transfer;
                 if (t.flags.closing_debit or t.flags.closing_credit) {
                     return .closing_transfer_must_be_pending;
-                }
-            }
-            if (forbid_zero_amounts(client_release)) {
-                if (!t.flags.balancing_debit and !t.flags.balancing_credit) {
-                    if (t.amount == 0) return .amount_must_not_be_zero;
                 }
             }
 
@@ -2231,33 +2384,18 @@ pub fn StateMachineType(
 
             const amount = amount: {
                 var amount = t.amount;
-                if (forbid_zero_amounts(client_release)) {
-                    if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                        comptime assert(@TypeOf(amount) == u128);
-                        if (amount == 0) amount = std.math.maxInt(u128);
-                    } else {
-                        assert(amount != 0);
-                    }
-                }
-
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_account.debits_posted + dr_account.debits_pending;
                     amount = @min(amount, dr_account.credits_posted -| dr_balance);
-                    if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_credits;
-                    }
                 }
 
                 if (t.flags.balancing_credit) {
                     const cr_balance = cr_account.credits_posted + cr_account.credits_pending;
                     amount = @min(amount, cr_account.debits_posted -| cr_balance);
-                    if (forbid_zero_amounts(client_release)) {
-                        if (amount == 0) return .exceeds_debits;
-                    }
                 }
                 break :amount amount;
             };
-            assert(amount > 0 or !forbid_zero_amounts(client_release));
+            maybe(amount == 0);
 
             if (t.flags.pending) {
                 if (sum_overflows(u128, amount, dr_account.debits_pending)) {
@@ -2316,8 +2454,8 @@ pub fn StateMachineType(
             t2.amount = amount;
             self.forest.grooves.transfers.insert(&t2);
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
+            var dr_account_new = dr_account;
+            var cr_account_new = cr_account;
             if (t.flags.pending) {
                 dr_account_new.debits_pending += amount;
                 cr_account_new.credits_pending += amount;
@@ -2338,21 +2476,32 @@ pub fn StateMachineType(
             if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
 
             const dr_updated = amount > 0 or dr_account_new.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &dr_account,
+                    .new = &dr_account_new,
+                });
             }
 
             const cr_updated = amount > 0 or cr_account_new.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &cr_account,
+                    .new = &cr_account_new,
+                });
             }
 
-            self.historical_balance(.{
-                .transfer = &t2,
+            self.account_event(.{
+                .event_timestamp = t2.timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
+                .transfer_flags = t2.flags,
+                .transfer_pending_status = if (t2.flags.pending) .pending else .none,
+                .transfer_pending = null,
+                .amount_requested = t.amount,
+                .amount = t2.amount,
             });
 
             if (t2.timeout > 0) {
@@ -2370,7 +2519,6 @@ pub fn StateMachineType(
 
         fn create_transfer_exists(
             self: *const StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
             e: *const Transfer,
         ) CreateTransferResult {
@@ -2388,7 +2536,7 @@ pub fn StateMachineType(
                 // Since both `t` and `e` have the same `pending_id`,
                 // it must be a valid transfer.
                 const p = self.get_transfer(t.pending_id).?;
-                return post_or_void_pending_transfer_exists(client_release, t, e, p);
+                return post_or_void_pending_transfer_exists(t, e, &p);
             } else {
                 if (t.debit_account_id != e.debit_account_id) {
                     return .exists_with_different_debit_account_id;
@@ -2409,13 +2557,7 @@ pub fn StateMachineType(
                 // range of possible values it should fail with `exists` rather than
                 // `exists_with_different_amount`.
                 if (t.flags.balancing_debit or t.flags.balancing_credit) {
-                    if (forbid_zero_amounts(client_release)) {
-                        if (t.amount > 0 and t.amount < e.amount) {
-                            return .exists_with_different_amount;
-                        }
-                    } else {
-                        if (t.amount < e.amount) return .exists_with_different_amount;
-                    }
+                    if (t.amount < e.amount) return .exists_with_different_amount;
                 } else {
                     if (t.amount != e.amount) return .exists_with_different_amount;
                 }
@@ -2430,10 +2572,7 @@ pub fn StateMachineType(
                     return .exists_with_different_user_data_32;
                 }
                 if (t.ledger != e.ledger) {
-                    return if (retry_transient_error(client_release))
-                        .transfer_must_have_the_same_ledger_as_accounts
-                    else
-                        .exists_with_different_ledger;
+                    return .exists_with_different_ledger;
                 }
                 if (t.code != e.code) {
                     return .exists_with_different_code;
@@ -2445,7 +2584,6 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
-            client_release: vsr.Release,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
@@ -2480,7 +2618,7 @@ pub fn StateMachineType(
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
             assert(p.timestamp > cr_account.timestamp);
-            if (forbid_zero_amounts(client_release)) assert(p.amount > 0);
+            maybe(p.amount == 0);
 
             if (t.debit_account_id > 0 and t.debit_account_id != p.debit_account_id) {
                 return .pending_transfer_has_different_debit_account_id;
@@ -2496,17 +2634,13 @@ pub fn StateMachineType(
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
             const amount = amount: {
-                if (forbid_zero_amounts(client_release)) {
-                    break :amount if (t.amount > 0) t.amount else p.amount;
+                if (t.flags.void_pending_transfer) {
+                    break :amount if (t.amount == 0) p.amount else t.amount;
                 } else {
-                    if (t.flags.void_pending_transfer) {
-                        break :amount if (t.amount > 0) t.amount else p.amount;
-                    } else {
-                        break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
-                    }
+                    break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
                 }
             };
-            if (p.amount > 0 and amount == 0) assert(!forbid_zero_amounts(client_release));
+            maybe(amount == 0);
 
             if (amount > p.amount) return .exceeds_pending_transfer_amount;
 
@@ -2602,28 +2736,27 @@ pub fn StateMachineType(
                 }
             }
 
-            self.transfer_update_pending_status(transfer_pending, status: {
+            const transfer_pending_status: TransferPendingStatus = status: {
                 if (t2.flags.post_pending_transfer) break :status .posted;
                 if (t2.flags.void_pending_transfer) break :status .voided;
                 unreachable;
-            });
+            };
+            self.transfer_update_pending_status(&transfer_pending, transfer_pending_status);
 
-            var dr_account_new = dr_account.*;
-            var cr_account_new = cr_account.*;
+            var dr_account_new = dr_account;
+            var cr_account_new = cr_account;
             dr_account_new.debits_pending -= p.amount;
             cr_account_new.credits_pending -= p.amount;
 
             if (t2.flags.post_pending_transfer) {
                 assert(!p.flags.closing_debit);
                 assert(!p.flags.closing_credit);
-                if (forbid_zero_amounts(client_release)) {
-                    assert(amount > 0);
-                }
                 assert(amount <= p.amount);
                 dr_account_new.debits_posted += amount;
                 cr_account_new.credits_posted += amount;
             }
             if (t2.flags.void_pending_transfer) {
+                assert(t2.amount == p.amount);
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
@@ -2637,22 +2770,33 @@ pub fn StateMachineType(
 
             const dr_updated = amount > 0 or p.amount > 0 or
                 dr_account_new.flags.closed != dr_account.flags.closed;
-            assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
+            assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = dr_account, .new = &dr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &dr_account,
+                    .new = &dr_account_new,
+                });
             }
 
             const cr_updated = amount > 0 or p.amount > 0 or
                 cr_account_new.flags.closed != cr_account.flags.closed;
-            assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
+            assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
-                self.forest.grooves.accounts.update(.{ .old = cr_account, .new = &cr_account_new });
+                self.forest.grooves.accounts.update(.{
+                    .old = &cr_account,
+                    .new = &cr_account_new,
+                });
             }
 
-            self.historical_balance(.{
-                .transfer = &t2,
+            self.account_event(.{
+                .event_timestamp = t2.timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
+                .transfer_flags = t2.flags,
+                .transfer_pending_status = transfer_pending_status,
+                .transfer_pending = &p,
+                .amount_requested = t.amount,
+                .amount = t2.amount,
             });
 
             self.commit_timestamp = t2.timestamp;
@@ -2661,7 +2805,6 @@ pub fn StateMachineType(
         }
 
         fn post_or_void_pending_transfer_exists(
-            client_release: vsr.Release,
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
@@ -2688,16 +2831,14 @@ pub fn StateMachineType(
                 return .exists_with_different_credit_account_id;
             }
 
-            if (forbid_zero_amounts(client_release) or
-                t.flags.void_pending_transfer)
-            {
+            if (t.flags.void_pending_transfer) {
                 if (t.amount == 0) {
                     if (e.amount != p.amount) return .exists_with_different_amount;
                 } else {
                     if (t.amount != e.amount) return .exists_with_different_amount;
                 }
-            } else {
-                assert(t.flags.post_pending_transfer);
+            }
+            if (t.flags.post_pending_transfer) {
                 assert(e.amount <= p.amount);
                 if (t.amount == std.math.maxInt(u128)) {
                     if (e.amount != p.amount) return .exists_with_different_amount;
@@ -2737,10 +2878,7 @@ pub fn StateMachineType(
             }
 
             if (t.ledger != 0 and t.ledger != e.ledger) {
-                return if (retry_transient_error(client_release))
-                    .transfer_must_have_the_same_ledger_as_accounts
-                else
-                    .exists_with_different_ledger;
+                return .exists_with_different_ledger;
             }
             if (t.code != 0 and t.code != e.code) {
                 return .exists_with_different_code;
@@ -2749,51 +2887,97 @@ pub fn StateMachineType(
             return .exists;
         }
 
-        fn historical_balance(
+        fn account_event(
             self: *StateMachine,
             args: struct {
-                transfer: *const Transfer,
+                event_timestamp: u64,
                 dr_account: *const Account,
                 cr_account: *const Account,
+                transfer_flags: ?TransferFlags,
+                transfer_pending_status: TransferPendingStatus,
+                transfer_pending: ?*const Transfer,
+                /// The amount from the user request.
+                /// It may differ from the recorded `amount` when posting transfers and balancing
+                /// accounts. Always zero for expiry events, as no user request is involved.
+                amount_requested: u128,
+                /// The actual amount recorded in the transfer.
+                amount: u128,
             },
         ) void {
-            assert(args.transfer.timestamp > 0);
-            assert(args.transfer.debit_account_id == args.dr_account.id);
-            assert(args.transfer.credit_account_id == args.cr_account.id);
+            assert(args.event_timestamp > 0);
+            switch (args.transfer_pending_status) {
+                .none, .pending => {
+                    assert(args.transfer_flags != null);
+                    assert(args.transfer_pending == null);
+                },
+                .posted, .voided => {
+                    assert(args.transfer_flags != null);
+                    assert(args.transfer_pending != null);
+                },
+                .expired => {
+                    assert(args.transfer_flags == null);
+                    assert(args.transfer_pending != null);
+                },
+            }
 
-            if (args.dr_account.flags.history or args.cr_account.flags.history) {
-                var balance = std.mem.zeroInit(AccountBalancesGrooveValue, .{
-                    .timestamp = args.transfer.timestamp,
+            // For CDC we always insert the history regardless `Account.flags.history`.
+            self.forest.grooves.account_events.insert(&.{
+                .timestamp = args.event_timestamp,
+
+                .dr_account_id = args.dr_account.id,
+                .dr_account_timestamp = args.dr_account.timestamp,
+                .dr_debits_pending = args.dr_account.debits_pending,
+                .dr_debits_posted = args.dr_account.debits_posted,
+                .dr_credits_pending = args.dr_account.credits_pending,
+                .dr_credits_posted = args.dr_account.credits_posted,
+                .dr_account_flags = args.dr_account.flags,
+
+                .cr_account_id = args.cr_account.id,
+                .cr_account_timestamp = args.cr_account.timestamp,
+                .cr_debits_pending = args.cr_account.debits_pending,
+                .cr_debits_posted = args.cr_account.debits_posted,
+                .cr_credits_pending = args.cr_account.credits_pending,
+                .cr_credits_posted = args.cr_account.credits_posted,
+                .cr_account_flags = args.cr_account.flags,
+
+                .amount_requested = args.amount_requested,
+                .amount = args.amount,
+                .ledger = ledger: {
+                    assert(args.dr_account.ledger == args.cr_account.ledger);
+                    break :ledger args.dr_account.ledger;
+                },
+
+                .transfer_flags = if (args.transfer_flags) |flags| flags else .{},
+
+                .transfer_pending_id = if (args.transfer_pending) |p| p.id else 0,
+                .transfer_pending_status = args.transfer_pending_status,
+                .transfer_pending_flags = if (args.transfer_pending) |p| p.flags else .{},
+            });
+
+            if (args.dr_account.flags.history) {
+                // Indexing the debit account.
+                self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
+                    .timestamp = args.event_timestamp,
+                    .field = args.dr_account.timestamp,
                 });
-
-                if (args.dr_account.flags.history) {
-                    balance.dr_account_id = args.dr_account.id;
-                    balance.dr_debits_pending = args.dr_account.debits_pending;
-                    balance.dr_debits_posted = args.dr_account.debits_posted;
-                    balance.dr_credits_pending = args.dr_account.credits_pending;
-                    balance.dr_credits_posted = args.dr_account.credits_posted;
-                }
-
-                if (args.cr_account.flags.history) {
-                    balance.cr_account_id = args.cr_account.id;
-                    balance.cr_debits_pending = args.cr_account.debits_pending;
-                    balance.cr_debits_posted = args.cr_account.debits_posted;
-                    balance.cr_credits_pending = args.cr_account.credits_pending;
-                    balance.cr_credits_posted = args.cr_account.credits_posted;
-                }
-
-                self.forest.grooves.account_balances.insert(&balance);
+            }
+            if (args.cr_account.flags.history) {
+                // Indexing the credit account.
+                self.forest.grooves.account_events.indexes.account_timestamp.put(&.{
+                    .timestamp = args.event_timestamp,
+                    .field = args.cr_account.timestamp,
+                });
             }
         }
 
-        fn get_transfer(self: *const StateMachine, id: u128) ?*const Transfer {
+        fn get_transfer(self: *const StateMachine, id: u128) ?Transfer {
             return switch (self.forest.grooves.transfers.get(id)) {
                 .found_object => |t| t,
                 .found_orphaned_id, .not_found => null,
             };
         }
 
-        fn get_account(self: *const StateMachine, id: u128) ?*const Account {
+        fn get_account(self: *const StateMachine, id: u128) ?Account {
             return switch (self.forest.grooves.accounts.get(id)) {
                 .found_object => |a| a,
                 .found_orphaned_id => unreachable,
@@ -2806,7 +2990,7 @@ pub fn StateMachineType(
         fn get_transfer_pending(
             self: *const StateMachine,
             pending_timestamp: u64,
-        ) ?*const TransferPending {
+        ) ?TransferPending {
             return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
                 .found_object => |a| a,
                 .found_orphaned_id => unreachable,
@@ -2835,44 +3019,51 @@ pub fn StateMachineType(
         fn execute_expire_pending_transfers(self: *StateMachine, timestamp: u64) usize {
             assert(self.scan_lookup_result_count != null);
             assert(self.scan_lookup_result_count.? <= constants.batch_max.create_transfers);
+            assert(timestamp > self.commit_timestamp or global_constants.aof_recovery);
 
             defer self.scan_lookup_result_count = null;
             if (self.scan_lookup_result_count.? == 0) return 0;
 
-            const transfers: []const Transfer = std.mem.bytesAsSlice(
+            const transfers_pending: []const Transfer = std.mem.bytesAsSlice(
                 Transfer,
                 self.scan_lookup_buffer[0 .. self.scan_lookup_result_count.? * @sizeOf(Transfer)],
             );
 
-            log.debug("expire_pending_transfers: len={}", .{transfers.len});
+            log.debug("expire_pending_transfers: len={}", .{transfers_pending.len});
 
-            for (transfers) |expired| {
-                assert(expired.flags.pending);
-                assert(expired.timeout > 0);
+            for (transfers_pending, 0..) |*p, index| {
+                assert(p.flags.pending);
+                assert(p.timeout > 0);
 
-                const expires_at = expired.timestamp + expired.timeout_ns();
-                assert(expires_at <= timestamp);
+                const event_timestamp = timestamp - transfers_pending.len + index + 1;
+                assert(event_timestamp >= TimestampRange.timestamp_min);
+                assert(event_timestamp <= TimestampRange.timestamp_max);
+                assert(self.commit_timestamp < event_timestamp);
+                defer self.commit_timestamp = event_timestamp;
+
+                const expires_at = p.timestamp + p.timeout_ns();
+                assert(expires_at <= event_timestamp);
 
                 const dr_account = self.get_account(
-                    expired.debit_account_id,
+                    p.debit_account_id,
                 ).?;
-                assert(dr_account.debits_pending >= expired.amount);
+                assert(dr_account.debits_pending >= p.amount);
 
                 const cr_account = self.get_account(
-                    expired.credit_account_id,
+                    p.credit_account_id,
                 ).?;
-                assert(cr_account.credits_pending >= expired.amount);
+                assert(cr_account.credits_pending >= p.amount);
 
-                var dr_account_new = dr_account.*;
-                var cr_account_new = cr_account.*;
-                dr_account_new.debits_pending -= expired.amount;
-                cr_account_new.credits_pending -= expired.amount;
+                var dr_account_new = dr_account;
+                var cr_account_new = cr_account;
+                dr_account_new.debits_pending -= p.amount;
+                cr_account_new.credits_pending -= p.amount;
 
-                if (expired.flags.closing_debit) {
+                if (p.flags.closing_debit) {
                     assert(dr_account_new.flags.closed);
                     dr_account_new.flags.closed = false;
                 }
-                if (expired.flags.closing_credit) {
+                if (p.flags.closing_credit) {
                     assert(cr_account_new.flags.closed);
                     cr_account_new.flags.closed = false;
                 }
@@ -2881,35 +3072,44 @@ pub fn StateMachineType(
                 maybe(dr_account_new.flags.closed);
                 maybe(cr_account_new.flags.closed);
 
-                const dr_updated = expired.amount > 0 or
+                const dr_updated = p.amount > 0 or
                     dr_account_new.flags.closed != dr_account.flags.closed;
-                assert(dr_updated == !stdx.equal_bytes(Account, dr_account, &dr_account_new));
                 if (dr_updated) {
                     self.forest.grooves.accounts.update(.{
-                        .old = dr_account,
+                        .old = &dr_account,
                         .new = &dr_account_new,
                     });
                 }
 
-                const cr_updated = expired.amount > 0 or
+                const cr_updated = p.amount > 0 or
                     cr_account_new.flags.closed != cr_account.flags.closed;
-                assert(cr_updated == !stdx.equal_bytes(Account, cr_account, &cr_account_new));
                 if (cr_updated) {
                     self.forest.grooves.accounts.update(.{
-                        .old = cr_account,
+                        .old = &cr_account,
                         .new = &cr_account_new,
                     });
                 }
 
-                const transfer_pending = self.get_transfer_pending(expired.timestamp).?;
-                assert(expired.timestamp == transfer_pending.timestamp);
+                const transfer_pending = self.get_transfer_pending(p.timestamp).?;
+                assert(p.timestamp == transfer_pending.timestamp);
                 assert(transfer_pending.status == .pending);
-                self.transfer_update_pending_status(transfer_pending, .expired);
+                self.transfer_update_pending_status(&transfer_pending, .expired);
 
                 // Removing the `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .timestamp = expired.timestamp,
+                    .timestamp = p.timestamp,
                     .field = expires_at,
+                });
+
+                self.account_event(.{
+                    .event_timestamp = event_timestamp,
+                    .dr_account = &dr_account_new,
+                    .cr_account = &cr_account_new,
+                    .transfer_flags = null,
+                    .transfer_pending_status = .expired,
+                    .transfer_pending = p,
+                    .amount_requested = 0,
+                    .amount = p.amount,
                 });
             }
 
@@ -2990,16 +3190,19 @@ pub fn StateMachineType(
                         batch_values_limit.transfers_pending,
                     ),
                 },
-                .account_balances = .{
+                .account_events = .{
                     .prefetch_entries_for_read_max = 0,
                     // We don't need to update the history, it's append only.
                     .prefetch_entries_for_update_max = 0,
-                    .cache_entries_max = options.cache_entries_account_balances,
+                    .cache_entries_max = 0,
                     .tree_options_object = .{
-                        .batch_value_count_limit = batch_values_limit.account_balances.timestamp,
+                        .batch_value_count_limit = batch_values_limit.account_events.timestamp,
                     },
                     .tree_options_id = {},
-                    .tree_options_index = .{},
+                    .tree_options_index = index_tree_options(
+                        AccountEventsGroove.IndexTreeOptions,
+                        batch_values_limit.account_events,
+                    ),
                 },
             };
         }
@@ -3047,8 +3250,15 @@ pub fn StateMachineType(
                 timestamp: u32,
                 status: u32,
             },
-            account_balances: struct {
+            account_events: struct {
                 timestamp: u32,
+                account_timestamp: u32,
+                transfer_pending_status: u32,
+                dr_account_id_expired: u32,
+                cr_account_id_expired: u32,
+                transfer_pending_id_expired: u32,
+                ledger_expired: u32,
+                prunable: u32,
             },
         } {
             assert(batch_size_limit <= constants.message_body_size_max);
@@ -3094,8 +3304,15 @@ pub fn StateMachineType(
                     .timestamp = 2 * batch_create_transfers,
                     .status = 2 * batch_create_transfers,
                 },
-                .account_balances = .{
+                .account_events = .{
                     .timestamp = batch_create_transfers,
+                    .account_timestamp = 2 * batch_create_transfers, // dr and cr accounts.
+                    .transfer_pending_status = batch_create_transfers,
+                    .dr_account_id_expired = batch_create_transfers,
+                    .cr_account_id_expired = batch_create_transfers,
+                    .transfer_pending_id_expired = batch_create_transfers,
+                    .ledger_expired = batch_create_transfers,
+                    .prunable = batch_create_transfers,
                 },
             };
         }
@@ -3112,49 +3329,6 @@ pub fn StateMachineType(
                 @divFloor(batch_size_limit, event_size),
                 @divFloor(constants.message_body_size_max, result_size),
             );
-        }
-
-        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
-        // legacy code it gates.
-        //
-        // Specifically, when forbid_zero_amounts() is true:
-        // - Zero-amount transfers are forbidden (`amount_must_not_be_zero`).
-        // - Post-pending-transfer uses amount=0 as a sentinel for "post full amount".
-        // - Balancing transfers use amount=0 as a sentinel for `maxInt(u128)`.
-        fn forbid_zero_amounts(client_release: vsr.Release) bool {
-            const release_min_inclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-            const release_max_exclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 0 });
-            const release_max_transition =
-                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-
-            comptime assert(config.release.value < release_max_transition.value);
-
-            return client_release.value >= release_min_inclusive.value and
-                client_release.value < release_max_exclusive.value;
-        }
-
-        // TODO(client_release_min): When client_release_min is bumped, remove this function and the
-        // legacy code it gates.
-        //
-        // Specifically, when retry_transient_error() is true:
-        // - Transfers that fail due to transient errors can be retried
-        //   with the same ID without returning `id_already_failed`.
-        // - The `exists_with_different_ledger` error code does not apply
-        //   to `create_transfers`.
-        fn retry_transient_error(client_release: vsr.Release) bool {
-            const release_min_inclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 15, .patch = 3 });
-            const release_max_exclusive =
-                vsr.Release.from(.{ .major = 0, .minor = 16, .patch = 4 });
-            const release_max_transition =
-                comptime vsr.Release.from(.{ .major = 0, .minor = 17, .patch = 0 });
-
-            comptime assert(config.release.value < release_max_transition.value);
-
-            return client_release.value >= release_min_inclusive.value and
-                client_release.value < release_max_exclusive.value;
         }
     };
 }
@@ -3363,6 +3537,7 @@ const TestContext = struct {
         .lsm_compaction_ops = global_constants.lsm_compaction_ops,
         .vsr_operations_reserved = 128,
     });
+    const AccountEvent = StateMachine.AccountEvent;
     const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
@@ -3371,7 +3546,6 @@ const TestContext = struct {
     grid: Grid,
     state_machine: StateMachine,
     busy: bool,
-    client_release: vsr.Release,
 
     fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
@@ -3386,7 +3560,7 @@ const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, .{});
+        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{
@@ -3416,12 +3590,20 @@ const TestContext = struct {
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
             .cache_entries_posted = 0,
-            .cache_entries_account_balances = 0,
         });
         errdefer ctx.state_machine.deinit(allocator);
+        // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state
+        // machine needs a `pulse` to scan for pending transfers and correctly determine when to
+        // process the next expiry. However, this initial `pulse` unnecessarily bumps time, making
+        // unit tests that depend on the `timestamp` harder to reason about.
+        //
+        // Since this is a newly created state machine, we can bypass the initial check, ensuring
+        // that there will be no `timestamp` bumps between operations unless actual pending
+        // transfers get expired.
+        ctx.state_machine.expire_pending_transfers
+            .pulse_next_timestamp = TimestampRange.timestamp_max;
 
         ctx.busy = false;
-        ctx.client_release = vsr.Release.minimum;
     }
 
     fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
@@ -3439,6 +3621,19 @@ const TestContext = struct {
         ctx.busy = false;
     }
 
+    fn prepare(
+        context: *TestContext,
+        operation: TestContext.StateMachine.Operation,
+        input: []align(16) const u8,
+    ) void {
+        context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
+        context.state_machine.prepare_timestamp += 1;
+        context.state_machine.prepare(
+            operation,
+            input,
+        );
+    }
+
     fn execute(
         context: *TestContext,
         op: u64,
@@ -3452,17 +3647,15 @@ const TestContext = struct {
         context.state_machine.prefetch_timestamp = timestamp;
         context.state_machine.prefetch(
             TestContext.callback,
-            context.client_release,
             op,
             operation,
             input,
         );
-        while (context.busy) context.storage.tick();
+        while (context.busy) context.storage.run();
 
         return context.state_machine.commit(
-            0,
-            context.client_release,
             1,
+            op,
             timestamp,
             operation,
             input,
@@ -3479,13 +3672,6 @@ const TestAction = union(enum) {
         debits_posted: u128,
         credits_pending: u128,
         credits_posted: u128,
-    },
-
-    // Opposite order to vsr.ReleaseTriple!
-    setup_client_release: struct {
-        major: u16,
-        minor: u8,
-        patch: u8,
     },
 
     tick: struct {
@@ -3517,7 +3703,6 @@ const TestAction = union(enum) {
     },
 
     get_account_balances: TestGetAccountBalances,
-    get_account_balances_former: TestGetAccountBalancesFormer,
     get_account_balances_result: struct {
         transfer_id: u128,
         debits_pending: u128,
@@ -3527,7 +3712,6 @@ const TestAction = union(enum) {
     },
 
     get_account_transfers: TestGetAccountTransfers,
-    get_account_transfers_former: TestGetAccountTransfersFormer,
     get_account_transfers_result: u128,
 
     query_accounts: TestQueryAccounts,
@@ -3535,6 +3719,9 @@ const TestAction = union(enum) {
 
     query_transfers: TestQueryTransfers,
     query_transfers_result: u128,
+
+    get_events,
+    get_events_result: TestEventResult,
 };
 
 const TestCreateAccount = struct {
@@ -3559,7 +3746,7 @@ const TestCreateAccount = struct {
     timestamp: u64 = 0,
     result: CreateAccountResult,
 
-    fn event(a: TestCreateAccount, timestamp: ?u64) Account {
+    fn event(a: TestCreateAccount) Account {
         return .{
             .id = a.id,
             .debits_pending = a.debits_pending,
@@ -3581,7 +3768,7 @@ const TestCreateAccount = struct {
                 .closed = a.flags_closed != null,
                 .padding = a.flags_padding,
             },
-            .timestamp = timestamp orelse a.timestamp,
+            .timestamp = a.timestamp,
         };
     }
 };
@@ -3611,7 +3798,7 @@ const TestCreateTransfer = struct {
     timestamp: u64 = 0,
     result: CreateTransferResult,
 
-    fn event(t: TestCreateTransfer, timestamp: ?u64) Transfer {
+    fn event(t: TestCreateTransfer) Transfer {
         return .{
             .id = t.id,
             .debit_account_id = t.debit_account_id,
@@ -3636,7 +3823,7 @@ const TestCreateTransfer = struct {
                 .closing_credit = t.flags_closing_credit != null,
                 .padding = t.flags_padding,
             },
-            .timestamp = timestamp orelse t.timestamp,
+            .timestamp = t.timestamp,
         };
     }
 };
@@ -3647,18 +3834,6 @@ const TestAccountFilter = struct {
     user_data_64: ?u64 = null,
     user_data_32: ?u32 = null,
     code: ?u16 = null,
-    // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
-    // created.
-    timestamp_min_transfer_id: ?u128 = null,
-    timestamp_max_transfer_id: ?u128 = null,
-    limit: u32,
-    flags_debits: ?enum { DR } = null,
-    flags_credits: ?enum { CR } = null,
-    flags_reversed: ?enum { REV } = null,
-};
-
-const TestAccountFilterFormer = struct {
-    account_id: u128,
     // When non-null, the filter is set to the timestamp at which the specified transfer (by id) was
     // created.
     timestamp_min_transfer_id: ?u128 = null,
@@ -3681,11 +3856,95 @@ const TestQueryFilter = struct {
     flags_reversed: ?enum { REV } = null,
 };
 
+const TestEventResult = struct {
+    event_type: ?enum { PEN, POS, VOI, EXP } = null,
+    timestamp_transfer: ?u128 = null,
+    amount_requested: u128,
+    amount: u128,
+    transfer_pending_id: ?u128 = null,
+    account_1: TestEventAccountBalanceResult,
+    account_2: TestEventAccountBalanceResult,
+
+    fn match(
+        self: *const TestEventResult,
+        accounts: *std.AutoHashMap(u128, Account),
+        transfers: *std.AutoHashMap(u128, Transfer),
+        event: *const TestContext.AccountEvent,
+    ) bool {
+        if (self.timestamp_transfer) |id| {
+            const transfer = transfers.get(id).?;
+            if (transfer.timestamp != event.timestamp) return false;
+            if (@as(u16, @bitCast(transfer.flags)) !=
+                @as(u16, @bitCast(event.transfer_flags))) return false;
+        }
+        if (self.event_type) |event_type| switch (event_type) {
+            .PEN => if (event.transfer_pending_status != .pending) return false,
+            .POS => if (event.transfer_pending_status != .posted) return false,
+            .VOI => if (event.transfer_pending_status != .voided) return false,
+            .EXP => if (event.transfer_pending_status != .expired) return false,
+        } else {
+            if (event.transfer_pending_status != .none) return false;
+        }
+        if (self.amount_requested != event.amount_requested) return false;
+        if (self.amount != event.amount) return false;
+        if (self.transfer_pending_id orelse 0 != event.transfer_pending_id) return false;
+        if (self.transfer_pending_id) |transfer_pending_id| {
+            const transfer_pending = transfers.get(transfer_pending_id).?;
+            if (@as(u16, @bitCast(transfer_pending.flags)) !=
+                @as(u16, @bitCast(event.transfer_pending_flags))) return false;
+            if (event.transfer_pending_status == .expired) {
+                assert(transfer_pending.timeout_ns() <= event.timestamp);
+            }
+        }
+
+        for (&[_]TestEventAccountBalanceResult{ self.account_1, self.account_2 }) |account_event| {
+            switch (account_event) {
+                .DR => |balance| {
+                    const account = accounts.get(balance.account_id).?;
+                    if (account.ledger != event.ledger) return false;
+                    if (balance.account_id != event.dr_account_id) return false;
+                    if (account.timestamp != event.dr_account_timestamp) return false;
+                    if (balance.debits_pending != event.dr_debits_pending) return false;
+                    if (balance.debits_posted != event.dr_debits_posted) return false;
+                    if (balance.credits_pending != event.dr_credits_pending) return false;
+                    if (balance.credits_posted != event.dr_credits_posted) return false;
+                    if ((balance.closed == .CLSD) != event.dr_account_flags.closed) return false;
+                },
+                .CR => |balance| {
+                    const account = accounts.get(balance.account_id).?;
+                    if (account.ledger != event.ledger) return false;
+                    if (balance.account_id != event.cr_account_id) return false;
+                    if (account.timestamp != event.cr_account_timestamp) return false;
+                    if (balance.debits_pending != event.cr_debits_pending) return false;
+                    if (balance.debits_posted != event.cr_debits_posted) return false;
+                    if (balance.credits_pending != event.cr_credits_pending) return false;
+                    if (balance.credits_posted != event.cr_credits_posted) return false;
+                    if ((balance.closed == .CLSD) != event.cr_account_flags.closed) return false;
+                },
+            }
+        }
+
+        return true;
+    }
+};
+
+const TestEventAccountBalanceResult = union(enum) {
+    DR: TestEventBalanceResult,
+    CR: TestEventBalanceResult,
+};
+
+const TestEventBalanceResult = struct {
+    account_id: u128,
+    debits_pending: u128,
+    debits_posted: u128,
+    credits_pending: u128,
+    credits_posted: u128,
+    closed: ?enum { CLSD } = null,
+};
+
 // Operations that share the same input.
 const TestGetAccountBalances = TestAccountFilter;
 const TestGetAccountTransfers = TestAccountFilter;
-const TestGetAccountBalancesFormer = TestAccountFilterFormer;
-const TestGetAccountTransfersFormer = TestAccountFilterFormer;
 const TestQueryAccounts = TestQueryFilter;
 const TestQueryTransfers = TestQueryFilter;
 
@@ -3719,7 +3978,7 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null);
 
                 const account = context.state_machine.get_account(b.account).?;
-                var account_new = account.*;
+                var account_new = account;
 
                 account_new.debits_pending = b.debits_pending;
                 account_new.debits_posted = b.debits_posted;
@@ -3728,25 +3987,12 @@ fn check(test_table: []const u8) !void {
                 assert(!account_new.debits_exceed_credits(0));
                 assert(!account_new.credits_exceed_debits(0));
 
-                if (!stdx.equal_bytes(Account, &account_new, account)) {
+                if (!stdx.equal_bytes(Account, &account_new, &account)) {
                     context.state_machine.forest.grooves.accounts.update(.{
-                        .old = account,
+                        .old = &account,
                         .new = &account_new,
                     });
                 }
-            },
-            .setup_client_release => |r| {
-                assert(operation == null);
-                assert(context.client_release.value == vsr.Release.minimum.value);
-
-                // ReleaseTriple defines things in the opposite order. Swap the fields by name so
-                // that the check in code can look in-order to a human.
-                const release_triple = vsr.ReleaseTriple{
-                    .major = r.major,
-                    .minor = r.minor,
-                    .patch = r.patch,
-                };
-                context.client_release = vsr.Release.from(release_triple);
             },
             .tick => |ticks| {
                 assert(ticks.value != 0);
@@ -3764,17 +4010,41 @@ fn check(test_table: []const u8) !void {
                     interval_ns
                 else
                     TimestampRange.timestamp_max - interval_ns;
+
+                // Pulse is executed when the cluster is idle.
+                if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
+                    const pulse = vsr.Operation.pulse.cast(TestContext.StateMachine);
+                    context.prepare(pulse, &.{});
+
+                    const reply_buffer = try allocator.alignedAlloc(
+                        u8,
+                        16,
+                        TestContext.message_body_size_max,
+                    );
+                    defer allocator.free(reply_buffer);
+                    const pulse_size = context.execute(
+                        op,
+                        pulse,
+                        &.{},
+                        reply_buffer[0..TestContext.message_body_size_max],
+                    );
+                    assert(pulse_size == 0);
+                    op += 1;
+                }
             },
             .account => |a| {
                 assert(operation == null or operation.? == .create_accounts);
                 operation = .create_accounts;
 
-                const event = a.event(null);
+                var event = a.event();
                 try request.appendSlice(std.mem.asBytes(&event));
                 if (a.result == .ok) {
-                    const timestamp = context.state_machine.prepare_timestamp + 1 +
-                        @divExact(request.items.len, @sizeOf(Account));
-                    try accounts.put(a.id, a.event(if (a.timestamp == 0) timestamp else null));
+                    if (a.timestamp == 0) {
+                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
+                            @divExact(request.items.len, @sizeOf(Account));
+                    }
+
+                    try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
@@ -3787,16 +4057,17 @@ fn check(test_table: []const u8) !void {
                 assert(operation == null or operation.? == .create_transfers);
                 operation = .create_transfers;
 
-                const event = t.event(null);
+                var event = t.event();
                 try request.appendSlice(std.mem.asBytes(&event));
                 if (t.result == .ok) {
-                    const timestamp = context.state_machine.prepare_timestamp + 1 +
-                        @divExact(request.items.len, @sizeOf(Transfer));
-                    var transfer = t.event(if (t.timestamp == 0) timestamp else null);
+                    if (t.timestamp == 0) {
+                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
+                            @divExact(request.items.len, @sizeOf(Transfer));
+                    }
 
-                    if (transfer.pending_id != 0) {
+                    if (event.pending_id != 0) {
                         // Fill in default values.
-                        const t_pending = transfers.get(transfer.pending_id).?;
+                        const t_pending = transfers.get(event.pending_id).?;
                         inline for (.{
                             "debit_account_id",
                             "credit_account_id",
@@ -3806,16 +4077,16 @@ fn check(test_table: []const u8) !void {
                             "user_data_64",
                             "user_data_32",
                         }) |field| {
-                            if (@field(transfer, field) == 0) {
-                                @field(transfer, field) = @field(t_pending, field);
+                            if (@field(event, field) == 0) {
+                                @field(event, field) = @field(t_pending, field);
                             }
                         }
 
-                        if (transfer.flags.void_pending_transfer) {
-                            if (transfer.amount == 0) transfer.amount = t_pending.amount;
+                        if (event.flags.void_pending_transfer) {
+                            if (event.amount == 0) event.amount = t_pending.amount;
                         }
                     }
-                    try transfers.put(t.id, transfer);
+                    try transfers.put(t.id, event);
                 } else {
                     const result = CreateTransfersResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
@@ -3889,28 +4160,6 @@ fn check(test_table: []const u8) !void {
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_account_balances_former => |f| {
-                assert(operation == null or operation.? == .get_account_balances);
-                operation = .get_account_balances;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = TestContext.StateMachine.AccountFilterFormer{
-                    .account_id = f.account_id,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
             .get_account_balances_result => |r| {
                 assert(operation.? == .get_account_balances);
 
@@ -3938,28 +4187,6 @@ fn check(test_table: []const u8) !void {
                     .user_data_64 = f.user_data_64 orelse 0,
                     .user_data_32 = f.user_data_32 orelse 0,
                     .code = f.code orelse 0,
-                    .timestamp_min = timestamp_min,
-                    .timestamp_max = timestamp_max,
-                    .limit = f.limit,
-                    .flags = .{
-                        .debits = f.flags_debits != null,
-                        .credits = f.flags_credits != null,
-                        .reversed = f.flags_reversed != null,
-                    },
-                };
-                try request.appendSlice(std.mem.asBytes(&event));
-            },
-            .get_account_transfers_former => |f| {
-                assert(operation == null or operation.? == .get_account_transfers);
-                operation = .get_account_transfers;
-
-                const timestamp_min =
-                    if (f.timestamp_min_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-                const timestamp_max =
-                    if (f.timestamp_max_transfer_id) |id| transfers.get(id).?.timestamp else 0;
-
-                const event = TestContext.StateMachine.AccountFilterFormer{
-                    .account_id = f.account_id,
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
@@ -4039,6 +4266,14 @@ fn check(test_table: []const u8) !void {
                 assert(operation.? == .query_transfers);
                 try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
             },
+            .get_events => {
+                assert(operation == null or operation.? == .get_events);
+                operation = .get_events;
+            },
+            .get_events_result => |*t| {
+                assert(operation.? == .get_events);
+                try reply.appendSlice(std.mem.asBytes(t));
+            },
             .commit => |commit_operation| {
                 assert(operation == null or operation.? == commit_operation);
                 assert(!context.busy);
@@ -4050,25 +4285,26 @@ fn check(test_table: []const u8) !void {
                 );
                 defer allocator.free(reply_actual_buffer);
 
-                context.state_machine.commit_timestamp = context.state_machine.prepare_timestamp;
-                context.state_machine.prepare_timestamp += 1;
-                context.state_machine.prepare(
-                    context.client_release,
-                    commit_operation,
-                    request.items,
-                );
+                context.prepare(commit_operation, request.items);
 
-                if (context.state_machine.pulse_needed(context.state_machine.prepare_timestamp)) {
+                const pulse_needed = context.state_machine.pulse_needed(
+                    context.state_machine.prepare_timestamp,
+                );
+                maybe(pulse_needed);
+                // Pulse is executed in a best-effort manner
+                // after committing the current pipelined operation.
+                defer if (pulse_needed) {
+                    const pulse = vsr.Operation.pulse.cast(TestContext.StateMachine);
+                    context.prepare(pulse, &.{});
                     const pulse_size = context.execute(
                         op,
-                        vsr.Operation.pulse.cast(TestContext.StateMachine),
+                        pulse,
                         &.{},
                         reply_actual_buffer[0..TestContext.message_body_size_max],
                     );
                     assert(pulse_size == 0);
-
                     op += 1;
-                }
+                };
 
                 const reply_actual_size = context.execute(
                     op,
@@ -4088,6 +4324,17 @@ fn check(test_table: []const u8) !void {
                             mem.bytesAsSlice(Result, reply.items),
                             mem.bytesAsSlice(Result, reply_actual),
                         );
+                    },
+                    .get_events => {
+                        const results_actual = mem.bytesAsSlice(
+                            TestContext.AccountEvent,
+                            reply_actual,
+                        );
+                        const results_expected = mem.bytesAsSlice(TestEventResult, reply.items);
+                        try testing.expectEqual(results_actual.len, results_expected.len);
+                        for (results_actual, results_expected) |*actual, *expected| {
+                            try testing.expect(expected.match(&accounts, &transfers, actual));
+                        }
                     },
                     .pulse => unreachable,
                 }
@@ -4334,16 +4581,8 @@ test "create_transfers/lookup_transfers" {
         \\ transfer   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ commit create_transfers
         \\
-        // Ensure compatibility with clients < 0.16.4
-        \\ setup_client_release 0 16 3
-        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
-        \\ transfer   T9 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
-        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ ok
-        \\ transfer   T9 A1 A3    1   _  _  _  _    _ L2 C1   _ _     _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 223 204   0   7  _
-        \\ lookup_account A3   0   7 233 214  _
+        \\ lookup_account A1 223 203   0   7  _
+        \\ lookup_account A3   0   7 233 213  _
         \\ commit lookup_accounts
         \\
         \\ lookup_transfer T5 exists true
@@ -4451,34 +4690,9 @@ test "create/lookup 2-phase transfers" {
         \\ transfer T107 A0 A0    1  T7 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > e.amount
         \\ commit create_transfers
 
-        // Ensure compatibility with client < 0.16.0
-        \\ setup_client_release 0 15 3
-        \\
-        \\ transfer T20  A1 A2    0   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ amount_must_not_be_zero
-        \\ transfer T20  A1 A2    7   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T21  A1 A2    2   _  _  _  _   _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
-        \\
-        \\ transfer T201 A0 A0   -0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T201 A0 A0   -1 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok
-        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
-        \\ transfer T201 A0 A0    7 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists // ledger/code = 0
-        \\ transfer T201 A0 A0    0 T20 U0 U0 U0    _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists // amount = 0
-        \\ transfer T201 A0 A0    8 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
-        \\ transfer T201 A0 A0    6 T20 U0 U0 U0    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < e.amount
-        \\
-        \\ transfer T202 A0 A0   -0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T202 A0 A0   -1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exceeds_pending_transfer_amount
-        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ ok
-        \\ transfer T202 A0 A0    0 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists
-        \\ transfer T202 A0 A0    1 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount < p.amount
-        \\ transfer T202 A0 A0    2 T21 U0 U0 U0    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ exists
-        \\ transfer T202 A0 A0    3 T21 U0 U0 U0    _ L1 C1   _   _   _ VOI   _   _  _ _ _ _ _ exists_with_different_amount // t.amount > p.amount
-        \\ commit create_transfers
-
         // Check balances after resolving.
-        \\ lookup_account A1  0 43  0  0  _
-        \\ lookup_account A2  0  0  0 43  _
+        \\ lookup_account A1  0 36  0  0  _
+        \\ lookup_account A2  0  0  0 36  _
         \\ commit lookup_accounts
 
         // The posted transfer amounts are set to the actual amount posted (which may be less than
@@ -4487,9 +4701,6 @@ test "create/lookup 2-phase transfers" {
         \\ lookup_transfer T105 amount 7
         \\ lookup_transfer T106 amount 1
         \\ lookup_transfer T107 amount 0
-        \\
-        \\ lookup_transfer T201 amount 7
-        \\ lookup_transfer T202 amount 2
         \\ commit lookup_transfers
     );
 }
@@ -4824,36 +5035,6 @@ test "create_transfers: balancing_debit | balancing_credit (amount=maxInt, balan
         \\
         \\ transfer   T1 A1 A2   -0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
         \\ transfer   T2 A3 A4   -0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
-        \\ commit create_transfers
-        \\
-        \\ lookup_account A1 0 -1  0 -1 _
-        \\ lookup_account A2 0  0  0 -1 _
-        \\ lookup_account A3 0 -1  0  0 _
-        \\ lookup_account A4 0 -1  0 -1 _
-        \\ commit lookup_accounts
-        \\
-        \\ lookup_transfer T1 amount -1
-        \\ lookup_transfer T2 amount -1
-        \\ commit lookup_transfers
-    );
-}
-
-test "create_transfers: balancing_debit | balancing_credit (amount=0, balance≈maxInt)" {
-    // Ensure compatibility with clients < 0.16.0
-    try check(
-        \\ setup_client_release 0 15 3
-        \\
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
-        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
-        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
-        \\ commit create_accounts
-        \\
-        \\ setup A1 0  0 0 -1
-        \\ setup A4 0 -1 0  0
-        \\
-        \\ transfer   T1 A1 A2   0   _  _  _  _    _ L1 C1   _   _   _   _ BDR   _  _ _ _ _ _ ok
-        \\ transfer   T2 A3 A4   0   _  _  _  _    _ L1 C1   _   _   _   _   _ BCR  _ _ _ _ _ ok
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0 -1  0 -1 _
@@ -5621,38 +5802,6 @@ test "get_account_balances: invalid filter" {
     );
 }
 
-test "get_account_transfers_former / get_account_balances_former" {
-    try check(
-        \\ setup_client_release 0 15 3
-        \\
-        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
-        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _ _ _ HIST _ _ _ _ ok
-        \\ commit create_accounts
-        \\
-        \\ transfer T1 A1 A2   10   _  U1000  U10  U1 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T2 A2 A1   11   _  U1001  U10  U2 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T3 A1 A2   12   _  U1000  U20  U2 _ L1 C1   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ transfer T4 A2 A1   13   _  U1001  U20  U1 _ L1 C2   _   _   _   _   _   _  _ _ _ _ _ ok
-        \\ commit create_transfers
-
-        // Debits + credits, chronological.
-        \\ get_account_transfers_former A1 _  _ 10 DR CR  _
-        \\ get_account_transfers_result T1
-        \\ get_account_transfers_result T2
-        \\ get_account_transfers_result T3
-        \\ get_account_transfers_result T4
-        \\ commit get_account_transfers
-
-        // Debits + credits, chronological.
-        \\ get_account_balances_former A1 _  _ 10 DR CR  _
-        \\ get_account_balances_result T1 0 10 0  0
-        \\ get_account_balances_result T2 0 10 0 11
-        \\ get_account_balances_result T3 0 22 0 11
-        \\ get_account_balances_result T4 0 22 0 24
-        \\ commit get_account_balances
-    );
-}
-
 test "query_accounts" {
     try check(
         \\ account A1  0  0  0  0 U1000 U10 U1 _ L1 C1 _   _   _ _ _ _ _ _ ok
@@ -5970,6 +6119,45 @@ test "query_transfers" {
     );
 }
 
+test "get_events" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ commit create_accounts
+
+        // First phase.
+        \\ transfer   T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _ _ _ ok // Not pending.
+        \\ transfer   T2 A1 A2   11   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Timeout zero will never expire.
+        \\ transfer   T3 A1 A2   12   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will expire.
+        \\ transfer   T4 A1 A2   13   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will be posted.
+        \\ transfer   T5 A1 A2   14   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will be voided.
+        \\ transfer   T6 A1 A3    0   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ CCR _ _ ok // Closes the credit account.
+        \\ commit create_transfers
+
+        // Bump the state machine time in +1s for testing the timeout expiration.
+        \\ tick 1 seconds
+
+        // Second phase.
+        \\ transfer  T14 A0 A0   -0  T4  _  _  _    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok // Posts T4.
+        \\ transfer  T15 A0 A0    0  T5  _  _  _    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ ok // Voids T5.
+        \\ commit create_transfers
+
+        // Check the events.
+        \\ get_events
+        \\ get_events_result   _  T1 10 10  _ DR A1  0 10  0  0 _ CR A2  0  0  0 10 _
+        \\ get_events_result PEN  T2 11 11  _ DR A1 11 10  0  0 _ CR A2  0  0 11 10 _
+        \\ get_events_result PEN  T3 12 12  _ DR A1 23 10  0  0 _ CR A2  0  0 23 10 _
+        \\ get_events_result PEN  T4 13 13  _ DR A1 36 10  0  0 _ CR A2  0  0 36 10 _
+        \\ get_events_result PEN  T5 14 14  _ DR A1 50 10  0  0 _ CR A2  0  0 50 10 _
+        \\ get_events_result PEN  T6  0  0  _ DR A1 50 10  0  0 _ CR A3  0  0  0  0 CLSD
+        \\ get_events_result EXP   _  0 12 T3 DR A1 38 10  0  0 _ CR A2  0  0 38 10 _
+        \\ get_events_result POS T14 -0 13 T4 DR A1 25 23  0  0 _ CR A2  0  0 25 23 _
+        \\ get_events_result VOI T15  0 14 T5 DR A1 11 23  0  0 _ CR A2  0  0 11 23 _
+        \\ commit get_events
+    );
+}
+
 test "StateMachine: input_valid" {
     const allocator = std.testing.allocator;
     const input = try allocator.alignedAlloc(u8, 16, 2 * TestContext.message_body_size_max);
@@ -5983,63 +6171,63 @@ test "StateMachine: input_valid" {
     };
 
     const events = comptime events: {
-        var array: []const Event = &.{};
-        for (std.enums.values(TestContext.StateMachine.Operation)) |operation| {
-            array = switch (operation) {
-                .pulse => array ++ [_]Event{.{
+        var array: [std.enums.values(TestContext.StateMachine.Operation).len]Event = undefined;
+        for (std.enums.values(TestContext.StateMachine.Operation), 0..) |operation, i| {
+            array[i] = switch (operation) {
+                .pulse, .get_events => .{
                     .operation = operation,
                     .min = 0,
                     .max = 0,
                     .size = 0,
-                }},
-                .create_accounts => array ++ [_]Event{.{
+                },
+                .create_accounts => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(Account),
-                }},
-                .create_transfers => array ++ [_]Event{.{
+                },
+                .create_transfers => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(Transfer),
-                }},
-                .lookup_accounts => array ++ [_]Event{.{
+                },
+                .lookup_accounts => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Account)),
                     .size = @sizeOf(u128),
-                }},
-                .lookup_transfers => array ++ [_]Event{.{
+                },
+                .lookup_transfers => .{
                     .operation = operation,
                     .min = 0,
                     .max = @divExact(TestContext.message_body_size_max, @sizeOf(Transfer)),
                     .size = @sizeOf(u128),
-                }},
-                .get_account_transfers => array ++ [_]Event{.{
+                },
+                .get_account_transfers => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(AccountFilter),
-                }},
-                .get_account_balances => array ++ [_]Event{.{
+                },
+                .get_account_balances => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(AccountFilter),
-                }},
-                .query_accounts => array ++ [_]Event{.{
+                },
+                .query_accounts => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(QueryFilter),
-                }},
-                .query_transfers => array ++ [_]Event{.{
+                },
+                .query_transfers => .{
                     .operation = operation,
                     .min = 1,
                     .max = 1,
                     .size = @sizeOf(QueryFilter),
-                }},
+                },
             };
         }
         break :events array;
@@ -6051,7 +6239,6 @@ test "StateMachine: input_valid" {
 
     for (events) |event| {
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0..0],
         ) == (event.min == 0));
@@ -6063,18 +6250,15 @@ test "StateMachine: input_valid" {
         }
 
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. 1 * event.size],
         ));
         try std.testing.expect(context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. event.max * event.size],
         ));
         if ((event.max + 1) * event.size < TestContext.message_body_size_max) {
             try std.testing.expect(!context.state_machine.input_valid(
-                context.client_release,
                 event.operation,
                 input[0 .. (event.max + 1) * event.size],
             ));
@@ -6083,7 +6267,6 @@ test "StateMachine: input_valid" {
             // on an assert.
         }
         try std.testing.expect(!context.state_machine.input_valid(
-            context.client_release,
             event.operation,
             input[0 .. 3 * (event.size / 2)],
         ));
@@ -6096,7 +6279,7 @@ test "StateMachine: Demuxer" {
         global_constants.state_machine_config,
     );
 
-    var prng = std.rand.DefaultPrng.init(42);
+    var prng = stdx.PRNG.from_seed(42);
     inline for ([_]StateMachine.Operation{
         .create_accounts,
         .create_transfers,
@@ -6111,7 +6294,7 @@ test "StateMachine: Demuxer" {
             // Generate Result errors to Events at random.
             var reply_len: u32 = 0;
             for (0..results.len) |i| {
-                if (prng.random().boolean()) {
+                if (prng.boolean()) {
                     results[reply_len] = .{ .index = @intCast(i), .result = .ok };
                     reply_len += 1;
                 }
@@ -6120,16 +6303,10 @@ test "StateMachine: Demuxer" {
             // Demux events of random strides from the generated results.
             var demuxer = StateMachine.DemuxerType(operation)
                 .init(mem.sliceAsBytes(results[0..reply_len]));
-            const event_count: u32 = @intCast(@max(
-                1,
-                prng.random().uintAtMost(usize, results.len),
-            ));
+            const event_count: u32 = prng.range_inclusive(u32, 1, results.len);
             var event_offset: u32 = 0;
             while (event_offset < event_count) {
-                const event_size = @max(
-                    1,
-                    prng.random().uintAtMost(u32, event_count - event_offset),
-                );
+                const event_size = prng.range_inclusive(u32, 1, event_count - event_offset);
                 const reply: []Result = @alignCast(
                     mem.bytesAsSlice(Result, demuxer.decode(event_offset, event_size)),
                 );

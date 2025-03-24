@@ -83,6 +83,10 @@ func HexStringToUint128(value string) (Uint128, error) {
 
 // BigIntToUint128 converts a [math/big.Int] to a Uint128.
 func BigIntToUint128(value big.Int) Uint128 {
+	if value.Sign() < 0 {
+		panic("cannot convert negative big.Int to Uint128")
+	}
+
 	// big.Int bytes are big-endian so convert them to little-endian for Uint128 bytes.
 	bytes := value.Bytes()
 	swapEndian(bytes[:])

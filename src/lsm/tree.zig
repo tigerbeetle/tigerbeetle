@@ -136,7 +136,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             });
             errdefer tree.table_immutable.deinit(allocator);
 
-            try tree.manifest.init(allocator, node_pool, config);
+            try tree.manifest.init(allocator, node_pool, config, grid.trace);
             errdefer tree.manifest.deinit(allocator);
 
             for (0..tree.compactions.len) |i| {
@@ -501,8 +501,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         pub fn compact(tree: *Tree) void {
             assert(tree.table_mutable.mutability == .mutable);
 
-            tree.grid.trace.start(.compact_mutable_suffix, .{ .tree = tree.config.name });
-            defer tree.grid.trace.stop(.compact_mutable_suffix, .{ .tree = tree.config.name });
+            tree.grid.trace.start(.{ .compact_mutable_suffix = .{
+                .tree = @enumFromInt(tree.config.id),
+            } });
+            defer tree.grid.trace.stop(.{ .compact_mutable_suffix = .{
+                .tree = @enumFromInt(tree.config.id),
+            } });
 
             // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
             // each bar (or immediately prior to scans).
@@ -516,8 +520,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             assert(snapshot_min > 0);
             assert(snapshot_min < snapshot_latest);
 
-            tree.grid.trace.start(.compact_mutable, .{ .tree = tree.config.name });
-            defer tree.grid.trace.stop(.compact_mutable, .{ .tree = tree.config.name });
+            tree.grid.trace.start(.{ .compact_mutable = .{
+                .tree = @enumFromInt(tree.config.id),
+            } });
+            defer tree.grid.trace.stop(.{ .compact_mutable = .{
+                .tree = @enumFromInt(tree.config.id),
+            } });
 
             if (tree.table_immutable.mutability.immutable.flushed) {
                 // The immutable table must be visible to the next bar.
@@ -562,6 +570,17 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             if (constants.verify) {
                 tree.manifest.assert_no_invisible_tables(&.{});
+            }
+        }
+
+        // Returns the last segment of the tree's fully qualified value type name.
+        // Inline function, so it can be fully resolved at comptime.
+        pub inline fn tree_name() []const u8 {
+            const name_full = @typeName(Value);
+            if (comptime std.mem.lastIndexOfScalar(u8, name_full, '.')) |offset| {
+                return name_full[offset + 1 ..];
+            } else {
+                return name_full;
             }
         }
     };

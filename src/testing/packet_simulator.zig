@@ -6,6 +6,9 @@ const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
 const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
+const stdx = @import("../stdx.zig");
+const Ratio = stdx.PRNG.Ratio;
+const ratio = stdx.PRNG.ratio;
 
 pub const PacketSimulatorOptions = struct {
     node_count: u8,
@@ -18,8 +21,8 @@ pub const PacketSimulatorOptions = struct {
     one_way_delay_mean: u64,
     one_way_delay_min: u64,
 
-    packet_loss_probability: u8 = 0,
-    packet_replay_probability: u8 = 0,
+    packet_loss_probability: Ratio = ratio(0, 100),
+    packet_replay_probability: Ratio = ratio(0, 100),
 
     /// How the partitions should be generated
     partition_mode: PartitionMode = .none,
@@ -27,10 +30,10 @@ pub const PacketSimulatorOptions = struct {
     partition_symmetry: PartitionSymmetry = .symmetric,
 
     /// Probability per tick that a partition will occur
-    partition_probability: u8 = 0,
+    partition_probability: Ratio = ratio(0, 100),
 
     /// Probability per tick that a partition will resolve
-    unpartition_probability: u8 = 0,
+    unpartition_probability: Ratio = ratio(0, 100),
 
     /// Minimum time a partition lasts
     partition_stability: u32 = 0,
@@ -43,7 +46,7 @@ pub const PacketSimulatorOptions = struct {
 
     /// Mean for the exponential distribution used to calculate how long a path is clogged for.
     path_clog_duration_mean: u64,
-    path_clog_probability: u8,
+    path_clog_probability: Ratio,
 };
 
 pub const Path = struct {
@@ -118,7 +121,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         const Recorded = std.ArrayListUnmanaged(RecordedPacket);
 
         options: PacketSimulatorOptions,
-        prng: std.rand.DefaultPrng,
+        prng: stdx.PRNG,
         ticks: u64 = 0,
 
         /// A send and receive path between each node in the network.
@@ -168,7 +171,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             return PacketSimulator{
                 .options = options,
-                .prng = std.rand.DefaultPrng.init(options.seed),
+                .prng = stdx.PRNG.from_seed(options.seed),
                 .links = links,
 
                 .recorded = recorded,
@@ -247,7 +250,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         fn should_drop(self: *PacketSimulator) bool {
-            return self.prng.random().uintAtMost(u8, 100) < self.options.packet_loss_probability;
+            return self.prng.chance(self.options.packet_loss_probability);
         }
 
         fn is_clogged(self: *PacketSimulator, path: Path) bool {
@@ -257,7 +260,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn should_clog(self: *PacketSimulator, path: Path) bool {
             _ = path;
 
-            return self.prng.random().uintAtMost(u8, 100) < self.options.path_clog_probability;
+            return self.prng.chance(self.options.path_clog_probability);
         }
 
         fn clog_for(self: *PacketSimulator, path: Path, ticks: u64) void {
@@ -271,15 +274,15 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         fn should_replay(self: *PacketSimulator) bool {
-            return self.prng.random().uintAtMost(u8, 100) < self.options.packet_replay_probability;
+            return self.prng.chance(self.options.packet_replay_probability);
         }
 
         fn should_partition(self: *PacketSimulator) bool {
-            return self.prng.random().uintAtMost(u8, 100) < self.options.partition_probability;
+            return self.prng.chance(self.options.partition_probability);
         }
 
         fn should_unpartition(self: *PacketSimulator) bool {
-            return self.prng.random().uintAtMost(u8, 100) < self.options.unpartition_probability;
+            return self.prng.chance(self.options.unpartition_probability);
         }
 
         /// Return a value produced using an exponential distribution with
@@ -287,45 +290,43 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn one_way_delay(self: *PacketSimulator) u64 {
             const min = self.options.one_way_delay_min;
             const mean = self.options.one_way_delay_mean;
-            return min + fuzz.random_int_exponential(self.prng.random(), u64, mean - min);
+            return min + fuzz.random_int_exponential(&self.prng, u64, mean - min);
         }
 
         /// Partitions the network. Guaranteed to isolate at least one replica.
         fn auto_partition_network(self: *PacketSimulator) void {
             assert(self.options.node_count > 1);
 
-            const random = self.prng.random();
             var partition = self.auto_partition;
             switch (self.options.partition_mode) {
                 .none => @memset(partition, false),
                 .uniform_size => {
-                    // Exclude cases partition_size == 0 and partition_size == node_count
                     const partition_size =
-                        1 + random.uintAtMost(u8, self.options.node_count - 2);
-                    random.shuffle(u8, self.auto_partition_nodes);
+                        self.prng.range_inclusive(u8, 1, self.options.node_count - 1);
+                    self.prng.shuffle(u8, self.auto_partition_nodes);
                     for (self.auto_partition_nodes, 0..) |r, i| {
                         partition[r] = i < partition_size;
                     }
                 },
                 .uniform_partition => {
                     var only_same = true;
-                    partition[0] = random.uintLessThan(u8, 2) == 1;
+                    partition[0] = self.prng.boolean();
 
                     var i: usize = 1;
                     while (i < self.options.node_count) : (i += 1) {
-                        partition[i] = random.uintLessThan(u8, 2) == 1;
+                        partition[i] = self.prng.boolean();
                         only_same =
                             only_same and (partition[i - 1] == partition[i]);
                     }
 
                     if (only_same) {
-                        const n = random.uintLessThan(u8, self.options.node_count);
+                        const n = self.prng.index(partition);
                         partition[n] = true;
                     }
                 },
                 .isolate_single => {
                     @memset(partition, false);
-                    const n = random.uintLessThan(u8, self.options.node_count);
+                    const n = self.prng.index(partition);
                     partition[n] = true;
                 },
             }
@@ -333,12 +334,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.auto_partition_active = true;
             self.auto_partition_stability = self.options.partition_stability;
 
-            const asymmetric_partition_side = random.boolean();
+            const asymmetric_partition_side = self.prng.boolean();
             var from: u8 = 0;
             while (from < self.process_count()) : (from += 1) {
                 var to: u8 = 0;
                 while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
+                    const path: Path = .{ .source = from, .target = to };
                     const enabled =
                         from >= self.options.node_count or
                         to >= self.options.node_count or
@@ -349,6 +350,38 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }
             }
+        }
+
+        pub fn step(self: *PacketSimulator) bool {
+            const ReadyPacket = struct { path: Path, link_packet: LinkPacket };
+            var packets: [32]ReadyPacket = undefined;
+            var packet_count: u32 = 0;
+
+            for (0..self.process_count()) |from| {
+                for (0..self.process_count()) |to| {
+                    const path: Path = .{ .source = @intCast(from), .target = @intCast(to) };
+                    if (self.is_clogged(path)) continue;
+
+                    const queue = &self.links[self.path_index(path)].queue;
+                    while (queue.peek()) |*head| {
+                        if (head.expiry > self.ticks) break;
+                        if (packet_count == packets.len) break;
+
+                        const link_packet = queue.remove();
+                        packets[packet_count] = .{ .path = path, .link_packet = link_packet };
+                        packet_count += 1;
+                    }
+                }
+            }
+            if (packet_count == 0) return false;
+
+            self.prng.shuffle(ReadyPacket, packets[0..packet_count]);
+            for (packets[0..packet_count]) |ready| {
+                self.submit_packet_finish(ready.path, ready.link_packet);
+                ready.link_packet.packet.deinit();
+            }
+
+            return true;
         }
 
         pub fn tick(self: *PacketSimulator) void {
@@ -373,55 +406,16 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 }
             }
 
-            var from: u8 = 0;
-            while (from < self.process_count()) : (from += 1) {
-                var to: u8 = 0;
-                while (to < self.process_count()) : (to += 1) {
-                    const path = .{ .source = from, .target = to };
-                    if (self.is_clogged(path)) continue;
-
-                    const queue = &self.links[self.path_index(path)].queue;
-                    while (queue.peek()) |*link_packet| {
-                        if (link_packet.expiry > self.ticks) break;
-
-                        _ = queue.remove();
-                        defer link_packet.packet.deinit();
-
-                        if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
-                            log.warn(
-                                "dropped packet (different partitions): from={} to={}",
-                                .{ from, to },
-                            );
-                            continue;
-                        }
-
-                        if (self.should_drop()) {
-                            log.warn("dropped packet from={} to={}", .{ from, to });
-                            continue;
-                        }
-
-                        if (self.should_replay()) {
-                            self.submit_packet(
-                                link_packet.packet.clone(),
-                                link_packet.callback,
-                                path,
-                            );
-                            log.debug("replayed packet from={} to={}", .{ from, to });
-                        }
-
-                        log.debug("delivering packet from={} to={}", .{ from, to });
-                        link_packet.callback(link_packet.packet, path);
-                    }
-
-                    const reverse_path: Path = .{ .source = to, .target = from };
-
-                    if (self.should_clog(reverse_path)) {
+            for (0..self.process_count()) |from| {
+                for (0..self.process_count()) |to| {
+                    const path: Path = .{ .source = @intCast(from), .target = @intCast(to) };
+                    if (self.should_clog(path)) {
                         const ticks = fuzz.random_int_exponential(
-                            self.prng.random(),
+                            &self.prng,
                             u64,
                             self.options.path_clog_duration_mean,
                         );
-                        self.clog_for(reverse_path, ticks);
+                        self.clog_for(path, ticks);
                     }
                 }
             }
@@ -434,9 +428,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
-            const queue_length = queue.count();
-            if (queue_length + 1 > self.options.path_maximum_capacity) {
-                const index = self.prng.random().uintLessThanBiased(u64, queue_length);
+            const queue_count = queue.count();
+            if (queue_count + 1 > self.options.path_maximum_capacity) {
+                const index = self.prng.int_inclusive(u64, queue_count - 1);
                 const link_packet = queue.removeIndex(index);
                 link_packet.packet.deinit();
                 log.warn("submit_packet: {} reached capacity, dropped packet={}", .{
@@ -459,6 +453,34 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     .path = path,
                 };
             }
+        }
+
+        fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
+            assert(link_packet.expiry <= self.ticks);
+            if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
+                log.warn(
+                    "dropped packet (different partitions): from={} to={}",
+                    .{ path.source, path.target },
+                );
+                return;
+            }
+
+            if (self.should_drop()) {
+                log.warn("dropped packet from={} to={}", .{ path.source, path.target });
+                return;
+            }
+
+            if (self.should_replay()) {
+                self.submit_packet(
+                    link_packet.packet.clone(),
+                    link_packet.callback,
+                    path,
+                );
+                log.debug("replayed packet from={} to={}", .{ path.source, path.target });
+            }
+
+            log.debug("delivering packet from={} to={}", .{ path.source, path.target });
+            link_packet.callback(link_packet.packet, path);
         }
     };
 }

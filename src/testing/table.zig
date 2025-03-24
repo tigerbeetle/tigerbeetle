@@ -7,12 +7,12 @@ const stdx = @import("../stdx.zig");
 /// See test cases for example usage.
 pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType(Row, 128) {
     var rows = stdx.BoundedArrayType(Row, 128){};
-    var row_strings = std.mem.tokenizeAny(u8, table_string, "\n");
+    var row_strings = std.mem.tokenizeScalar(u8, table_string, '\n');
     while (row_strings.next()) |row_string| {
         // Ignore blank line.
         if (row_string.len == 0) continue;
 
-        var columns = std.mem.tokenizeAny(u8, row_string, " ");
+        var columns = std.mem.tokenizeScalar(u8, row_string, ' ');
         const row = parse_data(Row, &columns);
         rows.append_assume_capacity(row);
 
@@ -22,7 +22,7 @@ pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType
     return rows;
 }
 
-fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Data {
+fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .scalar)) Data {
     return switch (@typeInfo(Data)) {
         .Optional => |info| parse_data(info.child, tokens),
         .Enum => field(Data, tokens.next().?),
@@ -92,7 +92,7 @@ fn parse_data(comptime Data: type, tokens: *std.mem.TokenIterator(u8, .any)) Dat
     };
 }
 
-fn eat(tokens: *std.mem.TokenIterator(u8, .any), token: []const u8) bool {
+fn eat(tokens: *std.mem.TokenIterator(u8, .scalar), token: []const u8) bool {
     const index_before = tokens.index;
     if (std.mem.eql(u8, tokens.next().?, token)) return true;
     tokens.index = index_before;

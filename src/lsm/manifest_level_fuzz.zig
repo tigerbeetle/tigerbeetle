@@ -24,6 +24,7 @@
 //! - Tables invisible to snapshot_latest and the current snapshot can be removed.
 //!
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.lsm_manifest_level_fuzz);
@@ -63,22 +64,21 @@ const Table = @import("table.zig").TableType(
 );
 
 pub fn main(args: fuzz.FuzzArgs) !void {
-    var prng = std.rand.DefaultPrng.init(args.seed);
-    const random = prng.random();
+    var prng = stdx.PRNG.from_seed(args.seed);
 
     const fuzz_op_count = @min(
         args.events_max orelse @as(usize, 2e5),
-        fuzz.random_int_exponential(random, usize, 1e5),
+        fuzz.random_int_exponential(&prng, usize, 1e5),
     );
 
     const table_count_max_tree = 1024;
     const node_size = 1024;
 
-    const fuzz_ops = try generate_fuzz_ops(random, table_count_max_tree, fuzz_op_count);
+    const fuzz_ops = try generate_fuzz_ops(&prng, table_count_max_tree, fuzz_op_count);
     defer allocator.free(fuzz_ops);
 
     const Environment = EnvironmentType(@as(u32, table_count_max_tree), node_size);
-    var env = try Environment.init(random);
+    var env = try Environment.init(&prng);
     try env.run_fuzz_ops(fuzz_ops);
     try env.deinit();
 }
@@ -96,7 +96,7 @@ const FuzzOp = union(enum) {
 const max_tables_per_insert = 10;
 
 fn generate_fuzz_ops(
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     table_count_max_tree: usize,
     fuzz_op_count: usize,
 ) ![]const FuzzOp {
@@ -106,18 +106,18 @@ fn generate_fuzz_ops(
     errdefer allocator.free(fuzz_ops);
 
     // TODO: These seem good enough, but we should find proper distributions.
-    const fuzz_op_distribution = fuzz.DistributionType(FuzzOpTag){
+    const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
         .insert_tables = 8,
         .update_tables = 5,
         .take_snapshot = 3,
         .remove_invisible = 3,
         .remove_visible = 3,
     };
-    log.info("fuzz_op_distribution = {:.2}", .{fuzz_op_distribution});
+    log.info("fuzz_op_weights = {:.2}", .{fuzz_op_weights});
 
-    var ctx = GenerateContext{ .max_inserted = table_count_max_tree, .random = random };
+    var ctx = GenerateContext{ .max_inserted = table_count_max_tree, .prng = prng };
     for (fuzz_ops) |*fuzz_op| {
-        const fuzz_op_tag = fuzz.random_enum(random, FuzzOpTag, fuzz_op_distribution);
+        const fuzz_op_tag = prng.enum_weighted(FuzzOpTag, fuzz_op_weights);
         fuzz_op.* = ctx.next(fuzz_op_tag);
     }
 
@@ -129,7 +129,7 @@ const GenerateContext = struct {
     updated: usize = 0,
     invisible: usize = 0,
     max_inserted: usize,
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
 
     fn next(ctx: *GenerateContext, fuzz_op_tag: FuzzOpTag) FuzzOp {
         switch (fuzz_op_tag) {
@@ -142,7 +142,7 @@ const GenerateContext = struct {
                     return ctx.next(.remove_visible);
                 }
 
-                const amount = ctx.random.intRangeAtMostBiased(usize, 1, insertable);
+                const amount = ctx.prng.range_inclusive(usize, 1, insertable);
                 ctx.inserted += amount;
                 assert(ctx.invisible <= ctx.inserted);
                 assert(ctx.invisible + ctx.updated <= ctx.inserted);
@@ -154,10 +154,10 @@ const GenerateContext = struct {
                 if (visible_latest == 0) return ctx.next(.insert_tables);
 
                 // Decide if all, or tables visible to snapshot_latest should be updated.
-                const amount = if (ctx.random.boolean())
+                const amount = if (ctx.prng.boolean())
                     visible_latest
                 else
-                    ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
+                    ctx.prng.range_inclusive(usize, 1, visible_latest);
 
                 ctx.updated += amount;
                 assert(ctx.invisible <= ctx.inserted);
@@ -182,10 +182,10 @@ const GenerateContext = struct {
                 }
 
                 // Decide if all invisible tables should be removed.
-                const amount = if (ctx.random.boolean())
+                const amount = if (ctx.prng.boolean())
                     invisible
                 else
-                    ctx.random.intRangeAtMostBiased(usize, 1, invisible);
+                    ctx.prng.range_inclusive(usize, 1, invisible);
 
                 ctx.inserted -= amount;
                 ctx.invisible -= amount;
@@ -203,10 +203,10 @@ const GenerateContext = struct {
                 }
 
                 // Decide if all tables visible to snapshot_latest should be removed.
-                const amount = if (ctx.random.boolean())
+                const amount = if (ctx.prng.boolean())
                     visible_latest
                 else
-                    ctx.random.intRangeAtMostBiased(usize, 1, visible_latest);
+                    ctx.prng.range_inclusive(usize, 1, visible_latest);
 
                 ctx.inserted -= amount;
                 assert(ctx.invisible <= ctx.inserted);
@@ -234,10 +234,10 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         level: ManifestLevel,
         buffer: TableBuffer,
         tables: TableBuffer,
-        random: std.rand.Random,
+        prng: *stdx.PRNG,
         snapshot: u64,
 
-        pub fn init(random: std.rand.Random) !Environment {
+        pub fn init(prng: *stdx.PRNG) !Environment {
             var env: Environment = undefined;
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +
@@ -254,7 +254,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             env.tables = TableBuffer.init(allocator);
             errdefer env.tables.deinit();
 
-            env.random = random;
+            env.prng = prng;
             env.snapshot = 1; // the first snapshot is reserved.
             return env;
         }
@@ -286,7 +286,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             // Generate random, non-overlapping TableInfo's into env.buffer:
             {
                 var insert_amount = amount;
-                var key = env.random.uintAtMostBiased(Key, table_count_max_tree * 64);
+                var key = env.prng.int_inclusive(Key, table_count_max_tree * 64);
 
                 while (insert_amount > 0) : (insert_amount -= 1) {
                     const table = env.generate_non_overlapping_table(key);
@@ -326,7 +326,7 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         }
 
         fn generate_non_overlapping_table(env: *Environment, key: Key) TableInfo {
-            var new_key_min = key + env.random.uintLessThanBiased(Key, 31) + 1;
+            var new_key_min = key + env.prng.int_inclusive(Key, 30) + 1;
             assert(new_key_min > key);
 
             const i = binary_search.binary_search_values_upsert_index(
@@ -353,12 +353,12 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             } else std.math.maxInt(Key);
 
             const max_delta = @min(32, next_key_min - 1 - new_key_min);
-            const new_key_max = new_key_min + env.random.uintAtMostBiased(Key, max_delta);
+            const new_key_max = new_key_min + env.prng.int_inclusive(Key, max_delta);
 
             return .{
-                .checksum = env.random.int(u128),
+                .checksum = env.prng.int(u128),
                 // Zero addresses are used to indicate the table being removed.
-                .address = env.random.intRangeAtMostBiased(u64, 1, std.math.maxInt(u64)),
+                .address = env.prng.int(u64) +| 1,
                 .snapshot_min = env.snapshot,
                 .key_min = new_key_min,
                 .key_max = new_key_max,

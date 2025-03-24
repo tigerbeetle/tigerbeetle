@@ -19,6 +19,7 @@ const log = std.log;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const stdx = @import("stdx.zig");
 const Shell = @This();
 
 const cwd_stack_max = 16;
@@ -151,10 +152,10 @@ pub fn open_section(shell: *Shell, name: []const u8) !Section {
 const Section = struct {
     ci: bool,
     name: []const u8,
-    start: std.time.Instant,
+    start: stdx.Instant,
 
     fn open(ci: bool, name: []const u8) !Section {
-        const start = try std.time.Instant.now();
+        const start = stdx.Instant.now();
         if (ci) {
             // See
             // https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#grouping-log-lines
@@ -170,10 +171,9 @@ const Section = struct {
     }
 
     pub fn close(section: *Section) void {
-        if (std.time.Instant.now()) |now| {
-            const elapsed_nanos = now.since(section.start);
-            std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed_nanos) });
-        } else |_| {}
+        const now = stdx.Instant.now();
+        const elapsed = now.duration_since(section.start);
+        std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed.nanoseconds) });
         if (section.ci) {
             std.io.getStdOut().writer().print("::endgroup::\n", .{}) catch {};
         }
@@ -539,7 +539,7 @@ fn exec_inner(
 
     if (options.capture_stdout) |destination| {
         const stdout = poller.?.fifo(.stdout).readableSlice(0);
-        const trailing_newline = if (std.mem.indexOf(u8, stdout, "\n")) |first_newline|
+        const trailing_newline = if (std.mem.indexOfScalar(u8, stdout, '\n')) |first_newline|
             first_newline == stdout.len - 1
         else
             false;
@@ -694,8 +694,8 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     const arg_count = std.meta.fields(@TypeOf(cmd_args)).len;
     comptime var args_used = std.StaticBitSet(arg_count).initEmpty();
-    comptime assert(std.mem.indexOf(u8, cmd, "'") == null); // Quoting isn't supported yet.
-    comptime assert(std.mem.indexOf(u8, cmd, "\"") == null);
+    comptime assert(std.mem.indexOfScalar(u8, cmd, '\'') == null); // Quoting isn't supported yet.
+    comptime assert(std.mem.indexOfScalar(u8, cmd, '"') == null);
     inline while (pos < cmd.len) {
         inline while (pos < cmd.len and (cmd[pos] == ' ' or cmd[pos] == '\n')) {
             pos += 1;

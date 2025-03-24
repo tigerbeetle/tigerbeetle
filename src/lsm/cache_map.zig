@@ -61,7 +61,7 @@ pub fn CacheMapType(
 
         pub const Options = struct {
             cache_value_count_max: u32,
-            map_value_count_max: u32,
+            stash_value_count_max: u32,
             scope_value_count_max: u32,
             name: []const u8,
         };
@@ -82,7 +82,7 @@ pub fn CacheMapType(
         options: Options,
 
         pub fn init(allocator: std.mem.Allocator, options: Options) !CacheMap {
-            assert(options.map_value_count_max > 0);
+            assert(options.stash_value_count_max > 0);
             maybe(options.cache_value_count_max == 0);
             maybe(options.scope_value_count_max == 0);
 
@@ -94,7 +94,7 @@ pub fn CacheMapType(
             errdefer if (cache) |*cache_unwrapped| cache_unwrapped.deinit(allocator);
 
             var stash: Map = .{};
-            try stash.ensureTotalCapacity(allocator, options.map_value_count_max);
+            try stash.ensureTotalCapacity(allocator, options.stash_value_count_max);
             errdefer stash.deinit(allocator);
 
             var scope_rollback_log = try std.ArrayListUnmanaged(Value).initCapacity(
@@ -114,7 +114,7 @@ pub fn CacheMapType(
         pub fn deinit(self: *CacheMap, allocator: std.mem.Allocator) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash.count() <= self.options.map_value_count_max);
+            assert(self.stash.count() <= self.options.stash_value_count_max);
 
             self.scope_rollback_log.deinit(allocator);
             self.stash.deinit(allocator);
@@ -124,7 +124,7 @@ pub fn CacheMapType(
         pub fn reset(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            assert(self.stash.count() <= self.options.map_value_count_max);
+            assert(self.stash.count() <= self.options.stash_value_count_max);
 
             if (self.cache) |*cache| cache.reset();
             self.stash.clearRetainingCapacity();
@@ -207,6 +207,7 @@ pub fn CacheMapType(
         }
 
         fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
+            defer assert(self.stash.count() <= self.options.stash_value_count_max);
             // Using `getOrPutAssumeCapacity` instead of `putAssumeCapacity` is
             // critical, since we use HashMaps with no Value, `putAssumeCapacity`
             // _will not_ clobber the existing value.
@@ -243,6 +244,7 @@ pub fn CacheMapType(
         }
 
         fn stash_remove(self: *CacheMap, key: Key) ?Value {
+            assert(self.stash.count() <= self.options.stash_value_count_max);
             return if (self.stash.fetchRemove(tombstone_from_key(key))) |kv|
                 kv.key
             else
@@ -300,7 +302,7 @@ pub fn CacheMapType(
         pub fn compact(self: *CacheMap) void {
             assert(!self.scope_is_active);
             assert(self.scope_rollback_log.items.len == 0);
-            maybe(self.stash.count() <= self.options.map_value_count_max);
+            assert(self.stash.count() <= self.options.stash_value_count_max);
 
             self.stash.clearRetainingCapacity();
         }
@@ -354,7 +356,7 @@ test "cache_map: unit" {
     var cache_map = try TestCacheMap.init(allocator, .{
         .cache_value_count_max = TestCacheMap.Cache.value_count_max_multiple,
         .scope_value_count_max = 32,
-        .map_value_count_max = 32,
+        .stash_value_count_max = 32,
         .name = "test map",
     });
     defer cache_map.deinit(allocator);

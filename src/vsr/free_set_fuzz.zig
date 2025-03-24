@@ -4,6 +4,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_free_set);
+const stdx = @import("../stdx.zig");
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 const Reservation = @import("./free_set.zig").Reservation;
@@ -12,25 +13,25 @@ const fuzz = @import("../testing/fuzz.zig");
 pub fn main(args: fuzz.FuzzArgs) !void {
     const allocator = fuzz.allocator;
 
-    var prng = std.rand.DefaultPrng.init(args.seed);
+    var prng = stdx.PRNG.from_seed(args.seed);
 
-    const blocks_count = FreeSet.shard_bits * (1 + prng.random().uintLessThan(usize, 10));
+    const blocks_count = FreeSet.shard_bits * prng.range_inclusive(usize, 1, 10);
     const events_count = @min(
         args.events_max orelse @as(usize, 2_000_000),
-        fuzz.random_int_exponential(prng.random(), usize, blocks_count * 100),
+        fuzz.random_int_exponential(&prng, usize, blocks_count * 100),
     );
-    const events = try generate_events(allocator, prng.random(), .{
+    const events = try generate_events(allocator, &prng, .{
         .blocks_count = blocks_count,
         .events_count = events_count,
     });
     defer allocator.free(events);
 
-    try run_fuzz(allocator, prng.random(), blocks_count, events);
+    try run_fuzz(allocator, &prng, blocks_count, events);
 }
 
 fn run_fuzz(
     allocator: std.mem.Allocator,
-    random: std.rand.Random,
+    prng: *stdx.PRNG,
     blocks_count: usize,
     events: []const FreeSetEvent,
 ) !void {
@@ -59,7 +60,7 @@ fn run_fuzz(
                 }
             },
             .forfeit => {
-                random.shuffle(Reservation, active_reservations.items);
+                prng.shuffle(Reservation, active_reservations.items);
                 for (active_reservations.items) |reservation| {
                     free_set.forfeit(reservation);
                     free_set_model.forfeit(reservation);
@@ -87,7 +88,7 @@ fn run_fuzz(
                 free_set_model.release(address);
             },
             .checkpoint => {
-                random.shuffle(Reservation, active_reservations.items);
+                prng.shuffle(Reservation, active_reservations.items);
                 for (active_reservations.items) |reservation| {
                     free_set.forfeit(reservation);
                     free_set_model.forfeit(reservation);
@@ -112,44 +113,45 @@ fn run_fuzz(
     }
 }
 
-const FreeSetEventType = std.meta.Tag(FreeSetEvent);
 const FreeSetEvent = union(enum) {
     reserve: struct { blocks: usize },
     forfeit: void,
     acquire: struct { reservation: usize },
     release: struct { address: usize },
     checkpoint: void,
+
+    const Tag = std.meta.Tag(FreeSetEvent);
 };
 
-fn generate_events(allocator: std.mem.Allocator, random: std.rand.Random, options: struct {
+fn generate_events(allocator: std.mem.Allocator, prng: *stdx.PRNG, options: struct {
     blocks_count: usize,
     events_count: usize,
 }) ![]const FreeSetEvent {
-    const event_distribution = fuzz.DistributionType(FreeSetEventType){
-        .reserve = 1 + random.float(f64) * 100,
+    const event_weights = stdx.PRNG.EnumWeightsType(FreeSetEvent.Tag){
+        .reserve = prng.range_inclusive(u64, 1, 100),
         .forfeit = 1,
-        .acquire = random.float(f64) * 1000,
-        .release = if (random.boolean()) 0 else 500 * random.float(f64),
-        .checkpoint = random.floatExp(f64) * 10,
+        .acquire = prng.range_inclusive(u64, 1, 1000),
+        .release = if (prng.boolean()) 0 else prng.range_inclusive(u64, 0, 500),
+        .checkpoint = fuzz.random_int_exponential(prng, u64, 10),
     };
 
     const events = try allocator.alloc(FreeSetEvent, options.events_count);
     errdefer allocator.free(events);
 
-    log.info("event_distribution = {:.2}", .{event_distribution});
+    log.info("event_weights = {:.2}", .{event_weights});
     log.info("event_count = {d}", .{events.len});
 
-    const reservation_blocks_mean = 1 +
-        random.uintLessThan(usize, @divFloor(options.blocks_count, 20));
+    const reservation_blocks_mean =
+        prng.range_inclusive(usize, 1, @divFloor(options.blocks_count, 20));
     for (events) |*event| {
-        event.* = switch (fuzz.random_enum(random, FreeSetEventType, event_distribution)) {
+        event.* = switch (prng.enum_weighted(FreeSetEvent.Tag, event_weights)) {
             .reserve => FreeSetEvent{ .reserve = .{
-                .blocks = 1 + fuzz.random_int_exponential(random, usize, reservation_blocks_mean),
+                .blocks = 1 + fuzz.random_int_exponential(prng, usize, reservation_blocks_mean),
             } },
             .forfeit => FreeSetEvent{ .forfeit = {} },
-            .acquire => FreeSetEvent{ .acquire = .{ .reservation = random.int(usize) } },
+            .acquire => FreeSetEvent{ .acquire = .{ .reservation = prng.int(usize) } },
             .release => FreeSetEvent{ .release = .{
-                .address = random.int(usize),
+                .address = prng.int(usize),
             } },
             .checkpoint => FreeSetEvent{ .checkpoint = {} },
         };

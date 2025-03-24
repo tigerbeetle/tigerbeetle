@@ -65,7 +65,6 @@ const CLIArgs = union(enum) {
         cache_accounts: ?flags.ByteSize = null,
         cache_transfers: ?flags.ByteSize = null,
         cache_transfers_pending: ?flags.ByteSize = null,
-        cache_account_balances: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
         trace: ?[:0]const u8 = null,
@@ -76,6 +75,8 @@ const CLIArgs = union(enum) {
         // Highly experimental options that will be removed in a future release:
         replicate_closed_loop: bool = false,
         replicate_star: bool = false,
+
+        statsd: ?[:0]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
@@ -102,7 +103,6 @@ const CLIArgs = union(enum) {
         cache_accounts: ?[]const u8 = null,
         cache_transfers: ?[]const u8 = null,
         cache_transfers_pending: ?[]const u8 = null,
-        cache_account_balances: ?[]const u8 = null,
         cache_grid: ?[]const u8 = null,
         account_count: usize = 10_000,
         account_count_hot: usize = 0,
@@ -130,7 +130,7 @@ const CLIArgs = union(enum) {
         print_batch_timings: bool = false,
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
-        statsd: bool = false,
+        statsd: ?[]const u8 = null,
         trace: ?[:0]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
@@ -141,6 +141,7 @@ const CLIArgs = union(enum) {
     // Experimental: the interface is subject to change.
     const Inspect = union(enum) {
         constants,
+        metrics,
         superblock: struct {
             positional: struct { path: []const u8 },
         },
@@ -176,6 +177,8 @@ const CLIArgs = union(enum) {
             \\
             \\  tigerbeetle inspect constants
             \\
+            \\  tigerbeetle inspect metrics
+            \\
             \\  tigerbeetle inspect superblock <path>
             \\
             \\  tigerbeetle inspect wal [--slot=<slot>] <path>
@@ -198,6 +201,9 @@ const CLIArgs = union(enum) {
             \\
             \\  constants
             \\        Print most important compile-time parameters.
+            \\
+            \\  metrics
+            \\        List metrics and their cardinalities.
             \\
             \\  superblock
             \\        Inspect the superblock header copies.
@@ -355,7 +361,6 @@ const StartDefaults = struct {
     cache_accounts: flags.ByteSize,
     cache_transfers: flags.ByteSize,
     cache_transfers_pending: flags.ByteSize,
-    cache_account_balances: flags.ByteSize,
     cache_grid: flags.ByteSize,
     memory_lsm_compaction: flags.ByteSize,
 };
@@ -367,7 +372,6 @@ const start_defaults_production = StartDefaults{
     .cache_accounts = .{ .value = constants.cache_accounts_size_default },
     .cache_transfers = .{ .value = constants.cache_transfers_size_default },
     .cache_transfers_pending = .{ .value = constants.cache_transfers_pending_size_default },
-    .cache_account_balances = .{ .value = constants.cache_account_balances_size_default },
     .cache_grid = .{ .value = constants.grid_cache_size_default },
     .memory_lsm_compaction = .{
         // By default, add a few extra blocks for beat-scoped work.
@@ -381,7 +385,6 @@ const start_defaults_development = StartDefaults{
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
-    .cache_account_balances = .{ .value = 0 },
     .cache_grid = .{ .value = constants.block_size * Grid.Cache.value_count_max_multiple },
     .memory_lsm_compaction = .{ .value = lsm_compaction_block_memory_min },
 };
@@ -413,7 +416,6 @@ pub const Command = union(enum) {
         cache_accounts: u32,
         cache_transfers: u32,
         cache_transfers_pending: u32,
-        cache_account_balances: u32,
         storage_size_limit: u64,
         pipeline_requests_limit: u32,
         request_size_limit: u32,
@@ -430,6 +432,7 @@ pub const Command = union(enum) {
         aof: bool,
         path: [:0]const u8,
         log_debug: bool,
+        statsd: ?std.net.Address,
     };
 
     pub const Version = struct {
@@ -462,7 +465,6 @@ pub const Command = union(enum) {
         cache_accounts: ?[]const u8,
         cache_transfers: ?[]const u8,
         cache_transfers_pending: ?[]const u8,
-        cache_account_balances: ?[]const u8,
         cache_grid: ?[]const u8,
         log_debug: bool,
         log_debug_replica: bool,
@@ -483,7 +485,7 @@ pub const Command = union(enum) {
         print_batch_timings: bool,
         id_order: IdOrder,
         clients: u32,
-        statsd: bool,
+        statsd: ?[]const u8,
         trace: ?[:0]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
@@ -492,6 +494,7 @@ pub const Command = union(enum) {
 
     pub const Inspect = union(enum) {
         constants,
+        metrics,
         data_file: DataFile,
 
         pub const DataFile = struct {
@@ -655,9 +658,8 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const AccountsValuesCache = groove_config.accounts.ObjectsCache.Cache;
     const TransfersValuesCache = groove_config.transfers.ObjectsCache.Cache;
     const TransfersPendingValuesCache = groove_config.transfers_pending.ObjectsCache.Cache;
-    const AccountBalancesValuesCache = groove_config.account_balances.ObjectsCache.Cache;
 
-    const addresses = parse_addresses(start.addresses);
+    const addresses = parse_addresses(start.addresses, "--addresses", Command.Addresses);
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
@@ -819,12 +821,6 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             start.cache_transfers_pending orelse defaults.cache_transfers_pending,
             "--cache-transfers-pending",
         ),
-        .cache_account_balances = parse_cache_size_to_count(
-            StateMachine.AccountBalancesGrooveValue,
-            AccountBalancesValuesCache,
-            start.cache_account_balances orelse defaults.cache_account_balances,
-            "--cache-account-balances",
-        ),
         .cache_grid_blocks = parse_cache_size_to_count(
             [constants.block_size]u8,
             Grid.Cache,
@@ -849,6 +845,14 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .aof = start.aof,
         .path = start.positional.path,
         .log_debug = start.log_debug,
+        .statsd = if (start.statsd) |statsd_address|
+            parse_addresses(
+                statsd_address,
+                "--statsd",
+                stdx.BoundedArrayType(std.net.Address, 1),
+            ).get(0)
+        else
+            null,
     };
 }
 
@@ -859,7 +863,7 @@ fn parse_args_version(version: CLIArgs.Version) Command.Version {
 }
 
 fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
-    const addresses = parse_addresses(repl.addresses);
+    const addresses = parse_addresses(repl.addresses, "--addresses", Command.Addresses);
 
     return .{
         .addresses = addresses,
@@ -872,7 +876,7 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
 
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
-        parse_addresses(addresses)
+        parse_addresses(addresses, "--addresses", Command.Addresses)
     else
         null;
 
@@ -884,7 +888,6 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .cache_accounts = benchmark.cache_accounts,
         .cache_transfers = benchmark.cache_transfers,
         .cache_transfers_pending = benchmark.cache_transfers_pending,
-        .cache_account_balances = benchmark.cache_account_balances,
         .cache_grid = benchmark.cache_grid,
         .log_debug = benchmark.log_debug,
         .log_debug_replica = benchmark.log_debug_replica,
@@ -916,6 +919,7 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
 fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         .constants => return .constants,
+        .metrics => return .metrics,
         inline else => |args| args.positional.path,
     };
 
@@ -923,6 +927,7 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
         .path = path,
         .query = switch (inspect) {
             .constants => unreachable,
+            .metrics => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },
             .replies => |args| .{ .replies = .{
@@ -953,30 +958,35 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
 }
 
 /// Parse and allocate the addresses returning a slice into that array.
-fn parse_addresses(raw_addresses: []const u8) Command.Addresses {
-    var result: Command.Addresses = .{};
+fn parse_addresses(
+    raw_addresses: []const u8,
+    comptime flag: []const u8,
+    comptime BoundedArray: type,
+) BoundedArray {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+    var result: BoundedArray = .{};
 
     const addresses_parsed = vsr.parse_addresses(
         raw_addresses,
         result.unused_capacity_slice(),
     ) catch |err| switch (err) {
         error.AddressHasTrailingComma => {
-            vsr.fatal(.cli, "--addresses: invalid trailing comma", .{});
+            vsr.fatal(.cli, flag ++ ": invalid trailing comma", .{});
         },
         error.AddressLimitExceeded => {
-            vsr.fatal(.cli, "--addresses: too many addresses, at most {d} are allowed", .{
-                constants.members_max,
+            vsr.fatal(.cli, flag ++ ": too many addresses, at most {d} are allowed", .{
+                result.capacity(),
             });
         },
         error.AddressHasMoreThanOneColon => {
-            vsr.fatal(.cli, "--addresses: invalid address with more than one colon", .{});
+            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
         },
-        error.PortOverflow => vsr.fatal(.cli, "--addresses: port exceeds 65535", .{}),
-        error.PortInvalid => vsr.fatal(.cli, "--addresses: invalid port", .{}),
-        error.AddressInvalid => vsr.fatal(.cli, "--addresses: invalid IPv4 or IPv6 address", .{}),
+        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
     };
     assert(addresses_parsed.len > 0);
-    assert(addresses_parsed.len <= constants.members_max);
+    assert(addresses_parsed.len <= result.capacity());
     result.resize(addresses_parsed.len) catch unreachable;
     return result;
 }

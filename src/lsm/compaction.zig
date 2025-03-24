@@ -43,7 +43,7 @@ const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 const vsr = @import("../vsr.zig");
 const trace = @import("../trace.zig");
-const FIFOType = @import("../fifo.zig").FIFOType;
+const StackType = @import("../stack.zig").StackType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
@@ -86,8 +86,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         reads: IOPSType(BlockRead, constants.lsm_compaction_iops_read_max) = .{},
         writes: IOPSType(BlockWrite, constants.lsm_compaction_iops_write_max) = .{},
         cpus: IOPSType(CPU, 1) = .{},
-        // Use FIFO instead of IOPS here because blocks are allocated at runtime.
-        blocks: FIFOType(Block),
+        blocks: StackType(Block),
         blocks_backing_storage: []Block,
 
         const ResourcePool = @This();
@@ -154,7 +153,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             // to the next index block.
             last_block_in_the_table: bool,
 
-            next: ?*Block, // For FIFO.
+            next: ?*Block, // For Stack.
         };
 
         pub fn init(allocator: mem.Allocator, block_count: u32) !ResourcePool {
@@ -178,10 +177,11 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             }
             assert(blocks_allocated == block_count);
 
-            var blocks: FIFOType(Block) = .{
+            var blocks = StackType(Block).init(.{
+                .capacity = blocks_allocated,
                 .name = "compaction_blocks",
                 .verify_push = false,
-            };
+            });
             for (blocks_backing_storage) |*block| blocks.push(block);
 
             return .{
@@ -200,6 +200,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         pub fn reset(pool: *ResourcePool) void {
             pool.* = .{
                 .blocks = .{
+                    .count_max = pool.blocks.count_max,
                     .name = "compaction_blocks",
                     .verify_push = false,
                 },
@@ -484,8 +485,8 @@ pub fn CompactionType(
         }
 
         pub fn reset(compaction: *Compaction) void {
-            compaction.grid.trace.reset(.compact_beat);
-            compaction.grid.trace.reset(.compact_beat_merge);
+            compaction.grid.trace.cancel(.compact_beat);
+            compaction.grid.trace.cancel(.compact_beat_merge);
             compaction.* = .{
                 .grid = compaction.grid,
                 .tree = compaction.tree,
@@ -978,10 +979,10 @@ pub fn CompactionType(
                 pool.blocks_free() >= compaction_block_count_beat_min -
                     @intFromBool(compaction.table_builder_index_block != null),
             );
-            compaction.grid.trace.start(.compact_beat, .{
-                .tree = compaction.tree.config.name,
+            compaction.grid.trace.start(.{ .compact_beat = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
-            });
+            } });
             compaction.level_a_index_block_next = compaction.level_a_position.index_block;
             compaction.level_a_value_block_next = compaction.level_a_position.value_block;
             compaction.level_b_index_block_next = compaction.level_b_position.index_block;
@@ -1358,10 +1359,10 @@ pub fn CompactionType(
                 compaction.counters.wasted -= compaction.level_a_position.value;
             }
             compaction.counters.wasted -= compaction.level_b_position.value;
-            compaction.grid.trace.stop(.compact_beat, .{
-                .tree = compaction.tree.config.name,
+            compaction.grid.trace.stop(.{ .compact_beat = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
-            });
+            } });
             compaction.beat_complete();
         }
 
@@ -1549,10 +1550,10 @@ pub fn CompactionType(
             compaction.pool.?.cpus.release(cpu);
             assert(compaction.table_builder.state == .index_and_data_block);
 
-            compaction.grid.trace.start(.compact_beat_merge, .{
-                .tree = compaction.tree.config.name,
+            compaction.grid.trace.start(.{ .compact_beat_merge = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
-            });
+            } });
 
             const values_source_a, const values_source_b = compaction.merge_inputs();
             assert(values_source_a != null or values_source_b != null);
@@ -1632,10 +1633,10 @@ pub fn CompactionType(
 
             // NB: although all the work here is synchronous, we don't defer trace.stop precisely
             // to exclude compaction.dispatch call below.
-            compaction.grid.trace.stop(.compact_beat_merge, .{
-                .tree = compaction.tree.config.name,
+            compaction.grid.trace.stop(.{ .compact_beat_merge = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
-            });
+            } });
             compaction.compaction_dispatch();
         }
 

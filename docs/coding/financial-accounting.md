@@ -18,7 +18,7 @@ the bank represents a "bad" thing for you, but a "good" thing for the bank. We m
 that same debt differently if we're doing your accounting or the bank's.
 
 These examples also hint at the **different types of accounts**. We probably want to think about a
-debt as having the opposite "sign" as the funds in your your bank account. At the same time, the
+debt as having the opposite "sign" as the funds in your bank account. At the same time, the
 types of these accounts look different depending on whether you are considering them from the
 perspective of you or the bank.
 
@@ -190,7 +190,7 @@ determines whether the given type of account is increased with a debit or a cred
 Have questions about debits and credits, TigerBeetle's data model, how to design your application on
 top of it, or anything else?
 
-Come join our [Community Slack](https://slack.tigerbeetle.com/invite) and ask any and all questions
+Come join our [Community Slack](https://slack.tigerbeetle.com/join) and ask any and all questions
 you might have!
 
 ### Dedicated Consultation
