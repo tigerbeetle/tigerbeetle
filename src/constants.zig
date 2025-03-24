@@ -265,12 +265,12 @@ pub const pipeline_prepare_queue_max: u32 = config.cluster.pipeline_prepare_queu
 /// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
 /// waiting to prepare. Each client has at most one request in flight, and a primary can send a
 /// pulse or request upgrade.
-pub const pipeline_request_queue_max: u32 = clients_max + 1 -| pipeline_prepare_queue_max;
+pub const pipeline_request_queue_max: u32 = (clients_max + 1) -| pipeline_prepare_queue_max;
 
 comptime {
-    // A prepare-queue capacity larger than clients_max + 1 is wasted.
+    // A prepare-queue capacity larger than (clients_max + 1) is wasted.
     assert(pipeline_prepare_queue_max <= clients_max + 1);
-    // A total queue capacity larger than clients_max + 1 is wasted.
+    // A total queue capacity larger than (clients_max + 1) is wasted.
     assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max + 1);
     assert(pipeline_prepare_queue_max > 0);
     assert(pipeline_request_queue_max >= 0);
