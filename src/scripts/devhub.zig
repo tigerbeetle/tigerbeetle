@@ -148,6 +148,36 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     };
     defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
+    const stats_count = blk: {
+        var process = try shell.spawn(
+            .{
+                .stdin_behavior = .Pipe,
+                .stdout_behavior = .Pipe,
+                .stderr_behavior = .Ignore,
+            },
+            "./tigerbeetle inspect metrics",
+            .{},
+        );
+
+        defer {
+            process.stdin.?.close();
+            process.stdin = null;
+            _ = process.wait() catch {};
+        }
+
+        var stats_buffer: [1024]u8 = undefined;
+        const stats_buffer_size = try process.stdout.?.readAll(&stats_buffer);
+        var stats_count: u32 = 0;
+        var lines = std.mem.split(u8, stats_buffer[0..stats_buffer_size], "\n");
+        while (lines.next()) |line| {
+            if (line.len != 0) {
+                std.debug.print("LINE: {s}\n", .{line});
+                stats_count += try std.fmt.parseInt(u32, stdx.cut(line, "=").?.suffix, 10);
+            }
+        }
+        break :blk stats_count;
+    };
+
     const startup_time_ms = blk: {
         timer.reset();
 
@@ -167,9 +197,9 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             _ = process.wait() catch {};
         }
 
-        var port_buf: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
-        const port_buf_len = try process.stdout.?.readAll(&port_buf);
-        const port = try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
+        var port_buffer: [std.fmt.count("{}\n", .{std.math.maxInt(u16)})]u8 = undefined;
+        const port_buffer_len = try process.stdout.?.readAll(&port_buffer);
+        const port = try std.fmt.parseInt(u16, port_buffer[0 .. port_buffer_len - 1], 10);
 
         // TODO: This sends a ping manually; once register connection speed has been fixed, this can
         // use the benchmark or repl via CLI.
@@ -257,6 +287,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .name = "format time", .value = format_time_ms, .unit = "ms" },
             .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
+            .{ .name = "stats count", .value = stats_count, .unit = "count" },
         },
     };
 

@@ -263,6 +263,14 @@ test "benchmark/inspect smoke" {
     );
 
     inline for (.{
+        "{tigerbeetle} inspect constants",
+        "{tigerbeetle} inspect metrics",
+    }) |command| {
+        log.debug("{s}", .{command});
+        try shell.exec(command, .{ .tigerbeetle = tigerbeetle });
+    }
+
+    inline for (.{
         "{tigerbeetle} inspect superblock              {path}",
         "{tigerbeetle} inspect wal --slot=0            {path}",
         "{tigerbeetle} inspect replies                 {path}",
