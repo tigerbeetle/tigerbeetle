@@ -3,6 +3,61 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.33
+
+Released: 2025-03-24
+
+Note that [#2824](https://github.com/tigerbeetle/tigerbeetle/pull/2824) bumps the oldest supported
+client version to 0.16.4, removing backward compatibility with various deprecated features. Please
+make sure that all of your clients are running on at least 0.16.4 before upgrading to this release!
+
+### Safety And Performance
+
+- [#2835](https://github.com/tigerbeetle/tigerbeetle/pull/2835)
+
+  Add performance mode to the VOPR, which tracks the number and aggregate size of each kind of
+  message during a run.
+
+### Features
+
+- [#2824](https://github.com/tigerbeetle/tigerbeetle/pull/2824)
+
+  Bump the oldest supported client version to 0.16.4, removing backward compatibility with various
+  deprecated features.
+
+### Internals
+
+- [#2826](https://github.com/tigerbeetle/tigerbeetle/pull/2826)
+
+  Simplify the idiom around adding elements to lists with comptime known lengths.
+
+- [#2827](https://github.com/tigerbeetle/tigerbeetle/pull/2827)
+
+  Better styling for links and block quotes in the documentation.
+
+- [#2831](https://github.com/tigerbeetle/tigerbeetle/pull/2831)
+
+  Change debug multiversion builds to encapsulate two versions as opposed to five.
+
+- [#2832](https://github.com/tigerbeetle/tigerbeetle/pull/2832)
+
+  Improve CFO efficacy by retaining Zig build cache across fuzzing iterations.
+
+- [#2836](https://github.com/tigerbeetle/tigerbeetle/pull/2836)
+
+  Update TigerStyle to add a new rule about using long form arguments in scripts (--force over -f).
+
+- [#2834](https://github.com/tigerbeetle/tigerbeetle/pull/2834),
+  [#2837](https://github.com/tigerbeetle/tigerbeetle/pull/2837),
+  [#2839](https://github.com/tigerbeetle/tigerbeetle/pull/2839),
+  [#2841](https://github.com/tigerbeetle/tigerbeetle/pull/2841),
+
+  Fix various VOPR false positives.
+
+### TigerTracks 🎧
+
+- [On The Way Home](https://open.spotify.com/track/4Fz1WWr5o0OrlIcZxcyZtK?si=4e48d9e99383409a)
+
 ## TigerBeetle 0.16.32
 
 Released: 2025-03-17
