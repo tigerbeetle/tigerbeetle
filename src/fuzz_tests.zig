@@ -52,7 +52,10 @@ const CLIArgs = struct {
 };
 
 pub fn main() !void {
-    var args = try std.process.argsWithAllocator(fuzz.allocator);
+    var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    const gpa = gpa_allocator.allocator();
+
+    var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
     const cli_args = flags.parse(&args, CLIArgs);
@@ -61,13 +64,13 @@ pub fn main() !void {
         .smoke => {
             assert(cli_args.positional.seed == null);
             assert(cli_args.events_max == null);
-            try main_smoke();
+            try main_smoke(gpa);
         },
-        else => try main_single(cli_args),
+        else => try main_single(gpa, cli_args),
     }
 }
 
-fn main_smoke() !void {
+fn main_smoke(gpa: std.mem.Allocator) !void {
     var timer_all = try std.time.Timer.start();
     inline for (comptime std.enums.values(FuzzersEnum)) |fuzzer| {
         const events_max = switch (fuzzer) {
@@ -93,7 +96,10 @@ fn main_smoke() !void {
         };
 
         var timer_single = try std.time.Timer.start();
-        try @field(Fuzzers, @tagName(fuzzer)).main(.{ .seed = 123, .events_max = events_max });
+        try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
+            .seed = 123,
+            .events_max = events_max,
+        });
         const fuzz_duration = timer_single.lap();
         if (fuzz_duration > 60 * std.time.ns_per_s) {
             log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {}", .{
@@ -105,7 +111,7 @@ fn main_smoke() !void {
     log.info("done in {}", .{std.fmt.fmtDuration(timer_all.lap())});
 }
 
-fn main_single(cli_args: CLIArgs) !void {
+fn main_single(gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     assert(cli_args.positional.fuzzer != .smoke);
 
     const seed = cli_args.positional.seed orelse std.crypto.random.int(u64);
@@ -119,9 +125,10 @@ fn main_single(cli_args: CLIArgs) !void {
                 std.process.exit(1);
             }
         },
-        inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(
-            .{ .seed = seed, .events_max = cli_args.events_max },
-        ),
+        inline else => |fuzzer| try @field(Fuzzers, @tagName(fuzzer)).main(gpa, .{
+            .seed = seed,
+            .events_max = cli_args.events_max,
+        }),
     }
     log.info("done in {}", .{std.fmt.fmtDuration(timer.lap())});
 }

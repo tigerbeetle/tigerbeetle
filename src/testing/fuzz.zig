@@ -5,11 +5,6 @@ const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const PRNG = stdx.PRNG;
 
-// Use our own allocator in the global scope instead of testing.allocator
-// as the latter now @compileError()'s if referenced outside a `test` block.
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-pub const allocator = gpa.allocator();
-
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
 pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {

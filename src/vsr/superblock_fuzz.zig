@@ -32,26 +32,24 @@ const cluster = 0;
 const replica = 0;
 const replica_count = 6;
 
-pub fn main(args: fuzz.FuzzArgs) !void {
-    const allocator = fuzz.allocator;
-
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // Total calls to checkpoint() + view_change().
     const transitions_count_total = args.events_max orelse 10;
 
-    try run_fuzz(allocator, args.seed, transitions_count_total);
+    try run_fuzz(gpa, args.seed, transitions_count_total);
 }
 
-fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
+fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !void {
     var prng = stdx.PRNG.from_seed(seed);
 
-    var storage_fault_atlas = try StorageFaultAtlas.init(allocator, 1, &prng, .{
+    var storage_fault_atlas = try StorageFaultAtlas.init(gpa, 1, &prng, .{
         .faulty_superblock = true,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
         .faulty_client_replies = false,
         .faulty_grid = false,
     });
-    defer storage_fault_atlas.deinit(allocator);
+    defer storage_fault_atlas.deinit(gpa);
 
     const storage_options: Storage.Options = .{
         .replica_index = 0,
@@ -78,25 +76,25 @@ fn run_fuzz(allocator: std.mem.Allocator, seed: u64, transitions_count_total: us
         .fault_atlas = &storage_fault_atlas,
     };
 
-    var storage = try Storage.init(allocator, superblock_zone_size, storage_options);
-    defer storage.deinit(allocator);
+    var storage = try Storage.init(gpa, superblock_zone_size, storage_options);
+    defer storage.deinit(gpa);
 
-    var storage_verify = try Storage.init(allocator, superblock_zone_size, storage_options);
-    defer storage_verify.deinit(allocator);
+    var storage_verify = try Storage.init(gpa, superblock_zone_size, storage_options);
+    defer storage_verify.deinit(gpa);
 
-    var superblock = try SuperBlock.init(allocator, .{
+    var superblock = try SuperBlock.init(gpa, .{
         .storage = &storage,
         .storage_size_limit = constants.storage_size_limit_default,
     });
-    defer superblock.deinit(allocator);
+    defer superblock.deinit(gpa);
 
-    var superblock_verify = try SuperBlock.init(allocator, .{
+    var superblock_verify = try SuperBlock.init(gpa, .{
         .storage = &storage_verify,
         .storage_size_limit = constants.storage_size_limit_default,
     });
-    defer superblock_verify.deinit(allocator);
+    defer superblock_verify.deinit(gpa);
 
-    var sequence_states = Environment.SequenceStates.init(allocator);
+    var sequence_states = Environment.SequenceStates.init(gpa);
     defer sequence_states.deinit();
 
     const members = vsr.root_members(cluster);

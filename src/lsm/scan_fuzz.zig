@@ -6,7 +6,6 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const allocator = fuzz.allocator;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_scan_fuzz);
@@ -511,11 +510,12 @@ const Environment = struct {
 
     fn init(
         env: *Environment,
+        gpa: std.mem.Allocator,
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
-        errdefer env.trace.deinit(allocator);
+        env.trace = try vsr.trace.Tracer.init(gpa, 0, 0, .{});
+        errdefer env.trace.deinit(gpa);
 
         env.* = .{
             .storage = storage,
@@ -523,12 +523,12 @@ const Environment = struct {
             .state = .init,
             .trace = env.trace,
 
-            .superblock = try SuperBlock.init(allocator, .{
+            .superblock = try SuperBlock.init(gpa, .{
                 .storage = env.storage,
                 .storage_size_limit = constants.storage_size_limit_default,
             }),
 
-            .grid = try Grid.init(allocator, .{
+            .grid = try Grid.init(gpa, .{
                 .superblock = &env.superblock,
                 .trace = &env.trace,
                 .missing_blocks_max = 0,
@@ -542,22 +542,23 @@ const Environment = struct {
             .model = .{},
             .model_matches = [_]std.DynamicBitSetUnmanaged{.{}} ** query_spec_max,
 
-            .scan_lookup_buffer = try allocator.alloc(Thing, batch_objects_max),
+            .scan_lookup_buffer = try gpa.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,
             .ticks_remaining = std.math.maxInt(usize),
         };
     }
 
-    fn deinit(env: *Environment) void {
-        for (&env.model_matches) |*matches| matches.deinit(allocator);
-        env.model.deinit(allocator);
-        env.superblock.deinit(allocator);
-        env.grid.deinit(allocator);
-        env.trace.deinit(allocator);
-        allocator.free(env.scan_lookup_buffer);
+    fn deinit(env: *Environment, gpa: std.mem.Allocator) void {
+        for (&env.model_matches) |*matches| matches.deinit(gpa);
+        env.model.deinit(gpa);
+        env.superblock.deinit(gpa);
+        env.grid.deinit(gpa);
+        env.trace.deinit(gpa);
+        gpa.free(env.scan_lookup_buffer);
     }
 
     pub fn run(
+        gpa: std.mem.Allocator,
         storage: *Storage,
         prng: *stdx.PRNG,
         commits_max: u32,
@@ -566,8 +567,8 @@ const Environment = struct {
         log.info("commits = {}", .{commits_max});
 
         var env: Environment = undefined;
-        try env.init(storage, prng);
-        defer env.deinit();
+        try env.init(gpa, storage, prng);
+        defer env.deinit(gpa);
 
         env.change_state(.init, .superblock_format);
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
@@ -578,8 +579,8 @@ const Environment = struct {
         });
         try env.tick_until_state_change(.superblock_format, .superblock_open);
 
-        try env.open();
-        defer env.close();
+        try env.open(gpa);
+        defer env.close(gpa);
 
         var index_cardinality: [thing_index_count]u64 = undefined;
         for (&index_cardinality) |*cardinality| {
@@ -599,9 +600,9 @@ const Environment = struct {
                 batch_objects_max
             else
                 prng.range_inclusive(u32, 1, batch_objects_max);
-            try env.model.ensureUnusedCapacity(allocator, batch_objects);
+            try env.model.ensureUnusedCapacity(gpa, batch_objects);
             for (&env.model_matches) |*query_matches| {
-                try query_matches.resize(allocator, env.model.items.len + batch_objects, false);
+                try query_matches.resize(gpa, env.model.items.len + batch_objects, false);
             }
 
             for (0..batch_objects) |_| {
@@ -786,7 +787,7 @@ const Environment = struct {
         assert(env.state == next_state);
     }
 
-    fn open(env: *Environment) !void {
+    fn open(env: *Environment, gpa: std.mem.Allocator) !void {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
         try env.tick_until_state_change(.superblock_open, .free_set_open);
 
@@ -796,7 +797,7 @@ const Environment = struct {
         // The first checkpoint is trivially durable.
         env.grid.free_set.mark_checkpoint_durable();
 
-        try env.forest.init(allocator, &env.grid, .{
+        try env.forest.init(gpa, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,
         }, forest_options);
@@ -806,8 +807,8 @@ const Environment = struct {
         try env.tick_until_state_change(.forest_open, .fuzzing);
     }
 
-    fn close(env: *Environment) void {
-        env.forest.deinit(allocator);
+    fn close(env: *Environment, gpa: std.mem.Allocator) void {
+        env.forest.deinit(gpa);
     }
 
     fn commit(env: *Environment) !void {
@@ -923,12 +924,12 @@ const Environment = struct {
     }
 };
 
-pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     // Init mocked storage.
     var storage = try Storage.init(
-        allocator,
+        gpa,
         constants.storage_size_limit_default,
         Storage.Options{
             .seed = prng.int(u64),
@@ -939,13 +940,13 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
             .crash_fault_probability = ratio(0, 100),
         },
     );
-    defer storage.deinit(allocator);
+    defer storage.deinit(gpa);
 
     const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse prng.range_inclusive(u32, 1, 1024),
     );
 
-    try Environment.run(&storage, &prng, commits_max);
+    try Environment.run(gpa, &storage, &prng, commits_max);
 
     log.info("Passed!", .{});
 }

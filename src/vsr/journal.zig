@@ -2593,7 +2593,7 @@ pub fn format_wal_headers(cluster: u128, offset_logical: u64, target: []u8) usiz
 
 test "format_wal_headers" {
     const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_headers(constants.sector_size);
+    try fuzz.fuzz_format_wal_headers(std.testing.allocator, constants.sector_size);
 }
 
 /// Format part of a new WAL's Zone.wal_prepares, writing to `target`.
@@ -2640,5 +2640,5 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
 
 test "format_wal_prepares" {
     const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_prepares(256 * 1024);
+    try fuzz.fuzz_format_wal_prepares(std.testing.allocator, 256 * 1024);
 }

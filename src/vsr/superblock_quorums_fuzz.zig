@@ -13,7 +13,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 
-pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
+pub fn main(_: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     // TODO When there is a top-level fuzz.zig main(), split these fuzzers into two different
