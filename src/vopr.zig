@@ -458,7 +458,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .cluster_id = cluster_id,
         .replica_count = 6,
         .standby_count = 0,
-        .client_count = 6,
+        .client_count = 4,
         .storage_size_limit = vsr.sector_floor(200 * MiB),
         .seed = prng.int(u64),
         .releases = releases[0..1],
