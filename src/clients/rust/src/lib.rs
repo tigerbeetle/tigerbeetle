@@ -847,7 +847,7 @@ where
         },
     ));
 
-    let mut events: Vec<Event> = events.iter().copied().collect();
+    let mut events: Vec<Event> = events.to_vec();
     assert_eq!(events.len(), events.capacity());
 
     let events_len = events.len();
