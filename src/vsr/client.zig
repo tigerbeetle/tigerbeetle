@@ -475,7 +475,8 @@ pub fn ClientType(
 
                 const rtt_median_ns =
                     round_trip_times_ns.get(@divFloor(round_trip_times_ns.count(), 2));
-                self.request_timeout.set_rtt_ns(rtt_median_ns);
+                _ = rtt_median_ns;
+                // self.request_timeout.set_rtt_ns(rtt_median_ns);
             } else {
                 log.debug("{}: on_pong: monotonic timestamp regressed {}..{} replica={}", .{
                     self.id,
@@ -649,7 +650,7 @@ pub fn ClientType(
                 message.header.checksum,
             });
 
-            if (message.header.operation == .register) {
+            if (message.header.operation == .register and false) {
                 self.send_message_to_replicas(message.base());
             } else {
                 // Retransmit potentially dropped message.
@@ -768,7 +769,7 @@ pub fn ClientType(
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            if (message.header.operation == .register) {
+            if (message.header.operation == .register and false) {
                 // When sending register command for the first time, broadcast it to the entire
                 // cluster to learn the view without waiting for pings to get through.
                 self.send_message_to_replicas(message.base());

@@ -489,7 +489,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .one_way_delay_mean = 5,
         .one_way_delay_min = 0,
-        .packet_loss_probability = ratio(0, 100),
+        .packet_loss_probability = ratio(10, 100),
         .path_maximum_capacity = 10,
         .path_clog_duration_mean = 200,
         .path_clog_probability = ratio(0, 100),
