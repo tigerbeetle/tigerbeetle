@@ -146,8 +146,6 @@ pub const Storage = struct {
     options: Options,
     prng: stdx.PRNG,
 
-    status: enum { idle, stepping, resetting },
-
     /// `memory` always contains the pristine data as-written -- it does not include storage faults.
     memory: []align(constants.sector_size) u8,
     /// Set bits correspond to sectors that have ever been written to.
@@ -231,7 +229,6 @@ pub const Storage = struct {
             .size = size,
             .options = options,
             .prng = prng,
-            .status = .idle,
             .memory = memory,
             .memory_written = memory_written,
             .faults = faults,
@@ -242,7 +239,6 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
-        assert(storage.status == .idle);
         storage.writes.deinit();
         storage.reads.deinit();
         allocator.destroy(storage.overlay_buffers);
@@ -254,10 +250,6 @@ pub const Storage = struct {
     /// Cancel any currently in-progress reads/writes.
     /// Corrupt the target sectors of any in-progress writes.
     pub fn reset(storage: *Storage) void {
-        assert(storage.status == .idle);
-        storage.status = .resetting;
-        defer storage.status = .idle;
-
         log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
             storage.reads.count(),
             storage.writes.count(),
@@ -265,31 +257,17 @@ pub const Storage = struct {
         });
         while (storage.writes.peek()) |_| {
             const write = storage.writes.remove();
-            storage.reset_write(write);
+            if (!storage.prng.chance(storage.options.crash_fault_probability)) continue;
+
+            // Randomly corrupt one of the faulty sectors the operation targeted.
+            // TODO: inject more realistic and varied storage faults as described above.
+            const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
+            storage.fault_sector(write.zone, sectors.random(&storage.prng));
         }
         assert(storage.writes.items.len == 0);
 
         storage.reads.items.len = 0;
         storage.next_tick_queue.reset();
-    }
-
-    /// Like reset, but can be called while storage is actively processing callbacks during step.
-    pub fn reset_soon(storage: *Storage) void {
-        switch (storage.status) {
-            .idle => storage.reset(),
-            .stepping => storage.status = .resetting,
-            .resetting => unreachable,
-        }
-    }
-
-    pub fn reset_write(storage: *Storage, write: *Write) void {
-        assert(storage.status == .resetting);
-        if (!storage.prng.chance(storage.options.crash_fault_probability)) return;
-
-        // Randomly corrupt one of the faulty sectors the operation targeted.
-        // TODO: inject more realistic and varied storage faults as described above.
-        const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
-        storage.fault_sector(write.zone, sectors.random(&storage.prng));
     }
 
     /// Compile-time upper bound on the size of a grid of a testing Storage.
@@ -298,7 +276,6 @@ pub const Storage = struct {
 
     /// Runtime bound on the size of the grid of a testing Storage.
     pub fn grid_blocks(storage: *const Storage) u64 {
-        assert(storage.status == .idle);
         return grid_blocks_for_storage_size(storage.size);
     }
 
@@ -315,7 +292,6 @@ pub const Storage = struct {
     /// Returns the number of bytes that have been written to, assuming that (the simulated)
     /// `fallocate()` creates a sparse file.
     pub fn size_used(storage: *const Storage) usize {
-        assert(storage.status == .idle);
         return storage.memory_written.count() * constants.sector_size;
     }
 
@@ -330,7 +306,6 @@ pub const Storage = struct {
     ///
     /// Both instances must have an identical size.
     pub fn copy(storage: *Storage, origin: *const Storage) void {
-        assert(storage.status == .idle);
         assert(storage.size == origin.size);
 
         storage.ticks = origin.ticks;
@@ -361,10 +336,6 @@ pub const Storage = struct {
     }
 
     pub fn step(storage: *Storage) bool {
-        assert(storage.status == .idle);
-        defer assert(storage.status == .idle);
-
-        storage.status = .stepping;
         var reads: [32]*Read = undefined;
         var read_count: u32 = 0;
 
@@ -387,63 +358,43 @@ pub const Storage = struct {
             write_count += 1;
         }
 
-        if (read_count == 0 and write_count == 0 and storage.next_tick_queue.empty()) {
-            storage.status = .idle;
-            return false;
-        }
+        // NB: to support upgrades in the simulator, we do not process next_tick_queue if we
+        // processed any IO. This is to get the simulator the chance to restart the corresponding
+        // replica into a newer version.
 
-        storage.prng.shuffle(*Read, reads[0..read_count]);
-        storage.prng.shuffle(*Write, writes[0..write_count]);
+        if (read_count > 0 or write_count > 0) {
+            storage.prng.shuffle(*Read, reads[0..read_count]);
+            storage.prng.shuffle(*Write, writes[0..write_count]);
 
-        while (read_count > 0 or write_count > 0) {
-            if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
-                read_count -= 1;
-                switch (storage.status) {
-                    .idle => unreachable,
-                    .stepping => storage.read_sectors_finish(reads[read_count]),
-                    .resetting => {},
-                }
-            } else {
-                write_count -= 1;
-                switch (storage.status) {
-                    .idle => unreachable,
-                    .stepping => storage.write_sectors_finish(writes[write_count]),
-                    .resetting => storage.reset_write(writes[write_count]),
+            while (read_count > 0 or write_count > 0) {
+                if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
+                    read_count -= 1;
+                    storage.read_sectors_finish(reads[read_count]);
+                } else {
+                    write_count -= 1;
+                    storage.write_sectors_finish(writes[write_count]);
                 }
             }
+            return true;
         }
 
-        // Process the queues in a single loop, since their callbacks may append to each other.
-        while (storage.next_tick_queue.pop()) |next_tick| {
-            switch (storage.status) {
-                .idle => unreachable,
-                .stepping => next_tick.callback(next_tick),
-                .resetting => {},
+        if (!storage.next_tick_queue.empty()) {
+            // Process the queues in a single loop, since their callbacks may append to each other.
+            while (storage.next_tick_queue.pop()) |next_tick| {
+                next_tick.callback(next_tick);
             }
-        }
-
-        switch (storage.status) {
-            .idle => unreachable,
-            .stepping => storage.status = .idle,
-            .resetting => {
-                storage.status = .idle;
-                storage.reset();
-            },
+            return true;
         }
 
         return false;
     }
 
     pub fn run(storage: *Storage) void {
-        assert(storage.status == .idle);
-        defer assert(storage.status == .idle);
-
         while (storage.step()) {}
         storage.tick();
     }
 
     pub fn tick(storage: *Storage) void {
-        assert(storage.status == .idle);
         storage.ticks += 1;
     }
 
@@ -453,7 +404,6 @@ pub const Storage = struct {
         callback: *const fn (next_tick: *Storage.NextTick) void,
         next_tick: *Storage.NextTick,
     ) void {
-        assert(storage.status != .resetting);
         next_tick.* = .{
             .source = source,
             .callback = callback,
@@ -463,7 +413,6 @@ pub const Storage = struct {
     }
 
     pub fn reset_next_tick_lsm(storage: *Storage) void {
-        assert(storage.status != .resetting);
         var next_tick_iterator = storage.next_tick_queue;
         storage.next_tick_queue.reset();
 
@@ -482,7 +431,6 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
-        assert(storage.status != .resetting);
         zone.verify_iop(buffer, offset_in_zone);
         assert(zone != .grid_padding);
         hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
@@ -517,7 +465,6 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        assert(storage.status == .stepping);
         hash_log.emit_autohash(.{ read.buffer, read.zone, read.offset }, .DeepRecursive);
 
         const offset_in_storage = read.zone.offset(read.offset);
@@ -592,7 +539,6 @@ pub const Storage = struct {
         corrupt,
         corrupt_or_misdirect,
     } {
-        assert(storage.status == .stepping);
         if (!storage.faulty) return .none;
 
         if (read.zone == .wal_prepares) {
@@ -641,7 +587,6 @@ pub const Storage = struct {
         zone: vsr.Zone,
         offset_in_zone: u64,
     ) void {
-        assert(storage.status != .resetting);
         zone.verify_iop(buffer, offset_in_zone);
         maybe(zone == .grid_padding); // Padding is zeroed during format.
         hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
@@ -668,7 +613,6 @@ pub const Storage = struct {
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
-        assert(storage.status == .stepping);
         assert(storage.overlays.total() >= 2);
 
         hash_log.emit_autohash(.{ write.buffer, write.zone, write.offset }, .DeepRecursive);
@@ -744,12 +688,10 @@ pub const Storage = struct {
     }
 
     fn read_latency(storage: *Storage) u64 {
-        assert(storage.status != .resetting);
         return storage.latency(storage.options.read_latency_min, storage.options.read_latency_mean);
     }
 
     fn write_latency(storage: *Storage) u64 {
-        assert(storage.status != .resetting);
         return storage.latency(
             storage.options.write_latency_min,
             storage.options.write_latency_mean,
@@ -757,7 +699,6 @@ pub const Storage = struct {
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
-        assert(storage.status != .resetting);
         return min + fuzz.random_int_exponential(&storage.prng, u64, mean - min);
     }
 
@@ -767,7 +708,6 @@ pub const Storage = struct {
         offset_in_zone: u64,
         size: u64,
     ) ?usize {
-        assert(storage.status == .stepping);
         const atlas = storage.options.fault_atlas orelse return null;
         return atlas.faulty_sector(
             &storage.prng,
@@ -779,7 +719,6 @@ pub const Storage = struct {
     }
 
     fn pick_faulty_chunk_offset(storage: *Storage, write: *const Write) ?u64 {
-        assert(storage.status == .stepping);
         const atlas = storage.options.fault_atlas orelse return null;
         const offset = atlas.faulty_chunk_offset(
             &storage.prng,
@@ -792,7 +731,6 @@ pub const Storage = struct {
     }
 
     fn fault_sector(storage: *Storage, zone: vsr.Zone, sector: usize) void {
-        assert(storage.status == .stepping or storage.status == .resetting);
         storage.faults.set(sector);
         if (storage.options.replica_index) |replica_index| {
             const offset = sector * constants.sector_size - zone.offset(0);
@@ -838,7 +776,6 @@ pub const Storage = struct {
         storage: *const Storage,
         area: Area,
     ) []align(constants.sector_size) const u8 {
-        assert(storage.status != .resetting);
         const sectors = area.sectors();
         const area_min = sectors.min * constants.sector_size;
         const area_max = sectors.max * constants.sector_size;
@@ -847,7 +784,6 @@ pub const Storage = struct {
 
     /// Returns whether any sector in the area is corrupt.
     pub fn area_faulty(storage: *const Storage, area: Area) bool {
-        assert(storage.status != .resetting);
         const sectors = area.sectors();
         var sector = sectors.min;
         var faulty: bool = false;
@@ -868,7 +804,6 @@ pub const Storage = struct {
         storage: *const Storage,
         copy_: u8,
     ) *const superblock.SuperBlockHeader {
-        assert(storage.status == .idle);
         const offset =
             vsr.Zone.superblock.offset(@as(usize, copy_) * superblock.superblock_copy_size);
         const bytes = storage.memory[offset..][0..@sizeOf(superblock.SuperBlockHeader)];
@@ -876,7 +811,6 @@ pub const Storage = struct {
     }
 
     pub fn wal_headers(storage: *const Storage) []const vsr.Header.Prepare {
-        assert(storage.status != .resetting);
         const offset = vsr.Zone.wal_headers.offset(0);
         const size = vsr.Zone.wal_headers.size().?;
         return @alignCast(mem.bytesAsSlice(
@@ -899,7 +833,6 @@ pub const Storage = struct {
     }
 
     pub fn wal_prepares(storage: *const Storage) []const MessageRawType(.prepare) {
-        assert(storage.status != .resetting);
         const offset = vsr.Zone.wal_prepares.offset(0);
         const size = vsr.Zone.wal_prepares.size().?;
         return @alignCast(mem.bytesAsSlice(
@@ -909,7 +842,6 @@ pub const Storage = struct {
     }
 
     pub fn client_replies(storage: *const Storage) []const MessageRawType(.reply) {
-        assert(storage.status != .resetting);
         const offset = vsr.Zone.client_replies.offset(0);
         const size = vsr.Zone.client_replies.size().?;
         return @alignCast(mem.bytesAsSlice(
@@ -922,7 +854,6 @@ pub const Storage = struct {
         storage: *const Storage,
         address: u64,
     ) ?*align(constants.sector_size) const [constants.block_size]u8 {
-        assert(storage.status != .resetting);
         assert(address > 0);
 
         const block_offset = vsr.Zone.grid.offset((address - 1) * constants.block_size);
@@ -938,7 +869,6 @@ pub const Storage = struct {
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
-        assert(storage.status == .idle);
         for (storage.reads.items) |read| {
             log.debug("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
         }
@@ -948,7 +878,6 @@ pub const Storage = struct {
     }
 
     pub fn assert_no_pending_reads(storage: *const Storage, zone: vsr.Zone) void {
-        assert(storage.status != .resetting);
         var assert_failed = false;
 
         for (storage.reads.items) |read| {
@@ -964,7 +893,6 @@ pub const Storage = struct {
     }
 
     pub fn assert_no_pending_writes(storage: *const Storage, zone: vsr.Zone) void {
-        assert(storage.status != .resetting);
         var assert_failed = false;
 
         const writes = storage.writes;
@@ -988,7 +916,6 @@ pub const Storage = struct {
     /// - contains the given index block
     /// - contains every data block referenced by the index block
     pub fn verify_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
-        assert(storage.status != .resetting);
         assert(index_address > 0);
 
         const index_block = storage.grid_block(index_address).?;
@@ -1012,7 +939,6 @@ pub const Storage = struct {
     }
 
     pub fn transition_to_liveness_mode(storage: *Storage) void {
-        assert(storage.status == .idle);
         storage.options.read_fault_probability = ratio(0, 100);
         storage.options.write_fault_probability = ratio(0, 100);
         storage.options.write_misdirect_probability = ratio(0, 100);
