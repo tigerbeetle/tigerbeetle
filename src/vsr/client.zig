@@ -452,9 +452,9 @@ pub fn ClientType(
                     pong.header.view,
                 });
                 self.view = pong.header.view;
-                // Even if there is a requst in flight, don't try to retransmit it immediately after
-                // a view change. Instead, ride the on_request_timeout normally  to reduce the size
-                // of thundering heard.
+                // Even if there is a request in flight, don't try to retransmit it immediately
+                // after a view change. Instead, ride the on_request_timeout normally to reduce the
+                // size of thundering herd.
                 maybe(self.request_inflight != null);
             }
 
@@ -764,7 +764,6 @@ pub fn ClientType(
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            // Otherwise we know the view and send directly to the primary.
             self.send_message_to_replica(
                 @as(u8, @intCast(self.view % self.replica_count)),
                 message.base(),

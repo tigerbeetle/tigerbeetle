@@ -5525,8 +5525,8 @@ pub fn ReplicaType(
             // should send evictions.
             if (self.backup()) {
                 // Clients only send requests to the primary. Either the client's view is outdated,
-                // or a message was misdirected. Intentinonally don't try to forward the message to
-                // the primary, to avoid amplyfying the network load.
+                // or a message was misdirected. Intentionally don't try to forward the message to
+                // the primary, to avoid amplifying the network load.
                 log.debug("{}: on_request: ignoring (backup view={} header.view={})", .{
                     self.replica,
                     self.view,
