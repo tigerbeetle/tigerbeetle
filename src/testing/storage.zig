@@ -40,8 +40,8 @@ const FreeSet = @import("../vsr/free_set.zig").FreeSet;
 const schema = @import("../lsm/schema.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
-const PriorityQueue = std.PriorityQueue;
 const fuzz = @import("./fuzz.zig");
+const ReadyQueueType = fuzz.ReadyQueueType;
 const hash_log = @import("./hash_log.zig");
 const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
@@ -100,7 +100,7 @@ pub const Storage = struct {
         /// Relative offset within the zone.
         offset: u64,
         /// Tick at which this read is considered "completed" and the callback should be called.
-        done_at_tick: u64,
+        ready_at_tick: u64,
         stack_trace: StackTrace,
 
         fn less_than(context: void, a: *Read, b: *Read) math.Order {
@@ -117,7 +117,7 @@ pub const Storage = struct {
         /// Relative offset within the zone.
         offset: u64,
         /// Tick at which this write is considered "completed" and the callback should be called.
-        done_at_tick: u64,
+        ready_at_tick: u64,
         stack_trace: StackTrace,
 
         fn less_than(context: void, a: *Write, b: *Write) math.Order {
@@ -187,8 +187,8 @@ pub const Storage = struct {
     /// This is used to disable faults during the replica's first startup.
     faulty: bool = true,
 
-    reads: PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
-    writes: PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
+    reads: ReadyQueueType(*Storage.Read),
+    writes: ReadyQueueType(*Storage.Write),
 
     ticks: u64 = 0,
     next_tick_queue: FIFOType(NextTick) = .{ .name = "storage_next_tick" },
@@ -215,14 +215,11 @@ pub const Storage = struct {
         const overlay_buffers = std.mem.bytesAsValue(OverlayBuffers, overlay_buffers_alloc);
         errdefer allocator.destroy(overlay_buffers);
 
-        var reads = PriorityQueue(*Storage.Read, void, Storage.Read.less_than).init(allocator, {});
-        errdefer reads.deinit();
-        try reads.ensureTotalCapacity(constants.iops_read_max);
+        var reads = try ReadyQueueType(*Storage.Read).init(allocator, constants.iops_read_max);
+        errdefer reads.deinit(allocator);
 
-        var writes =
-            PriorityQueue(*Storage.Write, void, Storage.Write.less_than).init(allocator, {});
-        errdefer writes.deinit();
-        try writes.ensureTotalCapacity(constants.iops_write_max);
+        var writes = try ReadyQueueType(*Storage.Write).init(allocator, constants.iops_write_max);
+        errdefer writes.deinit(allocator);
 
         return Storage{
             .allocator = allocator,
@@ -239,8 +236,8 @@ pub const Storage = struct {
     }
 
     pub fn deinit(storage: *Storage, allocator: mem.Allocator) void {
-        storage.writes.deinit();
-        storage.reads.deinit();
+        storage.writes.deinit(allocator);
+        storage.reads.deinit(allocator);
         allocator.destroy(storage.overlay_buffers);
         storage.faults.deinit(allocator);
         storage.memory_written.deinit(allocator);
@@ -255,8 +252,7 @@ pub const Storage = struct {
             storage.writes.count(),
             storage.next_tick_queue.count,
         });
-        while (storage.writes.peek()) |_| {
-            const write = storage.writes.remove();
+        for (storage.writes.slice()) |write| {
             if (!storage.prng.chance(storage.options.crash_fault_probability)) continue;
 
             // Randomly corrupt one of the faulty sectors the operation targeted.
@@ -264,9 +260,8 @@ pub const Storage = struct {
             const sectors = SectorRange.from_zone(write.zone, write.offset, write.buffer.len);
             storage.fault_sector(write.zone, sectors.random(&storage.prng));
         }
-        assert(storage.writes.items.len == 0);
-
-        storage.reads.items.len = 0;
+        storage.writes.reset();
+        storage.reads.reset();
         storage.next_tick_queue.reset();
     }
 
@@ -324,62 +319,46 @@ pub const Storage = struct {
         storage.faults.toggleSet(storage.faults);
         storage.faults.toggleSet(origin.faults);
 
-        storage.reads.items.len = 0;
-        for (origin.reads.items) |read| {
-            storage.reads.add(read) catch unreachable;
+        storage.reads.reset();
+        for (origin.reads.const_slice()) |read| {
+            storage.reads.add(read);
         }
 
-        storage.writes.items.len = 0;
-        for (origin.writes.items) |write| {
-            storage.writes.add(write) catch unreachable;
+        storage.writes.reset();
+        for (origin.writes.const_slice()) |write| {
+            storage.writes.add(write);
         }
     }
 
     pub fn step(storage: *Storage) bool {
-        var reads: [32]*Read = undefined;
-        var read_count: u32 = 0;
+        var advanced = false;
 
-        var writes: [32]*Write = undefined;
-        var write_count: u32 = 0;
+        const order: [2]enum { read, write } = if (storage.prng.boolean())
+            .{ .read, .write }
+        else
+            .{ .write, .read };
 
-        while (storage.reads.peek()) |read| {
-            if (read.done_at_tick > storage.ticks) break;
-            if (read_count == reads.len) break;
-            _ = storage.reads.remove();
-            reads[read_count] = read;
-            read_count += 1;
-        }
-
-        while (storage.writes.peek()) |write| {
-            if (write.done_at_tick > storage.ticks) break;
-            if (write_count == writes.len) break;
-            _ = storage.writes.remove();
-            writes[write_count] = write;
-            write_count += 1;
-        }
-
-        if (read_count == 0 and write_count == 0 and storage.next_tick_queue.empty()) {
-            return false;
-        }
-
-        storage.prng.shuffle(*Read, reads[0..read_count]);
-        storage.prng.shuffle(*Write, writes[0..write_count]);
-
-        while (read_count > 0 or write_count > 0) {
-            if (write_count == 0 or (read_count > 0 and storage.prng.boolean())) {
-                read_count -= 1;
-                storage.read_sectors_finish(reads[read_count]);
-            } else {
-                write_count -= 1;
-                storage.write_sectors_finish(writes[write_count]);
-            }
-        }
+        for (order) |kind| switch (kind) {
+            .read => if (storage.reads.remove_ready(&storage.prng, storage.ticks)) |read| {
+                assert(read.ready_at_tick <= storage.ticks);
+                storage.read_sectors_finish(read);
+                advanced = true;
+                break;
+            },
+            .write => if (storage.writes.remove_ready(&storage.prng, storage.ticks)) |write| {
+                assert(write.ready_at_tick <= storage.ticks);
+                storage.write_sectors_finish(write);
+                advanced = true;
+                break;
+            },
+        };
 
         // Process the queues in a single loop, since their callbacks may append to each other.
         while (storage.next_tick_queue.pop()) |next_tick| {
+            advanced = true;
             next_tick.callback(next_tick);
         }
-        return true;
+        return advanced;
     }
 
     pub fn run(storage: *Storage) void {
@@ -449,12 +428,12 @@ pub const Storage = struct {
             .buffer = buffer,
             .zone = zone,
             .offset = offset_in_zone,
-            .done_at_tick = storage.ticks + storage.read_latency(),
+            .ready_at_tick = storage.ticks + storage.read_latency(),
             .stack_trace = StackTrace.capture(),
         };
 
         // We ensure the capacity is sufficient for constants.iops_read_max in init()
-        storage.reads.add(read) catch unreachable;
+        storage.reads.add(read);
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
@@ -585,8 +564,7 @@ pub const Storage = struct {
         hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
 
         // Verify that there are no concurrent overlapping writes.
-        var iterator = storage.writes.iterator();
-        while (iterator.next()) |other| {
+        for (storage.writes.slice()) |other| {
             if (other.zone != zone) continue;
             assert(offset_in_zone + buffer.len <= other.offset or
                 other.offset + other.buffer.len <= offset_in_zone);
@@ -597,12 +575,12 @@ pub const Storage = struct {
             .buffer = buffer,
             .zone = zone,
             .offset = offset_in_zone,
-            .done_at_tick = storage.ticks + storage.write_latency(),
+            .ready_at_tick = storage.ticks + storage.write_latency(),
             .stack_trace = StackTrace.capture(),
         };
 
         // We ensure the capacity is sufficient for constants.iops_write_max in init()
-        storage.writes.add(write) catch unreachable;
+        storage.writes.add(write);
     }
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
@@ -862,10 +840,10 @@ pub const Storage = struct {
     }
 
     pub fn log_pending_io(storage: *const Storage) void {
-        for (storage.reads.items) |read| {
+        for (storage.reads.const_slice()) |read| {
             log.debug("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
         }
-        for (storage.writes.items) |write| {
+        for (storage.writes.const_slice()) |write| {
             log.debug("Pending write: {} {}\n{}", .{ write.offset, write.zone, write.stack_trace });
         }
     }
@@ -873,7 +851,7 @@ pub const Storage = struct {
     pub fn assert_no_pending_reads(storage: *const Storage, zone: vsr.Zone) void {
         var assert_failed = false;
 
-        for (storage.reads.items) |read| {
+        for (storage.reads.const_slice()) |read| {
             if (read.zone == zone) {
                 log.err("Pending read: {} {}\n{}", .{ read.offset, read.zone, read.stack_trace });
                 assert_failed = true;
@@ -889,7 +867,7 @@ pub const Storage = struct {
         var assert_failed = false;
 
         const writes = storage.writes;
-        for (writes.items) |write| {
+        for (writes.const_slice()) |write| {
             if (write.zone == zone) {
                 log.err("Pending write: {} {}\n{}", .{
                     write.offset,
