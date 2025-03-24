@@ -387,6 +387,7 @@ pub const CreateTransferResult = enum(u32) {
     }
 
     comptime {
+        @setEvalBranchQuota(2_000);
         const values = std.enums.values(CreateTransferResult);
         const BitSet = stdx.BitSetType(values.len);
         var set: BitSet = .{};
