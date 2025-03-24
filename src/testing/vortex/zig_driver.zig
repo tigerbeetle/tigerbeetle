@@ -14,7 +14,7 @@ const c = @cImport({
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.zig_driver);
-const events_count_max = 8190;
+const events_count_max = 8189;
 const events_buffer_size_max = size: {
     var event_size_max = 0;
     for (std.enums.values(StateMachine.Operation)) |operation| {
