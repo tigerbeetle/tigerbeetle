@@ -168,7 +168,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         var stats_buffer: [1024]u8 = undefined;
         const stats_buffer_size = try process.stdout.?.readAll(&stats_buffer);
         var stats_count: u32 = 0;
-        var lines = std.mem.split(u8, stats_buffer[0..stats_buffer_size], "\n");
+        var lines = std.mem.splitScalar(u8, stats_buffer[0..stats_buffer_size], '\n');
         while (lines.next()) |line| {
             if (line.len != 0) {
                 std.debug.print("LINE: {s}\n", .{line});
