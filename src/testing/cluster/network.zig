@@ -23,27 +23,7 @@ pub const NetworkOptions = PacketSimulatorOptions;
 pub const LinkFilter = @import("../packet_simulator.zig").LinkFilter;
 
 pub const Network = struct {
-    pub const Packet = struct {
-        network: *Network,
-        message: *Message,
-
-        pub fn clone(packet: *const Packet) Packet {
-            return Packet{
-                .network = packet.network,
-                .message = packet.message.ref(),
-            };
-        }
-
-        pub fn deinit(packet: *const Packet) void {
-            packet.network.message_pool.unref(packet.message);
-        }
-
-        pub fn command(packet: *const Packet) vsr.Command {
-            return packet.message.header.command;
-        }
-    };
-
-    const PacketSimulator = PacketSimulatorType(Packet);
+    const PacketSimulator = PacketSimulatorType(*Message);
 
     pub const Path = struct {
         source: Process,
@@ -85,7 +65,12 @@ pub const Network = struct {
         var processes = try std.ArrayListUnmanaged(u128).initCapacity(allocator, process_count);
         errdefer processes.deinit(allocator);
 
-        var packet_simulator = try PacketSimulatorType(Packet).init(allocator, options);
+        var packet_simulator = try PacketSimulator.init(allocator, options, .{
+            .packet_command = &packet_command,
+            .packet_clone = &packet_clone,
+            .packet_deinit = &packet_deinit,
+            .packet_deliver = &packet_deliver,
+        });
         errdefer packet_simulator.deinit(allocator);
 
         // Count:
@@ -251,11 +236,7 @@ pub const Network = struct {
         stdx.copy_disjoint(.exact, u8, network_message.buffer, message.buffer);
 
         network.packet_simulator.submit_packet(
-            .{
-                .message = network_message.ref(),
-                .network = network,
-            },
-            deliver_message,
+            network_message.ref(),
             .{
                 .source = network.process_to_address(path.source),
                 .target = network.process_to_address(path.target),
@@ -281,8 +262,25 @@ pub const Network = struct {
         return network.buses.items[network.process_to_address(process)];
     }
 
-    fn deliver_message(packet: Packet, path: PacketSimulatorPath) void {
-        const network = packet.network;
+    fn packet_command(_: *PacketSimulator, message: *Message) vsr.Command {
+        return message.header.command;
+    }
+
+    fn packet_clone(_: *PacketSimulator, message: *Message) *Message {
+        return message.ref();
+    }
+
+    fn packet_deinit(packet_simulator: *PacketSimulator, message: *Message) void {
+        const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
+        network.message_pool.unref(message);
+    }
+
+    fn packet_deliver(
+        packet_simulator: *PacketSimulator,
+        message: *Message,
+        path: PacketSimulatorPath,
+    ) void {
+        const network: *Network = @fieldParentPtr("packet_simulator", packet_simulator);
         const process_path = .{
             .source = raw_process_to_process(network.processes.items[path.source]),
             .target = raw_process_to_process(network.processes.items[path.target]),
@@ -292,7 +290,7 @@ pub const Network = struct {
             log.debug("deliver_message: {} > {}: {} (dropped; target is down)", .{
                 process_path.source,
                 process_path.target,
-                packet.message.header.command,
+                message.header.command,
             });
             return;
         }
@@ -301,12 +299,12 @@ pub const Network = struct {
         const target_message = target_bus.get_message(null);
         defer target_bus.unref(target_message);
 
-        stdx.copy_disjoint(.exact, u8, target_message.buffer, packet.message.buffer);
+        stdx.copy_disjoint(.exact, u8, target_message.buffer, message.buffer);
 
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
-            packet.message.header.command,
+            message.header.command,
         });
 
         if (target_message.header.command == .request or

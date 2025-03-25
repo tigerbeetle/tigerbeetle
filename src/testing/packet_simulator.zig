@@ -82,27 +82,33 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
     return struct {
         const PacketSimulator = @This();
 
+        const VTable = struct {
+            packet_command: *const fn (*PacketSimulator, Packet) vsr.Command,
+            packet_clone: *const fn (*PacketSimulator, Packet) Packet,
+            packet_deinit: *const fn (*PacketSimulator, Packet) void,
+            packet_deliver: *const fn (*PacketSimulator, Packet, Path) void,
+        };
+
         const LinkPacket = struct {
             ready_at_tick: u64,
-            callback: *const fn (packet: Packet, path: Path) void,
             packet: Packet,
         };
 
-        pub const LinkDropPacketFn = *const fn (packet: *const Packet) bool;
+        pub const LinkDropPacketFn = *const fn (packet: Packet) bool;
 
         const Link = struct {
             queue: ReadyQueueType(LinkPacket),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
-            drop_packet_fn: ?*const fn (packet: *const Packet) bool = null,
+            drop_packet_fn: ?LinkDropPacketFn = null,
             /// Commands in the set are recorded for a later replay.
             record: LinkFilter = .{},
             /// We can arbitrary clog a path until a tick.
             clogged_till: u64 = 0,
 
-            fn should_drop(link: *const @This(), packet: *const Packet) bool {
-                if (!link.filter.contains(packet.command())) {
+            fn should_drop(link: *const @This(), packet: Packet, command: vsr.Command) bool {
+                if (!link.filter.contains(command)) {
                     return true;
                 }
                 if (link.drop_packet_fn) |drop_packet_fn| {
@@ -113,13 +119,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         };
 
         const RecordedPacket = struct {
-            callback: *const fn (packet: Packet, path: Path) void,
             packet: Packet,
             path: Path,
         };
         const Recorded = std.ArrayListUnmanaged(RecordedPacket);
 
         options: PacketSimulatorOptions,
+        vtable: VTable,
         prng: stdx.PRNG,
         ticks: u64 = 0,
 
@@ -140,6 +146,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         pub fn init(
             allocator: std.mem.Allocator,
             options: PacketSimulatorOptions,
+            vtable: VTable,
         ) !PacketSimulator {
             assert(options.node_count > 0);
             assert(options.one_way_delay_mean >= options.one_way_delay_min);
@@ -172,6 +179,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
             return PacketSimulator{
                 .options = options,
+                .vtable = vtable,
                 .prng = stdx.PRNG.from_seed(options.seed),
                 .links = links,
 
@@ -186,11 +194,16 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn deinit(self: *PacketSimulator, allocator: std.mem.Allocator) void {
             for (self.links) |*link| {
-                for (link.queue.slice()) |link_packet| link_packet.packet.deinit();
+                for (link.queue.slice()) |link_packet| {
+                    self.packet_deinit(link_packet.packet);
+                }
+
                 link.queue.deinit(allocator);
             }
 
-            while (self.recorded.popOrNull()) |packet| packet.packet.deinit();
+            while (self.recorded.popOrNull()) |recorded_packet| {
+                self.packet_deinit(recorded_packet.packet);
+            }
             self.recorded.deinit(allocator);
 
             allocator.free(self.links);
@@ -202,7 +215,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         pub fn link_clear(self: *PacketSimulator, path: Path) void {
             const link = &self.links[self.path_index(path)];
             for (link.queue.slice()) |link_packet| {
-                link_packet.packet.deinit();
+                self.packet_deinit(link_packet.packet);
             }
             link.queue.reset();
         }
@@ -230,7 +243,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             assert(recording);
 
             while (self.recorded.popOrNull()) |packet| {
-                self.submit_packet(packet.packet, packet.callback, packet.path);
+                self.submit_packet(packet.packet, packet.path);
             }
         }
 
@@ -359,7 +372,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     while (queue.remove_ready(&self.prng, self.ticks)) |link_packet| {
                         assert(link_packet.ready_at_tick <= self.ticks);
                         self.submit_packet_finish(path, link_packet);
-                        link_packet.packet.deinit();
+                        self.packet_deinit(link_packet.packet);
                         advanced = true;
                     }
                 }
@@ -407,14 +420,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         pub fn submit_packet(
             self: *PacketSimulator,
             packet: Packet, // Callee owned.
-            callback: *const fn (packet: Packet, path: Path) void,
             path: Path,
         ) void {
             const queue = &self.links[self.path_index(path)].queue;
             const queue_count = queue.count();
             if (queue_count + 1 > self.options.path_maximum_capacity) {
                 const link_packet = queue.remove_random(&self.prng).?;
-                link_packet.packet.deinit();
+                self.packet_deinit(link_packet.packet);
                 log.warn("submit_packet: {} reached capacity, dropped packet", .{
                     path,
                 });
@@ -423,14 +435,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             queue.add(.{
                 .ready_at_tick = self.ticks + self.one_way_delay(),
                 .packet = packet,
-                .callback = callback,
             });
 
-            const recording = self.links[self.path_index(path)].record.contains(packet.command());
+            const command = self.packet_command(packet);
+            const recording = self.links[self.path_index(path)].record.contains(command);
             if (recording) {
                 self.recorded.addOneAssumeCapacity().* = .{
-                    .packet = packet.clone(),
-                    .callback = callback,
+                    .packet = self.packet_clone(packet),
                     .path = path,
                 };
             }
@@ -438,30 +449,50 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
             assert(link_packet.ready_at_tick <= self.ticks);
-            if (self.links[self.path_index(path)].should_drop(&link_packet.packet)) {
+            const command = self.packet_command(link_packet.packet);
+            if (self.links[self.path_index(path)].should_drop(link_packet.packet, command)) {
                 log.warn(
-                    "dropped packet (different partitions): from={} to={}",
-                    .{ path.source, path.target },
+                    "dropped packet (different partitions): from={} to={}: {}",
+                    .{ path.source, path.target, link_packet.packet },
                 );
                 return;
             }
 
             if (self.should_drop()) {
-                log.warn("dropped packet from={} to={}", .{ path.source, path.target });
+                log.warn("dropped packet from={} to={}: {}", .{
+                    path.source,
+                    path.target,
+                    link_packet.packet,
+                });
                 return;
             }
 
             if (self.should_replay()) {
                 self.submit_packet(
-                    link_packet.packet.clone(),
-                    link_packet.callback,
+                    self.packet_clone(link_packet.packet),
                     path,
                 );
                 log.debug("replayed packet from={} to={}", .{ path.source, path.target });
             }
 
             log.debug("delivering packet from={} to={}", .{ path.source, path.target });
-            link_packet.callback(link_packet.packet, path);
+            self.packet_deliver(link_packet.packet, path);
+        }
+
+        fn packet_command(self: *PacketSimulator, packet: Packet) vsr.Command {
+            return self.vtable.packet_command(self, packet);
+        }
+
+        fn packet_clone(self: *PacketSimulator, packet: Packet) Packet {
+            return self.vtable.packet_clone(self, packet);
+        }
+
+        fn packet_deinit(self: *PacketSimulator, packet: Packet) void {
+            self.vtable.packet_deinit(self, packet);
+        }
+
+        fn packet_deliver(self: *PacketSimulator, packet: Packet, path: Path) void {
+            self.vtable.packet_deliver(self, packet, path);
         }
     };
 }
