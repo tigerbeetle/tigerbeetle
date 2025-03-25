@@ -661,7 +661,7 @@ pub fn ClientType(
                 .client = self.id,
                 .ping_timestamp_monotonic = self.time.monotonic(),
             };
-            assert(self.request_timeout.attempts > 0);
+
             const next_backup: u32 =
                 (self.view + self.request_timeout.attempts) % self.replica_count;
             self.send_header_to_replica(@as(u8, @intCast(next_backup)), ping.frame_const());
