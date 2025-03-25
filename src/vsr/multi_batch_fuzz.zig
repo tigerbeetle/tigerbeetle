@@ -7,24 +7,23 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 const stdx = @import("../stdx.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const allocator = fuzz.allocator;
 
-pub fn main(args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
     const message_body_size_min = constants.sector_size - @sizeOf(vsr.Header);
     const message_body_size_max = (1024 * 1024) - @sizeOf(vsr.Header);
-    const buffer_expected = try allocator.alignedAlloc(
+    const buffer_expected = try gpa.alignedAlloc(
         u8,
         @alignOf(vsr.Header),
         message_body_size_max,
     );
-    defer allocator.free(buffer_expected);
-    const buffer_actual = try allocator.alignedAlloc(
+    defer gpa.free(buffer_expected);
+    const buffer_actual = try gpa.alignedAlloc(
         u8,
         @alignOf(vsr.Header),
         message_body_size_max,
     );
-    defer allocator.free(buffer_actual);
+    defer gpa.free(buffer_actual);
 
     const events_max = args.events_max orelse 1024;
     for (0..events_max) |_| {
