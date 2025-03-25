@@ -10,7 +10,7 @@
 //! Both reviewer and author amend the review commit and push --force-with-lease it to GitHub.
 //! By convention, only the author can change the code, and they should rebase the review commit.
 //!
-//! A review commit also adds REVIEW_SUMMARY.md, which is both a cover letter and a marker for the
+//! A review commit also adds REVIEW.md, which is both a cover letter and a marker for the
 //! review.
 //!
 //! When all comments are resolved, a reverting commit is added (to preserve review itself in git
@@ -97,7 +97,7 @@ pub fn main() !void {
 }
 
 fn has_review(shell: *Shell) !bool {
-    const has_summary = shell.file_exists("REVIEW_SUMMARY.md");
+    const has_summary = shell.file_exists("REVIEW.md");
     const has_commit = has_commit: {
         const top_commit = try shell.exec_stdout("git rev-parse HEAD", .{});
         const commit_message = try shell.exec_stdout("git log -1 --format=%B {commit}", .{
@@ -106,11 +106,11 @@ fn has_review(shell: *Shell) !bool {
         break :has_commit std.mem.eql(u8, commit_message, "review\n\n");
     };
     if (has_summary and !has_commit) {
-        log.err("REVIEW_SUMMARY.md present, but top-level commit is not a review", .{});
+        log.err("REVIEW.md present, but top-level commit is not a review", .{});
         return error.InvalidReviewState;
     }
     if (!has_summary and has_commit) {
-        log.err("no REVIEW_SUMMARY.md present, but top-level commit is a review", .{});
+        log.err("no REVIEW.md present, but top-level commit is a review", .{});
         return error.InvalidReviewState;
     }
     return has_summary;
@@ -176,9 +176,9 @@ fn review_new(shell: *Shell) !void {
         \\
         \\ Use this for review cover letter, if needed, or to leave review-wide comments.
     ;
-    try shell.cwd.writeFile(.{ .sub_path = "REVIEW_SUMMARY.md", .data = summary });
+    try shell.cwd.writeFile(.{ .sub_path = "REVIEW.md", .data = summary });
 
-    try shell.exec("git add REVIEW_SUMMARY.md", .{});
+    try shell.exec("git add REVIEW.md", .{});
     try shell.exec("git commit --message review", .{});
 }
 
@@ -218,7 +218,7 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
             continue;
         }
         assert(file_name.len > 0);
-        if (std.mem.eql(u8, file_name, "b/REVIEW_SUMMARY.md")) continue;
+        if (std.mem.eql(u8, file_name, "b/REVIEW.md")) continue;
         errdefer log.err("invalid review in '{s}':\n{s}", .{ file_name, line });
 
         if (std.mem.startsWith(u8, line, "- ")) {
