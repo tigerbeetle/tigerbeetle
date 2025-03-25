@@ -9,7 +9,7 @@ const Storage = @import("storage.zig").StorageType(IO);
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 
-pub fn main(args: fuzz.FuzzArgs) !void {
+pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const zones: []const vsr.Zone = &.{
         .superblock,
         .wal_headers,

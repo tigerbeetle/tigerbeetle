@@ -24,7 +24,7 @@ const Context = struct {
     stop_request: Atomic = Atomic.init(.none),
 };
 
-pub fn main(args: fuzz.FuzzArgs) !void {
+pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
     const events_max = args.events_max orelse 100;
 

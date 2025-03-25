@@ -10,9 +10,7 @@ const FreeSet = @import("./free_set.zig").FreeSet;
 const Reservation = @import("./free_set.zig").Reservation;
 const fuzz = @import("../testing/fuzz.zig");
 
-pub fn main(args: fuzz.FuzzArgs) !void {
-    const allocator = fuzz.allocator;
-
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
 
     const blocks_count = FreeSet.shard_bits * prng.range_inclusive(usize, 1, 10);
@@ -20,31 +18,31 @@ pub fn main(args: fuzz.FuzzArgs) !void {
         args.events_max orelse @as(usize, 2_000_000),
         fuzz.random_int_exponential(&prng, usize, blocks_count * 100),
     );
-    const events = try generate_events(allocator, &prng, .{
+    const events = try generate_events(gpa, &prng, .{
         .blocks_count = blocks_count,
         .events_count = events_count,
     });
-    defer allocator.free(events);
+    defer gpa.free(events);
 
-    try run_fuzz(allocator, &prng, blocks_count, events);
+    try run_fuzz(gpa, &prng, blocks_count, events);
 }
 
 fn run_fuzz(
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     prng: *stdx.PRNG,
     blocks_count: usize,
     events: []const FreeSetEvent,
 ) !void {
-    var free_set = try FreeSet.open_empty(allocator, blocks_count);
-    defer free_set.deinit(allocator);
+    var free_set = try FreeSet.open_empty(gpa, blocks_count);
+    defer free_set.deinit(gpa);
 
-    var free_set_model = try FreeSetModel.init(allocator, blocks_count);
-    defer free_set_model.deinit(allocator);
+    var free_set_model = try FreeSetModel.init(gpa, blocks_count);
+    defer free_set_model.deinit(gpa);
 
-    var active_reservations = std.ArrayList(Reservation).init(allocator);
+    var active_reservations = std.ArrayList(Reservation).init(gpa);
     defer active_reservations.deinit();
 
-    var active_addresses = std.ArrayList(u64).init(allocator);
+    var active_addresses = std.ArrayList(u64).init(gpa);
     defer active_addresses.deinit();
 
     for (events) |event| {
@@ -123,7 +121,7 @@ const FreeSetEvent = union(enum) {
     const Tag = std.meta.Tag(FreeSetEvent);
 };
 
-fn generate_events(allocator: std.mem.Allocator, prng: *stdx.PRNG, options: struct {
+fn generate_events(gpa: std.mem.Allocator, prng: *stdx.PRNG, options: struct {
     blocks_count: usize,
     events_count: usize,
 }) ![]const FreeSetEvent {
@@ -135,8 +133,8 @@ fn generate_events(allocator: std.mem.Allocator, prng: *stdx.PRNG, options: stru
         .checkpoint = fuzz.random_int_exponential(prng, u64, 10),
     };
 
-    const events = try allocator.alloc(FreeSetEvent, options.events_count);
-    errdefer allocator.free(events);
+    const events = try gpa.alloc(FreeSetEvent, options.events_count);
+    errdefer gpa.free(events);
 
     log.info("event_weights = {:.2}", .{event_weights});
     log.info("event_count = {d}", .{events.len});
@@ -172,15 +170,15 @@ const FreeSetModel = struct {
     reservation_count: usize = 0,
     reservation_session: usize = 1,
 
-    fn init(allocator: std.mem.Allocator, blocks_count: usize) !FreeSetModel {
-        var blocks_acquired = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
-        errdefer blocks_acquired.deinit(allocator);
+    fn init(gpa: std.mem.Allocator, blocks_count: usize) !FreeSetModel {
+        var blocks_acquired = try std.DynamicBitSetUnmanaged.initEmpty(gpa, blocks_count);
+        errdefer blocks_acquired.deinit(gpa);
 
-        var blocks_released = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
-        errdefer blocks_released.deinit(allocator);
+        var blocks_released = try std.DynamicBitSetUnmanaged.initEmpty(gpa, blocks_count);
+        errdefer blocks_released.deinit(gpa);
 
-        var blocks_reserved = try std.DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
-        errdefer blocks_reserved.deinit(allocator);
+        var blocks_reserved = try std.DynamicBitSetUnmanaged.initEmpty(gpa, blocks_count);
+        errdefer blocks_reserved.deinit(gpa);
 
         return FreeSetModel{
             .blocks_acquired = blocks_acquired,
@@ -189,10 +187,10 @@ const FreeSetModel = struct {
         };
     }
 
-    fn deinit(set: *FreeSetModel, allocator: std.mem.Allocator) void {
-        set.blocks_acquired.deinit(allocator);
-        set.blocks_released.deinit(allocator);
-        set.blocks_reserved.deinit(allocator);
+    fn deinit(set: *FreeSetModel, gpa: std.mem.Allocator) void {
+        set.blocks_acquired.deinit(gpa);
+        set.blocks_released.deinit(gpa);
+        set.blocks_reserved.deinit(gpa);
     }
 
     pub fn count_reservations(set: FreeSetModel) usize {
