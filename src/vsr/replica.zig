@@ -3490,6 +3490,11 @@ pub fn ReplicaType(
             self.trace.gauge(.lsm_nodes_free, self.state_machine.forest.node_pool.free.count());
 
             self.trace.gauge(
+                .grid_blocks_acquired,
+                if (self.grid.free_set.opened) self.grid.free_set.count_acquired() else 0,
+            );
+
+            self.trace.gauge(
                 .replica_pipeline_queue_length,
                 switch (self.pipeline) {
                     .cache => |_| 0,
