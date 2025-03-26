@@ -235,8 +235,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(replica_pools);
 
             // There may be more clients than `clients_max` (to test session eviction).
+            // +1 is for pulse which uses client_id = 0.
             const pipeline_requests_limit =
-                @min(options.cluster.client_count, constants.clients_max) -|
+                (@min(options.cluster.client_count, constants.clients_max) + @as(u8, 1)) -|
                 constants.pipeline_prepare_queue_max;
 
             for (replica_pools, 0..) |*pool, i| {
