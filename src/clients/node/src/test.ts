@@ -105,6 +105,35 @@ test('error if timestamp is not set to 0n on account', async (): Promise<void> =
   assert.deepStrictEqual(errors[0], { index: 0, result: CreateAccountError.timestamp_must_be_zero })
 })
 
+test('batch max size', async (): Promise<void> => {
+  const BATCH_SIZE = 10_000;
+  var transfers: Transfer[] = [];
+  for (var i=0; i<BATCH_SIZE;i++) {
+    transfers.push({
+      id: 0n,
+      debit_account_id: 0n,
+      credit_account_id: 0n,
+      amount: 0n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      pending_id: 0n,
+      timeout: 0,
+      ledger: 0,
+      code: 0,
+      flags: 0,
+      timestamp: 0n,
+    });
+  }
+
+  try {
+    const results = await client.createTransfers(transfers);
+    assert.fail();
+  } catch (error) {
+    assert.strictEqual(error.message, "Too much data provided on this batch.");
+  }
+})
+
 test('can lookup accounts', async (): Promise<void> => {
   const accounts = await client.lookupAccounts([accountA.id, accountB.id])
 
