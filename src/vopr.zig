@@ -74,6 +74,7 @@ const CLIArgs = struct {
     ticks_max_requests: u32 = 40_000_000,
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
+    replica_missing: ?u8 = null,
 
     positional: struct {
         seed: ?[]const u8 = null,
@@ -94,6 +95,10 @@ pub fn main() !void {
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
+    if (cli_args.replica_missing != null and !cli_args.performance) {
+        return vsr.fatal(.cli, "--replica-missing requires --performance", .{});
+    }
+
     log_performance_mode = cli_args.performance;
 
     const seed_random = std.crypto.random.int(u64);
@@ -126,6 +131,7 @@ pub fn main() !void {
     else
         options_swarm(&prng);
 
+    options.replica_missing = cli_args.replica_missing;
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
     }
@@ -199,8 +205,17 @@ pub fn main() !void {
     var simulator = try Simulator.init(allocator, &prng, options);
     defer simulator.deinit(allocator);
 
-    // Warm-up the cluster before performance testing to get past the initial view change.
     if (cli_args.performance) {
+        // Simulate a missing replica by crashing it with ∞ stability.
+        if (options.replica_missing) |replica_index| {
+            if (replica_index > options.network.node_count) {
+                vsr.fatal(.cli, "--replica-index too large", .{});
+            }
+            simulator.cluster.replica_crash(replica_index);
+            simulator.replica_crash_stability[replica_index] = std.math.maxInt(u32);
+        }
+
+        // Warm-up the cluster before performance testing to get past the initial view change.
         simulator.options.request_probability = ratio(0, 100);
         for (0..500) |_| simulator.tick();
         simulator.options.request_probability = options.request_probability;
@@ -579,6 +594,9 @@ pub const Simulator = struct {
         replica_restart_probability: Ratio,
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
+
+        // A replcia permanitely missing from the cluster, used in performance mode.
+        replica_missing: ?u8 = null,
 
         replica_pause_probability: Ratio,
         replica_pause_stability: u32,
