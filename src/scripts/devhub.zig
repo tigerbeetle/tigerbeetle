@@ -149,29 +149,15 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
     const stats_count = blk: {
-        var process = try shell.spawn(
-            .{
-                .stdin_behavior = .Pipe,
-                .stdout_behavior = .Pipe,
-                .stderr_behavior = .Ignore,
-            },
-            "./tigerbeetle inspect metrics",
-            .{},
-        );
-
-        defer {
-            process.stdin.?.close();
-            process.stdin = null;
-            _ = process.wait() catch {};
-        }
-
-        var stats_buffer: [1024]u8 = undefined;
-        const stats_buffer_size = try process.stdout.?.readAll(&stats_buffer);
+        const stats_inspect_result = try shell.exec_stdout("./tigerbeetle inspect metrics", .{});
         var stats_count: u32 = 0;
-        var lines = std.mem.splitScalar(u8, stats_buffer[0..stats_buffer_size], '\n');
+        var lines = std.mem.splitScalar(
+            u8,
+            stats_inspect_result,
+            '\n',
+        );
         while (lines.next()) |line| {
             if (line.len != 0) {
-                std.debug.print("LINE: {s}\n", .{line});
                 stats_count += try std.fmt.parseInt(u32, stdx.cut(line, "=").?.suffix, 10);
             }
         }
