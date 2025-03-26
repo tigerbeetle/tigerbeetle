@@ -148,10 +148,10 @@ const type_mappings = .{
 
 fn dotnet_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum, .Struct => return comptime get_mapped_type_name(Type) orelse
+        .@"enum", .@"struct" => return comptime get_mapped_type_name(Type) orelse
             @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
-        .Bool => return "byte",
-        .Int => |info| {
+        .bool => return "byte",
+        .int => |info| {
             assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "byte",
@@ -162,12 +162,12 @@ fn dotnet_type(comptime Type: type) []const u8 {
                 else => @compileError("invalid int type"),
             };
         },
-        .Optional => |info| switch (@typeInfo(info.child)) {
-            .Pointer => return dotnet_type(info.child),
+        .optional => |info| switch (@typeInfo(info.child)) {
+            .pointer => return dotnet_type(info.child),
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
-        .Pointer => |info| {
-            assert(info.size != .Slice);
+        .pointer => |info| {
+            assert(info.size != .slice);
             assert(!info.is_allowzero);
 
             return if (comptime get_mapped_type_name(info.child)) |name|
@@ -175,7 +175,7 @@ fn dotnet_type(comptime Type: type) []const u8 {
             else
                 dotnet_type(info.child);
         },
-        .Void, .Opaque => return "IntPtr",
+        .void, .@"opaque" => return "IntPtr",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
     }
 }
@@ -295,7 +295,7 @@ fn emit_struct(
     // [MarshalAs(UnmanagedType.ByValArray)] attribute.
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
-            .Array => |array| {
+            .array => |array| {
                 try buffer.writer().print(
                     \\    [StructLayout(LayoutKind.Sequential, Size = {[name]s}Data.SIZE)]
                     \\    private unsafe struct {[name]s}Data
@@ -347,7 +347,7 @@ fn emit_struct(
         const is_private = comptime mapping.is_private(field.name);
 
         switch (@typeInfo(field.type)) {
-            .Array => try buffer.writer().print(
+            .array => try buffer.writer().print(
                 \\    {s} {s}Data {s};
                 \\
                 \\
@@ -382,7 +382,7 @@ fn emit_struct(
             const is_read_only = comptime mapping.is_read_only(field.name);
 
             switch (@typeInfo(field.type)) {
-                .Array => try buffer.writer().print(
+                .array => try buffer.writer().print(
                     \\    {s} byte[] {s} {{ get => {s}.GetData(); {s}set => {s}.SetData(value); }}
                     \\
                     \\
@@ -453,7 +453,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         const mapping = type_mapping[1];
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError(
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
@@ -473,7 +473,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                     @sizeOf(ZigType),
                 ),
             },
-            .Enum => |info| try emit_enum(
+            .@"enum" => |info| try emit_enum(
                 buffer,
                 ZigType,
                 info,

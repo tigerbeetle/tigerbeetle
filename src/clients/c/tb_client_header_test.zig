@@ -54,9 +54,9 @@ test "valid tb_client.h" {
         const c_type: type = @field(c, c_type_name);
 
         switch (@typeInfo(ty)) {
-            .Int => assert(ty == c_type),
-            .Pointer => assert(@sizeOf(ty) == @sizeOf(c_type)),
-            .Enum => {
+            .int => assert(ty == c_type),
+            .pointer => assert(@sizeOf(ty) == @sizeOf(c_type)),
+            .@"enum" => {
                 const prefix_offset = std.mem.lastIndexOfScalar(u8, c_type_name, '_').?;
                 var c_enum_prefix: []const u8 = c_type_name[0 .. prefix_offset + 1];
                 assert(c_type == c_uint);
@@ -78,7 +78,7 @@ test "valid tb_client.h" {
                     assert(zig_value == c_value);
                 }
             },
-            .Struct => |type_info| switch (type_info.layout) {
+            .@"struct" => |type_info| switch (type_info.layout) {
                 .auto => @compileError("struct must be extern or packed to be used in C"),
                 .@"packed" => {
                     const prefix_offset = std.mem.lastIndexOfScalar(u8, c_type_name, '_').?;
@@ -110,21 +110,21 @@ test "valid tb_client.h" {
                         // In C, packed structs and enums are replaced with integers.
                         var field_type = field.type;
                         switch (@typeInfo(field_type)) {
-                            .Struct => |info| {
+                            .@"struct" => |info| {
                                 assert(info.layout == .@"packed");
                                 assert(@sizeOf(field_type) <= @sizeOf(u128));
                                 field_type = std.meta.Int(.unsigned, @bitSizeOf(field_type));
                             },
-                            .Enum => |info| field_type = info.tag_type,
-                            .Bool => field_type = u8,
+                            .@"enum" => |info| field_type = info.tag_type,
+                            .bool => field_type = u8,
                             else => {},
                         }
 
                         // In C, pointers are opaque so we compare only the field sizes,
                         const c_field_type = @TypeOf(@field(@as(c_type, undefined), field.name));
                         switch (@typeInfo(c_field_type)) {
-                            .Pointer => |info| {
-                                assert(info.size == .C);
+                            .pointer => |info| {
+                                assert(info.size == .c);
                                 assert(@sizeOf(c_field_type) == @sizeOf(field_type));
                             },
                             else => assert(c_field_type == field_type),

@@ -386,6 +386,7 @@ pub const CreateTransferResult = enum(u32) {
     }
 
     comptime {
+        @setEvalBranchQuota(2_000);
         const values = std.enums.values(CreateTransferResult);
         const BitSet = stdx.BitSetType(values.len);
         var set: BitSet = .{};
@@ -421,8 +422,8 @@ pub const CreateTransferResult = enum(u32) {
         }
 
         var type_info = @typeInfo(enum {});
-        type_info.Enum.tag_type = std.meta.Tag(CreateTransferResult);
-        type_info.Enum.fields = &fields;
+        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.@"enum".fields = &fields;
         break :type @Type(type_info);
     };
 
@@ -563,7 +564,7 @@ pub const AccountFilterFlags = packed struct(u32) {
 comptime {
     const target = builtin.target;
 
-    if (target.os.tag != .linux and !target.isDarwin() and target.os.tag != .windows) {
+    if (target.os.tag != .linux and !target.os.tag.isDarwin() and target.os.tag != .windows) {
         @compileError("linux, windows or macos is required for io");
     }
 

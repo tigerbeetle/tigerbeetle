@@ -85,10 +85,10 @@ const type_mappings = .{
 
 fn typescript_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError(
+        .@"enum" => return comptime get_mapped_type_name(Type) orelse @compileError(
             "Type " ++ @typeName(Type) ++ " not mapped.",
         ),
-        .Struct => |info| switch (info.layout) {
+        .@"struct" => |info| switch (info.layout) {
             .@"packed" => return comptime typescript_type(
                 std.meta.Int(.unsigned, @bitSizeOf(Type)),
             ),
@@ -96,7 +96,7 @@ fn typescript_type(comptime Type: type) []const u8 {
                 "Type " ++ @typeName(Type) ++ " not mapped.",
             ),
         },
-        .Int => |info| {
+        .int => |info| {
             assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 16 => "number",
@@ -127,7 +127,7 @@ fn emit_enum(
 
     try buffer.writer().print("export enum {s} {{\n", .{mapping.name});
 
-    inline for (@typeInfo(Type).Enum.fields) |field| {
+    inline for (@typeInfo(Type).@"enum".fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
         if (comptime mapping.hidden(field.name)) continue;
 
@@ -187,7 +187,7 @@ fn emit_struct(
         try emit_docs(buffer, mapping, 1, field.name);
 
         switch (@typeInfo(field.type)) {
-            .Array => try buffer.writer().print("  {s}: Buffer\n", .{
+            .array => try buffer.writer().print("  {s}: Buffer\n", .{
                 field.name,
             }),
             else => try buffer.writer().print(
@@ -243,14 +243,14 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         const mapping = type_mapping[1];
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError(
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
                 .@"packed" => try emit_packed_struct(buffer, info, mapping),
                 .@"extern" => try emit_struct(buffer, info, mapping),
             },
-            .Enum => try emit_enum(buffer, ZigType, mapping),
+            .@"enum" => try emit_enum(buffer, ZigType, mapping),
             else => @compileError("Type cannot be represented: " ++ @typeName(ZigType)),
         }
     }

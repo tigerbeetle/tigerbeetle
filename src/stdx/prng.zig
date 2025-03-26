@@ -154,13 +154,13 @@ test fill {
 /// No biased version is provided --- while biased generation is simpler&faster, the bias can be
 /// quite high depending on max!
 pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
     if (max == std.math.maxInt(T)) {
         return prng.int(T);
     }
 
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
-    const bits = @typeInfo(T).Int.bits;
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
+    const bits = @typeInfo(T).int.bits;
     const less_than = max + 1;
 
     // adapted from:
@@ -249,7 +249,7 @@ test index {
 
 /// Generates a uniform, unbiased integer r such that max ≤ r ≤ max.
 pub fn range_inclusive(prng: *PRNG, T: type, min: T, max: T) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
     assert(min <= max);
     return min + prng.int_inclusive(T, max - min);
 }
@@ -273,7 +273,7 @@ test range_inclusive {
 ///
 /// That is, fills @sizeOf(T) bytes with random bits.
 pub fn int(prng: *PRNG, T: anytype) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
     if (T == u64) return prng.next();
     if (@sizeOf(T) < @sizeOf(u64)) return @truncate(prng.next());
     var result: T = undefined;
@@ -366,7 +366,7 @@ pub fn EnumWeightsType(E: type) type {
 
 /// Returns a random value of an enum, where probability is proportional to weight.
 pub fn enum_weighted(prng: *PRNG, Enum: type, weights: EnumWeightsType(Enum)) Enum {
-    const fields = @typeInfo(Enum).Enum.fields;
+    const fields = @typeInfo(Enum).@"enum".fields;
     var total: u64 = 0;
     inline for (fields) |field| {
         total += @field(weights, field.name);
@@ -526,7 +526,12 @@ test shuffle {
 }
 
 test "no floating point please" {
-    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, @src().file, 64 * 1024);
+    const path = try std.fs.path.join(std.testing.allocator, &.{
+        "src",
+        @src().file,
+    });
+    defer std.testing.allocator.free(path);
+    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * 1024);
     defer std.testing.allocator.free(file_text);
 
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);
