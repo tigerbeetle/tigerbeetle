@@ -221,12 +221,10 @@ const Environment = struct {
         assert(!env.pending_verify);
         assert(env.pending.contains(.view_change) == env.superblock.updating(.view_change));
 
-        const write = env.superblock.storage.writes.peek();
-        env.superblock.storage.run();
-
-        if (write) |w| {
-            if (w.done_at_tick <= env.superblock.storage.ticks) try env.verify();
+        while (env.superblock.storage.step()) {
+            try env.verify();
         }
+        env.superblock.storage.tick();
     }
 
     /// Verify that the superblock will recover safely if the replica crashes immediately after
