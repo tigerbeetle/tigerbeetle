@@ -870,14 +870,10 @@ pub fn run_fuzz_ops(
 }
 
 fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for random ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        8
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        Environment.cache_entries_max;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+    return fuzz.random_id(prng, Int, .{
+        .average_hot = 8,
+        .average_cold = Environment.cache_entries_max,
+    });
 }
 
 pub fn generate_fuzz_ops(

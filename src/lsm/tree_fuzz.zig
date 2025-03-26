@@ -770,15 +770,11 @@ const Model = struct {
     }
 };
 
-fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for prng ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        constants.lsm_growth_factor * 2048
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+fn random_id(prng: *stdx.PRNG) u64 {
+    return fuzz.random_id(prng, u64, .{
+        .average_hot = constants.lsm_growth_factor * 2048,
+        .average_cold = 100 * constants.lsm_growth_factor * 2048,
+    });
 }
 
 pub fn generate_fuzz_ops(
@@ -830,17 +826,17 @@ pub fn generate_fuzz_ops(
                 break :action action;
             },
             .put => FuzzOp{ .put = .{
-                .id = random_id(prng, u64),
+                .id = random_id(prng),
                 .value = prng.int(u63),
             } },
             .remove => FuzzOp{ .remove = .{
-                .id = random_id(prng, u64),
+                .id = random_id(prng),
                 .value = prng.int(u63),
             } },
-            .get => FuzzOp{ .get = random_id(prng, u64) },
+            .get => FuzzOp{ .get = random_id(prng) },
             .scan => blk: {
-                const min = random_id(prng, u64);
-                const max = min + random_id(prng, u64);
+                const min = random_id(prng);
+                const max = min + random_id(prng);
                 const direction = prng.enum_uniform(Direction);
                 assert(min <= max);
                 break :blk FuzzOp{
