@@ -290,8 +290,8 @@ fn on_completion(
         .client_release_too_low,
         .client_release_too_high,
         .client_shutdown,
+        .too_much_data,
         => {}, // Handled on the JS side to throw exception.
-        .too_much_data => unreachable, // We limit packet data size during request().
         .invalid_operation => unreachable, // We check the operation during request().
         .invalid_data_size => unreachable, // We set correct data size during request().
     }
@@ -356,6 +356,9 @@ fn on_completion_js(
                 },
                 .client_release_too_high => {
                     break :blk translate.throw(env, "Client was evicted: release too new.");
+                },
+                .too_much_data => {
+                    break :blk translate.throw(env, "Too much data provided on this batch.");
                 },
                 else => unreachable, // all other packet status' handled in previous callback.
             }
@@ -517,8 +520,8 @@ fn BufferType(comptime op: Operation) type {
                 @sizeOf(Event) * count,
                 @sizeOf(Result) * event_count(op, count),
             );
-            if (@sizeOf(vsr.Header) + body_size > constants.message_size_max) {
-                return translate.throw(env, "Batch is larger than the maximum message size.");
+            if (body_size > constants.message_body_size_max) {
+                return translate.throw(env, "Too much data provided on this batch.");
             }
 
             const max_align = @max(body_align, @alignOf(tb_client.Packet));
