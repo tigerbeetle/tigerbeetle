@@ -427,8 +427,12 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             if (queue_count + 1 > self.options.path_maximum_capacity) {
                 const link_packet = queue.remove_random(&self.prng).?;
                 self.packet_deinit(link_packet.packet);
-                log.warn("submit_packet: {} reached capacity, dropped packet", .{
+                log.warn("submit_packet: {} reached capacity, dropped packet: {}", .{
                     path,
+                    if (@typeInfo(Packet) == .Pointer)
+                        link_packet.packet.header
+                    else
+                        link_packet.packet,
                 });
             }
 
@@ -453,7 +457,14 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             if (self.links[self.path_index(path)].should_drop(link_packet.packet, command)) {
                 log.warn(
                     "dropped packet (different partitions): from={} to={}: {}",
-                    .{ path.source, path.target, link_packet.packet },
+                    .{
+                        path.source,
+                        path.target,
+                        if (@typeInfo(Packet) == .Pointer)
+                            link_packet.packet.header
+                        else
+                            link_packet.packet,
+                    },
                 );
                 return;
             }
@@ -462,7 +473,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 log.warn("dropped packet from={} to={}: {}", .{
                     path.source,
                     path.target,
-                    link_packet.packet,
+                    if (@typeInfo(Packet) == .Pointer)
+                        link_packet.packet.header
+                    else
+                        link_packet.packet,
                 });
                 return;
             }
