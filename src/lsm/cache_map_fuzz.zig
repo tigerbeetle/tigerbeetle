@@ -278,8 +278,9 @@ const Model = struct {
 
 fn random_id(prng: *stdx.PRNG) u32 {
     return fuzz.random_id(prng, u32, .{
-        .average_hot = constants.lsm_growth_factor * 2048,
-        .average_cold = 100 * constants.lsm_growth_factor * 2048,
+        .average_hot = 8,
+        .average_cold = scope_value_count_max + stash_value_count_max +
+            TestCacheMap.Cache.value_count_max_multiple,
     });
 }
 
