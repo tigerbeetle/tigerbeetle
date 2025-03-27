@@ -1530,6 +1530,7 @@ public class IntegrationTest {
             }
         }
 
+
         {
             // Querying transfers where:
             // `credit_account_id=$account2Id
@@ -1537,7 +1538,7 @@ public class IntegrationTest {
             final var filter = new AccountFilter();
             filter.setAccountId(account2Id);
             filter.setTimestampMin(1);
-            filter.setTimestampMax(-2L); // -2L == ulong max - 1
+            filter.setTimestampMax(0);
             filter.setLimit(254);
             filter.setDebits(false);
             filter.setCredits(true);
@@ -1722,8 +1723,36 @@ public class IntegrationTest {
             // Invalid timestamp min > max:
             final var filter = new AccountFilter();
             filter.setAccountId(account2Id);
-            filter.setTimestampMin(-2L); // -2L == ulong max - 1
+            filter.setTimestampMin(2);
             filter.setTimestampMax(1);
+            filter.setLimit(254);
+            filter.setDebits(true);
+            filter.setCredits(true);
+            filter.setReversed(false);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+        }
+
+        {
+            // Invalid negative timestamp_min:
+            final var filter = new AccountFilter();
+            filter.setAccountId(account2Id);
+            filter.setTimestampMin(-123123130);
+            filter.setTimestampMax(0);
+            filter.setLimit(254);
+            filter.setDebits(true);
+            filter.setCredits(true);
+            filter.setReversed(false);
+            assertTrue(client.getAccountTransfersAsync(filter).get().getLength() == 0);
+            assertTrue(client.getAccountBalancesAsync(filter).get().getLength() == 0);
+        }
+
+        {
+            // Invalid negative timestamp_max:
+            final var filter = new AccountFilter();
+            filter.setAccountId(account2Id);
+            filter.setTimestampMin(0);
+            filter.setTimestampMax(-123123130);
             filter.setLimit(254);
             filter.setDebits(true);
             filter.setCredits(true);
@@ -2120,6 +2149,27 @@ public class IntegrationTest {
             assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
             assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
         }
+
+        {
+            // Invalid negative timestamp_min:
+            final var filter = new QueryFilter();
+            filter.setTimestampMin(-123123130);
+            filter.setTimestampMax(0);
+            filter.setLimit(254);
+            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+        }
+
+        {
+            // Invalid negative timestamp_max:
+            final var filter = new QueryFilter();
+            filter.setTimestampMin(0);
+            filter.setTimestampMax(-123123130);
+            filter.setLimit(254);
+            assertTrue(client.queryAccountsAsync(filter).get().getLength() == 0);
+            assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
+        }
+
     }
 
     @Test
