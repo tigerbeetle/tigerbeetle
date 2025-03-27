@@ -32,4 +32,9 @@ pub const TimestampRange = struct {
             .max = final,
         };
     }
+
+    pub inline fn valid(timestamp: u64) bool {
+        return timestamp >= timestamp_min and
+            timestamp <= timestamp_max;
+    }
 };
