@@ -107,15 +107,17 @@ pub fn main() !void {
         break :seed_from_arg vsr.testing.parse_seed(seed_argument);
     };
 
-    if (builtin.mode == .ReleaseFast or builtin.mode == .ReleaseSmall) {
-        // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
-        @panic("the simulator must be run with -OReleaseSafe");
-    }
+    // We do not support ReleaseFast or ReleaseSmall because they disable assertions.
+    comptime assert(builtin.mode == .Debug or builtin.mode == .ReleaseSafe);
 
     if (seed == seed_random) {
         if (builtin.mode != .ReleaseSafe) {
             // If no seed is provided, than Debug is too slow and ReleaseSafe is much faster.
-            @panic("no seed provided: the simulator must be run with -OReleaseSafe");
+            return vsr.fatal(
+                .cli,
+                "no seed provided: the simulator must be run with -OReleaseSafe",
+                .{},
+            );
         }
         if (vsr_vopr_options.log != .short) {
             log.warn("no seed provided: full debug logs are enabled, this will be slow", .{});
@@ -1611,9 +1613,13 @@ fn log_override(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (vsr_vopr_options.log == .short) {
-        if (scope != .cluster and scope != .simulator) return;
-        if (log_performance_mode and scope != .simulator) return;
+    if (scope == .vsr and level == .err) {
+        // Always print a message for vsr.fatal.
+    } else {
+        if (vsr_vopr_options.log == .short) {
+            if (scope != .cluster and scope != .simulator) return;
+            if (log_performance_mode and scope != .simulator) return;
+        }
     }
 
     const prefix_default = "[" ++ @tagName(level) ++ "] " ++ "(" ++ @tagName(scope) ++ "): ";
