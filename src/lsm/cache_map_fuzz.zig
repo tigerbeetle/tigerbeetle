@@ -276,15 +276,12 @@ const Model = struct {
     }
 };
 
-fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for random ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        constants.lsm_growth_factor * 2048
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+fn random_id(prng: *stdx.PRNG) u32 {
+    return fuzz.random_id(prng, u32, .{
+        .average_hot = 8,
+        .average_cold = scope_value_count_max + stash_value_count_max +
+            TestCacheMap.Cache.value_count_max_multiple,
+    });
 }
 
 pub fn generate_fuzz_ops(
@@ -358,7 +355,7 @@ pub fn generate_fuzz_ops(
                 }
 
                 break :blk FuzzOp{ .upsert = .{
-                    .key = random_id(prng, u32),
+                    .key = random_id(prng),
                     .value = prng.int(u32),
                 } };
             },
@@ -367,9 +364,9 @@ pub fn generate_fuzz_ops(
                     operations_since_scope_open += 1;
                 }
 
-                break :blk FuzzOp{ .remove = random_id(prng, u32) };
+                break :blk FuzzOp{ .remove = random_id(prng) };
             },
-            .get => FuzzOp{ .get = random_id(prng, u32) },
+            .get => FuzzOp{ .get = random_id(prng) },
             .compact => blk: {
                 upserts_since_compact = 0;
                 op += 1;

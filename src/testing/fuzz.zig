@@ -49,6 +49,20 @@ pub fn random_enum_weights(
     return weights;
 }
 
+/// We have two opposing desires for prng ids:
+/// 1. We want to cause many collisions.
+/// 2. We want to generate enough ids that various caches can't hold them all.
+///
+/// So, flip a coin and pick an an ID either from a small, or from a large set.
+pub fn random_id(prng: *stdx.PRNG, comptime Int: type, options: struct {
+    average_hot: Int,
+    average_cold: Int,
+}) Int {
+    assert(options.average_hot < options.average_cold);
+    const average: Int = if (prng.boolean()) options.average_hot else options.average_cold;
+    return random_int_exponential(prng, Int, average);
+}
+
 pub const FuzzArgs = struct {
     seed: u64,
     events_max: ?usize,
