@@ -117,6 +117,8 @@ test "tb_client echo" {
         tb_client.Operation.create_transfers,
         tb_client.Operation.lookup_accounts,
         tb_client.Operation.lookup_transfers,
+        tb_client.Operation.get_account_transfers,
+        tb_client.Operation.get_account_balances,
         tb_client.Operation.query_accounts,
         tb_client.Operation.query_transfers,
     };
@@ -166,6 +168,7 @@ test "tb_client echo" {
         };
 
         const event_size: u32, const event_request_max: u32 = switch (operation) {
+            // All multi-batched operations require a minimum trailer size of one element:
             .create_accounts => .{
                 @sizeOf(tb.Account),
                 @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
@@ -182,11 +185,11 @@ test "tb_client echo" {
                 @sizeOf(u128),
                 @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
             },
-            .query_accounts => .{
-                @sizeOf(tb.QueryFilter),
+            .get_account_transfers, .get_account_balances => .{
+                @sizeOf(tb.AccountFilter),
                 1,
             },
-            .query_transfers => .{
+            .query_accounts, .query_transfers => .{
                 @sizeOf(tb.QueryFilter),
                 1,
             },
