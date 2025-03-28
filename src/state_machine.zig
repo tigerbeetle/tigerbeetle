@@ -1356,9 +1356,9 @@ pub fn StateMachineType(
             assert(self.prefetch_operation == .create_accounts or
                 self.prefetch_operation == .deprecated_create_accounts);
 
-            const accounts: []const Account = stdx.bytes_as_slice(
-                Account,
+            const accounts = stdx.bytes_as_slice(
                 .exact,
+                Account,
                 self.prefetch_input.?,
             );
             for (accounts) |*a| {
@@ -1380,9 +1380,9 @@ pub fn StateMachineType(
                 self.prefetch_operation == .deprecated_create_accounts);
 
             self.prefetch_context = .null;
-            const accounts: []const Account = stdx.bytes_as_slice(
-                Account,
+            const accounts = stdx.bytes_as_slice(
                 .exact,
+                Account,
                 self.prefetch_input.?,
             );
             if (accounts.len > 0 and
@@ -1419,9 +1419,9 @@ pub fn StateMachineType(
             assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
 
-            const transfers: []const Transfer = stdx.bytes_as_slice(
-                Transfer,
+            const transfers = stdx.bytes_as_slice(
                 .exact,
+                Transfer,
                 self.prefetch_input.?,
             );
             for (transfers) |*t| {
@@ -1447,9 +1447,9 @@ pub fn StateMachineType(
                 self.prefetch_operation == .deprecated_create_transfers);
 
             self.prefetch_context = .null;
-            const transfers: []const Transfer = stdx.bytes_as_slice(
-                Transfer,
+            const transfers = stdx.bytes_as_slice(
                 .exact,
+                Transfer,
                 self.prefetch_input.?,
             );
             for (transfers) |*t| {
@@ -1517,9 +1517,9 @@ pub fn StateMachineType(
             assert(self.prefetch_operation == .lookup_accounts or
                 self.prefetch_operation == .deprecated_lookup_accounts);
 
-            const ids: []const u128 = stdx.bytes_as_slice(
-                u128,
+            const ids = stdx.bytes_as_slice(
                 .exact,
+                u128,
                 self.prefetch_input.?,
             );
             for (ids) |id| {
@@ -1547,9 +1547,9 @@ pub fn StateMachineType(
             assert(self.prefetch_operation == .lookup_transfers or
                 self.prefetch_operation == .deprecated_lookup_transfers);
 
-            const ids: []const u128 = stdx.bytes_as_slice(
-                u128,
+            const ids = stdx.bytes_as_slice(
                 .exact,
+                u128,
                 self.prefetch_input.?,
             );
             for (ids) |id| {
@@ -1603,13 +1603,13 @@ pub fn StateMachineType(
             if (self.get_scan_from_account_filter(filter)) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                var scan_buffer: []Transfer = stdx.bytes_as_slice(
-                    Transfer,
+                const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
+                    Transfer,
                     self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
                 );
 
-                var scan_lookup = self.scan_lookup.get(.transfers);
+                const scan_lookup = self.scan_lookup.get(.transfers);
                 scan_lookup.* = TransfersScanLookup.init(
                     &self.forest.grooves.transfers,
                     scan,
@@ -1669,9 +1669,9 @@ pub fn StateMachineType(
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
-            const filters: []const AccountFilter = stdx.bytes_as_slice(
-                AccountFilter,
+            const filters = stdx.bytes_as_slice(
                 .exact,
+                AccountFilter,
                 self.prefetch_input.?,
             );
             assert(filters.len > 0);
@@ -1722,13 +1722,13 @@ pub fn StateMachineType(
                     if (self.get_scan_from_account_filter(filter)) |scan| {
                         assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                        var scan_buffer: []AccountEvent = stdx.bytes_as_slice(
-                            AccountEvent,
+                        const scan_buffer = stdx.bytes_as_slice(
                             .inexact,
+                            AccountEvent,
                             self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
                         );
 
-                        var scan_lookup = self.scan_lookup.get(.account_balances);
+                        const scan_lookup = self.scan_lookup.get(.account_balances);
                         scan_lookup.* = AccountBalancesScanLookup.init(
                             &self.forest.grooves.account_events,
                             scan,
@@ -1806,9 +1806,9 @@ pub fn StateMachineType(
                     const filter_index = self.scan_lookup_results.items.len;
                     maybe(filter_index > 0);
 
-                    const filters: []const AccountFilter = stdx.bytes_as_slice(
-                        AccountFilter,
+                    const filters = stdx.bytes_as_slice(
                         .exact,
+                        AccountFilter,
                         self.prefetch_input.?,
                     );
                     assert(filters.len > 0);
@@ -1969,9 +1969,9 @@ pub fn StateMachineType(
             )) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                const scan_buffer: []Account = stdx.bytes_as_slice(
-                    Account,
+                const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
+                    Account,
                     self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
                 );
 
@@ -2060,13 +2060,13 @@ pub fn StateMachineType(
             )) |scan| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-                var scan_buffer: []Transfer = stdx.bytes_as_slice(
-                    Transfer,
+                const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
+                    Transfer,
                     self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
                 );
 
-                var scan_lookup = self.scan_lookup.get(.transfers);
+                const scan_lookup = self.scan_lookup.get(.transfers);
                 scan_lookup.* = TransfersScanLookup.init(
                     &self.forest.grooves.transfers,
                     scan,
@@ -2130,9 +2130,9 @@ pub fn StateMachineType(
                     const filter_index = self.scan_lookup_results.items.len;
                     maybe(filter_index > 0);
 
-                    const filters: []const QueryFilter = stdx.bytes_as_slice(
-                        QueryFilter,
+                    const filters = stdx.bytes_as_slice(
                         .exact,
+                        QueryFilter,
                         self.prefetch_input.?,
                     );
                     assert(filters.len > 0);
@@ -2296,12 +2296,12 @@ pub fn StateMachineType(
             );
             assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
-            const scan_buffer: []AccountEvent = stdx.bytes_as_slice(
-                AccountEvent,
+            const scan_buffer = stdx.bytes_as_slice(
                 .inexact,
+                AccountEvent,
                 self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
             );
-            var scan_lookup = self.scan_lookup.get(.events);
+            const scan_lookup = self.scan_lookup.get(.events);
             scan_lookup.* = EventsScanLookup.init(
                 groove,
                 scan,
@@ -2353,9 +2353,9 @@ pub fn StateMachineType(
                 operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
             ) * @sizeOf(Transfer);
 
-            const scan_lookup_buffer: []Transfer = stdx.bytes_as_slice(
-                Transfer,
+            const scan_lookup_buffer = stdx.bytes_as_slice(
                 .inexact,
+                Transfer,
                 self.scan_lookup_buffer[0..scan_buffer_size],
             );
 
@@ -2416,9 +2416,9 @@ pub fn StateMachineType(
             );
             assert(result_count <= result_max);
             assert(self.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
-            const transfers: []const Transfer = stdx.bytes_as_slice(
-                Transfer,
+            const transfers = stdx.bytes_as_slice(
                 .exact,
+                Transfer,
                 self.scan_lookup_buffer[0..self.scan_lookup_buffer_index],
             );
 
@@ -2905,8 +2905,8 @@ pub fn StateMachineType(
 
             const Event = EventType(operation);
             const Result = ResultType(operation);
-            const events: []const Event = stdx.bytes_as_slice(Event, .exact, batch);
-            var results: []Result = stdx.bytes_as_slice(Result, .inexact, output_buffer);
+            const events = stdx.bytes_as_slice(.exact, Event, batch);
+            const results = stdx.bytes_as_slice(.inexact, Result, output_buffer);
             assert(events.len <= results.len);
 
             var count: usize = 0;
@@ -3056,8 +3056,8 @@ pub fn StateMachineType(
             batch: []const u8,
             output_buffer: []u8,
         ) usize {
-            const events: []const u128 = stdx.bytes_as_slice(u128, .exact, batch);
-            const results: []Account = stdx.bytes_as_slice(Account, .inexact, output_buffer);
+            const events = stdx.bytes_as_slice(.exact, u128, batch);
+            const results = stdx.bytes_as_slice(.inexact, Account, output_buffer);
             assert(events.len <= results.len);
 
             var results_count: usize = 0;
@@ -3076,8 +3076,8 @@ pub fn StateMachineType(
             batch: []const u8,
             output_buffer: []u8,
         ) usize {
-            const events: []const u128 = stdx.bytes_as_slice(u128, .exact, batch);
-            const results: []Transfer = stdx.bytes_as_slice(Transfer, .inexact, output_buffer);
+            const events = stdx.bytes_as_slice(.exact, u128, batch);
+            const results = stdx.bytes_as_slice(.inexact, Transfer, output_buffer);
             assert(events.len <= results.len);
 
             var results_count: usize = 0;
@@ -3124,16 +3124,8 @@ pub fn StateMachineType(
                 batch,
             ));
 
-            const scan_results: []const AccountEvent = stdx.bytes_as_slice(
-                AccountEvent,
-                .exact,
-                scan_buffer,
-            );
-            const output_slice: []AccountBalance = stdx.bytes_as_slice(
-                AccountBalance,
-                .inexact,
-                output_buffer,
-            );
+            const scan_results = stdx.bytes_as_slice(.exact, AccountEvent, scan_buffer);
+            const output_slice = stdx.bytes_as_slice(.inexact, AccountBalance, output_buffer);
             var output_count: u32 = 0;
 
             for (scan_results) |*result| {
@@ -4026,9 +4018,9 @@ pub fn StateMachineType(
             assert(self.scan_lookup_buffer_index > 0);
             assert(self.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
 
-            const transfers_pending: []const Transfer = stdx.bytes_as_slice(
-                Transfer,
+            const transfers_pending = stdx.bytes_as_slice(
                 .exact,
+                Transfer,
                 self.scan_lookup_buffer[0..self.scan_lookup_buffer_index],
             );
 
@@ -5409,15 +5401,21 @@ fn check(test_table: []const u8) !void {
                         );
                         try testing.expectEqualSlices(
                             Result,
-                            stdx.bytes_as_slice(Result, .exact, reply.items),
-                            stdx.bytes_as_slice(Result, .exact, reply_actual),
+                            stdx.bytes_as_slice(.exact, Result, reply.items),
+                            stdx.bytes_as_slice(.exact, Result, reply_actual),
                         );
                     },
                     .get_events => {
-                        const results_actual: []const TestContext.AccountEvent =
-                            stdx.bytes_as_slice(TestContext.AccountEvent, .exact, reply_actual);
-                        const results_expected: []const TestEventResult =
-                            stdx.bytes_as_slice(TestEventResult, .exact, reply.items);
+                        const results_actual = stdx.bytes_as_slice(
+                            .exact,
+                            TestContext.AccountEvent,
+                            reply_actual,
+                        );
+                        const results_expected = stdx.bytes_as_slice(
+                            .exact,
+                            TestEventResult,
+                            reply.items,
+                        );
                         try testing.expectEqual(results_actual.len, results_expected.len);
                         for (results_actual, results_expected) |*actual, *expected| {
                             try testing.expect(expected.match(&accounts, &transfers, actual));

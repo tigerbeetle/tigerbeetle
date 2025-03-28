@@ -367,9 +367,9 @@ const Benchmark = struct {
             if (b.clients_busy.empty()) b.run_finish();
         } else {
             const account_count: u32 = @intCast(@min(b.account_count, b.account_batch_size));
-            const accounts: []tb.Account = stdx.bytes_as_slice(
-                tb.Account,
+            const accounts = stdx.bytes_as_slice(
                 .exact,
+                tb.Account,
                 &b.client_requests[client_index],
             )[0..account_count];
             b.build_accounts(accounts);
@@ -383,9 +383,9 @@ const Benchmark = struct {
     fn create_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
         assert(b.stage == .create_accounts);
 
-        const create_accounts_results: []const tb.CreateAccountsResult = stdx.bytes_as_slice(
-            tb.CreateAccountsResult,
+        const create_accounts_results = stdx.bytes_as_slice(
             .exact,
+            tb.CreateAccountsResult,
             result,
         );
         if (create_accounts_results.len > 0) {
@@ -403,9 +403,9 @@ const Benchmark = struct {
             if (b.clients_busy.empty()) b.create_transfers_finish();
         } else {
             const transfer_count: u32 = @intCast(@min(b.transfer_count, b.transfer_batch_size));
-            const transfers: []tb.Transfer = stdx.bytes_as_slice(
-                tb.Transfer,
+            const transfers = stdx.bytes_as_slice(
                 .exact,
+                tb.Transfer,
                 &b.client_requests[client_index],
             )[0..transfer_count];
             b.build_transfers(transfers);
@@ -417,9 +417,9 @@ const Benchmark = struct {
     }
 
     fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
-        const create_transfers_results: []const tb.CreateTransfersResult = stdx.bytes_as_slice(
-            tb.CreateTransfersResult,
+        const create_transfers_results = stdx.bytes_as_slice(
             .exact,
+            tb.CreateTransfersResult,
             result,
         );
         if (create_transfers_results.len > 0) {
@@ -514,7 +514,7 @@ const Benchmark = struct {
             tb.AccountFilter,
             b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)],
         );
-        const results: []const tb.Transfer = stdx.bytes_as_slice(tb.Transfer, .exact, result);
+        const results = stdx.bytes_as_slice(.exact, tb.Transfer, result);
         for (results) |*transfer| {
             assert((transfer.debit_account_id == filter.account_id) !=
                 (transfer.credit_account_id == filter.account_id));
@@ -542,14 +542,14 @@ const Benchmark = struct {
             if (b.clients_busy.empty()) b.validate_accounts_finish();
         } else {
             const account_count: u32 = @intCast(@min(b.account_count, b.account_batch_size));
-            const account_ids: []u128 = stdx.bytes_as_slice(
-                u128,
+            const account_ids = stdx.bytes_as_slice(
                 .exact,
+                u128,
                 &b.client_requests[client_index],
             )[0..account_count];
-            const accounts: []tb.Account = stdx.bytes_as_slice(
-                tb.Account,
+            const accounts = stdx.bytes_as_slice(
                 .exact,
+                tb.Account,
                 &b.client_replies[client_index],
             )[0..account_count];
             b.build_accounts(accounts);
@@ -570,14 +570,14 @@ const Benchmark = struct {
 
         const accounts_count = @min(b.account_count, b.account_batch_size);
         const accounts_expected_body = &b.client_replies[client_index];
-        const accounts_expected: []const tb.Account = stdx.bytes_as_slice(
-            tb.Account,
+        const accounts_expected = stdx.bytes_as_slice(
             .exact,
+            tb.Account,
             accounts_expected_body,
         )[0..accounts_count];
-        const accounts_actual: []const tb.Account = stdx.bytes_as_slice(
-            tb.Account,
+        const accounts_actual = stdx.bytes_as_slice(
             .exact,
+            tb.Account,
             result,
         );
         assert(accounts_actual.len == accounts_count);
@@ -610,14 +610,14 @@ const Benchmark = struct {
             if (b.clients_busy.empty()) b.validate_transfers_finish();
         } else {
             const transfer_count: u32 = @intCast(@min(b.transfer_count, b.transfer_batch_size));
-            const transfer_ids: []u128 = stdx.bytes_as_slice(
-                u128,
+            const transfer_ids = stdx.bytes_as_slice(
                 .exact,
+                u128,
                 &b.client_requests[client_index],
             )[0..transfer_count];
-            const transfers: []tb.Transfer = stdx.bytes_as_slice(
-                tb.Transfer,
+            const transfers = stdx.bytes_as_slice(
                 .exact,
+                tb.Transfer,
                 &b.client_replies[client_index],
             )[0..transfer_count];
             b.build_transfers(transfers);
@@ -637,14 +637,14 @@ const Benchmark = struct {
         assert(b.stage == .validate_transfers);
 
         const transfers_count = @min(b.transfer_count, b.transfer_batch_size);
-        const transfers_expected: []const tb.Transfer = stdx.bytes_as_slice(
-            tb.Transfer,
+        const transfers_expected = stdx.bytes_as_slice(
             .exact,
+            tb.Transfer,
             &b.client_replies[client_index],
         )[0..transfers_count];
-        const transfers_actual: []const tb.Transfer = stdx.bytes_as_slice(
-            tb.Transfer,
+        const transfers_actual = stdx.bytes_as_slice(
             .exact,
+            tb.Transfer,
             result,
         );
         assert(transfers_actual.len == transfers_count);

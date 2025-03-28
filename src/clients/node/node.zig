@@ -285,14 +285,14 @@ fn on_completion(
                         @panic("Failed to allocated the request buffer.");
                     };
 
-                    const source: []const Result = stdx.bytes_as_slice(
-                        Result,
+                    const source = stdx.bytes_as_slice(
                         .exact,
+                        Result,
                         result_ptr.?[0..result_len],
                     );
-                    const target: []Result = stdx.bytes_as_slice(
-                        Result,
+                    const target = stdx.bytes_as_slice(
                         .exact,
+                        Result,
                         reply_buffer,
                     );
 
@@ -363,9 +363,9 @@ fn on_completion_js(
 
             switch (packet.status) {
                 .ok => {
-                    const results: []const Result = stdx.bytes_as_slice(
-                        Result,
+                    const results = stdx.bytes_as_slice(
                         .exact,
+                        Result,
                         buffer,
                     );
                     break :blk encode_array(Result, env, results);
