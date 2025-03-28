@@ -2,7 +2,6 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
-const KiB = stdx.KiB;
 
 const constants = @import("../constants.zig");
 
@@ -2555,81 +2554,3 @@ pub const BitSet = struct {
         }
     }
 };
-
-/// Format part of a new WAL's Zone.wal_headers, writing to `target`.
-///
-/// `offset_logical` is relative to the beginning of the `wal_headers` zone.
-/// Returns the number of bytes written to `target`.
-pub fn format_wal_headers(cluster: u128, offset_logical: u64, target: []u8) usize {
-    assert(offset_logical <= constants.journal_size_headers);
-    assert(offset_logical % constants.sector_size == 0);
-    assert(target.len > 0);
-    assert(target.len % @sizeOf(Header) == 0);
-    assert(target.len % constants.sector_size == 0);
-
-    var headers = std.mem.bytesAsSlice(Header.Prepare, target);
-    const headers_past = @divExact(offset_logical, @sizeOf(Header));
-    const headers_count = @min(headers.len, slot_count - headers_past);
-
-    for (headers[0..headers_count], 0..) |*header, i| {
-        const slot = @divExact(offset_logical, @sizeOf(Header)) + i;
-        if (slot == 0 and i == 0) {
-            header.* = Header.Prepare.root(cluster);
-        } else {
-            header.* = Header.Prepare.reserve(cluster, slot);
-        }
-    }
-    return headers_count * @sizeOf(Header);
-}
-
-test "format_wal_headers" {
-    const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_headers(std.testing.allocator, constants.sector_size);
-}
-
-/// Format part of a new WAL's Zone.wal_prepares, writing to `target`.
-///
-/// `offset_logical` is relative to the beginning of the `wal_prepares` zone.
-/// Returns the number of bytes written to `target`.
-pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usize {
-    assert(offset_logical <= constants.journal_size_prepares);
-    assert(offset_logical % constants.sector_size == 0);
-    assert(target.len > 0);
-    assert(target.len % @sizeOf(Header) == 0);
-    assert(target.len % constants.sector_size == 0);
-
-    const sectors_per_message = @divExact(constants.message_size_max, constants.sector_size);
-    const sector_max = @divExact(constants.journal_size_prepares, constants.sector_size);
-
-    const sectors = std.mem.bytesAsSlice([constants.sector_size]u8, target);
-    for (sectors, 0..) |*sector_data, i| {
-        const sector = @divExact(offset_logical, constants.sector_size) + i;
-        if (sector == sector_max) {
-            if (i == 0) {
-                assert(offset_logical == constants.journal_size_prepares);
-            }
-            return i * constants.sector_size;
-        } else {
-            const message_slot = @divFloor(sector, sectors_per_message);
-            assert(message_slot < slot_count);
-
-            @memset(sector_data, 0);
-            if (sector % sectors_per_message == 0) {
-                // The header goes in the first sector of the message.
-                const sector_header =
-                    std.mem.bytesAsValue(Header.Prepare, sector_data[0..@sizeOf(Header)]);
-                if (message_slot == 0) {
-                    sector_header.* = Header.Prepare.root(cluster);
-                } else {
-                    sector_header.* = Header.Prepare.reserve(cluster, message_slot);
-                }
-            }
-        }
-    }
-    return target.len;
-}
-
-test "format_wal_prepares" {
-    const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_prepares(std.testing.allocator, 256 * KiB);
-}

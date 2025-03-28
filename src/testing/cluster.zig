@@ -25,6 +25,7 @@ const ManifestCheckerType = @import("cluster/manifest_checker.zig").ManifestChec
 const JournalCheckerType = @import("cluster/journal_checker.zig").JournalCheckerType;
 
 const vsr = @import("../vsr.zig");
+const format_writes_max = @import("../vsr/replica_format.zig").writes_max;
 
 const MiB = stdx.MiB;
 
@@ -62,7 +63,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const Storage = @import("storage.zig").Storage;
         pub const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
         pub const Tracer = Storage.Tracer;
-        pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
         pub const SuperBlock = vsr.SuperBlockType(Storage);
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
@@ -228,6 +228,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 storage_options.replica_index = @intCast(replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage_options.grid_checker = grid_checker;
+                storage_options.iops_write_max = @max(format_writes_max, constants.iops_write_max);
                 storage.* = try Storage.init(allocator, storage_options);
                 // Disable most faults at startup,
                 // so that the replicas don't get stuck recovering_head.
