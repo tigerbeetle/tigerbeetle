@@ -101,13 +101,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     const state_machine_operation =
                         std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
                     assert(state_machine_operation != null);
-
-                    const payload_size: u32 = @intCast(statement.arguments.items.len);
-                    statement.arguments.expandToCapacity();
                     try repl.send(
                         state_machine_operation.?,
-                        statement.arguments.items,
-                        payload_size,
+                        statement.arguments,
                     );
                 },
             }
@@ -668,7 +664,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
             var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
                 allocator,
-                constants.message_size_max,
+                constants.message_body_size_max,
             );
             errdefer arguments.deinit(allocator);
 
@@ -830,8 +826,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
         fn send(
             repl: *Repl,
             operation: StateMachine.Operation,
-            buffer: []u8,
-            payload_size: u32,
+            arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             const operation_type = switch (operation) {
                 .create_accounts, .create_transfers => "create",
@@ -848,7 +843,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 else => unreachable,
             };
 
-            if (payload_size == 0) {
+            if (arguments.items.len == 0) {
                 try repl.fail(
                     "No {s} to {s}.\n",
                     .{ object_type, operation_type },
@@ -859,7 +854,12 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             repl.request_done = false;
             try repl.debug("Sending command: {}.\n", .{operation});
 
-            assert(payload_size < buffer.len);
+            const payload_size: u32 = @intCast(arguments.items.len);
+            const buffer: []u8 = buffer: {
+                arguments.expandToCapacity();
+                assert(arguments.items.len == constants.message_body_size_max);
+                break :buffer arguments.items;
+            };
             var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
                 .element_size = StateMachine.event_size_bytes(operation),
             });
