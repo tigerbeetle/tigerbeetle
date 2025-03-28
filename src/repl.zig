@@ -940,8 +940,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
             switch (operation) {
                 .create_accounts => {
-                    const create_account_results: []const tb.CreateAccountsResult =
-                        stdx.bytes_as_slice(tb.CreateAccountsResult, .exact, result);
+                    const create_account_results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.CreateAccountsResult,
+                        result,
+                    );
                     if (create_account_results.len > 0) {
                         for (create_account_results) |*reason| {
                             try repl.terminal.print(
@@ -952,9 +955,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .lookup_accounts, .query_accounts => {
-                    const account_results: []const tb.Account = stdx.bytes_as_slice(
-                        tb.Account,
+                    const account_results = stdx.bytes_as_slice(
                         .exact,
+                        tb.Account,
                         result,
                     );
                     if (account_results.len == 0) {
@@ -966,8 +969,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .create_transfers => {
-                    const create_transfer_results: []const tb.CreateTransfersResult =
-                        stdx.bytes_as_slice(tb.CreateTransfersResult, .exact, result);
+                    const create_transfer_results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.CreateTransfersResult,
+                        result,
+                    );
                     if (create_transfer_results.len > 0) {
                         for (create_transfer_results) |*reason| {
                             try repl.terminal.print(
@@ -981,9 +987,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 .get_account_transfers,
                 .query_transfers,
                 => {
-                    const transfer_results: []const tb.Transfer = stdx.bytes_as_slice(
-                        tb.Transfer,
+                    const transfer_results = stdx.bytes_as_slice(
                         .exact,
+                        tb.Transfer,
                         result,
                     );
                     if (transfer_results.len == 0) {
@@ -995,8 +1001,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .get_account_balances => {
-                    const get_account_balances_results: []const tb.AccountBalance =
-                        stdx.bytes_as_slice(tb.AccountBalance, .exact, result);
+                    const get_account_balances_results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.AccountBalance,
+                        result,
+                    );
                     if (get_account_balances_results.len == 0) {
                         try repl.fail("No balances were found.\n", .{});
                     } else {

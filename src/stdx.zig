@@ -57,10 +57,10 @@ test "div_ceil" {
     try std.testing.expectEqual(div_ceil(@as(u64, max) - 2, 2), max / 2);
 }
 
-pub const CopyPrecision = enum { exact, inexact };
+pub const SizePrecision = enum { exact, inexact };
 
 pub inline fn copy_left(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -89,7 +89,7 @@ test "copy_left" {
 }
 
 pub inline fn copy_right(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -118,7 +118,7 @@ test "copy_right" {
 }
 
 pub inline fn copy_disjoint(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -183,8 +183,8 @@ pub fn zeroed(bytes: []const u8) bool {
 /// Differently from `std.mem.bytesAsSlice` that can return `[]align(1) T`, this function
 /// always `@alignCast` the result.
 pub fn bytes_as_slice(
+    comptime precision: SizePrecision,
     comptime T: type,
-    comptime mode: enum { exact, inexact },
     bytes: anytype,
 ) type: {
     const type_info = @typeInfo(@TypeOf(bytes));
@@ -202,7 +202,7 @@ pub fn bytes_as_slice(
 
     break :type if (type_info.Pointer.is_const) []const T else []T;
 } {
-    switch (mode) {
+    switch (precision) {
         .exact => {
             assert(bytes.len % @sizeOf(T) == 0);
             return @alignCast(std.mem.bytesAsSlice(T, bytes));
@@ -222,36 +222,36 @@ test bytes_as_slice {
 
     try testing.expectEqual(
         @as(usize, 4),
-        bytes_as_slice(T16, .exact, buffer[0..]).len,
+        bytes_as_slice(.exact, T16, buffer[0..]).len,
     );
     try testing.expectEqual(
         @as(usize, 6),
-        bytes_as_slice(T10, .exact, buffer[0..60]).len,
+        bytes_as_slice(.exact, T10, buffer[0..60]).len,
     );
 
     try testing.expectEqual(
         @as(usize, 6),
-        bytes_as_slice(T10, .inexact, buffer[0..]).len,
+        bytes_as_slice(.inexact, T10, buffer[0..]).len,
     );
     try testing.expectEqual(
         @as(usize, 4),
-        bytes_as_slice(T16, .inexact, buffer[0..]).len,
+        bytes_as_slice(.inexact, T16, buffer[0..]).len,
     );
     try testing.expectEqual(
         @as(usize, 6),
-        bytes_as_slice(T10, .inexact, buffer[0 .. buffer.len - 1]).len,
+        bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 1]).len,
     );
     try testing.expectEqual(
         @as(usize, 3),
-        bytes_as_slice(T16, .inexact, buffer[0 .. buffer.len - 1]).len,
+        bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 1]).len,
     );
     try testing.expectEqual(
         @as(usize, 5),
-        bytes_as_slice(T10, .inexact, buffer[0 .. buffer.len - 10]).len,
+        bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 10]).len,
     );
     try testing.expectEqual(
         @as(usize, 3),
-        bytes_as_slice(T16, .inexact, buffer[0 .. buffer.len - 10]).len,
+        bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 10]).len,
     );
 }
 
