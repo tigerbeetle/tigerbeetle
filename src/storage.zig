@@ -362,7 +362,7 @@ pub fn StorageType(comptime IO: type) type {
             offset_in_zone: u64,
         ) void {
             zone.verify_iop(buffer, offset_in_zone);
-            maybe(zone == .grid_padding); // Padding is zeroed during format.
+            assert(zone != .grid_padding); // Padding is never touched.
 
             const offset_in_storage = zone.offset(offset_in_zone);
             write.* = .{
