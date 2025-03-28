@@ -117,7 +117,9 @@ pub fn trailer_total_size(options: struct {
 }
 
 pub const MultiBatchDecoder = struct {
-    const Options = struct {
+    pub const Error = error{MultiBatchInvalid};
+
+    pub const Options = struct {
         element_size: u32,
     };
 
@@ -135,57 +137,49 @@ pub const MultiBatchDecoder = struct {
         /// The message body used, including the trailer.
         body: []const u8,
         options: Options,
-    ) error{MultiBatchInvalid}!MultiBatchDecoder {
+    ) Error!MultiBatchDecoder {
         // Supports zero-sized elements, or any power of two, including 2^0.
         assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
-        if (body.len < @sizeOf(Postamble)) return error.MultiBatchInvalid;
-        if (!std.mem.isAligned(
-            @intFromPtr(&body[body.len - @sizeOf(Postamble)]),
-            @alignOf(Postamble),
-        )) {
-            return error.MultiBatchInvalid;
-        }
+        const Parser = struct {
+            buffer: []const u8,
+            buffer_parsed: u32 = 0,
 
-        const postamble: *const Postamble = @alignCast(@ptrCast(
-            body[body.len - @sizeOf(Postamble) ..],
-        ));
-        if (postamble.batch_count == 0) return error.MultiBatchInvalid;
-        if (postamble.batch_count > Postamble.batch_count_max) return error.MultiBatchInvalid;
+            fn parse_suffix(parser: *@This(), comptime T: type, count: u32) Error![]const T {
+                const suffix_size = count * @sizeOf(T);
+                if (parser.buffer.len < suffix_size) return error.MultiBatchInvalid;
 
+                const suffix = parser.buffer[parser.buffer.len - suffix_size ..];
+                const suffix_aligned = std.mem.isAligned(@intFromPtr(suffix.ptr), @alignOf(T));
+                if (!suffix_aligned) return error.MultiBatchInvalid;
+
+                parser.buffer = parser.buffer[0 .. parser.buffer.len - suffix_size];
+                parser.buffer_parsed += suffix_size;
+                return stdx.bytes_as_slice(.exact, T, suffix);
+            }
+        };
+
+        var parser = Parser{ .buffer = body };
+        const postamble: *const Postamble = postamble: {
+            const slice = try parser.parse_suffix(Postamble, 1);
+            break :postamble &slice[0];
+        };
         const trailer_size = trailer_total_size(.{
             .element_size = options.element_size,
             .batch_count = postamble.batch_count,
         });
-        if ((options.element_size > 0 and body.len < trailer_size) or
-            (options.element_size == 0 and body.len != trailer_size))
-        {
-            return error.MultiBatchInvalid;
-        }
-        if (!std.mem.isAligned(
-            @intFromPtr(body[body.len - trailer_size ..].ptr),
-            @alignOf(TrailerItem),
-        )) {
+
+        const trailer_items_used = try parser.parse_suffix(TrailerItem, postamble.batch_count);
+        // The trailer size is a multiple of the element size.
+        // Unused elements are filled with `maxInt` for padding.
+        const trailer_items_padding = try parser.parse_suffix(
+            u8,
+            trailer_size - parser.buffer_parsed,
+        );
+        if (!std.mem.allEqual(u8, trailer_items_padding, std.math.maxInt(u8))) {
             return error.MultiBatchInvalid;
         }
 
-        const trailer_items: []const TrailerItem = @alignCast(std.mem.bytesAsSlice(
-            TrailerItem,
-            body[body.len - trailer_size .. body.len - @sizeOf(Postamble)],
-        ));
-        if (trailer_items.len < postamble.batch_count) return error.MultiBatchInvalid;
-
-        const trailer_items_used = trailer_items[trailer_items.len - postamble.batch_count ..];
-        assert(trailer_items_used.len == postamble.batch_count);
-        if (trailer_items.len > postamble.batch_count) {
-            // Check the padding sentinel of the extra slots used for alignment.
-            const BackingInteger = @typeInfo(TrailerItem).Struct.backing_integer.?;
-            if (!std.mem.allEqual(
-                BackingInteger,
-                @ptrCast(trailer_items[0 .. trailer_items.len - postamble.batch_count]),
-                @bitCast(TrailerItem.padding),
-            )) return error.MultiBatchInvalid;
-        }
         const events_count_total: u32 = count: {
             var count: u32 = 0;
             for (trailer_items_used) |trailer_item| {
@@ -203,18 +197,19 @@ pub const MultiBatchDecoder = struct {
         };
 
         // For byte-aligned elements, padding may be required between the payload and the trailer.
-        const padding: u32 = @intCast(payload_size % @sizeOf(TrailerItem));
-        assert(padding < @sizeOf(TrailerItem));
-        assert(padding == 0 or options.element_size == 1);
-        if (!std.mem.allEqual(
-            u8,
-            body[body.len - padding - trailer_size ..][0..padding],
-            std.math.maxInt(u8),
-        )) return error.MultiBatchInvalid;
-        if (body.len != payload_size + padding + trailer_size) return error.MultiBatchInvalid;
+        const trailer_padding_size: u32 = @intCast(payload_size % @sizeOf(TrailerItem));
+        assert(trailer_padding_size < @sizeOf(TrailerItem));
+        assert(trailer_padding_size == 0 or options.element_size == 1);
+        const trailer_padding = try parser.parse_suffix(u8, trailer_padding_size);
+        if (!std.mem.allEqual(u8, trailer_padding, std.math.maxInt(u8))) {
+            return error.MultiBatchInvalid;
+        }
+
+        if (payload_size != body.len - parser.buffer_parsed) return error.MultiBatchInvalid;
+        assert(payload_size == parser.buffer.len);
 
         return .{
-            .payload = body[0..payload_size],
+            .payload = parser.buffer,
             .trailer_items = trailer_items_used,
             .payload_index = 0,
             .batch_index = 0,
