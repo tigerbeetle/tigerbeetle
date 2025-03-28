@@ -113,7 +113,8 @@ pub const AccountingAuditor = struct {
         account_id_permutation: IdPermutation,
         client_count: usize,
 
-        batch_create_transfers_limit: u32,
+        /// The maximum number of pending transfers that can be expired per pulse.
+        pulse_expiries_max: u32,
 
         /// This is the maximum number of pending transfers, not counting those that have timed
         /// out.
@@ -335,7 +336,7 @@ pub const AccountingAuditor = struct {
 
             // Each expiration round can expire at most one batch of transfers.
             expired_count += 1;
-            if (expired_count == self.options.batch_create_transfers_limit) break;
+            if (expired_count == self.options.pulse_expiries_max) break;
 
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));
@@ -352,7 +353,9 @@ pub const AccountingAuditor = struct {
         results: []const tb.CreateAccountsResult,
     ) void {
         assert(accounts.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (accounts.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
@@ -405,7 +408,9 @@ pub const AccountingAuditor = struct {
         results: []const tb.CreateTransfersResult,
     ) void {
         assert(transfers.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (transfers.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
@@ -516,7 +521,7 @@ pub const AccountingAuditor = struct {
     ) void {
         _ = client_index;
         assert(ids.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp <= timestamp);
         defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookupType(tb.Account).init(results);
@@ -567,7 +572,7 @@ pub const AccountingAuditor = struct {
     ) void {
         _ = client_index;
         assert(ids.len >= results.len);
-        assert(self.timestamp < timestamp);
+        assert(self.timestamp <= timestamp);
         defer self.timestamp = timestamp;
 
         var results_iterator = IteratorForLookupType(tb.Transfer).init(results);

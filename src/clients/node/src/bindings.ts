@@ -911,14 +911,14 @@ export type AccountBalance = {
 
 export enum Operation {
   pulse = 128,
-  create_accounts = 129,
-  create_transfers = 130,
-  lookup_accounts = 131,
-  lookup_transfers = 132,
-  get_account_transfers = 133,
-  get_account_balances = 134,
-  query_accounts = 135,
-  query_transfers = 136,
   get_events = 137,
+  create_accounts = 138,
+  create_transfers = 139,
+  lookup_accounts = 140,
+  lookup_transfers = 141,
+  get_account_transfers = 142,
+  get_account_balances = 143,
+  query_accounts = 144,
+  query_transfers = 145,
 }
 

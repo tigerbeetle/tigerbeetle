@@ -1200,23 +1200,23 @@ internal enum TBOperation : byte
 {
     Pulse = 128,
 
-    CreateAccounts = 129,
-
-    CreateTransfers = 130,
-
-    LookupAccounts = 131,
-
-    LookupTransfers = 132,
-
-    GetAccountTransfers = 133,
-
-    GetAccountBalances = 134,
-
-    QueryAccounts = 135,
-
-    QueryTransfers = 136,
-
     GetEvents = 137,
+
+    CreateAccounts = 138,
+
+    CreateTransfers = 139,
+
+    LookupAccounts = 140,
+
+    LookupTransfers = 141,
+
+    GetAccountTransfers = 142,
+
+    GetAccountBalances = 143,
+
+    QueryAccounts = 144,
+
+    QueryTransfers = 145,
 
 }
 

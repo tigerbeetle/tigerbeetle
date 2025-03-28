@@ -22,7 +22,6 @@ pub fn ClientType(
         const Client = @This();
 
         pub const StateMachine = StateMachine_;
-        pub const DemuxerType = StateMachine.DemuxerType;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,

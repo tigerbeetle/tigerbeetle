@@ -1316,7 +1316,7 @@ public class IntegrationTest {
             assertTrue(createAccountErrors.getLength() == 0);
 
             final var tasks = new CompletableFuture[TASKS_COUNT];
-            for (int i = 0; i < TASKS_COUNT; i++) {
+            for (int i = 0; i < TASKS_COUNT; i += 2) {
 
                 final var transfers = new TransferBatch(1);
                 transfers.add();
@@ -1328,20 +1328,30 @@ public class IntegrationTest {
                 transfers.setCode(1);
                 transfers.setAmount(100);
 
-                // Starting async batch.
+                // Starting two async requests of different operations.
                 tasks[i] = client.createTransfersAsync(transfers);
+                tasks[i + 1] = client.lookupAccountsAsync(new IdBatch(account1Id));
             }
 
             // Wait for all tasks.
             CompletableFuture.allOf(tasks).join();
 
             for (int i = 0; i < TASKS_COUNT; i++) {
-                @SuppressWarnings("unchecked")
-                final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
-                final var result = future.get();
-                assertEquals(0, result.getLength());
-                assertNotNull(result.getHeader());
-                assertTrue(result.getHeader().getTimestamp() != 0L);
+                if (i % 2 == 0) {
+                    @SuppressWarnings("unchecked")
+                    final var future = (CompletableFuture<CreateTransferResultBatch>) tasks[i];
+                    final var result = future.get();
+                    assertEquals(0, result.getLength());
+                    assertNotNull(result.getHeader());
+                    assertTrue(result.getHeader().getTimestamp() != 0L);
+                } else {
+                    @SuppressWarnings("unchecked")
+                    final var future = (CompletableFuture<AccountBatch>) tasks[i];
+                    final var result = future.get();
+                    assertEquals(1, result.getLength());
+                    assertNotNull(result.getHeader());
+                    assertTrue(result.getHeader().getTimestamp() != 0L);
+                }
             }
 
             // Asserting if all transfers were submitted correctly.
@@ -1354,14 +1364,16 @@ public class IntegrationTest {
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getCreditsPosted());
+            assertEquals(BigInteger.valueOf(100 * (TASKS_COUNT / 2)),
+                    lookupAccounts.getCreditsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getDebitsPosted());
 
             assertTrue(accounts.next());
             assertTrue(lookupAccounts.next());
             assertAccounts(accounts, lookupAccounts);
 
-            assertEquals(BigInteger.valueOf(100 * TASKS_COUNT), lookupAccounts.getDebitsPosted());
+            assertEquals(BigInteger.valueOf(100 * (TASKS_COUNT / 2)),
+                    lookupAccounts.getDebitsPosted());
             assertEquals(BigInteger.ZERO, lookupAccounts.getCreditsPosted());
         }
     }
@@ -1881,7 +1893,7 @@ public class IntegrationTest {
             filter.setLimit(254);
             filter.setReversed(false);
             final AccountBatch query = client.queryAccounts(filter);
-            assertTrue(query.getLength() == 10);
+            assertEquals(10, query.getLength());
             long timestamp = 0L;
             while (query.next()) {
                 assertTrue(Long.compareUnsigned(query.getTimestamp(), timestamp) > 0);
@@ -2170,6 +2182,114 @@ public class IntegrationTest {
             assertTrue(client.queryTransfersAsync(filter).get().getLength() == 0);
         }
 
+    }
+
+    @Test
+    public void testConcurrentQueries() throws Throwable {
+        final var filterCriteria = UInt128.id();
+        final var account1Id = UInt128.id();
+        final var account2Id = UInt128.id();
+        final var transferId = UInt128.id();
+        {
+            // Creating the accounts and transfers.
+            final var accounts = new AccountBatch(2);
+            accounts.add();
+            accounts.setId(account1Id);
+            accounts.setUserData128(filterCriteria);
+            accounts.setCode(1);
+            accounts.setLedger(720);
+            accounts.setFlags(AccountFlags.HISTORY);
+
+            accounts.add();
+            accounts.setId(account2Id);
+            accounts.setCode(1);
+            accounts.setLedger(720);
+
+            final var createAccountsErrors = client.createAccounts(accounts);
+            assertTrue(createAccountsErrors.getLength() == 0);
+
+            final var transfers = new TransferBatch(1);
+            transfers.add();
+            transfers.setId(transferId);
+            transfers.setUserData128(filterCriteria);
+            transfers.setCreditAccountId(account1Id);
+            transfers.setDebitAccountId(account2Id);
+            transfers.setLedger(720);
+            transfers.setCode((short) 1);
+            transfers.setAmount(100);
+
+            final var createTransferErrors = client.createTransfers(transfers);
+            assertTrue(createTransferErrors.getLength() == 0);
+        }
+
+        final class Tasks {
+            CompletableFuture<AccountBatch> queryAccounts;
+            CompletableFuture<TransferBatch> queryTransfers;
+            CompletableFuture<TransferBatch> getAccountTransfers;
+            CompletableFuture<AccountBalanceBatch> getAccountBalances;
+
+            void validate() throws ExecutionException, InterruptedException {
+                CompletableFuture.allOf(queryAccounts, queryTransfers, getAccountBalances,
+                        getAccountTransfers).join();
+
+                validateAccount(queryAccounts.get());
+                validateTransfer(queryTransfers.get());
+                validateTransfer(getAccountTransfers.get());
+                validateAccountBalances(getAccountBalances.get());
+            }
+
+            private void validateAccount(AccountBatch results) {
+                assertEquals(1, results.getLength());
+                assertTrue(results.next());
+                assertArrayEquals(results.getId(), account1Id);
+                assertNotNull(results.getHeader());
+                assertTrue(results.getHeader().getTimestamp() != 0L);
+            }
+
+            private void validateTransfer(TransferBatch results) {
+                assertEquals(1, results.getLength());
+                assertTrue(results.next());
+                assertArrayEquals(results.getId(), transferId);
+                assertNotNull(results.getHeader());
+                assertTrue(results.getHeader().getTimestamp() != 0L);
+            }
+
+            private void validateAccountBalances(AccountBalanceBatch results) {
+                assertEquals(1, results.getLength());
+                assertTrue(results.next());
+                assertNotNull(results.getHeader());
+                assertTrue(results.getHeader().getTimestamp() != 0L);
+            }
+        }
+
+        // Limit=1 allows multiple queries to be batched together in the same request.
+        // Limit=MAX prevents batching because it would exceed the message size.
+        final var TASKS_COUNT = 100;
+        final var limits = new int[] {1, Integer.MAX_VALUE};
+        for (var limit : limits) {
+            var tasks = new Tasks[TASKS_COUNT];
+            for (int i = 0; i < TASKS_COUNT; i++) {
+                tasks[i] = new Tasks();
+
+                final var queryFilter = new QueryFilter();
+                queryFilter.setUserData128(filterCriteria);
+                queryFilter.setLimit(limit);
+                tasks[i].queryAccounts = client.queryAccountsAsync(queryFilter);
+                tasks[i].queryTransfers = client.queryTransfersAsync(queryFilter);
+
+                final var accountFilter = new AccountFilter();
+                accountFilter.setAccountId(account1Id);
+                accountFilter.setUserData128(filterCriteria);
+                accountFilter.setCredits(true);
+                accountFilter.setLimit(limit);
+                tasks[i].getAccountTransfers = client.getAccountTransfersAsync(accountFilter);
+                tasks[i].getAccountBalances = client.getAccountBalancesAsync(accountFilter);
+            }
+
+            for (var task : tasks) {
+                task.validate();
+            }
+        }
     }
 
     @Test

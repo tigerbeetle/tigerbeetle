@@ -41,7 +41,7 @@ const assert = std.debug.assert;
 const testing = std.testing;
 const StateMachine = StateMachineType(TestingStorage, constants.state_machine_config);
 
-const events_count_max = 8190;
+const events_count_max = 8189;
 const pending_transfers_count_max = 1024;
 const accounts_count_max = 128;
 
@@ -150,9 +150,10 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
 /// enum values from command to operation.
 fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
     return switch (tag) {
+        .create_accounts => .create_accounts,
+        .create_transfers => .create_transfers,
         .lookup_all_accounts => .lookup_accounts,
         .lookup_latest_transfers => .lookup_transfers,
-        else => std.enums.nameCast(StateMachine.Operation, tag),
     };
 }
 
