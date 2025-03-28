@@ -113,7 +113,8 @@ pub const AccountingAuditor = struct {
         account_id_permutation: IdPermutation,
         client_count: usize,
 
-        transfers_expiry_max: u32,
+        /// The maximum number of pending transfers that can be expired per pulse.
+        pulse_expiries_max: u32,
 
         /// This is the maximum number of pending transfers, not counting those that have timed
         /// out.
@@ -335,7 +336,7 @@ pub const AccountingAuditor = struct {
 
             // Each expiration round can expire at most one batch of transfers.
             expired_count += 1;
-            if (expired_count == self.options.transfers_expiry_max) break;
+            if (expired_count == self.options.pulse_expiries_max) break;
 
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));

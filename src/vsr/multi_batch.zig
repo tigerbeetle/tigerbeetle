@@ -50,6 +50,9 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
 const Postamble = packed struct(u16) {
+    /// `maxInt(u16)` is reserved for padding.
+    const batch_count_max = std.math.maxInt(u16) - 1;
+
     /// The number of batches in the message body.
     batch_count: u16,
     comptime {
@@ -69,10 +72,25 @@ const TrailerItem = packed struct(u16) {
     }
 };
 
-/// The maximum number of batches that can be encoded in a message.
-/// Since the multi-batch trailer has a variable length, the actual limit depends on the buffer
-/// size and the number of elements in each batch.
-pub const multi_batch_count_max: u16 = std.math.maxInt(u16);
+/// The maximum number of batches that can be encoded, assuming the worst case single-element
+/// batches with the minimum size (maybe empty).
+pub fn multi_batch_count_max(options: struct {
+    /// The minimum size of a single batch.
+    /// May be zero if the operation allows zeroed batches.
+    batch_size_min: u32,
+    /// The maximum size of the message body, including the multi-batch trailer.
+    batch_size_limit: u32,
+}) u16 {
+    assert(options.batch_size_limit > @sizeOf(Postamble));
+    maybe(options.batch_size_min == 0);
+    return @intCast(@min(
+        @divFloor(
+            options.batch_size_limit - @sizeOf(Postamble),
+            options.batch_size_min + @sizeOf(TrailerItem),
+        ),
+        Postamble.batch_count_max,
+    ));
+}
 
 /// The trailer is an array of `TrailerItem`, each containing the number of elements
 /// in a batch, followed by a `Postamble` that holds the total number of batches.
@@ -84,7 +102,7 @@ pub fn trailer_total_size(options: struct {
     batch_count: u16,
 }) u32 {
     assert(options.batch_count > 0);
-    assert(options.batch_count <= multi_batch_count_max);
+    assert(options.batch_count <= Postamble.batch_count_max);
     // Supports zero-sized elements, or any power of two, including 2^0.
     assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
 
@@ -133,7 +151,7 @@ pub const MultiBatchDecoder = struct {
             body[body.len - @sizeOf(Postamble) ..],
         ));
         if (postamble.batch_count == 0) return error.MultiBatchInvalid;
-        if (postamble.batch_count > multi_batch_count_max) return error.MultiBatchInvalid;
+        if (postamble.batch_count > Postamble.batch_count_max) return error.MultiBatchInvalid;
 
         const trailer_size = trailer_total_size(.{
             .element_size = options.element_size,
@@ -217,7 +235,7 @@ pub const MultiBatchDecoder = struct {
     }
 
     pub fn batch_count(self: *const MultiBatchDecoder) u16 {
-        assert(self.trailer_items.len <= multi_batch_count_max);
+        assert(self.trailer_items.len <= Postamble.batch_count_max);
         return @intCast(self.trailer_items.len);
     }
 
@@ -349,8 +367,8 @@ pub const MultiBatchEncoder = struct {
     /// The returned slice may have a length of zero if the remaining buffer
     /// isn't large enough to hold at least one element of the current operation.
     pub fn writable(self: *const MultiBatchEncoder) ?[]u8 {
-        if (self.batch_count == multi_batch_count_max) return null;
-        assert(self.batch_count < multi_batch_count_max);
+        if (self.batch_count == Postamble.batch_count_max) return null;
+        assert(self.batch_count < Postamble.batch_count_max);
         maybe(self.batch_count == 0);
 
         assert(self.options.element_size > 0 or self.buffer_index == 0);
@@ -383,7 +401,7 @@ pub const MultiBatchEncoder = struct {
 
     /// Records how many bytes were written in the slice previously acquired by `writable()`.
     pub fn add(self: *MultiBatchEncoder, bytes_written: u32) void {
-        assert(self.batch_count < multi_batch_count_max);
+        assert(self.batch_count < Postamble.batch_count_max);
         maybe(self.batch_count == 0);
 
         const written_element_count: u16 = written_element_count: {
@@ -431,7 +449,7 @@ pub const MultiBatchEncoder = struct {
     /// At least one batch must be inserted, and the encoder should not be used after
     /// being finished.
     pub fn finish(self: *MultiBatchEncoder) u32 {
-        assert(self.batch_count <= multi_batch_count_max);
+        assert(self.batch_count <= Postamble.batch_count_max);
         // Empty messages are considered valid.
         if (self.batch_count == 0) {
             assert(self.buffer_index == 0);
@@ -512,7 +530,7 @@ pub const MultiBatchEncoder = struct {
 test "batch: maximum batches with no elements" {
     var prng = stdx.PRNG.from_seed(42);
 
-    const batch_count = std.math.maxInt(u16);
+    const batch_count = Postamble.batch_count_max;
     const element_size = 128;
     const buffer_size = trailer_total_size(.{
         .element_size = element_size,
@@ -541,10 +559,10 @@ test "batch: maximum batches with a single element" {
 
     const element_size = 128;
     const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
-    const batch_count_max: u16 = @divFloor(
-        buffer_size - @sizeOf(Postamble),
-        element_size + @sizeOf(TrailerItem), // Single element batches.
-    );
+    const batch_count_max: u16 = multi_batch_count_max(.{
+        .batch_size_min = element_size,
+        .batch_size_limit = buffer_size,
+    });
 
     const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
     defer testing.allocator.free(buffer);

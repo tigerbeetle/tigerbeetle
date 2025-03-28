@@ -1820,7 +1820,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
                     .in_flight_max = options.in_flight_max,
-                    .transfers_expiry_max = @max(
+                    .pulse_expiries_max = @max(
                         StateMachine.operation_event_max(
                             .create_transfers,
                             options.batch_size_limit,
