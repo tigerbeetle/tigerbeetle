@@ -82,7 +82,6 @@ impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_PENDING_ID_MUST_BE_DIFFERENT => PendingIdMustBeDifferent,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_TIMEOUT_RESERVED_FOR_PENDING_TRANSFER => TimeoutReservedForPendingTransfer,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_CLOSING_TRANSFER_MUST_BE_PENDING => ClosingTransferMustBePending,
-            TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_AMOUNT_MUST_NOT_BE_ZERO => AmountMustNotBeZero,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LEDGER_MUST_NOT_BE_ZERO => LedgerMustNotBeZero,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_CODE_MUST_NOT_BE_ZERO => CodeMustNotBeZero,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_DEBIT_ACCOUNT_NOT_FOUND => DebitAccountNotFound,
@@ -120,19 +119,32 @@ impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
     }
 }
 
-impl From<i32> for Status {
-    fn from(other: i32) -> Status {
+impl From<i32> for InitStatus {
+    fn from(other: i32) -> InitStatus {
         use tbc::*;
-        use Status::*;
+        use InitStatus::*;
 
         match other {
-            TB_STATUS_TB_STATUS_SUCCESS => panic!(),
-            TB_STATUS_TB_STATUS_UNEXPECTED => Unexpected,
-            TB_STATUS_TB_STATUS_OUT_OF_MEMORY => OutOfMemory,
-            TB_STATUS_TB_STATUS_ADDRESS_INVALID => AddressInvalid,
-            TB_STATUS_TB_STATUS_ADDRESS_LIMIT_EXCEEDED => AddressLimitExceeded,
-            TB_STATUS_TB_STATUS_SYSTEM_RESOURCES => SystemResources,
-            TB_STATUS_TB_STATUS_NETWORK_SUBSYSTEM => NetworkSubsystem,
+            TB_INIT_STATUS_TB_INIT_SUCCESS => panic!(),
+            TB_INIT_STATUS_TB_INIT_UNEXPECTED => Unexpected,
+            TB_INIT_STATUS_TB_INIT_OUT_OF_MEMORY => OutOfMemory,
+            TB_INIT_STATUS_TB_INIT_ADDRESS_INVALID => AddressInvalid,
+            TB_INIT_STATUS_TB_INIT_ADDRESS_LIMIT_EXCEEDED => AddressLimitExceeded,
+            TB_INIT_STATUS_TB_INIT_SYSTEM_RESOURCES => SystemResources,
+            TB_INIT_STATUS_TB_INIT_NETWORK_SUBSYSTEM => NetworkSubsystem,
+            v => Unknown(v),
+        }
+    }
+}
+
+impl From<i32> for ClientStatus {
+    fn from(other: i32) -> ClientStatus {
+        use tbc::*;
+        use ClientStatus::*;
+
+        match other {
+            TB_CLIENT_STATUS_TB_CLIENT_OK => panic!(),
+            TB_CLIENT_STATUS_TB_CLIENT_INVALID => Invalid,
             v => Unknown(v),
         }
     }

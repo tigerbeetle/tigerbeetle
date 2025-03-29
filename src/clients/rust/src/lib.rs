@@ -29,24 +29,27 @@ mod conversions;
 const COMPLETION_CONTEXT: usize = 0xAB;
 
 pub struct Client {
-    client: tbc::tb_client_t,
+    client: *mut tbc::tb_client_t,
 }
 
 impl Client {
-    pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, Status> {
+    pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, InitStatus> {
         assert_abi_compatibility();
 
         unsafe {
-            let mut tb_client = std::ptr::null_mut();
+            let tb_client = Box::new(tbc::tb_client_t {
+                opaque: Default::default(),
+            });
+            let tb_client = Box::into_raw(tb_client);
             let status = tbc::tb_client_init(
-                &mut tb_client,
-                &cluster_id.to_le_bytes() as *const u8,
+                tb_client,
+                &cluster_id.to_le_bytes(),
                 addresses.as_ptr() as *const c_char,
                 addresses.len() as u32,
                 COMPLETION_CONTEXT,
                 Some(on_completion),
             );
-            if status == tbc::TB_STATUS_TB_STATUS_SUCCESS {
+            if status == tbc::TB_INIT_STATUS_TB_INIT_SUCCESS {
                 Ok(Client { client: tb_client })
             } else {
                 Err(status.into())
@@ -237,7 +240,7 @@ impl Client {
     }
 
     pub fn close(mut self) -> impl Future<Output = ()> {
-        struct SendClient(tbc::tb_client_t);
+        struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
 
         let client = std::mem::replace(&mut self.client, std::ptr::null_mut());
@@ -250,6 +253,7 @@ impl Client {
             unsafe {
                 // This is a blocking function so we're calling it offthread.
                 tbc::tb_client_deinit(client.0);
+                std::mem::drop(Box::from_raw(client.0));
             }
             drop(tx);
         });
@@ -582,7 +586,6 @@ pub enum CreateTransferResult {
     PendingIdMustBeDifferent,
     TimeoutReservedForPendingTransfer,
     ClosingTransferMustBePending,
-    AmountMustNotBeZero,
     LedgerMustNotBeZero,
     CodeMustNotBeZero,
     DebitAccountNotFound,
@@ -677,7 +680,6 @@ impl core::fmt::Display for CreateTransferResult {
                 f.write_str("timeout reserved for pending transfer")
             }
             Self::ClosingTransferMustBePending => f.write_str("closing transfers must be pending"),
-            Self::AmountMustNotBeZero => f.write_str("amount must not be zero"),
             Self::LedgerMustNotBeZero => f.write_str("ledger must not be zero"),
             Self::CodeMustNotBeZero => f.write_str("code must not be zero"),
             Self::DebitAccountNotFound => f.write_str("debit account not found"),
@@ -739,7 +741,7 @@ impl core::fmt::Display for CreateTransferResult {
 
 #[derive(Debug, Copy, Clone)]
 #[non_exhaustive]
-pub enum Status {
+pub enum InitStatus {
     Unexpected,
     OutOfMemory,
     AddressInvalid,
@@ -749,8 +751,8 @@ pub enum Status {
     Unknown(i32),
 }
 
-impl std::error::Error for Status {}
-impl core::fmt::Display for Status {
+impl std::error::Error for InitStatus {}
+impl core::fmt::Display for InitStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Unexpected => f.write_str("unexpected"),
@@ -759,6 +761,23 @@ impl core::fmt::Display for Status {
             Self::AddressLimitExceeded => f.write_str("address limit exceeded"),
             Self::SystemResources => f.write_str("system resources"),
             Self::NetworkSubsystem => f.write_str("network subsystem"),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+        }
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+#[non_exhaustive]
+pub enum ClientStatus {
+    Invalid,
+    Unknown(i32),
+}
+
+impl std::error::Error for ClientStatus {}
+impl core::fmt::Display for ClientStatus {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Self::Invalid => f.write_str("invalid"),
             Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
         }
     }
@@ -822,7 +841,7 @@ where
 {
     let (tx, rx) = channel::<CompletionMessage<Event>>();
     let callback: Box<OnCompletion> = Box::new(Box::new(
-        |context, client, packet, timestamp, result_ptr, result_len| unsafe {
+        |context, packet, timestamp, result_ptr, result_len| unsafe {
             let events_len = (*packet).data_size as usize / mem::size_of::<Event>();
             let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
             (*packet).data = ptr::null_mut();
@@ -838,7 +857,6 @@ where
 
             let _ = tx.send(CompletionMessage {
                 _context: context,
-                _client: client,
                 packet,
                 _timestamp: timestamp,
                 result,
@@ -855,17 +873,13 @@ where
     mem::forget(events);
 
     let packet = Box::new(tbc::tb_packet_t {
-        next: ptr::null_mut(),
         user_data: Box::into_raw(callback) as *mut c_void,
+        data: events_ptr as *mut c_void,
+        data_size: (mem::size_of::<Event>() * events_len) as u32,
+        user_tag: 0xABCD,
         operation: op,
         status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
-        data_size: (mem::size_of::<Event>() * events_len) as u32,
-        data: events_ptr as *mut c_void,
-        batch_next: ptr::null_mut(),
-        batch_tail: ptr::null_mut(),
-        batch_size: 0,
-        batch_allowed: 0,
-        reserved: Default::default(),
+        opaque: Default::default(),
     });
 
     (packet, rx)
@@ -980,19 +994,16 @@ where
 #[derive(Debug)]
 struct CompletionMessage<E> {
     _context: usize,
-    _client: tbc::tb_client_t,
     packet: Box<tbc::tb_packet_t>,
     _timestamp: u64,
     result: Vec<u8>,
     events: Vec<E>,
 }
 
-type OnCompletion =
-    Box<dyn FnOnce(usize, tbc::tb_client_t, *mut tbc::tb_packet_t, u64, *const u8, u32)>;
+type OnCompletion = Box<dyn FnOnce(usize, *mut tbc::tb_packet_t, u64, *const u8, u32)>;
 
 extern "C" fn on_completion(
     context: usize,
-    client: tbc::tb_client_t,
     packet: *mut tbc::tb_packet_t,
     timestamp: u64,
     result_ptr: *const u8,
@@ -1001,6 +1012,6 @@ extern "C" fn on_completion(
     unsafe {
         let callback: Box<OnCompletion> = Box::from_raw((*packet).user_data as *mut OnCompletion);
         (*packet).user_data = ptr::null_mut();
-        callback(context, client, packet, timestamp, result_ptr, result_len);
+        callback(context, packet, timestamp, result_ptr, result_len);
     }
 }

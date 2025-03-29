@@ -1,28 +1,39 @@
 const std = @import("std");
 const vsr = @import("vsr");
-const tb = vsr.tigerbeetle;
-const tb_client = vsr.tb_client;
+const exports = vsr.tb_client.exports;
 
 const type_mappings = .{
-    .{ tb.AccountFlags, "TB_ACCOUNT_FLAGS" },
-    .{ tb.Account, "tb_account_t" },
-    .{ tb.TransferFlags, "TB_TRANSFER_FLAGS" },
-    .{ tb.Transfer, "tb_transfer_t" },
-    .{ tb.CreateAccountResult, "TB_CREATE_ACCOUNT_RESULT" },
-    .{ tb.CreateTransferResult, "TB_CREATE_TRANSFER_RESULT" },
-    .{ tb.CreateAccountsResult, "tb_create_accounts_result_t" },
-    .{ tb.CreateTransfersResult, "tb_create_transfers_result_t" },
-    .{ tb.AccountFilter, "tb_account_filter_t" },
-    .{ tb.AccountFilterFlags, "TB_ACCOUNT_FILTER_FLAGS" },
-    .{ tb.AccountBalance, "tb_account_balance_t" },
-    .{ tb.QueryFilter, "tb_query_filter_t" },
-    .{ tb.QueryFilterFlags, "TB_QUERY_FILTER_FLAGS" },
-
-    .{ tb_client.tb_operation_t, "TB_OPERATION" },
-    .{ tb_client.tb_packet_status_t, "TB_PACKET_STATUS" },
-    .{ tb_client.tb_packet_t, "tb_packet_t" },
-    .{ tb_client.tb_client_t, "tb_client_t" },
-    .{ tb_client.tb_status_t, "TB_STATUS" },
+    .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
+    .{ exports.tb_account_t, "tb_account_t" },
+    .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
+    .{ exports.tb_transfer_t, "tb_transfer_t" },
+    .{ exports.tb_create_account_result, "TB_CREATE_ACCOUNT_RESULT" },
+    .{ exports.tb_create_transfer_result, "TB_CREATE_TRANSFER_RESULT" },
+    .{ exports.tb_create_accounts_result_t, "tb_create_accounts_result_t" },
+    .{ exports.tb_create_transfers_result_t, "tb_create_transfers_result_t" },
+    .{ exports.tb_account_filter_t, "tb_account_filter_t" },
+    .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
+    .{ exports.tb_account_balance_t, "tb_account_balance_t" },
+    .{ exports.tb_query_filter_t, "tb_query_filter_t" },
+    .{ exports.tb_query_filter_flags, "TB_QUERY_FILTER_FLAGS" },
+    .{
+        exports.tb_client_t, "tb_client_t",
+        \\// Opaque struct serving as a handle for the client instance.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the client instance.
+    },
+    .{
+        exports.tb_packet_t, "tb_packet_t",
+        \\// Struct containing the state of a request submitted through the client.
+        \\// This struct must be "pinned" (not copyable or movable), as its address must remain stable
+        \\// throughout the lifetime of the request.
+    },
+    .{ exports.tb_operation, "TB_OPERATION" },
+    .{ exports.tb_packet_status, "TB_PACKET_STATUS" },
+    .{ exports.tb_init_status, "TB_INIT_STATUS" },
+    .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
+    .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
+    .{ exports.tb_log_level, "TB_LOG_LEVEL" },
 };
 
 fn resolve_rust_type(comptime Type: type) []const u8 {
@@ -189,6 +200,11 @@ pub fn main() !void {
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
         const rust_name = type_mapping[1]; 
+        if (type_mapping.len == 3) {
+            const comments: []const u8 = type_mapping[2];
+            try buffer.writer().print(comments, .{});
+            try buffer.writer().print("\n", .{});
+        }
 
         switch (@typeInfo(ZigType)) {
             .Struct => |info| switch (info.layout) {
@@ -211,62 +227,75 @@ pub fn main() !void {
         \\    // Initialize a new TigerBeetle client which connects to the addresses provided and
         \\    // completes submitted packets by invoking the callback with the given context.
         \\    pub fn tb_client_init(
-        \\        out_client: *mut tb_client_t,
-        \\        cluster_id: *const u8,
+        \\        client_out: *mut tb_client_t,
+        \\        // 128-bit unsigned integer represented as a 16-byte little-endian array.
+        \\        cluster_id: *const [u8; 16],
         \\        address_ptr: *const ::std::os::raw::c_char,
         \\        address_len: u32,
-        \\        on_completion_ctx: usize,
-        \\        on_completion: ::std::option::Option<
+        \\        completion_ctx: usize,
+        \\        completion_callback: ::std::option::Option<
         \\            unsafe extern "C" fn(
         \\                arg1: usize,
-        \\                arg2: tb_client_t,
         \\                arg3: *mut tb_packet_t,
         \\                arg4: u64,
         \\                arg5: *const u8,
         \\                arg6: u32,
         \\            ),
         \\        >,
-        \\    ) -> TB_STATUS;
+        \\    ) -> TB_INIT_STATUS;
         \\
         \\    // Initialize a new TigerBeetle client which echos back any data submitted.
         \\    pub fn tb_client_init_echo(
-        \\        out_client: *mut tb_client_t,
-        \\        cluster_id: *const u8,
+        \\        client_out: *mut tb_client_t,
+        \\        // 128-bit unsigned integer represented as a 16-byte little-endian array.
+        \\        cluster_id: *const [u8; 16],
         \\        address_ptr: *const ::std::os::raw::c_char,
         \\        address_len: u32,
-        \\        on_completion_ctx: usize,
-        \\        on_completion: ::std::option::Option<
+        \\        completion_ctx: usize,
+        \\        completion_callback: ::std::option::Option<
         \\            unsafe extern "C" fn(
         \\                arg1: usize,
-        \\                arg2: tb_client_t,
         \\                arg3: *mut tb_packet_t,
         \\                arg4: u64,
         \\                arg5: *const u8,
         \\                arg6: u32,
         \\            ),
         \\        >,
-        \\    ) -> TB_STATUS;
+        \\    ) -> TB_INIT_STATUS;
         \\
         \\    // Retrieve the callback context initially passed into `tb_client_init` or
         \\    // `tb_client_init_echo`.
         \\    pub fn tb_client_completion_context(
-        \\        client: tb_client_t,
-        \\    ) -> usize;
+        \\        client: *mut tb_client_t,
+        \\        completion_ctx_out: *mut usize,
+        \\    ) -> TB_CLIENT_STATUS;
         \\
         \\    // Submit a packet with its operation, data, and data_size fields set.
         \\    // Once completed, `on_completion` will be invoked with `on_completion_ctx` and the given
         \\    // packet on the `tb_client` thread (separate from caller's thread).
         \\    pub fn tb_client_submit(
-        \\        client: tb_client_t,
+        \\        client: *mut tb_client_t,
         \\        packet: *mut tb_packet_t,
-        \\    );
+        \\    ) -> TB_CLIENT_STATUS;
         \\
         \\    // Closes the client, causing any previously submitted packets to be completed with
         \\    // `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
         \\    // It is undefined behavior to use any functions on the client once deinit is called.
         \\    pub fn tb_client_deinit(
-        \\        client: tb_client_t,
-        \\    );
+        \\        client: *mut tb_client_t,
+        \\    ) -> TB_CLIENT_STATUS;
+        \\
+        \\    // Registers or unregisters the application log callback.
+        \\    pub fn register_log_callback(
+        \\        callback: ::std::option::Option<
+        \\            unsafe extern "C" fn(
+        \\                TB_LOG_LEVEL,
+        \\                *const u8,
+        \\                u32,
+        \\            ),
+        \\        >,
+        \\        debug: bool,
+        \\    ) -> TB_REGISTER_LOG_CALLBACK_STATUS;
         \\}}
     , .{});
 
