@@ -1434,17 +1434,12 @@ pub fn ReplicaType(
             assert(message.references > 0);
             defer self.invariants();
 
-            // Switch on the header type so that we don't log opaque bytes for the per-command data.
-            switch (message.header.into_any()) {
-                inline else => |header| {
-                    log.debug("{}: on_message: view={} status={s} {}", .{
-                        self.replica,
-                        self.view,
-                        @tagName(self.status),
-                        header,
-                    });
-                },
-            }
+            log.debug("{}: on_message: view={} status={s} {}", .{
+                self.replica,
+                self.view,
+                @tagName(self.status),
+                message.header,
+            });
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: on_message: invalid (command={}, {s})", .{

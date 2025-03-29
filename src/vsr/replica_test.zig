@@ -1011,9 +1011,9 @@ test "Cluster: view-change: nack older view" {
     a0.drop_all(.R_, .bidirectional);
     b2.pass(.R_, .incoming, .prepare);
     b2.filter(.R_, .incoming, struct {
-        fn drop_message(message: *Message) bool {
-            const prepare = message.into(.prepare) orelse return false;
-            return prepare.header.op < checkpoint_1_trigger + 3;
+        fn drop_message(message: *const Message) bool {
+            const header = message.header.into(.prepare) orelse return false;
+            return header.op < checkpoint_1_trigger + 3;
         }
     }.drop_message);
 
@@ -1245,9 +1245,9 @@ test "Cluster: sync: checkpoint from a newer view" {
         b1.pass(.A0, .incoming, .prepare);
         b1.filter(.A0, .incoming, struct {
             // Force b1 to sync, rather than repair.
-            fn drop_message(message: *Message) bool {
-                const prepare = message.into(.prepare) orelse return false;
-                return prepare.header.op == checkpoint_1;
+            fn drop_message(message: *const Message) bool {
+                const header = message.header.into(.prepare) orelse return false;
+                return header.op == checkpoint_1;
             }
         }.drop_message);
         try c.request(checkpoint_1 + 1, checkpoint_1 - 1);
@@ -2372,16 +2372,12 @@ const TestReplicas = struct {
         t: *const TestReplicas,
         peer: ProcessSelector,
         direction: LinkDirection,
-        comptime drop_message_fn: ?fn (message: *Message) bool,
+        comptime drop_message_fn: ?fn (message: *const Message) bool,
     ) void {
         const paths = t.peer_paths(peer, direction);
         for (paths.const_slice()) |path| {
             t.cluster.network.link_drop_packet_fn(path).* = if (drop_message_fn) |f|
-                &struct {
-                    fn drop_packet(packet: *const Network.Packet) bool {
-                        return f(packet.message);
-                    }
-                }.drop_packet
+                &f
             else
                 null;
         }

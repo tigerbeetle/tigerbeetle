@@ -792,21 +792,9 @@ const ClockSimulator = struct {
     const Packet = struct {
         m0: u64,
         t1: ?i64,
-        clock_simulator: *ClockSimulator,
-
-        pub fn clone(packet: *const Packet) Packet {
-            return packet.*;
-        }
-
-        /// PacketSimulator requires this function, but we don't actually have anything to deinit.
-        pub fn deinit(packet: *const Packet) void {
-            _ = packet;
-        }
-
-        pub fn command(_: *const Packet) Command {
-            return .ping; // Value doesn't matter.
-        }
     };
+
+    const PacketSimulator = PacketSimulatorType(Packet);
 
     const Options = struct {
         ping_timeout: u32,
@@ -823,7 +811,12 @@ const ClockSimulator = struct {
     prng: stdx.PRNG,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
-        var network = try PacketSimulatorType(Packet).init(allocator, options.network_options);
+        var network = try PacketSimulator.init(allocator, options.network_options, .{
+            .packet_command = &packet_command,
+            .packet_clone = &packet_clone,
+            .packet_deinit = &packet_deinit,
+            .packet_deliver = &packet_deliver,
+        });
         errdefer network.deinit(allocator);
 
         var times = try allocator.alloc(DeterministicTime, options.clock_count);
@@ -891,9 +884,7 @@ const ClockSimulator = struct {
                             .{
                                 .m0 = m0,
                                 .t1 = null,
-                                .clock_simulator = self,
                             },
-                            ClockSimulator.handle_packet,
                             .{
                                 .source = clock.replica,
                                 .target = @intCast(target),
@@ -905,8 +896,18 @@ const ClockSimulator = struct {
         }
     }
 
-    fn handle_packet(packet: Packet, path: Path) void {
-        const self = packet.clock_simulator;
+    fn packet_command(_: *PacketSimulator, _: Packet) Command {
+        return .ping; // Value doesn't matter.
+    }
+
+    fn packet_clone(_: *PacketSimulator, packet: Packet) Packet {
+        return packet;
+    }
+
+    fn packet_deinit(_: *PacketSimulator, _: Packet) void {}
+
+    fn packet_deliver(packet_simulator: *PacketSimulator, packet: Packet, path: Path) void {
+        const self: *ClockSimulator = @fieldParentPtr("network", packet_simulator);
         const target = &self.clocks[path.target];
 
         if (packet.t1) |t1| {
@@ -921,9 +922,7 @@ const ClockSimulator = struct {
                 .{
                     .m0 = packet.m0,
                     .t1 = target.realtime(),
-                    .clock_simulator = self,
                 },
-                ClockSimulator.handle_packet,
                 .{
                     // send the packet back to where it came from.
                     .source = path.target,
