@@ -8,7 +8,7 @@
 #![allow(clippy::needless_lifetimes)] // explicit lifetimes for readability
 
 use bitflags::bitflags;
-use futures::channel::oneshot::{channel, Receiver};
+use futures_channel::oneshot::{channel, Receiver};
 
 use std::convert::Infallible;
 use std::future::Future;
