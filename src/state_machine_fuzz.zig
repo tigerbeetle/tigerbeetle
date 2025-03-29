@@ -64,6 +64,10 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         };
         const request_buffer_operation = request_buffer_full[0..operation_size];
 
+        // This is checked in the state machine, but as of writing the fuzz, all that it cares about
+        // is the length. Maybe that changes in the future and you hit this assert.
+        assert(context.state_machine.input_valid(operation, request_buffer_operation));
+
         switch (operation) {
             .query_accounts, .query_transfers => {
                 const query_filter: *tb.QueryFilter = @ptrCast(request_buffer_operation);
@@ -132,10 +136,6 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             .get_events, .pulse => continue,
         }
 
-        // This is checked in the state machine, but as of writing the fuzz, all that it cares about
-        // is the length. Maybe that changes in the future and you hit this assert.
-        assert(context.state_machine.input_valid(operation, request_buffer_operation));
-
         context.prepare(operation, request_buffer_operation);
 
         const reply_size = context.execute(
@@ -148,4 +148,36 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
         op += 1;
     }
+}
+
+test "int_edge_biased" {
+    const seed = 42;
+
+    var prng = stdx.PRNG.from_seed(seed);
+    var found_max_int: [129]bool = std.mem.zeroes([129]bool);
+
+    // Currently takes ~20 000 random values to hit all maxInts (eg, 0, maxInt(u1), maxInt(u2), etc,
+    // for a u128 with a seed of 42. Even if the seed changes, we expect this to find them all
+    // within a relatively short space of time.
+    for (0..20_000) |_| {
+        const int = int_edge_biased(&prng, u128);
+
+        if (int == 0) {
+            found_max_int[0] = true;
+            continue;
+        }
+
+        inline for (1..129) |bits| {
+            const IntType = @Type(.{ .Int = .{
+                .signedness = .unsigned,
+                .bits = bits,
+            } });
+            const max = std.math.maxInt(IntType);
+            if (int == max) {
+                found_max_int[bits] = true;
+            }
+        }
+    }
+
+    assert(std.mem.allEqual(bool, &found_max_int, true));
 }

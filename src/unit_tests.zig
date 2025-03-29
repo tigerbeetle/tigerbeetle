@@ -54,6 +54,7 @@ comptime {
     _ = @import("repl/parser.zig");
 
     _ = @import("state_machine.zig");
+    _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
