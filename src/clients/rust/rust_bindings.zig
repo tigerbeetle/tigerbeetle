@@ -42,7 +42,7 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
         .Enum => |info| return resolve_rust_type(info.tag_type),
         .Struct => return resolve_rust_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
         .Bool => return "u8", // todo "bool"
-        .Int => |info | {
+        .Int => |info| {
             std.debug.assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "u8",
@@ -96,7 +96,7 @@ fn emit_enum(
     var suffix_pos = std.mem.lastIndexOf(u8, rust_name, "_").?;
     if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
 
-    const backing_type = switch(@typeInfo(Type)) {
+    const backing_type = switch (@typeInfo(Type)) {
         .Struct => |s| s.backing_integer.?,
         .Enum => |e| e.tag_type,
         else => @panic("unexpected"),
@@ -116,7 +116,7 @@ fn emit_enum(
         else => @panic("unexpected"),
     };
 
-    try buffer.writer().print("pub type {s} = {s};\n", .{rust_name, rust_backing_type_str});
+    try buffer.writer().print("pub type {s} = {s};\n", .{ rust_name, rust_backing_type_str });
 
     inline for (type_info.fields, 0..) |field, i| {
         comptime var skip = false;
@@ -199,7 +199,7 @@ pub fn main() !void {
 
     inline for (type_mappings) |type_mapping| {
         const ZigType = type_mapping[0];
-        const rust_name = type_mapping[1]; 
+        const rust_name = type_mapping[1];
         if (type_mapping.len == 3) {
             const comments: []const u8 = type_mapping[2];
             try buffer.writer().print(comments, .{});
@@ -301,4 +301,3 @@ pub fn main() !void {
 
     try std.io.getStdOut().writeAll(buffer.items);
 }
-
