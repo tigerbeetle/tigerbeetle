@@ -149,36 +149,22 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     defer shell.cwd.deleteFile("datafile-devhub") catch unreachable;
 
     const stats_count = blk: {
-        var process = try shell.spawn(
-            .{
-                .stdin_behavior = .Pipe,
-                .stdout_behavior = .Pipe,
-                .stderr_behavior = .Ignore,
-            },
-            "./tigerbeetle inspect metrics",
-            .{},
-        );
-
-        defer {
-            process.stdin.?.close();
-            process.stdin = null;
-            _ = process.wait() catch {};
-        }
-
-        var stats_buffer: [1024]u8 = undefined;
-        const stats_buffer_size = try process.stdout.?.readAll(&stats_buffer);
+        const stats_inspect_result = try shell.exec_stdout("./tigerbeetle inspect metrics", .{});
         var stats_count: u32 = 0;
-        var lines = std.mem.split(u8, stats_buffer[0..stats_buffer_size], "\n");
+        var lines = std.mem.splitScalar(
+            u8,
+            stats_inspect_result,
+            '\n',
+        );
         while (lines.next()) |line| {
             if (line.len != 0) {
-                std.debug.print("LINE: {s}\n", .{line});
                 stats_count += try std.fmt.parseInt(u32, stdx.cut(line, "=").?.suffix, 10);
             }
         }
         break :blk stats_count;
     };
 
-    const startup_time_ms = blk: {
+    const startup_time_ms, const repl_single_command_ms = blk: {
         timer.reset();
 
         var process = try shell.spawn(
@@ -237,7 +223,20 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         assert(eviction.valid_checksum());
         assert(eviction.valid_checksum_body(&[0]u8{}));
 
-        break :blk timer.read() / std.time.ns_per_ms;
+        const startup_time_ms = timer.read() / std.time.ns_per_ms;
+
+        // While there's a running instance, check how long the repl takes to connect and run a
+        // command.
+        timer.reset();
+
+        try shell.exec(
+            "./tigerbeetle repl --addresses={port} --cluster=0 --command={command}",
+            .{ .port = port, .command = "create_accounts id=1 ledger=1 code=1" },
+        );
+
+        const repl_single_command_ms = timer.read() / std.time.ns_per_ms;
+
+        break :blk .{ startup_time_ms, repl_single_command_ms };
     };
 
     const ci_pipeline_duration_s: ?u64 = blk: {
@@ -288,6 +287,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "format time", .value = format_time_ms, .unit = "ms" },
             .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },
             .{ .name = "stats count", .value = stats_count, .unit = "count" },
+            .{ .name = "repl single command", .value = repl_single_command_ms, .unit = "ms" },
         },
     };
 

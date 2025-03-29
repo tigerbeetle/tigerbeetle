@@ -31,7 +31,6 @@ const log = std.log.scoped(.lsm_manifest_level_fuzz);
 const fuzz = @import("../testing/fuzz.zig");
 const binary_search = @import("binary_search.zig");
 const lsm = @import("tree.zig");
-const allocator = fuzz.allocator;
 
 const Key = u64;
 const Value = packed struct(u128) {
@@ -63,7 +62,7 @@ const Table = @import("table.zig").TableType(
     .general,
 );
 
-pub fn main(args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
 
     const fuzz_op_count = @min(
@@ -74,13 +73,13 @@ pub fn main(args: fuzz.FuzzArgs) !void {
     const table_count_max_tree = 1024;
     const node_size = 1024;
 
-    const fuzz_ops = try generate_fuzz_ops(&prng, table_count_max_tree, fuzz_op_count);
-    defer allocator.free(fuzz_ops);
+    const fuzz_ops = try generate_fuzz_ops(gpa, &prng, table_count_max_tree, fuzz_op_count);
+    defer gpa.free(fuzz_ops);
 
     const Environment = EnvironmentType(@as(u32, table_count_max_tree), node_size);
-    var env = try Environment.init(&prng);
+    var env = try Environment.init(gpa, &prng);
     try env.run_fuzz_ops(fuzz_ops);
-    try env.deinit();
+    try env.deinit(gpa);
 }
 
 const FuzzOpTag = std.meta.Tag(FuzzOp);
@@ -96,14 +95,15 @@ const FuzzOp = union(enum) {
 const max_tables_per_insert = 10;
 
 fn generate_fuzz_ops(
+    gpa: std.mem.Allocator,
     prng: *stdx.PRNG,
     table_count_max_tree: usize,
     fuzz_op_count: usize,
 ) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
-    const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
-    errdefer allocator.free(fuzz_ops);
+    const fuzz_ops = try gpa.alloc(FuzzOp, fuzz_op_count);
+    errdefer gpa.free(fuzz_ops);
 
     // TODO: These seem good enough, but we should find proper distributions.
     const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
@@ -237,21 +237,21 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
         prng: *stdx.PRNG,
         snapshot: u64,
 
-        pub fn init(prng: *stdx.PRNG) !Environment {
+        pub fn init(gpa: std.mem.Allocator, prng: *stdx.PRNG) !Environment {
             var env: Environment = undefined;
 
             const node_pool_size = ManifestLevel.Keys.node_count_max +
                 ManifestLevel.Tables.node_count_max;
-            try env.pool.init(allocator, node_pool_size);
-            errdefer env.pool.deinit(allocator);
+            try env.pool.init(gpa, node_pool_size);
+            errdefer env.pool.deinit(gpa);
 
-            try env.level.init(allocator);
-            errdefer env.level.deinit(allocator, &env.pool);
+            try env.level.init(gpa);
+            errdefer env.level.deinit(gpa, &env.pool);
 
-            env.buffer = TableBuffer.init(allocator);
+            env.buffer = TableBuffer.init(gpa);
             errdefer env.buffer.deinit();
 
-            env.tables = TableBuffer.init(allocator);
+            env.tables = TableBuffer.init(gpa);
             errdefer env.tables.deinit();
 
             env.prng = prng;
@@ -259,11 +259,11 @@ pub fn EnvironmentType(comptime table_count_max_tree: u32, comptime node_size: u
             return env;
         }
 
-        pub fn deinit(env: *Environment) !void {
+        pub fn deinit(env: *Environment, gpa: std.mem.Allocator) !void {
             env.tables.deinit();
             env.buffer.deinit();
-            env.level.deinit(allocator, &env.pool);
-            env.pool.deinit(allocator);
+            env.level.deinit(gpa, &env.pool);
+            env.pool.deinit(gpa);
         }
 
         pub fn run_fuzz_ops(env: *Environment, fuzz_ops: []const FuzzOp) !void {

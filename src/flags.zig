@@ -282,7 +282,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
 fn assert_valid_value_type(comptime T: type) void {
     comptime {
-        if (T == []const u8 or T == [:0]const u8 or T == ByteSize or @typeInfo(T) == .Int) return;
+        if (T == []const u8 or T == [:0]const u8 or @typeInfo(T) == .Int) return;
+        if (@hasDecl(T, "parse_flag_value")) return;
 
         if (@typeInfo(T) == .Enum) {
             const info = @typeInfo(T).Enum;
@@ -342,35 +343,18 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     };
 
     if (V == []const u8 or V == [:0]const u8) return value;
-    if (V == ByteSize) return parse_value_size(flag, value);
     if (@typeInfo(V) == .Int) return parse_value_int(V, flag, value);
     if (@typeInfo(V) == .Enum) return parse_value_enum(V, flag, value);
-    comptime unreachable;
-}
-
-fn parse_value_size(flag: []const u8, value: []const u8) ByteSize {
-    assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
-
-    return ByteSize.parse(value) catch |err| {
-        switch (err) {
-            error.ParseOverflow => fatal(
-                "{s}: value exceeds 64-bit unsigned integer: '{s}'",
-                .{ flag, value },
-            ),
-            error.InvalidSize => fatal(
-                "{s}: expected a size, but found '{s}'",
-                .{ flag, value },
-            ),
-            error.InvalidUnit => fatal(
-                "{s}: invalid unit in size '{s}', (needed KiB, MiB, GiB or TiB)",
-                .{ flag, value },
-            ),
-            error.BytesOverflow => fatal(
-                "{s}: size in bytes exceeds 64-bit unsigned integer: '{s}'",
-                .{ flag, value },
-            ),
+    if (@hasDecl(V, "parse_flag_value")) {
+        switch (V.parse_flag_value(value)) {
+            .ok => |v| return v,
+            .err => |message| {
+                assert(message[message.len - 1] == ':');
+                fatal("{s}: {s} '{s}'", .{ flag, message, value });
+            },
         }
-    };
+    }
+    comptime unreachable;
 }
 
 pub const ByteUnit = enum(u64) {
@@ -381,25 +365,18 @@ pub const ByteUnit = enum(u64) {
     tib = 1024 * 1024 * 1024 * 1024,
 };
 
-const ByteSizeParseError = error{
-    ParseOverflow,
-    InvalidSize,
-    InvalidUnit,
-    BytesOverflow,
-};
-
 pub const ByteSize = struct {
     value: u64,
     unit: ByteUnit = .bytes,
 
-    fn parse(value: []const u8) ByteSizeParseError!ByteSize {
+    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
         assert(value.len != 0);
 
         const split: struct {
             value_input: []const u8,
             unit_input: []const u8,
         } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i])) {
+            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
                 break :split .{
                     .value_input = value[0..i],
                     .unit_input = value[i..],
@@ -415,11 +392,11 @@ pub const ByteSize = struct {
         const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
             switch (err) {
                 error.Overflow => {
-                    return ByteSizeParseError.ParseOverflow;
+                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
                 },
                 error.InvalidCharacter => {
                     // The only case this can happen is for the empty string
-                    return ByteSizeParseError.InvalidSize;
+                    return .{ .err = "expected a size, but found:" };
                 },
             }
         };
@@ -430,16 +407,16 @@ pub const ByteSize = struct {
                     break :unit tag;
                 }
             } else {
-                return ByteSizeParseError.InvalidUnit;
+                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
             }
         else
             ByteUnit.bytes;
 
         _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return ByteSizeParseError.BytesOverflow;
+            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
         };
 
-        return ByteSize{ .value = amount, .unit = unit };
+        return .{ .ok = .{ .value = amount, .unit = unit } };
     }
 
     pub fn bytes(size: *const ByteSize) u64 {
@@ -461,7 +438,7 @@ pub const ByteSize = struct {
     }
 };
 
-test parse_value_size {
+test "ByteSize.parse_flag_value" {
     const kib = 1024;
     const mib = kib * 1024;
     const gib = mib * 1024;
@@ -480,6 +457,7 @@ test parse_value_size {
         .{ 10 * mib, "10mib", 10, ByteUnit.mib },
         .{ 1 * kib, "1KiB", 1, ByteUnit.kib },
         .{ 10 * kib, "10kib", 10, ByteUnit.kib },
+        .{ 10 * kib, "1_0kib", 10, ByteUnit.kib },
     };
 
     inline for (cases) |case| {
@@ -487,7 +465,11 @@ test parse_value_size {
         const input = case[1];
         const unit_val = case[2];
         const unit = case[3];
-        const got = parse_value_size("--size", input);
+        const result = ByteSize.parse_flag_value(input);
+        if (result == .err) {
+            std.debug.panic("expected ok, got: '{s}'", .{result.err});
+        }
+        const got = result.ok;
         assert(bytes == got.bytes());
         assert(unit_val == got.value);
         assert(unit == got.unit);
@@ -1132,10 +1114,28 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=_1000KiB" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: invalid unit in size '1_000KiB', (needed KiB, MiB, GiB or TiB)
+        \\error: --size: expected a size, but found: '_1000KiB'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=1000_KiB" }, snap(@src(),
+        \\status: 1
+        \\stderr:
+        \\error: --size: expected a size, but found: '1000_KiB'
+        \\
+    ));
+
+    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 1024000
+        \\boolean: false
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
         \\
     ));
 
@@ -1178,14 +1178,14 @@ test "flags" {
     try t.check(&.{ "values", "--size=3bogus" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: invalid unit in size '3bogus', (needed KiB, MiB, GiB or TiB)
+        \\error: --size: invalid unit in size, needed KiB, MiB, GiB or TiB: '3bogus'
         \\
     ));
 
     try t.check(&.{ "values", "--size=MiB" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --size: expected a size, but found 'MiB'
+        \\error: --size: expected a size, but found: 'MiB'
         \\
     ));
 

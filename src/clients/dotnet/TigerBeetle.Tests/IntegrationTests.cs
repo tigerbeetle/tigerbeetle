@@ -1158,7 +1158,7 @@ public class IntegrationTests
             {
                 AccountId = accounts[1].Id,
                 TimestampMin = 1,
-                TimestampMax = ulong.MaxValue - 1,
+                TimestampMax = 0,
                 Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Reversed
             };
@@ -1341,7 +1341,7 @@ public class IntegrationTests
             filter = new AccountFilter
             {
                 AccountId = accounts[0].Id,
-                TimestampMin = ulong.MaxValue - 1,
+                TimestampMin = 2,
                 TimestampMax = 1,
                 Limit = 254,
                 Flags = AccountFilterFlags.Credits | AccountFilterFlags.Debits,

@@ -894,7 +894,16 @@ pub const IO = struct {
         // Obtain an advisory exclusive lock that works only if all processes actually use flock().
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
         posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
-            error.WouldBlock => @panic("another process holds the data file lock"),
+            error.WouldBlock => {
+                if (method == .open_read_only) {
+                    log.warn(
+                        "another process holds the data file lock - results may be inconsistent",
+                        .{},
+                    );
+                } else {
+                    @panic("another process holds the data file lock");
+                }
+            },
             else => return err,
         };
 

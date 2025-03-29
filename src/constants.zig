@@ -86,6 +86,7 @@ comptime {
 /// This impacts the amount of memory allocated at initialization by the server.
 /// This determines the size of the VR client table used to cache replies to clients by client ID.
 /// Each client has one entry in the VR client table to store the latest `message_size_max` reply.
+/// Client ID 0 which is used by primary for pulse and upgrade request, is not counted.
 pub const clients_max = config.cluster.clients_max;
 
 comptime {
@@ -262,14 +263,15 @@ comptime {
 pub const pipeline_prepare_queue_max: u32 = config.cluster.pipeline_prepare_queue_max;
 
 /// The maximum number of Viewstamped Replication request messages that can be queued at a primary,
-/// waiting to prepare.
-pub const pipeline_request_queue_max: u32 = clients_max -| pipeline_prepare_queue_max;
+/// waiting to prepare. Each client has at most one request in flight, and a primary can send a
+/// pulse or request upgrade.
+pub const pipeline_request_queue_max: u32 = (clients_max + 1) -| pipeline_prepare_queue_max;
 
 comptime {
-    // A prepare-queue capacity larger than clients_max is wasted.
-    assert(pipeline_prepare_queue_max <= clients_max);
-    // A total queue capacity larger than clients_max is wasted.
-    assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max);
+    // A prepare-queue capacity larger than (clients_max + 1) is wasted.
+    assert(pipeline_prepare_queue_max <= clients_max + 1);
+    // A total queue capacity larger than (clients_max + 1) is wasted.
+    assert(pipeline_prepare_queue_max + pipeline_request_queue_max <= clients_max + 1);
     assert(pipeline_prepare_queue_max > 0);
     assert(pipeline_request_queue_max >= 0);
 

@@ -4,7 +4,6 @@ const assert = std.debug.assert;
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const allocator = fuzz.allocator;
 
 const TestTable = @import("cache_map.zig").TestTable;
 const TestCacheMap = @import("cache_map.zig").TestCacheMap;
@@ -36,12 +35,12 @@ const Environment = struct {
     cache_map: TestCacheMap,
     model: Model,
 
-    pub fn init(options: TestCacheMap.Options) !Environment {
-        var cache_map = try TestCacheMap.init(allocator, options);
-        errdefer cache_map.deinit(allocator);
+    pub fn init(gpa: std.mem.Allocator, options: TestCacheMap.Options) !Environment {
+        var cache_map = try TestCacheMap.init(gpa, options);
+        errdefer cache_map.deinit(gpa);
 
-        var model = Model.init();
-        errdefer model.deinit();
+        var model = Model.init(gpa);
+        errdefer model.deinit(gpa);
 
         return Environment{
             .cache_map = cache_map,
@@ -49,9 +48,9 @@ const Environment = struct {
         };
     }
 
-    pub fn deinit(self: *Environment) void {
+    pub fn deinit(self: *Environment, gpa: std.mem.Allocator) void {
         self.model.deinit();
-        self.cache_map.deinit(allocator);
+        self.cache_map.deinit(gpa);
     }
 
     pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
@@ -203,10 +202,10 @@ const Model = struct {
     scope_active: bool = false,
     compacts: u32 = 0,
 
-    fn init() Model {
+    fn init(gpa: std.mem.Allocator) Model {
         return .{
-            .map = Map.init(allocator),
-            .undo_log = UndoLog.init(allocator),
+            .map = Map.init(gpa),
+            .undo_log = UndoLog.init(gpa),
         };
     }
 
@@ -277,22 +276,23 @@ const Model = struct {
     }
 };
 
-fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for random ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        constants.lsm_growth_factor * 2048
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+fn random_id(prng: *stdx.PRNG) u32 {
+    return fuzz.random_id(prng, u32, .{
+        .average_hot = 8,
+        .average_cold = scope_value_count_max + stash_value_count_max +
+            TestCacheMap.Cache.value_count_max_multiple,
+    });
 }
 
-pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(
+    gpa: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    fuzz_op_count: usize,
+) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
-    const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
-    errdefer allocator.free(fuzz_ops);
+    const fuzz_ops = try gpa.alloc(FuzzOp, fuzz_op_count);
+    errdefer gpa.free(fuzz_ops);
 
     const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
         // Always do puts, and always more puts than removes.
@@ -355,7 +355,7 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
                 }
 
                 break :blk FuzzOp{ .upsert = .{
-                    .key = random_id(prng, u32),
+                    .key = random_id(prng),
                     .value = prng.int(u32),
                 } };
             },
@@ -364,9 +364,9 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
                     operations_since_scope_open += 1;
                 }
 
-                break :blk FuzzOp{ .remove = random_id(prng, u32) };
+                break :blk FuzzOp{ .remove = random_id(prng) };
             },
-            .get => FuzzOp{ .get = random_id(prng, u32) },
+            .get => FuzzOp{ .get = random_id(prng) },
             .compact => blk: {
                 upserts_since_compact = 0;
                 op += 1;
@@ -389,7 +389,7 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
     return fuzz_ops;
 }
 
-pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const fuzz_op_count = @min(
@@ -397,8 +397,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         fuzz.random_int_exponential(&prng, usize, 1E8),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
-    defer allocator.free(fuzz_ops);
+    const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
+    defer gpa.free(fuzz_ops);
 
     // Running the same fuzz with and without cache enabled.
     inline for (&.{ TestCacheMap.Cache.value_count_max_multiple, 0 }) |cache_value_count_max| {
@@ -409,8 +409,8 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
             .name = "fuzz map",
         };
 
-        var env = try Environment.init(options);
-        defer env.deinit();
+        var env = try Environment.init(gpa, options);
+        defer env.deinit(gpa);
 
         try env.apply(fuzz_ops);
         env.verify();

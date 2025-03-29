@@ -460,13 +460,13 @@ const Inspector = struct {
 
             var label_buffer: [128]u8 = undefined;
             for (group_by.groups()) |group| {
-                const header_index = group.findFirstSet().?;
+                const header_index = group.first_set().?;
                 const header = &inspector.superblock_headers[header_index];
                 const header_mark: u8 = if (header_valid[header_index]) '|' else 'X';
 
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
                 for (0..constants.superblock_copies) |j| {
-                    try label_stream.writer().writeByte(if (group.isSet(j)) header_mark else '_');
+                    try label_stream.writer().writeByte(if (group.is_set(j)) header_mark else '_');
                 }
                 try label_stream.writer().writeByte(' ');
                 try label_stream.writer().writeAll(field.name);
@@ -522,14 +522,14 @@ const Inspector = struct {
 
             var label_buffer: [64]u8 = undefined;
             for (group_by.groups()) |group| {
-                const header = header_pair[group.findFirstSet().?];
+                const header = header_pair[group.first_set().?];
                 const header_valid = header.valid_checksum() and
-                    (!group.isSet(1) or wal_prepare_body_valid);
+                    (!group.is_set(1) or wal_prepare_body_valid);
 
                 const mark: u8 = if (header_valid) '|' else 'X';
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
-                try label_stream.writer().writeByte(if (group.isSet(0)) mark else '_');
-                try label_stream.writer().writeByte(if (group.isSet(1)) mark else '_');
+                try label_stream.writer().writeByte(if (group.is_set(0)) mark else '_');
+                try label_stream.writer().writeByte(if (group.is_set(1)) mark else '_');
                 try label_stream.writer().print("{:_>4}: ", .{slot});
 
                 try print_struct(output, label_stream.getWritten(), &.{
@@ -581,10 +581,10 @@ const Inspector = struct {
 
         var label_buffer: [2]u8 = undefined;
         for (group_by.groups()) |group| {
-            const header = copies[group.findFirstSet().?];
+            const header = copies[group.first_set().?];
             const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
-            label_buffer[0] = if (group.isSet(0)) header_mark else '_';
-            label_buffer[1] = if (group.isSet(1)) header_mark else '_';
+            label_buffer[0] = if (group.is_set(0)) header_mark else '_';
+            label_buffer[1] = if (group.is_set(1)) header_mark else '_';
 
             try print_struct(output, &label_buffer, header);
         }
@@ -629,14 +629,14 @@ const Inspector = struct {
             try output.print("{:_>2}     session={}\n", .{ slot, session });
 
             for (group_by.groups()) |group| {
-                const header_index = group.findFirstSet().?;
+                const header_index = group.first_set().?;
                 const header = copies[header_index];
                 const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
 
                 var label_stream = std.io.fixedBufferStream(&label_buffer);
                 try label_stream.writer().print("{:_>2}: ", .{slot});
-                try label_stream.writer().writeByte(if (group.isSet(0)) header_mark else '_');
-                try label_stream.writer().writeByte(if (group.isSet(1)) header_mark else '_');
+                try label_stream.writer().writeByte(if (group.is_set(0)) header_mark else '_');
+                try label_stream.writer().writeByte(if (group.is_set(1)) header_mark else '_');
                 try label_stream.writer().writeAll(" header");
                 try print_struct(output, label_stream.getWritten(), header);
             }
@@ -683,10 +683,10 @@ const Inspector = struct {
 
         var label_buffer: [2]u8 = undefined;
         for (group_by.groups()) |group| {
-            const header = copies[group.findFirstSet().?];
+            const header = copies[group.first_set().?];
             const header_mark: u8 = if (header.valid_checksum()) '|' else 'X';
-            label_buffer[0] = if (group.isSet(0)) header_mark else '_';
-            label_buffer[1] = if (group.isSet(1)) header_mark else '_';
+            label_buffer[0] = if (group.is_set(0)) header_mark else '_';
+            label_buffer[1] = if (group.is_set(1)) header_mark else '_';
 
             try print_struct(output, &label_buffer, header);
         }
@@ -1007,7 +1007,7 @@ const Inspector = struct {
             var quorums = SuperBlockQuorums{};
             const quorum = try quorums.working(&copies, .open);
             if (!quorum.valid) return error.SuperBlockQuorumInvalid;
-            return inspector.superblock_headers[quorum.copies.findFirstSet().?];
+            return inspector.superblock_headers[quorum.copies.first_set().?];
         }
     }
 
@@ -1530,7 +1530,7 @@ fn print_table_info(
 fn GroupByType(comptime count_max: usize) type {
     return struct {
         const GroupBy = @This();
-        const BitSet = std.StaticBitSet(count_max);
+        const BitSet = stdx.BitSetType(count_max);
 
         count: usize = 0,
         checksums: [count_max]?u128 = [_]?u128{null} ** count_max,
@@ -1549,11 +1549,11 @@ fn GroupByType(comptime count_max: usize) type {
 
             var distinct: usize = 0;
             for (&group_by.checksums, 0..) |checksum_a, a| {
-                var matches = BitSet.initEmpty();
+                var matches: BitSet = .{};
                 for (&group_by.checksums, 0..) |checksum_b, b| {
-                    matches.setValue(b, checksum_a.? == checksum_b.?);
+                    matches.set_value(b, checksum_a.? == checksum_b.?);
                 }
-                if (matches.findFirstSet().? == a) {
+                if (matches.first_set().? == a) {
                     group_by.matches[distinct] = matches;
                     distinct += 1;
                 }

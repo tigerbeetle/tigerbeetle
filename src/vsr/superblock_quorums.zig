@@ -21,7 +21,7 @@ pub fn QuorumsType(comptime options: Options) type {
             valid: bool = false,
             /// Track which copies are a member of the quorum.
             /// Used to ignore duplicate copies of a header when determining a quorum.
-            copies: QuorumCount = QuorumCount.initEmpty(),
+            copies: QuorumCount = .{},
             /// An integer value indicates the copy index found in the corresponding slot.
             /// A `null` value indicates that the copy is invalid or not a member of the working
             /// quorum. All copies belong to the same (valid, working) quorum.
@@ -33,7 +33,7 @@ pub fn QuorumsType(comptime options: Options) type {
             }
         };
 
-        pub const QuorumCount = std.StaticBitSet(options.superblock_copies);
+        pub const QuorumCount = stdx.BitSetType(options.superblock_copies);
 
         pub const Error = error{
             Fork,
@@ -102,7 +102,7 @@ pub fn QuorumsType(comptime options: Options) type {
             std.mem.sort(Quorum, quorums.slice(), {}, sort_priority_descending);
 
             for (quorums.slice()) |quorum| {
-                if (quorum.copies.count() == options.superblock_copies) {
+                if (quorum.copies.full()) {
                     log.debug("quorum: checksum={x} parent={x} sequence={} count={} valid={}", .{
                         quorum.header.checksum,
                         quorum.header.parent,
@@ -254,7 +254,7 @@ pub fn QuorumsType(comptime options: Options) type {
                 // that is, the copy is in the correct slot, and its copy index is simply corrupt.
                 quorum.slots[slot] = @intCast(slot);
                 quorum.copies.set(slot);
-            } else if (quorum.copies.isSet(copy.copy)) {
+            } else if (quorum.copies.is_set(copy.copy)) {
                 // Ignore the duplicate copy.
             } else {
                 quorum.slots[slot] = @intCast(copy.copy);
@@ -337,13 +337,13 @@ pub fn QuorumsType(comptime options: Options) type {
                 }
 
                 // Set bits indicate that the corresponding copy was found at least once.
-                var copies_any = QuorumCount.initEmpty();
+                var copies_any: QuorumCount = .{};
                 // Set bits indicate that the corresponding copy was found more than once.
-                var copies_duplicate = QuorumCount.initEmpty();
+                var copies_duplicate: QuorumCount = .{};
 
                 for (iterator.slots) |slot| {
                     if (slot) |copy| {
-                        if (copies_any.isSet(copy)) copies_duplicate.set(copy);
+                        if (copies_any.is_set(copy)) copies_duplicate.set(copy);
                         copies_any.set(copy);
                     }
                 }
@@ -356,10 +356,10 @@ pub fn QuorumsType(comptime options: Options) type {
                 var b: ?u8 = null;
                 var c: ?u8 = null;
                 for (iterator.slots, 0..) |slot, i| {
-                    if (slot == null and !copies_any.isSet(i)) a = @intCast(i);
-                    if (slot == null and copies_any.isSet(i)) b = @intCast(i);
+                    if (slot == null and !copies_any.is_set(i)) a = @intCast(i);
+                    if (slot == null and copies_any.is_set(i)) b = @intCast(i);
                     if (slot) |slot_copy| {
-                        if (slot_copy != i and copies_duplicate.isSet(slot_copy)) c = @intCast(i);
+                        if (slot_copy != i and copies_duplicate.is_set(slot_copy)) c = @intCast(i);
                     }
                 }
 

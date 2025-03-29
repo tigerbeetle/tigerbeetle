@@ -8,23 +8,21 @@ const stdx = @import("stdx.zig");
 const ewah = @import("./ewah.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
-pub fn main(args: fuzz.FuzzArgs) !void {
-    const allocator = fuzz.allocator;
-
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
         var prng = stdx.PRNG.from_seed(args.seed);
 
         const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
         const decoded_size = prng.range_inclusive(usize, 1, decoded_size_max);
-        const decoded = try allocator.alloc(Word, decoded_size);
-        defer allocator.free(decoded);
+        const decoded = try gpa.alloc(Word, decoded_size);
+        defer gpa.free(decoded);
 
         const decoded_bits_total = decoded_size * @bitSizeOf(Word);
         const decoded_bits = prng.int_inclusive(usize, decoded_bits_total);
         generate_bits(&prng, std.mem.sliceAsBytes(decoded[0..decoded_size]), decoded_bits);
 
-        var context = try ContextType(Word).init(allocator, decoded.len);
-        defer context.deinit(allocator);
+        var context = try ContextType(Word).init(gpa, decoded.len);
+        defer context.deinit(gpa);
 
         const encode_chunk_words_count = prng.range_inclusive(usize, 1, decoded_size);
         const decode_chunk_words_count = prng.range_inclusive(usize, 1, decoded_size);
@@ -49,12 +47,12 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
 pub fn fuzz_encode_decode(
     comptime Word: type,
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     decoded: []const Word,
     options: ContextType(Word).TestOptions,
 ) !void {
-    var context = try ContextType(Word).init(allocator, decoded.len);
-    defer context.deinit(allocator);
+    var context = try ContextType(Word).init(gpa, decoded.len);
+    defer context.deinit(gpa);
 
     _ = try context.test_encode_decode(decoded, options);
 }
@@ -95,16 +93,16 @@ pub fn ContextType(comptime Word: type) type {
         decoded_actual: []Word,
         encoded_actual: []align(@alignOf(Word)) u8,
 
-        fn init(allocator: std.mem.Allocator, size_max: usize) !Context {
-            const decoded_actual = try allocator.alloc(Word, size_max);
-            errdefer allocator.free(decoded_actual);
+        fn init(gpa: std.mem.Allocator, size_max: usize) !Context {
+            const decoded_actual = try gpa.alloc(Word, size_max);
+            errdefer gpa.free(decoded_actual);
 
-            const encoded_actual = try allocator.alignedAlloc(
+            const encoded_actual = try gpa.alignedAlloc(
                 u8,
                 @alignOf(Word),
                 Codec.encode_size_max(size_max),
             );
-            errdefer allocator.free(encoded_actual);
+            errdefer gpa.free(encoded_actual);
 
             return Context{
                 .decoded_actual = decoded_actual,
@@ -112,9 +110,9 @@ pub fn ContextType(comptime Word: type) type {
             };
         }
 
-        fn deinit(context: *Context, allocator: std.mem.Allocator) void {
-            allocator.free(context.decoded_actual);
-            allocator.free(context.encoded_actual);
+        fn deinit(context: *Context, gpa: std.mem.Allocator) void {
+            gpa.free(context.decoded_actual);
+            gpa.free(context.encoded_actual);
         }
 
         pub const TestOptions = struct {

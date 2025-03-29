@@ -15,6 +15,7 @@
 //! - remove dynamic-dispatch idirection (a minor bonus).
 
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
 const Snap = @import("../testing/snaptest.zig").Snap;
@@ -26,9 +27,9 @@ const PRNG = @This();
 
 /// A less than one rational number, used to specify probabilities.
 pub const Ratio = struct {
-    // Invariant: numerator ≤ denomitator.
+    // Invariant: numerator ≤ denominator.
     numerator: u64,
-    // Invariant: denomitator ≠ 0.
+    // Invariant: denominator ≠ 0.
     denominator: u64,
 
     pub fn format(
@@ -41,7 +42,47 @@ pub const Ratio = struct {
         _ = options;
         return writer.print("{d}/{d}", .{ r.numerator, r.denominator });
     }
+
+    pub fn parse_flag_value(value: []const u8) union(enum) { ok: Ratio, err: []const u8 } {
+        const cut = stdx.cut(value, "/") orelse
+            return .{ .err = "expected 'a/b' ratio, but found:" };
+        const numerator = std.fmt.parseInt(u64, cut.prefix, 16) catch
+            return .{ .err = "invalid numerator:" };
+        const denominator = std.fmt.parseInt(u64, cut.suffix, 16) catch
+            return .{ .err = "invalid denominator:" };
+        if (numerator > denominator) {
+            return .{ .err = "ratio greater than 1:" };
+        }
+        return .{ .ok = ratio(numerator, denominator) };
+    }
 };
+
+test "Ratio.parse_flag_value" {
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("3/4"),
+        .{ .ok = ratio(3, 4) },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("3"),
+        .{ .err = "expected 'a/b' ratio, but found:" },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value(""),
+        .{ .err = "expected 'a/b' ratio, but found:" },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("π/4"),
+        .{ .err = "invalid numerator:" },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("3/i"),
+        .{ .err = "invalid denominator:" },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("4/3"),
+        .{ .err = "ratio greater than 1:" },
+    ));
+}
 
 /// Canonical constructor for Ratio. Import as `const ratio = stdx.PRNG.ratio`.
 pub fn ratio(numerator: u64, denominator: u64) Ratio {
@@ -130,7 +171,7 @@ test fill {
     for (0..size_max + 1) |size| {
         // Check that the entire buffer is filled, by filling it over a couple of times
         // and checking that each byte is non-zero at least once.
-        var non_zero = std.StaticBitSet(size_max).initEmpty();
+        var non_zero: stdx.BitSetType(size_max) = .{};
         for (0..3) |_| {
             const buffer = buffer_max[0..size];
             @memset(buffer, 0);
@@ -140,7 +181,7 @@ test fill {
                 if (byte != 0) non_zero.set(i);
             }
         }
-        for (0..size) |i| assert(non_zero.isSet(i));
+        for (0..size) |i| assert(non_zero.is_set(i));
     }
 
     try snap(@src(),

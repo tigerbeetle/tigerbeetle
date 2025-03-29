@@ -7,7 +7,6 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const allocator = fuzz.allocator;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
@@ -122,17 +121,17 @@ const Environment = struct {
     ticks_remaining: usize,
     scan_lookup_buffer: []tb.Account,
 
-    fn init(env: *Environment, storage: *Storage) !void {
+    fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.trace = try vsr.trace.Tracer.init(allocator, 0, replica, .{});
+        env.trace = try vsr.trace.Tracer.init(gpa, 0, replica, .{});
 
-        env.superblock = try SuperBlock.init(allocator, .{
+        env.superblock = try SuperBlock.init(gpa, .{
             .storage = env.storage,
             .storage_size_limit = constants.storage_size_limit_default,
         });
 
-        env.grid = try Grid.init(allocator, .{
+        env.grid = try Grid.init(gpa, .{
             .superblock = &env.superblock,
             .trace = &env.trace,
             .missing_blocks_max = 0,
@@ -142,7 +141,7 @@ const Environment = struct {
                 Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
         });
 
-        env.scan_lookup_buffer = try allocator.alloc(
+        env.scan_lookup_buffer = try gpa.alloc(
             tb.Account,
             StateMachine.constants.batch_max.create_accounts,
         );
@@ -152,18 +151,18 @@ const Environment = struct {
         env.ticks_remaining = std.math.maxInt(usize);
     }
 
-    fn deinit(env: *Environment) void {
-        env.superblock.deinit(allocator);
-        env.grid.deinit(allocator);
-        env.trace.deinit(allocator);
-        allocator.free(env.scan_lookup_buffer);
+    fn deinit(env: *Environment, gpa: std.mem.Allocator) void {
+        env.superblock.deinit(gpa);
+        env.grid.deinit(gpa);
+        env.trace.deinit(gpa);
+        gpa.free(env.scan_lookup_buffer);
     }
 
-    pub fn run(storage: *Storage, fuzz_ops: []const FuzzOp) !void {
+    pub fn run(gpa: std.mem.Allocator, storage: *Storage, fuzz_ops: []const FuzzOp) !void {
         var env: Environment = undefined;
         env.state = .init;
-        try env.init(storage);
-        defer env.deinit();
+        try env.init(gpa, storage);
+        defer env.deinit(gpa);
 
         env.change_state(.init, .superblock_format);
         env.superblock.format(superblock_format_callback, &env.superblock_context, .{
@@ -174,10 +173,10 @@ const Environment = struct {
         });
         try env.tick_until_state_change(.superblock_format, .superblock_open);
 
-        try env.open();
-        defer env.close();
+        try env.open(gpa);
+        defer env.close(gpa);
 
-        try env.apply(fuzz_ops);
+        try env.apply(gpa, fuzz_ops);
     }
 
     fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -196,14 +195,14 @@ const Environment = struct {
         assert(env.state == next_state);
     }
 
-    fn open(env: *Environment) !void {
+    fn open(env: *Environment, gpa: std.mem.Allocator) !void {
         env.superblock.open(superblock_open_callback, &env.superblock_context);
         try env.tick_until_state_change(.superblock_open, .free_set_open);
 
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
 
-        try env.forest.init(allocator, &env.grid, .{
+        try env.forest.init(gpa, &env.grid, .{
             // TODO Test that the same sequence of events applied to forests with different
             // compaction_blocks result in identical grids.
             .compaction_block_count = Forest.Options.compaction_block_count_min,
@@ -239,8 +238,8 @@ const Environment = struct {
         }
     }
 
-    fn close(env: *Environment) void {
-        env.forest.deinit(allocator);
+    fn close(env: *Environment, gpa: std.mem.Allocator) void {
+        env.forest.deinit(gpa);
     }
 
     fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
@@ -545,13 +544,13 @@ const Environment = struct {
         // Represents in-memory state:
         log: Log,
 
-        pub fn init() Model {
+        pub fn init(gpa: std.mem.Allocator) Model {
             return .{
                 .checkpointed = .{
-                    .objects = Map.init(allocator),
-                    .timestamps = Set.init(allocator),
+                    .objects = Map.init(gpa),
+                    .timestamps = Set.init(gpa),
                 },
-                .log = Log.init(allocator),
+                .log = Log.init(gpa),
             };
         }
 
@@ -621,8 +620,8 @@ const Environment = struct {
         }
     };
 
-    fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
-        var model = Model.init();
+    fn apply(env: *Environment, gpa: std.mem.Allocator, fuzz_ops: []const FuzzOp) !void {
+        var model = Model.init(gpa);
         defer model.deinit();
 
         for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -648,13 +647,13 @@ const Environment = struct {
             });
 
             // Apply fuzz_op to the forest and the model.
-            try env.apply_op(fuzz_op, &model);
+            try env.apply_op(gpa, fuzz_op, &model);
         }
 
         log.debug("Applied all ops", .{});
     }
 
-    fn apply_op(env: *Environment, fuzz_op: FuzzOp, model: *Model) !void {
+    fn apply_op(env: *Environment, gpa: std.mem.Allocator, fuzz_op: FuzzOp, model: *Model) !void {
         switch (fuzz_op.modifier) {
             .normal => {
                 env.ticks_remaining = std.math.maxInt(usize);
@@ -676,15 +675,15 @@ const Environment = struct {
                 env.ticks_remaining = std.math.maxInt(usize);
 
                 env.storage.log_pending_io();
-                env.close();
-                env.deinit();
+                env.close(gpa);
+                env.deinit(gpa);
                 env.storage.reset();
 
                 env.state = .init;
-                try env.init(env.storage);
+                try env.init(gpa, env.storage);
 
                 env.change_state(.init, .superblock_open);
-                try env.open();
+                try env.open(gpa);
 
                 // TODO: currently this checks that everything added to the LSM after checkpoint
                 // resets to the last checkpoint on crash by looking through what's been added
@@ -854,34 +853,38 @@ const Environment = struct {
     }
 };
 
-pub fn run_fuzz_ops(storage_options: Storage.Options, fuzz_ops: []const FuzzOp) !void {
+pub fn run_fuzz_ops(
+    gpa: std.mem.Allocator,
+    storage_options: Storage.Options,
+    fuzz_ops: []const FuzzOp,
+) !void {
     // Init mocked storage.
     var storage = try Storage.init(
-        allocator,
+        gpa,
         constants.storage_size_limit_default,
         storage_options,
     );
-    defer storage.deinit(allocator);
+    defer storage.deinit(gpa);
 
-    try Environment.run(&storage, fuzz_ops);
+    try Environment.run(gpa, &storage, fuzz_ops);
 }
 
 fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for random ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        8
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        Environment.cache_entries_max;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+    return fuzz.random_id(prng, Int, .{
+        .average_hot = 8,
+        .average_cold = Environment.cache_entries_max,
+    });
 }
 
-pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(
+    gpa: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    fuzz_op_count: usize,
+) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
-    const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
-    errdefer allocator.free(fuzz_ops);
+    const fuzz_ops = try gpa.alloc(FuzzOp, fuzz_op_count);
+    errdefer gpa.free(fuzz_ops);
 
     const action_weights = stdx.PRNG.EnumWeightsType(FuzzOpActionTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
@@ -906,7 +909,7 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
 
     log.info("puts_since_compact_max = {}", .{Environment.puts_since_compact_max});
 
-    var id_to_account = std.hash_map.AutoHashMap(u128, Account).init(allocator);
+    var id_to_account = std.hash_map.AutoHashMap(u128, Account).init(gpa);
     defer id_to_account.deinit();
 
     var op: u64 = 1;
@@ -1097,7 +1100,7 @@ fn generate_put_account(
 
 const io_latency_mean = 20;
 
-pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const fuzz_op_count = @min(
@@ -1105,10 +1108,10 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         fuzz.random_int_exponential(&prng, usize, 1E6),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
-    defer allocator.free(fuzz_ops);
+    const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
+    defer gpa.free(fuzz_ops);
 
-    try run_fuzz_ops(Storage.Options{
+    try run_fuzz_ops(gpa, Storage.Options{
         .seed = prng.int(u64),
         .read_latency_min = 0,
         .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),

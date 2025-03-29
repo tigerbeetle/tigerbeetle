@@ -39,7 +39,7 @@ test "tidy" {
     // to read the files once.
     for (paths) |path| {
         const bytes_read = (try std.fs.cwd().readFile(path, buffer)).len;
-        if (bytes_read == buffer.len - 1) return error.FileTooLong;
+        if (bytes_read >= buffer.len - 1) return error.FileTooLong;
         buffer[bytes_read] = 0;
 
         const source_file = SourceFile{ .path = path, .text = buffer[0..bytes_read :0] };
@@ -124,6 +124,10 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
     // Note: must avoid banning ourselves!
     if (std.mem.indexOf(u8, source, "std." ++ "BoundedArray") != null) {
         return "use stdx.BoundedArrayType instead of std version";
+    }
+
+    if (std.mem.indexOf(u8, source, "Static" ++ "BitSet") != null) {
+        return "use stdx.BitSetType instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {

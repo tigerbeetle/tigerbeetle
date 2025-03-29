@@ -1314,8 +1314,8 @@ pub fn StateMachineType(
 
             const filter_valid =
                 filter.account_id != 0 and filter.account_id != std.math.maxInt(u128) and
-                filter.timestamp_min != std.math.maxInt(u64) and
-                filter.timestamp_max != std.math.maxInt(u64) and
+                (filter.timestamp_min == 0 or TimestampRange.valid(filter.timestamp_min)) and
+                (filter.timestamp_max == 0 or TimestampRange.valid(filter.timestamp_max)) and
                 (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max) and
                 filter.limit != 0 and
                 (filter.flags.credits or filter.flags.debits) and
@@ -1595,8 +1595,8 @@ pub fn StateMachineType(
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
-                filter.timestamp_min != std.math.maxInt(u64) and
-                filter.timestamp_max != std.math.maxInt(u64) and
+                (filter.timestamp_min == 0 or TimestampRange.valid(filter.timestamp_min)) and
+                (filter.timestamp_max == 0 or TimestampRange.valid(filter.timestamp_max)) and
                 (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max) and
                 filter.limit != 0 and
                 filter.flags.padding == 0 and

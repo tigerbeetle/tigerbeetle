@@ -7,7 +7,6 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
-const allocator = fuzz.allocator;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
@@ -152,21 +151,26 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         pool: ResourcePool,
 
-        pub fn run(storage: *Storage, block_count: u32, fuzz_ops: []const FuzzOp) !void {
+        pub fn run(
+            gpa: std.mem.Allocator,
+            storage: *Storage,
+            block_count: u32,
+            fuzz_ops: []const FuzzOp,
+        ) !void {
             var env: Environment = undefined;
             env.state = .init;
             env.storage = storage;
 
-            env.trace = try vsr.trace.Tracer.init(allocator, 0, replica, .{});
-            defer env.trace.deinit(allocator);
+            env.trace = try vsr.trace.Tracer.init(gpa, 0, replica, .{});
+            defer env.trace.deinit(gpa);
 
-            env.superblock = try SuperBlock.init(allocator, .{
+            env.superblock = try SuperBlock.init(gpa, .{
                 .storage = env.storage,
                 .storage_size_limit = constants.storage_size_limit_default,
             });
-            defer env.superblock.deinit(allocator);
+            defer env.superblock.deinit(gpa);
 
-            env.grid = try Grid.init(allocator, .{
+            env.grid = try Grid.init(gpa, .{
                 .superblock = &env.superblock,
                 .trace = &env.trace,
                 .missing_blocks_max = 0,
@@ -176,10 +180,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .blocks_released_prior_checkpoint_durability_max = Grid
                     .free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
             });
-            defer env.grid.deinit(allocator);
+            defer env.grid.deinit(gpa);
 
             try env.manifest_log.init(
-                allocator,
+                gpa,
                 &env.grid,
                 &ManifestLogPace.init(.{
                     .tree_count = 1,
@@ -187,28 +191,28 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
                 }),
             );
-            defer env.manifest_log.deinit(allocator);
+            defer env.manifest_log.deinit(gpa);
 
-            try env.node_pool.init(allocator, node_count);
-            defer env.node_pool.deinit(allocator);
+            try env.node_pool.init(gpa, node_count);
+            defer env.node_pool.deinit(gpa);
 
             env.tree = undefined;
             env.lookup_value = null;
 
-            try env.scan_buffer.init(allocator, .{ .index = 0 });
-            defer env.scan_buffer.deinit(allocator);
+            try env.scan_buffer.init(gpa, .{ .index = 0 });
+            defer env.scan_buffer.deinit(gpa);
 
-            env.scan_results = try allocator.alloc(Value, scan_results_max);
+            env.scan_results = try gpa.alloc(Value, scan_results_max);
             env.scan_results_count = 0;
-            defer allocator.free(env.scan_results);
+            defer gpa.free(env.scan_results);
 
-            env.scan_results_model = try allocator.alloc(Value, scan_results_max);
-            defer allocator.free(env.scan_results_model);
+            env.scan_results_model = try gpa.alloc(Value, scan_results_max);
+            defer gpa.free(env.scan_results_model);
 
-            env.pool = try ResourcePool.init(allocator, block_count);
-            defer env.pool.deinit(allocator);
+            env.pool = try ResourcePool.init(gpa, block_count);
+            defer env.pool.deinit(gpa);
 
-            try env.open_then_apply(fuzz_ops);
+            try env.open_then_apply(gpa, fuzz_ops);
         }
 
         fn change_state(env: *Environment, current_state: State, next_state: State) void {
@@ -232,7 +236,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(env.state == next_state);
         }
 
-        pub fn open_then_apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
+        pub fn open_then_apply(
+            env: *Environment,
+            gpa: std.mem.Allocator,
+            fuzz_ops: []const FuzzOp,
+        ) !void {
             env.change_state(.init, .superblock_format);
             env.superblock.format(superblock_format_callback, &env.superblock_context, .{
                 .cluster = cluster,
@@ -252,13 +260,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             // The first checkpoint is trivially durable.
             env.grid.free_set.mark_checkpoint_durable();
 
-            try env.tree.init(allocator, &env.node_pool, &env.grid, .{
+            try env.tree.init(gpa, &env.node_pool, &env.grid, .{
                 .id = 1,
                 .name = "Key.Value",
             }, .{
                 .batch_value_count_limit = commit_entries_max,
             });
-            defer env.tree.deinit(allocator);
+            defer env.tree.deinit(gpa);
 
             env.change_state(.tree_init, .manifest_log_open);
 
@@ -268,7 +276,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tick_until_state_change(.manifest_log_open, .fuzzing);
             env.tree.open_complete();
 
-            try env.apply(fuzz_ops);
+            try env.apply(gpa, fuzz_ops);
         }
 
         fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
@@ -501,10 +509,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.change_state(.scan_tree, .fuzzing);
         }
 
-        pub fn apply(env: *Environment, fuzz_ops: []const FuzzOp) !void {
+        pub fn apply(env: *Environment, gpa: std.mem.Allocator, fuzz_ops: []const FuzzOp) !void {
             var model: Model = undefined;
-            try model.init(table_usage);
-            defer model.deinit();
+            try model.init(gpa, table_usage);
+            defer model.deinit(gpa);
 
             var value_count: u64 = 0;
             for (fuzz_ops, 0..) |fuzz_op, fuzz_op_index| {
@@ -651,7 +659,7 @@ const Model = struct {
     node_pool: NodePool,
     array: Array,
 
-    fn init(model: *Model, table_usage: TableUsage) !void {
+    fn init(model: *Model, gpa: std.mem.Allocator, table_usage: TableUsage) !void {
         model.* = .{
             .table_usage = table_usage,
 
@@ -664,16 +672,16 @@ const Model = struct {
             NodePool.node_size,
         );
 
-        try model.node_pool.init(allocator, model_node_count);
-        errdefer model.node_pool.deinit(allocator);
+        try model.node_pool.init(gpa, model_node_count);
+        errdefer model.node_pool.deinit(gpa);
 
-        model.array = try Array.init(allocator);
-        errdefer model.array.deinit(allocator, &model.node_pool);
+        model.array = try Array.init(gpa);
+        errdefer model.array.deinit(gpa, &model.node_pool);
     }
 
-    fn deinit(model: *Model) void {
-        model.array.deinit(allocator, &model.node_pool);
-        model.node_pool.deinit(allocator);
+    fn deinit(model: *Model, gpa: std.mem.Allocator) void {
+        model.array.deinit(gpa, &model.node_pool);
+        model.node_pool.deinit(gpa);
         model.* = undefined;
     }
 
@@ -762,22 +770,22 @@ const Model = struct {
     }
 };
 
-fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
-    // We have two opposing desires for prng ids:
-    const avg_int: Int = if (prng.boolean())
-        // 1. We want to cause many collisions.
-        constants.lsm_growth_factor * 2048
-    else
-        // 2. We want to generate enough ids that the cache can't hold them all.
-        100 * constants.lsm_growth_factor * 2048;
-    return fuzz.random_int_exponential(prng, Int, avg_int);
+fn random_id(prng: *stdx.PRNG) u64 {
+    return fuzz.random_id(prng, u64, .{
+        .average_hot = 8,
+        .average_cold = value_count_max * table_count_max,
+    });
 }
 
-pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp {
+pub fn generate_fuzz_ops(
+    gpa: std.mem.Allocator,
+    prng: *stdx.PRNG,
+    fuzz_op_count: usize,
+) ![]const FuzzOp {
     log.info("fuzz_op_count = {}", .{fuzz_op_count});
 
-    const fuzz_ops = try allocator.alloc(FuzzOp, fuzz_op_count);
-    errdefer allocator.free(fuzz_ops);
+    const fuzz_ops = try gpa.alloc(FuzzOp, fuzz_op_count);
+    errdefer gpa.free(fuzz_ops);
 
     const fuzz_op_weights = stdx.PRNG.EnumWeightsType(FuzzOpTag){
         // Maybe compact more often than forced to by `puts_since_compact`.
@@ -818,17 +826,17 @@ pub fn generate_fuzz_ops(prng: *stdx.PRNG, fuzz_op_count: usize) ![]const FuzzOp
                 break :action action;
             },
             .put => FuzzOp{ .put = .{
-                .id = random_id(prng, u64),
+                .id = random_id(prng),
                 .value = prng.int(u63),
             } },
             .remove => FuzzOp{ .remove = .{
-                .id = random_id(prng, u64),
+                .id = random_id(prng),
                 .value = prng.int(u63),
             } },
-            .get => FuzzOp{ .get = random_id(prng, u64) },
+            .get => FuzzOp{ .get = random_id(prng) },
             .scan => blk: {
-                const min = random_id(prng, u64);
-                const max = min + random_id(prng, u64);
+                const min = random_id(prng);
+                const max = min + random_id(prng);
                 const direction = prng.enum_uniform(Direction);
                 assert(min <= max);
                 break :blk FuzzOp{
@@ -872,20 +880,20 @@ fn generate_compact(
     } };
 }
 
-pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     const table_usage = prng.enum_uniform(TableUsage);
     log.info("table_usage={}", .{table_usage});
 
-    var storage_fault_atlas = try ClusterFaultAtlas.init(allocator, 3, &prng, .{
+    var storage_fault_atlas = try ClusterFaultAtlas.init(gpa, 3, &prng, .{
         .faulty_superblock = false,
         .faulty_wal_headers = false,
         .faulty_wal_prepares = false,
         .faulty_client_replies = false,
         .faulty_grid = true,
     });
-    defer storage_fault_atlas.deinit(allocator);
+    defer storage_fault_atlas.deinit(gpa);
 
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
@@ -912,20 +920,20 @@ pub fn main(fuzz_args: fuzz.FuzzArgs) !void {
         fuzz.random_int_exponential(&prng, usize, 1E6),
     );
 
-    const fuzz_ops = try generate_fuzz_ops(&prng, fuzz_op_count);
-    defer allocator.free(fuzz_ops);
+    const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
+    defer gpa.free(fuzz_ops);
 
     // Init mocked storage.
     var storage = try Storage.init(
-        allocator,
+        gpa,
         constants.storage_size_limit_default,
         storage_options,
     );
-    defer storage.deinit(allocator);
+    defer storage.deinit(gpa);
 
     switch (table_usage) {
         inline else => |usage| {
-            try EnvironmentType(usage).run(&storage, block_count, fuzz_ops);
+            try EnvironmentType(usage).run(gpa, &storage, block_count, fuzz_ops);
         },
     }
 

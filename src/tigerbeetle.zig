@@ -187,19 +187,19 @@ pub const CreateAccountResult = enum(u32) {
 
     comptime {
         const values = std.enums.values(CreateAccountResult);
-        const BitSet = std.StaticBitSet(values.len);
-        var set = BitSet.initEmpty();
+        const BitSet = stdx.BitSetType(values.len);
+        var set: BitSet = .{};
         for (0..values.len) |index| {
             const result: CreateAccountResult = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
-            assert(!set.isSet(index));
+            assert(!set.is_set(index));
             set.set(index);
         }
 
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
-        assert(set.count() == set.capacity());
+        assert(set.full());
     }
 };
 
@@ -387,19 +387,19 @@ pub const CreateTransferResult = enum(u32) {
 
     comptime {
         const values = std.enums.values(CreateTransferResult);
-        const BitSet = std.StaticBitSet(values.len);
-        var set = BitSet.initEmpty();
+        const BitSet = stdx.BitSetType(values.len);
+        var set: BitSet = .{};
         for (0..values.len) |index| {
             const result: CreateTransferResult = @enumFromInt(index);
             stdx.maybe(result == values[index]);
 
-            assert(!set.isSet(index));
+            assert(!set.is_set(index));
             set.set(index);
         }
 
         // It's a non-ordered enum, we need to ensure
         // there are no gaps in the numbering of the values.
-        assert(set.count() == set.capacity());
+        assert(set.full());
     }
 
     /// TODO(zig): CreateTransferResult is ordered by precedence, but it crashes

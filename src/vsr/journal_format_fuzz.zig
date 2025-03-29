@@ -9,11 +9,10 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const journal = @import("./journal.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const allocator = fuzz.allocator;
 
 const cluster = 0;
 
-pub fn main(args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
 
     // +10 to occasionally test formatting into a buffer larger than the total data size.
@@ -23,17 +22,17 @@ pub fn main(args: fuzz.FuzzArgs) !void {
 
     log.info("write_size={} write_sectors={}", .{ write_size, write_sectors });
 
-    try fuzz_format_wal_headers(write_size);
-    try fuzz_format_wal_prepares(write_size);
+    try fuzz_format_wal_headers(gpa, write_size);
+    try fuzz_format_wal_prepares(gpa, write_size);
 }
 
-pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
+pub fn fuzz_format_wal_headers(gpa: std.mem.Allocator, write_size_max: usize) !void {
     assert(write_size_max > 0);
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
     assert(write_size_max % constants.sector_size == 0);
 
-    const write = try allocator.alloc(u8, write_size_max);
-    defer allocator.free(write);
+    const write = try gpa.alloc(u8, write_size_max);
+    defer gpa.free(write);
 
     var offset: usize = 0;
     while (offset < constants.journal_size_headers) {
@@ -49,13 +48,13 @@ pub fn fuzz_format_wal_headers(write_size_max: usize) !void {
     assert(offset == constants.journal_size_headers);
 }
 
-pub fn fuzz_format_wal_prepares(write_size_max: usize) !void {
+pub fn fuzz_format_wal_prepares(gpa: std.mem.Allocator, write_size_max: usize) !void {
     assert(write_size_max > 0);
     assert(write_size_max % @sizeOf(vsr.Header) == 0);
     assert(write_size_max % constants.sector_size == 0);
 
-    const write = try allocator.alloc(u8, write_size_max);
-    defer allocator.free(write);
+    const write = try gpa.alloc(u8, write_size_max);
+    defer gpa.free(write);
 
     var offset: usize = 0;
     while (offset < constants.journal_size_prepares) {
