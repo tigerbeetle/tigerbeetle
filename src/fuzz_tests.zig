@@ -17,6 +17,7 @@ pub const std_options: std.Options = .{
     .log_level = .info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
         .{ .scope = .superblock_quorums, .level = .err },
+        .{ .scope = .state_machine, .level = .err },
     },
 };
 
@@ -35,6 +36,7 @@ const Fuzzers = .{
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
     .signal = @import("./clients/c/tb_client/signal_fuzz.zig"),
+    .state_machine = @import("./state_machine_fuzz.zig"),
     // A fuzzer that intentionally fails, to test fuzzing infrastructure itself
     .canary = {},
     // Quickly run all fuzzers as a smoke test
@@ -84,6 +86,7 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             .lsm_tree => 400,
             .vsr_free_set => 10_000,
             .vsr_superblock => 3,
+            .state_machine => 10_000,
 
             inline .ewah,
             .lsm_segmented_array,
