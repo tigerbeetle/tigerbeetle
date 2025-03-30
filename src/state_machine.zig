@@ -3525,12 +3525,12 @@ test "sum_overflows" {
     try sum_overflows_test(u128);
 }
 
-const TestContext = struct {
+pub const TestContext = struct {
     const Storage = @import("testing/storage.zig").Storage;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("vsr/grid.zig").GridType(Storage);
-    const StateMachine = StateMachineType(Storage, .{
+    pub const StateMachine = StateMachineType(Storage, .{
         .release = vsr.Release.minimum,
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
@@ -3538,7 +3538,7 @@ const TestContext = struct {
         .vsr_operations_reserved = 128,
     });
     const AccountEvent = StateMachine.AccountEvent;
-    const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
+    pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
     trace: vsr.trace.Tracer,
@@ -3547,7 +3547,7 @@ const TestContext = struct {
     state_machine: StateMachine,
     busy: bool,
 
-    fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
+    pub fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
         ctx.storage = try Storage.init(
             allocator,
             4096,
@@ -3606,7 +3606,7 @@ const TestContext = struct {
         ctx.busy = false;
     }
 
-    fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
+    pub fn deinit(ctx: *TestContext, allocator: mem.Allocator) void {
         ctx.state_machine.deinit(allocator);
         ctx.grid.deinit(allocator);
         ctx.superblock.deinit(allocator);
@@ -3621,7 +3621,7 @@ const TestContext = struct {
         ctx.busy = false;
     }
 
-    fn prepare(
+    pub fn prepare(
         context: *TestContext,
         operation: TestContext.StateMachine.Operation,
         input: []align(16) const u8,
@@ -3634,7 +3634,7 @@ const TestContext = struct {
         );
     }
 
-    fn execute(
+    pub fn execute(
         context: *TestContext,
         op: u64,
         operation: TestContext.StateMachine.Operation,
