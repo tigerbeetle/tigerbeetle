@@ -917,7 +917,6 @@ fn build_vortex(
         .target = options.target,
         .optimize = options.mode,
     });
-    tb_client.linkLibC();
     tb_client.pie = true;
     tb_client.bundle_compiler_rt = true;
     tb_client.root_module.addImport("vsr", options.vsr_module);
@@ -935,7 +934,6 @@ fn build_vortex(
     });
 
     vortex.root_module.omit_frame_pointer = false;
-    vortex.linkLibC();
     vortex.linkLibrary(tb_client);
     vortex.addIncludePath(options.tb_client_header.dirname());
     vortex.root_module.addOptions("vsr_options", options.vsr_options);
@@ -1017,7 +1015,6 @@ fn build_go_client(
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
         lib.root_module.stack_protector = false;
@@ -1123,7 +1120,6 @@ fn build_dotnet_client(
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
 
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
@@ -1277,7 +1273,6 @@ fn build_python_client(
             .target = resolved_target,
             .optimize = options.mode,
         });
-        shared_lib.linkLibC();
 
         if (resolved_target.result.os.tag == .windows) {
             shared_lib.linkSystemLibrary("ws2_32");
@@ -1336,8 +1331,6 @@ fn build_c_client(
         static_lib.pie = true;
 
         for ([_]*std.Build.Step.Compile{ shared_lib, static_lib }) |lib| {
-            lib.linkLibC();
-
             if (resolved_target.result.os.tag == .windows) {
                 lib.linkSystemLibrary("ws2_32");
                 lib.linkSystemLibrary("advapi32");
@@ -1371,7 +1364,6 @@ fn build_clients_c_sample(
         .target = options.target,
         .optimize = options.mode,
     });
-    static_lib.linkLibC();
     static_lib.pie = true;
     static_lib.bundle_compiler_rt = true;
     static_lib.root_module.addImport("vsr", options.vsr_module);

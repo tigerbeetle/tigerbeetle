@@ -5,6 +5,10 @@ const vsr = @import("../../vsr.zig");
 const tb = vsr.tb_client;
 const stdx = vsr.stdx;
 
+var global_allocator: std.heap.GeneralPurposeAllocator(.{
+    .thread_safe = true,
+}) = .{};
+
 pub const tb_packet_t = tb.Packet;
 pub const tb_packet_status = tb.PacketStatus;
 
@@ -108,7 +112,7 @@ pub fn init(
     };
 
     tb.init(
-        std.heap.c_allocator,
+        global_allocator.allocator(),
         tb_client_out.cast(),
         cluster_id,
         addresses,
@@ -135,9 +139,8 @@ pub fn init_echo(
 
         break :blk cluster_id;
     };
-
     tb.init_echo(
-        std.heap.c_allocator,
+        global_allocator.allocator(),
         tb_client_out.cast(),
         cluster_id,
         addresses,
