@@ -785,18 +785,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         fn cluster_on_eviction(cluster: *Cluster, client_id: u128) void {
-            _ = client_id;
-            // Disable checking of `Client.request_inflight`, to guard against the following panic:
-            // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
-            // 2. Cluster prepares + commits `A₁`, and sends the reply to `A`.
-            // 4. `A` receives the reply to `A₁`, and issues a second request (`A₂`).
-            // 5. `clients_max` other clients register, evicting `A`'s session.
-            // 6. An old retry (or replay) of `A₁` arrives at the cluster.
-            // 7. `A₁` is committed (for a second time, as a different op).
-            //    If `StateChecker` were to check `Client.request_inflight`, it would see that `A₁`
-            //    is not actually in-flight, despite being committed for the "first time" by a
-            //    replica.
-            cluster.state_checker.clients_exhaustive = false;
+            cluster.state_checker.on_client_eviction(client_id);
         }
 
         fn client_on_eviction(client: *Client, eviction: *const Message.Eviction) void {
