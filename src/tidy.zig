@@ -650,6 +650,7 @@ const DeadFilesDetector = struct {
             "single_page_writer.zig",
             "search_index_writer.zig",
             "service_worker_writer.zig",
+            "rust_bindings.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -758,6 +759,7 @@ test "tidy extensions" {
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
+        .{"src/clients/rust/Cargo.lock"},
     });
 
     const allocator = std.testing.allocator;

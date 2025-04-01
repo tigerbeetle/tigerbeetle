@@ -1,6 +1,7 @@
 const std = @import("std");
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
+const assert = std.debug.assert;
 
 const type_mappings = .{
     .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
@@ -43,7 +44,7 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
         .Struct => return resolve_rust_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
         .Bool => return "u8", // todo "bool"
         .Int => |info| {
-            std.debug.assert(info.signedness == .unsigned);
+            assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "u8",
                 16 => "u16",
@@ -58,8 +59,8 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
         .Pointer => |info| {
-            std.debug.assert(info.size != .Slice);
-            std.debug.assert(!info.is_allowzero);
+            assert(info.size != .Slice);
+            assert(!info.is_allowzero);
 
             inline for (type_mappings) |type_mapping| {
                 const ZigType = type_mapping[0];
