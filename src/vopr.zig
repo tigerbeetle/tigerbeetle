@@ -1158,23 +1158,24 @@ pub const Simulator = struct {
             }
         }
 
-        for (replies_latest, 0..) |reply_or_empty, reply_slot| {
-            const reply = reply_or_empty orelse continue;
-            const reply_in_core = for (simulator.cluster.replicas) |replica| {
+        for (simulator.cluster.state_checker.client_replies.values()) |reply| {
+            const reply_in_core = reply_in_core: for (simulator.cluster.replicas) |replica| {
                 const storage = &simulator.cluster.storages[replica.replica];
                 const storage_replies = storage.client_replies();
-                const storage_reply = storage_replies[reply_slot];
-
                 if (simulator.core.is_set(replica.replica) and !replica.standby()) {
-                    if (storage_reply.header.checksum == reply.checksum and
-                        !storage.area_faulty(.{ .client_replies = .{ .slot = reply_slot } }))
-                    {
-                        break true;
+                    for (storage_replies, 0..) |storage_reply, reply_slot| {
+                        if (storage_reply.header.checksum == reply.checksum and
+                            !storage.area_faulty(.{ .client_replies = .{ .slot = reply_slot } }))
+                        {
+                            break :reply_in_core true;
+                        }
                     }
                 }
             } else false;
+
             if (!reply_in_core) return reply;
         }
+
         return null;
     }
 
