@@ -130,23 +130,52 @@ fn run_fuzz(options: struct {
     assert(encoder_bytes_written ==
         expect_payload_size + expect_padding + expect_trailer_size);
 
-    // Decode.
-    var decoder = try MultiBatchDecoder.init(
-        buffer_actual[0..encoder_bytes_written],
-        .{ .element_size = batch_element_size },
-    );
-    assert(expect_payload_size == decoder.payload.len);
+    {
+        // Decode.
+        var decoder = try MultiBatchDecoder.init(
+            buffer_actual[0..encoder_bytes_written],
+            .{ .element_size = batch_element_size },
+        );
+        assert(expect_payload_size == decoder.payload.len);
 
-    var payloads_decoded: u32 = 0;
-    for (batches.const_slice()) |batch_element_count| {
-        const batch_size: u32 = batch_element_count * batch_element_size;
-        const expect_batch: []u8 = buffer_expected[payloads_decoded..][0..batch_size];
-        payloads_decoded += batch_size;
+        var payloads_decoded: u32 = 0;
+        for (batches.const_slice()) |batch_element_count| {
+            const batch_size: u32 = batch_element_count * batch_element_size;
+            const expect_batch: []u8 = buffer_expected[payloads_decoded..][0..batch_size];
+            payloads_decoded += batch_size;
 
-        const decoded_batch = decoder.pop().?;
-        assert(batch_size == decoded_batch.len);
-        assert(std.mem.eql(u8, expect_batch, decoded_batch));
+            const decoded_batch = decoder.pop().?;
+            assert(batch_size == decoded_batch.len);
+            assert(std.mem.eql(u8, expect_batch, decoded_batch));
+        }
+        assert(payloads_decoded == decoder.payload.len);
+        assert(decoder.pop() == null);
     }
-    assert(payloads_decoded == decoder.payload.len);
-    assert(decoder.pop() == null);
+
+    // Verify that any flipped bit mutates the results or causes a decoding error
+    // (but never a panic).
+    for (0..32) |_| {
+        const byte_index = options.prng.int_inclusive(usize, encoder_bytes_written);
+        for (0..@bitSizeOf(u8)) |bit_index| {
+            buffer_actual[byte_index] ^= @as(u8, 1) << @as(u3, @intCast(bit_index));
+            defer buffer_actual[byte_index] ^= @as(u8, 1) << @as(u3, @intCast(bit_index));
+
+            var decoder = MultiBatchDecoder.init(
+                buffer_actual[0..encoder_bytes_written],
+                .{ .element_size = batch_element_size },
+            ) catch continue;
+
+            var same: bool = true;
+            var payloads_decoded: u32 = 0;
+            for (batches.const_slice()) |batch_element_count| {
+                const batch_size: u32 = batch_element_count * batch_element_size;
+                const expect_batch: []u8 = buffer_expected[payloads_decoded..][0..batch_size];
+                payloads_decoded += batch_size;
+
+                const decoded_batch = decoder.pop().?;
+                same = same and std.mem.eql(u8, expect_batch, decoded_batch);
+            }
+            assert(!same);
+        }
+    }
 }
