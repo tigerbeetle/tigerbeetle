@@ -3,14 +3,20 @@ use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
+use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use tempfile::TempDir;
 
 use tigerbeetle as tb;
 
+fn random_seed() -> u64 {
+    std::hash::Hasher::finish(&std::hash::BuildHasher::build_hasher(
+        &std::collections::hash_map::RandomState::new(),
+    ))
+}
+
 struct TestHarness {
     tigerbeetle_bin: String,
-    temp_dir: TempDir,
+    temp_dir: PathBuf,
     server: Option<Child>,
 }
 
@@ -21,7 +27,10 @@ impl TestHarness {
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
 
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let temp_dir = TempDir::with_prefix_in(name, &work_dir)?;
+        let test_dir = format!("test-{name}-{}", random_seed());
+        let temp_dir = format!("{work_dir}/{test_dir}");
+        let temp_dir = PathBuf::from(temp_dir);
+        std::fs::create_dir_all(&temp_dir)?;
 
         Ok(TestHarness {
             tigerbeetle_bin,
@@ -32,7 +41,7 @@ impl TestHarness {
 
     fn prepare_database(&self) -> anyhow::Result<()> {
         let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(self.temp_dir.path());
+        cmd.current_dir(&self.temp_dir);
         cmd.args([
             "format",
             "--replica-count=1",
@@ -51,7 +60,7 @@ impl TestHarness {
         assert!(self.server.is_none());
 
         let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(self.temp_dir.path());
+        cmd.current_dir(&self.temp_dir);
         cmd.args([
             "start",
             "--addresses=0", // tell us the port to use
@@ -77,6 +86,7 @@ impl Drop for TestHarness {
             child.kill().expect("kill");
             let _ = child.wait().expect("wait");
         }
+        let _ = std::fs::remove_dir_all(&self.temp_dir);
     }
 }
 
