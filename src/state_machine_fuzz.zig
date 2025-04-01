@@ -3,6 +3,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
+const vsr = @import("vsr.zig");
 const stdx = @import("stdx.zig");
 
 const tb = @import("tigerbeetle.zig");
@@ -39,12 +40,12 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     try context.init(allocator);
     defer context.deinit(allocator);
 
-    const request_buffer_full = try allocator.alignedAlloc(
+    const request_buffer = try allocator.alignedAlloc(
         u8,
         16,
         TestContext.message_body_size_max,
     );
-    defer allocator.free(request_buffer_full);
+    defer allocator.free(request_buffer);
 
     const reply_buffer = try allocator.alignedAlloc(
         u8,
@@ -57,97 +58,175 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     var op: u64 = 1;
 
-    for (0..args.events_max orelse 10_000_000) |_| {
+    for (0..args.events_max orelse 50_000) |_| {
         const operation = prng.enum_uniform(TestContext.StateMachine.Operation);
-        const operation_size: u64 = switch (operation) {
-            inline else => |tag| @sizeOf(TestContext.StateMachine.EventType(tag)),
+        const size: usize = size: {
+            if (!TestContext.StateMachine.operation_is_multi_batch(operation)) {
+                break :size build_batch(&prng, operation, request_buffer);
+            }
+            assert(TestContext.StateMachine.operation_is_multi_batch(operation));
+
+            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(request_buffer, .{
+                .element_size = TestContext.StateMachine.event_size_bytes(operation),
+            });
+
+            const batch_count = prng.enum_uniform(enum { zero, one, random, max });
+            while (body_encoder.writable()) |writable| {
+                switch (batch_count) {
+                    .zero => {
+                        assert(body_encoder.batch_count == 0);
+                        break;
+                    },
+                    .one => {
+                        if (body_encoder.batch_count == 1) break;
+                    },
+                    .random => if (prng.chance(.{ .numerator = 30, .denominator = 100 })) {
+                        break;
+                    },
+                    .max => {},
+                }
+
+                const bytes_written: u32 = build_batch(&prng, operation, writable);
+                body_encoder.add(bytes_written);
+            }
+
+            break :size body_encoder.finish();
         };
-        const request_buffer_operation = request_buffer_full[0..operation_size];
 
-        // This is checked in the state machine, but as of writing the fuzz, all that it cares about
-        // is the length. Maybe that changes in the future and you hit this assert.
-        assert(context.state_machine.input_valid(operation, request_buffer_operation));
-
-        switch (operation) {
-            .query_accounts, .query_transfers => {
-                const query_filter: *tb.QueryFilter = @ptrCast(request_buffer_operation);
-                var reserved = std.mem.zeroes([6]u8);
-                if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
-                    prng.fill(&reserved);
-                }
-
-                query_filter.* = .{
-                    .user_data_128 = int_edge_biased(&prng, u128),
-                    .user_data_64 = int_edge_biased(&prng, u64),
-                    .user_data_32 = int_edge_biased(&prng, u32),
-                    .ledger = int_edge_biased(&prng, u32),
-                    .code = int_edge_biased(&prng, u16),
-                    .timestamp_min = int_edge_biased(&prng, u64),
-                    .timestamp_max = int_edge_biased(&prng, u64),
-                    .limit = int_edge_biased(&prng, u32),
-                    .reserved = reserved,
-                    .flags = .{
-                        .reversed = prng.boolean(),
-                        .padding = if (prng.chance(.{ .numerator = 1, .denominator = 1000 }))
-                            int_edge_biased(&prng, u31)
-                        else
-                            0,
-                    },
-                };
-            },
-            .get_account_balances, .get_account_transfers => {
-                const account_filter: *tb.AccountFilter = @ptrCast(request_buffer_operation);
-                var reserved = std.mem.zeroes([58]u8);
-                if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
-                    prng.fill(&reserved);
-                }
-
-                account_filter.* = .{
-                    .account_id = int_edge_biased(&prng, u128),
-                    .user_data_128 = int_edge_biased(&prng, u128),
-                    .user_data_64 = int_edge_biased(&prng, u64),
-                    .user_data_32 = int_edge_biased(&prng, u32),
-                    .code = int_edge_biased(&prng, u16),
-                    .timestamp_min = int_edge_biased(&prng, u64),
-                    .timestamp_max = int_edge_biased(&prng, u64),
-                    .limit = int_edge_biased(&prng, u32),
-                    .reserved = reserved,
-                    .flags = .{
-                        .reversed = prng.boolean(),
-                        .debits = prng.boolean(),
-                        .credits = prng.boolean(),
-                        .padding = if (prng.chance(.{ .numerator = 1, .denominator = 1000 }))
-                            int_edge_biased(&prng, u29)
-                        else
-                            0,
-                    },
-                };
-            },
-            .lookup_accounts, .lookup_transfers => {
-                const account_or_transfer_id: *u128 = @ptrCast(request_buffer_operation);
-                account_or_transfer_id.* = int_edge_biased(&prng, u128);
-            },
-
-            // TODO: Only reads are supported now, due to how create_* require compaction to be
-            // hooked up.
-            .create_accounts, .create_transfers => continue,
-
-            // No payload, so not very interesting yet.
-            .get_events, .pulse => continue,
+        if (context.state_machine.input_valid(operation, request_buffer[0..size])) {
+            context.prepare(operation, request_buffer[0..size]);
+            const reply_size = context.execute(
+                op,
+                operation,
+                request_buffer[0..size],
+                @ptrCast(reply_buffer),
+            );
+            stdx.maybe(reply_size == 0);
+            if (TestContext.StateMachine.operation_is_multi_batch(operation)) {
+                assert(reply_size > 0);
+                assert(vsr.multi_batch.MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                    .element_size = TestContext.StateMachine.result_size_bytes(operation),
+                }) != error.MultiBatchInvalid);
+            }
         }
-
-        context.prepare(operation, request_buffer_operation);
-
-        const reply_size = context.execute(
-            op,
-            operation,
-            request_buffer_operation,
-            @ptrCast(reply_buffer),
-        );
-        stdx.maybe(reply_size == 0);
-
         op += 1;
     }
+}
+
+fn build_batch(
+    prng: *stdx.PRNG,
+    operation: TestContext.StateMachine.Operation,
+    buffer: []u8,
+) u32 {
+    return switch (operation) {
+        // No payload, so not very interesting yet.
+        .get_events, .pulse => 0,
+
+        // No payload, `create_*` require compaction to be hooked up.
+        .create_accounts, .create_transfers => 0,
+
+        .lookup_accounts, .lookup_transfers => build_lookup(prng, buffer),
+        .get_account_transfers, .get_account_balances => build_account_filter(prng, buffer),
+        .query_accounts, .query_transfers => build_query_filter(prng, buffer),
+
+        // No payload, `create_*` require compaction to be hooked up.
+        .deprecated_create_accounts, .deprecated_create_transfers => 0,
+
+        .deprecated_lookup_accounts,
+        .deprecated_lookup_transfers,
+        => build_lookup(prng, buffer),
+        .deprecated_get_account_transfers,
+        .deprecated_get_account_balances,
+        => build_account_filter(prng, buffer),
+        .deprecated_query_accounts,
+        .deprecated_query_transfers,
+        => build_query_filter(prng, buffer),
+    };
+}
+
+fn build_lookup(prng: *stdx.PRNG, buffer: []u8) u32 {
+    const ids: []u128 = stdx.bytes_as_slice(.inexact, u128, buffer);
+    const size: u32 = prng.int_inclusive(u32, @intCast(ids.len));
+    for (ids[0..size]) |*id| {
+        id.* = int_edge_biased(prng, u128);
+    }
+    return size * @sizeOf(u128);
+}
+
+fn build_account_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
+    const filter: *tb.AccountFilter = filter: {
+        const slice = stdx.bytes_as_slice(
+            .inexact,
+            tb.AccountFilter,
+            buffer,
+        );
+        if (slice.len == 0) return 0;
+        break :filter &slice[0];
+    };
+    var reserved = std.mem.zeroes([58]u8);
+    if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
+        prng.fill(&reserved);
+    }
+
+    filter.* = .{
+        .account_id = int_edge_biased(prng, u128),
+        .user_data_128 = int_edge_biased(prng, u128),
+        .user_data_64 = int_edge_biased(prng, u64),
+        .user_data_32 = int_edge_biased(prng, u32),
+        .code = int_edge_biased(prng, u16),
+        .timestamp_min = int_edge_biased(prng, u64),
+        .timestamp_max = int_edge_biased(prng, u64),
+        .limit = int_edge_biased(prng, u32),
+        .reserved = reserved,
+        .flags = .{
+            .reversed = prng.boolean(),
+            .debits = prng.boolean(),
+            .credits = prng.boolean(),
+            .padding = if (prng.chance(.{ .numerator = 1, .denominator = 1000 }))
+                int_edge_biased(prng, u29)
+            else
+                0,
+        },
+    };
+
+    return @sizeOf(tb.AccountFilter);
+}
+
+fn build_query_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
+    const filter: *tb.QueryFilter = filter: {
+        const slice = stdx.bytes_as_slice(
+            .inexact,
+            tb.QueryFilter,
+            buffer,
+        );
+        if (slice.len == 0) return 0;
+        break :filter &slice[0];
+    };
+    var reserved = std.mem.zeroes([6]u8);
+    if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
+        prng.fill(&reserved);
+    }
+
+    filter.* = .{
+        .user_data_128 = int_edge_biased(prng, u128),
+        .user_data_64 = int_edge_biased(prng, u64),
+        .user_data_32 = int_edge_biased(prng, u32),
+        .ledger = int_edge_biased(prng, u32),
+        .code = int_edge_biased(prng, u16),
+        .timestamp_min = int_edge_biased(prng, u64),
+        .timestamp_max = int_edge_biased(prng, u64),
+        .limit = int_edge_biased(prng, u32),
+        .reserved = reserved,
+        .flags = .{
+            .reversed = prng.boolean(),
+            .padding = if (prng.chance(.{ .numerator = 1, .denominator = 1000 }))
+                int_edge_biased(prng, u31)
+            else
+                0,
+        },
+    };
+
+    return @sizeOf(tb.QueryFilter);
 }
 
 test "int_edge_biased" {

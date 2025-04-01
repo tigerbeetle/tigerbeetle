@@ -4698,7 +4698,7 @@ pub const TestContext = struct {
         return reply_decoder.peek();
     }
 
-    fn prepare(
+    pub fn prepare(
         context: *TestContext,
         operation: TestContext.StateMachine.Operation,
         message_body_used: []align(16) const u8,
@@ -4726,7 +4726,7 @@ pub const TestContext = struct {
         }
     }
 
-    fn execute(
+    pub fn execute(
         context: *TestContext,
         op: u64,
         operation: TestContext.StateMachine.Operation,
