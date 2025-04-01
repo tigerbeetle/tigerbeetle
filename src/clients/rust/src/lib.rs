@@ -66,7 +66,8 @@ impl Client {
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -92,7 +93,8 @@ impl Client {
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -118,7 +120,8 @@ impl Client {
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -143,7 +146,8 @@ impl Client {
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -170,7 +174,8 @@ impl Client {
         );
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -191,7 +196,8 @@ impl Client {
         );
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -210,7 +216,8 @@ impl Client {
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS, &[event]);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -229,7 +236,8 @@ impl Client {
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS, &[event]);
 
         unsafe {
-            tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
         }
 
         async {
@@ -253,7 +261,8 @@ impl Client {
             let client = client;
             unsafe {
                 // This is a blocking function so we're calling it offthread.
-                tbc::tb_client_deinit(client.0);
+                let status = tbc::tb_client_deinit(client.0);
+                assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
                 std::mem::drop(Box::from_raw(client.0));
             }
             drop(tx);
