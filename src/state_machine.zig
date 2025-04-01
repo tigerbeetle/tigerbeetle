@@ -7470,7 +7470,7 @@ test "StateMachine: query multi-batch input_valid" {
                     var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
                         .element_size = @sizeOf(AccountFilter),
                     });
-                    for (limits) |limit| {
+                    if (limits.len == 0) body_encoder.add(0) else for (limits) |limit| {
                         const batch: []u8 = body_encoder.writable().?;
                         const filter: *AccountFilter = @alignCast(std.mem.bytesAsValue(
                             AccountFilter,
@@ -7501,7 +7501,7 @@ test "StateMachine: query multi-batch input_valid" {
                     var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
                         .element_size = @sizeOf(QueryFilter),
                     });
-                    for (limits) |limit| {
+                    if (limits.len == 0) body_encoder.add(0) else for (limits) |limit| {
                         const batch: []u8 = body_encoder.writable().?;
                         const filter: *QueryFilter = @alignCast(std.mem.bytesAsValue(
                             QueryFilter,

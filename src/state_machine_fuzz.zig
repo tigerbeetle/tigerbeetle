@@ -70,13 +70,11 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 .element_size = TestContext.StateMachine.event_size_bytes(operation),
             });
 
-            const batch_count = prng.enum_uniform(enum { zero, one, random, max });
+            const batch_count = prng.enum_uniform(enum { one, random, max });
             while (body_encoder.writable()) |writable| {
+                const bytes_written: u32 = build_batch(&prng, operation, writable);
+                body_encoder.add(bytes_written);
                 switch (batch_count) {
-                    .zero => {
-                        assert(body_encoder.batch_count == 0);
-                        break;
-                    },
                     .one => {
                         if (body_encoder.batch_count == 1) break;
                     },
@@ -85,9 +83,6 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                     },
                     .max => {},
                 }
-
-                const bytes_written: u32 = build_batch(&prng, operation, writable);
-                body_encoder.add(bytes_written);
             }
 
             break :size body_encoder.finish();

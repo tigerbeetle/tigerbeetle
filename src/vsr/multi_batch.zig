@@ -164,6 +164,9 @@ pub const MultiBatchDecoder = struct {
             const slice = try parser.parse_suffix(Postamble, 1);
             break :postamble &slice[0];
         };
+        if (postamble.batch_count == 0) return error.MultiBatchInvalid;
+        if (postamble.batch_count > Postamble.batch_count_max) return error.MultiBatchInvalid;
+
         const trailer_size = trailer_total_size(.{
             .element_size = options.element_size,
             .batch_count = postamble.batch_count,
@@ -242,12 +245,11 @@ pub const MultiBatchDecoder = struct {
             assert(self.payload_index == self.payload.len);
             return null;
         }
-        assert(self.batch_index < self.trailer_items.len);
-        assert(self.payload_index <= self.payload.len);
-
         const batch_item: []const u8 = self.peek();
-        const moved = self.move_next();
-        maybe(moved);
+        self.batch_index += 1;
+        self.payload_index += @intCast(batch_item.len);
+        assert(self.batch_index <= self.trailer_items.len);
+        assert(self.payload_index <= self.payload.len);
         return batch_item;
     }
 
@@ -261,7 +263,6 @@ pub const MultiBatchDecoder = struct {
         // element corresponds to the first batch.
         const trailer_item: *const TrailerItem =
             &self.trailer_items[self.trailer_items.len - self.batch_index - 1];
-        maybe(trailer_item.element_count == 0);
         if (trailer_item.element_count == 0) {
             assert(self.payload_index <= self.payload.len);
             return &.{};
@@ -276,31 +277,6 @@ pub const MultiBatchDecoder = struct {
         assert(slice.len > 0);
         assert(slice.len % self.options.element_size == 0);
         return slice;
-    }
-
-    fn move_next(self: *MultiBatchDecoder) bool {
-        assert(self.trailer_items.len > 0);
-        maybe(self.payload.len == 0);
-
-        if (self.batch_index == self.trailer_items.len) {
-            assert(self.payload_index == self.payload.len);
-            return false;
-        }
-        assert(self.batch_index < self.trailer_items.len);
-        assert(self.payload_index <= self.payload.len);
-
-        const trailer_item: *const TrailerItem =
-            &self.trailer_items[self.trailer_items.len - self.batch_index - 1];
-        assert(self.options.element_size > 0 or trailer_item.element_count == 0);
-
-        const batch_size: u32 = @intCast(trailer_item.element_count * self.options.element_size);
-        self.payload_index += batch_size;
-        assert(self.payload_index <= self.payload.len);
-
-        self.batch_index += 1;
-        assert(self.batch_index <= self.trailer_items.len);
-
-        return self.batch_index < self.trailer_items.len;
     }
 };
 
@@ -444,12 +420,8 @@ pub const MultiBatchEncoder = struct {
     /// At least one batch must be inserted, and the encoder should not be used after
     /// being finished.
     pub fn finish(self: *MultiBatchEncoder) u32 {
+        assert(self.batch_count > 0);
         assert(self.batch_count <= Postamble.batch_count_max);
-        // Empty messages are considered valid.
-        if (self.batch_count == 0) {
-            assert(self.buffer_index == 0);
-            return 0;
-        }
 
         const buffer: []u8 = self.buffer.?;
         assert(buffer.len > self.buffer_index);
@@ -543,7 +515,7 @@ test "batch: maximum batches with no elements" {
         .element_size = element_size,
         .buffer = buffer,
         .batch_count = batch_count,
-        .elements_per_batch = 0,
+        .batch_elements = 0,
     });
     try testing.expectEqual(buffer_size, written_bytes);
 }
@@ -566,7 +538,7 @@ test "batch: maximum batches with a single element" {
         .element_size = element_size,
         .buffer = buffer,
         .batch_count = batch_count_max,
-        .elements_per_batch = 1,
+        .batch_elements = 1,
     });
 
     const written_bytes_expected: usize =
@@ -593,7 +565,7 @@ test "batch: maximum elements on a single batch" {
         .element_size = element_size,
         .buffer = buffer,
         .batch_count = 1,
-        .elements_per_batch = batch_size_max,
+        .batch_elements = batch_size_max,
     });
     try testing.expectEqual(buffer_size, written_bytes);
 }
@@ -672,7 +644,7 @@ const TestRunner = struct {
         element_size: u32,
         buffer: []align(16) u8,
         batch_count: u16,
-        elements_per_batch: ?u16 = null,
+        batch_elements: ?u16 = null,
     }) !usize {
         const ratio = stdx.PRNG.ratio;
         const BoundedArray = stdx.BoundedArrayType(u16, std.math.maxInt(u16));
@@ -684,7 +656,7 @@ const TestRunner = struct {
         });
 
         // Cleaning the buffer first, so it can assert the bytes.
-        @memset(options.buffer, std.math.maxInt(u8));
+        options.prng.fill(options.buffer);
 
         var encoder = MultiBatchEncoder.init(options.buffer, .{
             .element_size = options.element_size,
@@ -692,8 +664,8 @@ const TestRunner = struct {
         for (0..options.batch_count) |index| {
             const bytes_available = options.buffer.len - encoder.buffer_index - trailer_size;
 
-            const elements_count: u16 = if (options.elements_per_batch) |elements_per_batch|
-                elements_per_batch
+            const elements_count: u16 = if (options.batch_elements) |batch_elements|
+                batch_elements
             else random: {
                 if (index == options.batch_count - 1) {
                     const batch_full = options.prng.chance(ratio(30, 100));
