@@ -104,20 +104,32 @@ pub const Completion = struct {
             return;
         }
 
+        // First pass: add prefix matches
         for (keywords) |kw| {
             if (std.mem.startsWith(u8, kw, target)) {
-                assert(kw.len < completion_entry_bytes - 1);
-
-                if (self.matches.full()) {
-                    self.matches.advance_head();
-                }
-
-                const completion_tail = self.matches.next_tail_ptr().?;
-                stdx.copy_left(.exact, u8, completion_tail[0..kw.len], kw);
-                completion_tail[kw.len] = '\x00';
-                self.matches.advance_tail();
+                try self.add_match(kw);
             }
         }
+
+        // Second pass: add substring matches (but avoid duplicates)
+        for (keywords) |kw| {
+            if (!std.mem.startsWith(u8, kw, target) and std.mem.indexOf(u8, kw, target) != null) {
+                try self.add_match(kw);
+            }
+        }
+    }
+
+    fn add_match(self: *Completion, kw: []const u8) !void {
+        assert(kw.len < completion_entry_bytes - 1);
+
+        if (self.matches.full()) {
+            self.matches.advance_head();
+        }
+
+        const completion_tail = self.matches.next_tail_ptr().?;
+        stdx.copy_left(.exact, u8, completion_tail[0..kw.len], kw);
+        completion_tail[kw.len] = '\x00';
+        self.matches.advance_tail();
     }
 };
 
@@ -128,47 +140,65 @@ test "completion.zig: Split buffer and complete" {
         prefix: BoundedArray(u8, completion_entry_bytes),
         suffix: BoundedArray(u8, completion_entry_bytes),
         query: BoundedArray(u8, completion_entry_bytes),
-        matches: BoundedArray([]const u8, 5),
-    }{
-        .{
-            .buffer = "",
-            .idx = 0,
-            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .query = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .matches = try BoundedArray([]const u8, 5).from_slice(&.{}),
-        },
-        .{
-            .buffer = "creat",
-            .idx = 5,
-            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("creat"),
-            .matches = try BoundedArray([]const u8, 5).from_slice(
-                &.{ "create_accounts", "create_transfers" },
-            ),
-        },
-        .{
-            .buffer = "create_accounts id=1 co",
-            .idx = 23,
-            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
-                "create_accounts id=1 ",
-            ),
-            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
-            .matches = try BoundedArray([]const u8, 5).from_slice(&.{"code"}),
-        },
-        .{
-            .buffer = "create_accounts id=1 co ledger=700",
-            .idx = 23,
-            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
-                "create_accounts id=1 ",
-            ),
-            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(" ledger=700"),
-            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
-            .matches = try BoundedArray([]const u8, 5).from_slice(&.{"code"}),
-        },
-    };
+        matches: BoundedArray([]const u8, 10),
+    }{ .{
+        .buffer = "",
+        .idx = 0,
+        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .query = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .matches = try BoundedArray([]const u8, 10).from_slice(&.{}),
+    }, .{
+        .buffer = "creat",
+        .idx = 5,
+        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("creat"),
+        .matches = try BoundedArray([]const u8, 10).from_slice(
+            &.{ "create_accounts", "create_transfers" },
+        ),
+    }, .{
+        .buffer = "create_accounts id=1 co",
+        .idx = 23,
+        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
+            "create_accounts id=1 ",
+        ),
+        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
+        .matches = try BoundedArray([]const u8, 10).from_slice(&.{ 
+        "code", 
+        "create_accounts", 
+        "lookup_accounts", 
+        "get_account_transfers", 
+        "get_account_balances", 
+        "query_accounts", 
+        "account_id", 
+        "debit_account_id", 
+        "credit_account_id" }),
+    }, .{
+        .buffer = "create_accounts id=1 cod ledger=700",
+        .idx = 24,
+        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
+            "create_accounts id=1 ",
+        ),
+        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(" ledger=700"),
+        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("cod"),
+        .matches = try BoundedArray([]const u8, 10).from_slice(&.{"code"}),
+    }, .{
+        .buffer = "nsf",
+        .idx = 3,
+        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("nsf"),
+        .matches = try BoundedArray([]const u8, 10).from_slice(
+            &.{ 
+                "create_transfers", 
+                "lookup_transfers", 
+                "get_account_transfers", 
+                "query_transfers"
+             },
+        ),
+    } };
 
     for (tests) |t| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -182,7 +212,7 @@ test "completion.zig: Split buffer and complete" {
 
         try std.testing.expectEqualSlices(u8, c.prefix.const_slice(), t.prefix.const_slice());
         try std.testing.expectEqualSlices(u8, c.suffix.const_slice(), t.suffix.const_slice());
-        try std.testing.expectEqualSlices(u8, c.query.const_slice(), c.query.const_slice());
+        try std.testing.expectEqualSlices(u8, c.query.const_slice(), t.query.const_slice());
         try std.testing.expectEqual(c.count(), t.matches.count());
 
         var i: usize = 0;
