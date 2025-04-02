@@ -13,6 +13,8 @@ def client():
     yield client
     client.close()
 
+BATCH_MAX = 8189
+
 # Test data
 account_a = tb.Account(
     id=17,
@@ -504,7 +506,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
     )
     transfers = client.get_account_transfers(filter)
@@ -528,7 +530,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.DEBITS |  tb.AccountFilterFlags.REVERSED,
     )
     transfers = client.get_account_transfers(filter)
@@ -553,7 +555,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS |  tb.AccountFilterFlags.REVERSED,
     )
     transfers = client.get_account_transfers(filter)
@@ -712,7 +714,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
     )
     assert client.get_account_transfers(filter) == []
@@ -727,7 +729,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=(1 << 64) - 1, # ulong max value
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
     )
     assert client.get_account_transfers(filter) == []
@@ -742,7 +744,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=(1 << 64) - 1, # ulong max value
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
     )
     assert client.get_account_transfers(filter) == []
@@ -757,7 +759,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=(1 << 64) - 2, # ulong max - 1
         timestamp_max=1,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.CREDITS | tb.AccountFilterFlags.DEBITS,
     )
     assert client.get_account_transfers(filter) == []
@@ -787,7 +789,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.AccountFilterFlags.NONE,
     )
     assert client.get_account_transfers(filter) == []
@@ -802,7 +804,7 @@ def test_get_account_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=0xFFFF,
     )
     assert client.get_account_transfers(filter) == []
@@ -842,7 +844,7 @@ def test_query_accounts(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_accounts(filter)
@@ -870,7 +872,7 @@ def test_query_accounts(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.REVERSED,
     )
     query = client.query_accounts(filter)
@@ -897,7 +899,7 @@ def test_query_accounts(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_accounts(filter)
@@ -960,7 +962,7 @@ def test_query_accounts(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_accounts(filter)
@@ -1017,7 +1019,7 @@ def test_query_transfers(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_transfers(filter)
@@ -1045,7 +1047,7 @@ def test_query_transfers(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.REVERSED,
     )
     query = client.query_transfers(filter)
@@ -1072,7 +1074,7 @@ def test_query_transfers(client):
         code=999,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_transfers(filter)
@@ -1135,7 +1137,7 @@ def test_query_transfers(client):
         code=0,
         timestamp_min=0,
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     query = client.query_transfers(filter)
@@ -1151,7 +1153,7 @@ def test_query_with_invalid_filter(client):
         code=0,
         timestamp_min=(1 << 64) - 1, # ulong max value
         timestamp_max=0,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     assert client.query_accounts(filter) == []
@@ -1166,7 +1168,7 @@ def test_query_with_invalid_filter(client):
         code=0,
         timestamp_min=0,
         timestamp_max=(1 << 64) - 1, # ulong max value,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     assert client.query_accounts(filter) == []
@@ -1181,7 +1183,7 @@ def test_query_with_invalid_filter(client):
         code=0,
         timestamp_min=(1 << 64) - 2, # ulong max - 1
         timestamp_max=1,
-        limit=8190,
+        limit=BATCH_MAX,
         flags=tb.QueryFilterFlags.NONE,
     )
     assert client.query_accounts(filter) == []

@@ -357,6 +357,16 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
     else
         prng.range_inclusive(u32, batch_size_limit_min, constants.message_body_size_max);
 
+    const multi_batch_per_request_limit: u32 = multi_batch_per_request_limit: {
+        const event_max = @divFloor(batch_size_limit, batch_size_limit_min);
+        assert(event_max > 0);
+        break :multi_batch_per_request_limit if (event_max == 1) 1 else prng.range_inclusive(
+            u32,
+            1,
+            event_max - 1, // Minus one for the multi-batch trailer.
+        );
+    };
+
     const storage_size_limit = vsr.sector_floor(
         200 * MiB - prng.int_inclusive(u64, 20 * MiB),
     );
@@ -383,7 +393,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = if (prng.boolean()) 256 else 0,
                 .cache_entries_transfers = if (prng.boolean()) 256 else 0,
-                .cache_entries_posted = if (prng.boolean()) 256 else 0,
+                .cache_entries_transfers_pending = if (prng.boolean()) 256 else 0,
             },
         },
     };
@@ -435,11 +445,13 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
 
     const workload_options = StateMachine.Workload.Options.generate(prng, .{
         .batch_size_limit = batch_size_limit,
+        .multi_batch_per_request_limit = multi_batch_per_request_limit,
         .client_count = client_count,
         // TODO(DJ) Once Workload no longer needs in_flight_max, make stalled_queue_capacity
         // private. Also maybe make it dynamic (computed from the client_count instead of
         // clients_max).
-        .in_flight_max = ReplySequence.stalled_queue_capacity,
+        .in_flight_max = ReplySequence.stalled_queue_capacity *
+            multi_batch_per_request_limit,
     });
 
     return .{
@@ -500,7 +512,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
                 .lsm_forest_node_count = 4096,
                 .cache_entries_accounts = 256,
                 .cache_entries_transfers = 0,
-                .cache_entries_posted = 0,
+                .cache_entries_transfers_pending = 0,
             },
         },
     };
@@ -549,6 +561,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
     var workload_prng = stdx.PRNG.from_seed(92); // Fix workload for perf testing.
     const workload_options = StateMachine.Workload.Options.generate(&workload_prng, .{
         .batch_size_limit = constants.message_body_size_max,
+        .multi_batch_per_request_limit = 1,
         .client_count = cluster_options.client_count,
         .in_flight_max = ReplySequence.stalled_queue_capacity,
     });
@@ -1145,19 +1158,6 @@ pub const Simulator = struct {
     pub fn core_missing_reply(simulator: *const Simulator) ?vsr.Header.Reply {
         assert(simulator.core.count() > 0);
 
-        var replies_latest = [_]?vsr.Header.Reply{null} ** constants.clients_max;
-        for (simulator.cluster.replicas) |replica| {
-            for (replica.client_sessions.entries, 0..) |entry, entry_slot| {
-                if (entry.session != 0) {
-                    if (replies_latest[entry_slot] == null or
-                        replies_latest[entry_slot].?.op < entry.header.op)
-                    {
-                        replies_latest[entry_slot] = entry.header;
-                    }
-                }
-            }
-        }
-
         for (simulator.cluster.state_checker.client_replies.values()) |reply| {
             const reply_in_core = reply_in_core: for (simulator.cluster.replicas) |replica| {
                 const storage = &simulator.cluster.storages[replica.replica];
@@ -1332,7 +1332,7 @@ pub const Simulator = struct {
             client_index,
             request_message.buffer[@sizeOf(vsr.Header)..constants.message_size_max],
         );
-        assert(request_metadata.size <= constants.message_size_max - @sizeOf(vsr.Header));
+        assert(request_metadata.size <= constants.message_body_size_max);
 
         simulator.cluster.request(
             client_index,

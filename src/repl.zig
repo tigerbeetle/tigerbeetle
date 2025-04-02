@@ -101,8 +101,10 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     const state_machine_operation =
                         std.meta.stringToEnum(StateMachine.Operation, @tagName(operation));
                     assert(state_machine_operation != null);
-
-                    try repl.send(state_machine_operation.?, statement.arguments);
+                    try repl.send(
+                        state_machine_operation.?,
+                        statement.arguments,
+                    );
                 },
             }
         }
@@ -662,7 +664,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
             var arguments = try std.ArrayListUnmanaged(u8).initCapacity(
                 allocator,
-                constants.message_size_max,
+                constants.message_body_size_max,
             );
             errdefer arguments.deinit(allocator);
 
@@ -824,24 +826,24 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
         fn send(
             repl: *Repl,
             operation: StateMachine.Operation,
-            arguments: []const u8,
+            arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             const operation_type = switch (operation) {
                 .create_accounts, .create_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
                 .query_accounts, .query_transfers => "query",
-                .pulse, .get_events => unreachable,
+                else => unreachable,
             };
             const object_type = switch (operation) {
                 .create_accounts, .lookup_accounts, .query_accounts => "accounts",
                 .create_transfers, .lookup_transfers, .query_transfers => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
-                .pulse, .get_events => unreachable,
+                else => unreachable,
             };
 
-            if (arguments.len == 0) {
+            if (arguments.items.len == 0) {
                 try repl.fail(
                     "No {s} to {s}.\n",
                     .{ object_type, operation_type },
@@ -850,13 +852,26 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             }
 
             repl.request_done = false;
-
             try repl.debug("Sending command: {}.\n", .{operation});
+
+            const payload_size: u32 = @intCast(arguments.items.len);
+            const buffer: []u8 = buffer: {
+                arguments.expandToCapacity();
+                assert(arguments.items.len == constants.message_body_size_max);
+                break :buffer arguments.items;
+            };
+            var body_encoder = vsr.multi_batch.MultiBatchEncoder.init(buffer, .{
+                .element_size = StateMachine.event_size_bytes(operation),
+            });
+            body_encoder.add(payload_size);
+            const bytes_written = body_encoder.finish();
+            assert(bytes_written > 0);
+
             repl.client.request(
                 client_request_callback,
                 @intCast(@intFromPtr(repl)),
                 operation,
-                arguments,
+                buffer[0..bytes_written],
             );
         }
 
@@ -905,7 +920,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             try repl.terminal.print("\n}}\n", .{});
         }
 
-        fn client_request_callback_error(
+        fn client_request_completed(
             user_data: u128,
             operation: StateMachine.Operation,
             timestamp: u64,
@@ -925,11 +940,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
             switch (operation) {
                 .create_accounts => {
-                    const create_account_results = std.mem.bytesAsSlice(
+                    const create_account_results = stdx.bytes_as_slice(
+                        .exact,
                         tb.CreateAccountsResult,
                         result,
                     );
-
                     if (create_account_results.len > 0) {
                         for (create_account_results) |*reason| {
                             try repl.terminal.print(
@@ -940,11 +955,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .lookup_accounts, .query_accounts => {
-                    const account_results = std.mem.bytesAsSlice(
+                    const account_results = stdx.bytes_as_slice(
+                        .exact,
                         tb.Account,
                         result,
                     );
-
                     if (account_results.len == 0) {
                         try repl.fail("No accounts were found.\n", .{});
                     } else {
@@ -954,11 +969,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .create_transfers => {
-                    const create_transfer_results = std.mem.bytesAsSlice(
+                    const create_transfer_results = stdx.bytes_as_slice(
+                        .exact,
                         tb.CreateTransfersResult,
                         result,
                     );
-
                     if (create_transfer_results.len > 0) {
                         for (create_transfer_results) |*reason| {
                             try repl.terminal.print(
@@ -968,12 +983,15 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         }
                     }
                 },
-                .lookup_transfers, .get_account_transfers, .query_transfers => {
-                    const transfer_results = std.mem.bytesAsSlice(
+                .lookup_transfers,
+                .get_account_transfers,
+                .query_transfers,
+                => {
+                    const transfer_results = stdx.bytes_as_slice(
+                        .exact,
                         tb.Transfer,
                         result,
                     );
-
                     if (transfer_results.len == 0) {
                         try repl.fail("No transfers were found.\n", .{});
                     } else {
@@ -983,11 +1001,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                     }
                 },
                 .get_account_balances => {
-                    const get_account_balances_results = std.mem.bytesAsSlice(
+                    const get_account_balances_results = stdx.bytes_as_slice(
+                        .exact,
                         tb.AccountBalance,
                         result,
                     );
-
                     if (get_account_balances_results.len == 0) {
                         try repl.fail("No balances were found.\n", .{});
                     } else {
@@ -996,7 +1014,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         }
                     }
                 },
-                .pulse, .get_events => unreachable,
+                else => unreachable,
             }
         }
 
@@ -1006,11 +1024,15 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             timestamp: u64,
             result: []u8,
         ) void {
-            client_request_callback_error(
+            const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{
+                .element_size = StateMachine.result_size_bytes(operation),
+            }) catch unreachable;
+            assert(reply_decoder.batch_count() == 1);
+            client_request_completed(
                 user_data,
                 operation,
                 timestamp,
-                result,
+                reply_decoder.peek(),
             ) catch |err| {
                 const repl: *Repl = @ptrFromInt(@as(usize, @intCast(user_data)));
                 repl.fail("Error in callback: {any}", .{err}) catch return;
