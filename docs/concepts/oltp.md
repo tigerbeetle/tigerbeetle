@@ -22,7 +22,7 @@ OLTP workloads have increased by 3-4 orders of magnitude in the last 10 years al
 OLGP databases already struggle to keep up.
 
 **But TigerBeetle is built to handle the scale of OLTP workloads today and for the decades to come.**
-It works well alongside OLGP databases,  which holds infrequently updated data.
+It works well alongside OLGP databases,  which hold infrequently updated data.
 TigerBeetle can race ahead, giving your system unparalleled latency and throughput.
 
 ## Write-Heavy Workloads
@@ -76,5 +76,6 @@ business outgrowing your database.
 ## Next Up: Debit / Credit is the Schema for OLTP
 
 The world is becoming more transactional. OLTP workloads are increasing and we need a database
-designed from the ground up. What is the perfect schema and language for this database?
+designed from the ground up to handle them. 
+What is the perfect schema and language for this database?
 [Debit / Credit](./debit-credit.md).

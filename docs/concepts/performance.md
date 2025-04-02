@@ -18,8 +18,8 @@ SQL.
 
 ## Batching, Batching, Batching
 
-On a busy day in a busy city, taking subway is faster than using a car. On empty streets, a personal
-sports car gives you the best latency, but, when the load and contention increases, due to
+On a busy day in a busy city, taking the subway is faster than using a car. On empty streets, a personal
+sports car gives you the best latency, but, when the load and contention increase, due to
 [**Little's law**](https://en.wikipedia.org/wiki/Little%27s_law), both latency and throughput become abysmal.
 
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
@@ -73,7 +73,7 @@ COST?](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsh
 Is it _really_ necessary to go to such great lengths in the name of performance? It of course
 depends on a particular use-case, but it's worth keeping in mind that higher performance can unlock
 new use-cases. An OLGP database might be enough to do nightly settlement, but with OLTP real-time
-settlement is a no-brainer. If a transaction system just hits its throughput target, that means that
+settlement is a no-brainer. If a transaction system just hits its throughput target, 
 every unexpected delay or an ops accident lead to missed transactions. If a system operates at one
 tenth of capacity, this gives a lot of headroom for operators to deal with the unexpected.
 

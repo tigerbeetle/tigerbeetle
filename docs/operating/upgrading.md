@@ -41,7 +41,7 @@ Upgrading causes a short period of unavailability as the replicas restart. This 
 5 seconds, and will show up as a latency spike on requests. The TigerBeetle clients will internally
 retry any requests during the period.
 
-Even though this period is short, scheduling a maintenance windows for upgrades is still
+Even though this period is short, scheduling a maintenance window for upgrades is still
 recommended, for an extra layer of safety.
 
 Any special instructions, like that when upgrading from 0.15.3 to 0.15.4, will be explicitly

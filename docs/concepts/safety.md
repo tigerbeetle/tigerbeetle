@@ -9,7 +9,7 @@ with real-world value transfers, it is paramount that the data stored in TigerBe
 
 ## Strict Serializability
 
-The easiest way to lose data is by using the database incorrectly, by misconfiguring (or just
+The easiest way to lose data is by incorrectly using the database, by misconfiguring (or just
 misunderstanding) its isolation level. For this reason, TigerBeetle intentionally supports only the
 strictest possible isolation level --- **strict serializability**. All transfers are executed
 one-by-one, on a single core.
@@ -39,7 +39,7 @@ safe bounds of "true time", TigerBeetle combines all the clocks in the cluster t
 fault-tolerant clock that we call
 ["cluster time"](https://tigerbeetle.com/blog/three-clocks-are-better-than-one/).
 
-For highest availability, TigerBeetle should be deployed as a cluster of six replicas across three
+For the highest availability, TigerBeetle should be deployed as a cluster of six replicas across three
 different cloud providers (two replicas per provider). Because TigerBeetle uses
 [Heidi Howard's flexible quorums](https://arxiv.org/pdf/1608.06696v1), this deployment is guaranteed
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
@@ -68,14 +68,14 @@ repair replica's local disks.
 - All data in TigerBeetle is immutable, checksummed, and [hash-chained](https://csrc.nist.gov/glossary/term/hash_chain), providing a strong guarantee
   that no corruption or tampering happened. In case of a latent sector error, the error is detected
   and repaired without any operator involvement.
-- Most consensus implementations lose data or become unavailable if the write ahead log gets
+- Most consensus implementations lose data or become unavailable if the write-ahead log gets
   corrupted. TigerBeetle uses [Protocol Aware Recovery](https://www.youtube.com/watch?v=fDY6Wi0GcPs)
   to remain available unless the data gets corrupted on every single replica.
-- To minimize impact of software bugs, TigerBeetle puts as little software as possible between
+- To minimize the impact of software bugs, TigerBeetle puts as little software as possible between
   itself and the disk --- TigerBeetle manages its own page cache, writes data to disk with O_DIRECT
   and can work with a block device directly, no file system is necessary.
 - TigerBeetle also tolerates gray failure --- if a disk on a replica becomes very slow, the cluster
-  fall backs on other replicas for durability.
+  falls back on other replicas for durability.
 
 ## Software Reliability
 
