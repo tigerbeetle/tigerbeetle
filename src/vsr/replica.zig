@@ -8115,6 +8115,11 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
             assert(reply.header.client != 0);
+            defer {
+                if (self.event_callback) |hook| {
+                    hook(self, .{ .message_sent = reply.base() });
+                }
+            }
 
             // If the request committed in a different view than the one it was originally prepared
             // in, we must inform the client about this newer view before we send it a reply.

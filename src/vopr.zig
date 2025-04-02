@@ -1158,19 +1158,6 @@ pub const Simulator = struct {
     pub fn core_missing_reply(simulator: *const Simulator) ?vsr.Header.Reply {
         assert(simulator.core.count() > 0);
 
-        var replies_latest = [_]?vsr.Header.Reply{null} ** constants.clients_max;
-        for (simulator.cluster.replicas) |replica| {
-            for (replica.client_sessions.entries, 0..) |entry, entry_slot| {
-                if (entry.session != 0) {
-                    if (replies_latest[entry_slot] == null or
-                        replies_latest[entry_slot].?.op < entry.header.op)
-                    {
-                        replies_latest[entry_slot] = entry.header;
-                    }
-                }
-            }
-        }
-
         for (simulator.cluster.state_checker.client_replies.values()) |reply| {
             const reply_in_core = reply_in_core: for (simulator.cluster.replicas) |replica| {
                 const storage = &simulator.cluster.storages[replica.replica];
