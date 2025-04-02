@@ -127,6 +127,7 @@ fn run_fuzz(options: struct {
     assert(expect_padding < @sizeOf(u16));
 
     const encoder_bytes_written = encoder.finish();
+    assert(encoder_bytes_written > 0);
     assert(encoder_bytes_written ==
         expect_payload_size + expect_padding + expect_trailer_size);
 
@@ -155,7 +156,7 @@ fn run_fuzz(options: struct {
     // Verify that any flipped bit mutates the results or causes a decoding error
     // (but never a panic).
     for (0..32) |_| {
-        const byte_index = options.prng.int_inclusive(usize, encoder_bytes_written);
+        const byte_index = options.prng.int_inclusive(usize, encoder_bytes_written - 1);
         for (0..@bitSizeOf(u8)) |bit_index| {
             buffer_actual[byte_index] ^= @as(u8, 1) << @as(u3, @intCast(bit_index));
             defer buffer_actual[byte_index] ^= @as(u8, 1) << @as(u3, @intCast(bit_index));
@@ -175,6 +176,7 @@ fn run_fuzz(options: struct {
                 const decoded_batch = decoder.pop().?;
                 same = same and std.mem.eql(u8, expect_batch, decoded_batch);
             }
+            assert(decoder.pop() == null);
             assert(!same);
         }
     }
