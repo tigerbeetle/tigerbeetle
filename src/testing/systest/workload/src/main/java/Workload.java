@@ -19,7 +19,7 @@ import com.tigerbeetle.TransferFlags;
  */
 public class Workload implements Callable<Void> {
   static int ACCOUNTS_COUNT_MAX = 100;
-  static int BATCH_SIZE_MAX = 8190;
+  static int BATCH_SIZE_MAX = 8189;
 
   final Model model;
   final Random random;
@@ -61,7 +61,7 @@ public class Workload implements Callable<Void> {
         });
       } catch (AssertionError e) {
         System.err.println("ledger %d: Assertion failed after executing command: %s".formatted(
-              ledger, 
+              ledger,
               command));
         throw e;
       }
@@ -116,9 +116,9 @@ public class Workload implements Callable<Void> {
           var flags = Arbitrary.flags(random,
               List.of(AccountFlags.LINKED,
                   AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
-                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS, 
+                  AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS,
                   AccountFlags.HISTORY));
-          
+
           if (random.nextDouble(1.0) > 0.99) {
             flags |= AccountFlags.CLOSED;
           }
@@ -156,16 +156,16 @@ public class Workload implements Callable<Void> {
 
         if (random.nextDouble(1.0) > 0.9 && !model.pendingTransfers.isEmpty()) {
           flags = Arbitrary.element(random, List.of(
-                TransferFlags.POST_PENDING_TRANSFER, 
+                TransferFlags.POST_PENDING_TRANSFER,
                 TransferFlags.VOID_PENDING_TRANSFER));
         } else if (random.nextDouble(1.0) > 0.99999) {
           flags = Arbitrary.flags(random, List.of(
-                TransferFlags.CLOSING_DEBIT, 
+                TransferFlags.CLOSING_DEBIT,
                 TransferFlags.CLOSING_CREDIT)) | TransferFlags.PENDING;
         } else {
           flags = Arbitrary.flags(random, List.of(
                 TransferFlags.PENDING,
-                TransferFlags.BALANCING_DEBIT, 
+                TransferFlags.BALANCING_DEBIT,
                 TransferFlags.BALANCING_CREDIT));
         }
 

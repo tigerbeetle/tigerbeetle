@@ -49,12 +49,13 @@ pub const Packet = extern struct {
 
     next: ?*Packet,
 
-    batch_next: ?*Packet,
-    batch_tail: ?*Packet,
-    batch_size: u32,
-    batch_allowed: bool,
+    multi_batch_next: ?*Packet,
+    multi_batch_tail: ?*Packet,
+    multi_batch_count: u16,
+    multi_batch_event_count: u16,
+    multi_batch_result_count_expected: u16,
     phase: Phase,
-    reserved: [2]u8 = [_]u8{0} ** 2,
+    reserved: u8 = 0,
 
     pub fn cast(self: *Packet) *Extern {
         return @ptrCast(self);
@@ -77,38 +78,43 @@ pub const Packet = extern struct {
     pub inline fn assert_phase(packet: *const Packet, expected: Phase) void {
         assert(packet.phase == expected);
         assert(packet.data_size == 0 or packet.data != null);
-        assert(stdx.zeroed(&packet.reserved));
+        assert(packet.reserved == 0);
         maybe(packet.user_data == null);
         maybe(packet.user_tag == 0);
 
         switch (expected) {
             .submitted => {
                 assert(packet.next == null);
-                assert(packet.batch_next == null);
-                assert(packet.batch_tail == null);
-                assert(packet.batch_size == 0);
-                assert(!packet.batch_allowed);
+                assert(packet.multi_batch_next == null);
+                assert(packet.multi_batch_tail == null);
+                assert(packet.multi_batch_count == 0);
+                assert(packet.multi_batch_event_count == 0);
+                assert(packet.multi_batch_result_count_expected == 0);
             },
             .pending => {
-                assert(packet.batch_size >= packet.data_size);
-                assert(packet.batch_size == packet.data_size or packet.batch_next != null);
-                assert(packet.batch_next == null or packet.batch_allowed);
-                assert((packet.batch_next == null) == (packet.batch_tail == null));
+                assert(packet.multi_batch_count >= 1);
+                assert(packet.multi_batch_next == null or packet.multi_batch_count > 1);
+                assert((packet.multi_batch_next == null) == (packet.multi_batch_tail == null));
+                maybe(packet.data_size == 0);
+                maybe(packet.multi_batch_event_count == 0);
+                maybe(packet.multi_batch_result_count_expected == 0);
                 maybe(packet.next == null);
             },
             .batched => {
                 assert(packet.next == null);
-                assert(packet.batch_tail == null);
-                assert(packet.batch_size == 0);
-                assert(!packet.batch_allowed);
-                maybe(packet.batch_next != null);
+                assert(packet.multi_batch_tail == null);
+                assert(packet.multi_batch_count == 0);
+                assert(packet.multi_batch_event_count == 0);
+                assert(packet.multi_batch_result_count_expected == 0);
+                maybe(packet.multi_batch_next != null);
             },
             .sent => {
                 assert(packet.next == null);
-                assert(packet.batch_size >= packet.data_size);
-                assert(packet.batch_size == packet.data_size or packet.batch_next != null);
-                assert((packet.batch_next == null) == (packet.batch_tail == null));
-                assert(packet.batch_next == null or packet.batch_allowed);
+                assert(packet.multi_batch_count > 0);
+                assert(packet.multi_batch_next == null or packet.multi_batch_count > 1);
+                assert((packet.multi_batch_next == null) == (packet.multi_batch_tail == null));
+                maybe(packet.multi_batch_event_count == 0);
+                maybe(packet.multi_batch_result_count_expected == 0);
             },
             .complete => {
                 // The packet pointer isn't available after completed,

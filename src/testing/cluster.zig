@@ -741,6 +741,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 undefined,
                 message,
             );
+            assert(message.header.request != 0);
         }
 
         /// The `request_callback` is not used — Cluster uses `Client.on_reply_{context,callback}`
