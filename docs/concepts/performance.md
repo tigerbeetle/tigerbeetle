@@ -24,8 +24,8 @@ sports car gives you the best latency, but, when the load and contention increas
 
 TigerBeetle works like a high-speed train --- its interface always deals with _batches_ of
 transactions, 8k apiece. Although TigerBeetle is a replicated database using a consensus algorithm,
-the cost of replications is paid only once per batch, which means that TigerBeetle runs not much
-slower than an in-memory hash map, all the while providing extreme durability and availability.
+the cost of replications is paid only once per batch, which means that TigerBeetle runs almost as
+fast as an in-memory hash map, all the while providing extreme durability and availability.
 
 What's more, under light load the batches automatically become smaller, trading unnecessary
 throughput for better latency.
