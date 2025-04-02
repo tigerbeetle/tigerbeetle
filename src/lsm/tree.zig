@@ -511,6 +511,12 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
             // each bar (or immediately prior to scans).
             tree.table_mutable.sort_suffix();
+            // TZ: here we could also push the merge until we have 1/2 bar done
+            //     this should be by 1/2 compaction ops. and on swap we reset it.
+            // merge one into the other how to make the interface?
+            // for now we simply sort completely and copy it over?
+            // Place sort here by 1/2 ops
+            // this means that make immutable does not sort!
         }
 
         /// Called after the last beat of a full compaction bar, by the compaction instance.
@@ -527,6 +533,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .tree = @enumFromInt(tree.config.id),
             } });
 
+            // TZ: Case one where we simply swap it at the end of the bar.
             if (tree.table_immutable.mutability.immutable.flushed) {
                 // The immutable table must be visible to the next bar.
                 // In addition, the immutable table is conceptually an output table of this
@@ -536,6 +543,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.table_immutable.make_mutable();
                 std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
             } else {
+                // TZ: we skip we absorb the file in one, this would mean now that we keep it right?
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
 

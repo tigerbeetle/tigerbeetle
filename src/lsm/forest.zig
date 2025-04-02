@@ -14,6 +14,8 @@ const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_no
 const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLogPace = @import("manifest_log.zig").Pace;
 
+const vsr = @import("../vsr.zig");
+
 const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
 const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
@@ -491,6 +493,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const compaction_beat = op % constants.lsm_compaction_ops;
             const last_half_beat = compaction_beat ==
                 @divExact(constants.lsm_compaction_ops, 2) - 1;
+
             const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
 
             if (op < constants.lsm_compaction_ops or
@@ -517,6 +520,40 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 @field(forest.grooves, field.name).compact(op);
             }
 
+            if (last_half_beat) {
+                // We sort here for the last beat in the first half of the bar.
+                // This is the same logic as desribed in this PR.
+                inline for (comptime std.enums.values(TreeID)) |tree_id| {
+                    const tree = tree_for_id(forest, tree_id);
+
+                    const value_count_limit =
+                        tree.options.batch_value_count_limit * constants.lsm_compaction_ops;
+                    const mutable_count_half_bar_first = tree.table_mutable.count();
+                    const mutable_count_half_bar_last = @divExact(value_count_limit, 2);
+                    const mutable_count = mutable_count_half_bar_first + mutable_count_half_bar_last;
+                    const immutable_count = tree.table_immutable.count();
+                    const space_for_abosrb = immutable_count + mutable_count <= value_count_limit;
+
+                    // determine checkpoint
+                    // TODO: refactor?
+                    const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
+                    const op_checkpoint =
+                        forest.grid.superblock.working.vsr_state.checkpoint.header.op;
+                    const op_checkpoint_next = vsr.Checkpoint.checkpoint_after(op_checkpoint);
+                    const op_checkpoint_trigger_next =
+                        vsr.Checkpoint.trigger_for_checkpoint(op_checkpoint_next).?;
+                    const compaction_op_max = op + (half_bar_beat_count - 1);
+                    const last_half_bar_of_checkpoint =
+                        compaction_op_max == op_checkpoint_trigger_next - 1;
+
+                    if (space_for_abosrb and !last_half_bar_of_checkpoint) {
+                        //elements_saved += tree.table_immutable.count();
+                    } else {
+                        //elements_count += tree.table_immutable.count();
+                        tree.table_immutable.sort();
+                    }
+                }
+            }
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {

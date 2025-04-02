@@ -132,9 +132,12 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= table.values.len);
-            defer assert(table.value_context.sorted);
+            //defer assert(table.value_context.sorted);
 
-            table.sort();
+            // TODO: This is the final sort, can we make delay this without problems?
+            //       i.e. make this only immutable on the second bar.
+            //       and make the final sort more incremental
+            //table.sort();
 
             // If we have no values, then we can consider ourselves flushed right away.
             table.mutability = .{ .immutable = .{
@@ -166,7 +169,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         ) void {
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
-            assert(table_immutable.value_context.sorted);
+            //assert(table_immutable.value_context.sorted);
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.value_context.sorted);
 
@@ -184,8 +187,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
-            table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
+            table_immutable.value_context.count = tables_combined_count;
+            // TODO: I think we do not need to sort here?
+            //table_immutable.value_context.count =
+            //sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -197,6 +202,14 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn sort(table: *TableMemory) void {
+            if (table.mutability == .immutable) {
+                // This is the final sort
+                const target_count = sort_suffix_from_offset(table.values_used(), 0);
+                table.value_context.count = target_count;
+                table.value_context.sorted = true;
+                return;
+            }
+
             assert(table.mutability == .mutable);
 
             if (!table.value_context.sorted) {
