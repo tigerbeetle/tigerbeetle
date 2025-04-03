@@ -258,7 +258,7 @@ pub fn ReplicaType(
         /// Presently, it is used to detect outdated start view messages in recovering head status.
         nonce: Nonce,
 
-        time: Time,
+        time: *Time,
 
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall
         /// clock:
@@ -578,7 +578,7 @@ pub fn ReplicaType(
             storage: *Storage,
             message_pool: *MessagePool,
             nonce: Nonce,
-            time: Time,
+            time: *Time,
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
@@ -1001,7 +1001,7 @@ pub fn ReplicaType(
             replica_index: u8,
             pipeline_requests_limit: u32,
             nonce: Nonce,
-            time: Time,
+            time: *Time,
             storage: *Storage,
             aof: ?*AOF,
             message_pool: *MessagePool,
@@ -1078,7 +1078,7 @@ pub fn ReplicaType(
             //   - a standby clock tracks active replicas and the standby itself.
             self.clock = try Clock.init(
                 allocator,
-                &self.time,
+                self.time,
                 if (replica_index < replica_count) .{
                     .replica_count = replica_count,
                     .replica = replica_index,
