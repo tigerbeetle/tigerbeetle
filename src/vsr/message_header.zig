@@ -377,9 +377,10 @@ pub const Header = extern struct {
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
+        route: [8]u8,
         release_count: u16,
 
-        reserved: [94]u8 = [_]u8{0} ** 94,
+        reserved: [86]u8 = [_]u8{0} ** 86,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);

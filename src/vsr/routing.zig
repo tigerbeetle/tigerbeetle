@@ -68,7 +68,7 @@ best_alternative: ?struct {
 
 history: [history_max]?OpHistory,
 
-const Route = stdx.BoundedArrayType(u8, constants.replicas_max);
+pub const Route = stdx.BoundedArrayType(u8, constants.replicas_max);
 const OpHistory = struct {
     op: u64,
     prepare: u64,
