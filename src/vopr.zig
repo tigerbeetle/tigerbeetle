@@ -670,7 +670,7 @@ pub const Simulator = struct {
     requests_idle: bool = false,
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         prng: *stdx.PRNG,
         options: Options,
     ) !Simulator {
@@ -678,7 +678,7 @@ pub const Simulator = struct {
         assert(options.request_probability.numerator > 0);
         assert(options.request_idle_off_probability.numerator > 0);
 
-        var cluster = try Cluster.init(allocator, .{
+        var cluster = try Cluster.init(gpa, .{
             .cluster = options.cluster,
             .network = options.network,
             .storage = options.storage,
@@ -690,25 +690,25 @@ pub const Simulator = struct {
         });
         errdefer cluster.deinit();
 
-        var workload = try StateMachine.Workload.init(allocator, prng, options.workload);
-        errdefer workload.deinit(allocator);
+        var workload = try StateMachine.Workload.init(gpa, prng, options.workload);
+        errdefer workload.deinit(gpa);
 
-        const replica_releases = try allocator.alloc(
+        const replica_releases = try gpa.alloc(
             usize,
             options.cluster.replica_count + options.cluster.standby_count,
         );
-        errdefer allocator.free(replica_releases);
+        errdefer gpa.free(replica_releases);
         @memset(replica_releases, 1);
 
-        const replica_crash_stability = try allocator.alloc(
+        const replica_crash_stability = try gpa.alloc(
             usize,
             options.cluster.replica_count + options.cluster.standby_count,
         );
-        errdefer allocator.free(replica_crash_stability);
+        errdefer gpa.free(replica_crash_stability);
         @memset(replica_crash_stability, 0);
 
-        var reply_sequence = try ReplySequence.init(allocator);
-        errdefer reply_sequence.deinit(allocator);
+        var reply_sequence = try ReplySequence.init(gpa);
+        errdefer reply_sequence.deinit(gpa);
 
         return Simulator{
             .prng = prng,
@@ -721,11 +721,11 @@ pub const Simulator = struct {
         };
     }
 
-    pub fn deinit(simulator: *Simulator, allocator: std.mem.Allocator) void {
-        allocator.free(simulator.replica_releases);
-        allocator.free(simulator.replica_crash_stability);
-        simulator.reply_sequence.deinit(allocator);
-        simulator.workload.deinit(allocator);
+    pub fn deinit(simulator: *Simulator, gpa: std.mem.Allocator) void {
+        gpa.free(simulator.replica_releases);
+        gpa.free(simulator.replica_crash_stability);
+        simulator.reply_sequence.deinit(gpa);
+        simulator.workload.deinit(gpa);
         simulator.cluster.deinit();
     }
 
@@ -812,14 +812,14 @@ pub const Simulator = struct {
         simulator.tick_pause();
     }
 
-    pub fn cluster_recoverable(simulator: *Simulator, allocator: std.mem.Allocator) !bool {
+    pub fn cluster_recoverable(simulator: *Simulator, gpa: std.mem.Allocator) !bool {
         if (simulator.core_missing_primary()) {
             unimplemented("repair requires reachable primary");
         } else if (simulator.core_missing_quorum()) {
             log.warn("no liveness, core replicas cannot view-change", .{});
-        } else if (try simulator.core_missing_prepare(allocator)) |header| {
+        } else if (try simulator.core_missing_prepare(gpa)) |header| {
             log.warn("no liveness, op={} is not available in core", .{header.op});
-        } else if (try simulator.core_missing_blocks(allocator)) |blocks| {
+        } else if (try simulator.core_missing_blocks(gpa)) |blocks| {
             log.warn("no liveness, {} blocks are not available in core", .{blocks});
         } else if (simulator.core_missing_reply()) |header| {
             log.warn("no liveness, reply op={} is not available in core", .{header.op});
@@ -944,7 +944,7 @@ pub const Simulator = struct {
     // if the core gets stuck, we verify that this is indeed due to storage faults.
     pub fn core_missing_prepare(
         simulator: *const Simulator,
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
     ) error{OutOfMemory}!?vsr.Header.Prepare {
         assert(simulator.core.count() > 0);
         const replica_count = simulator.options.cluster.replica_count;
@@ -990,11 +990,11 @@ pub const Simulator = struct {
         }
 
         const ReplicaSet = stdx.BitSetType(constants.replicas_max);
-        var replicas_missing_ops = try allocator.alloc(
+        var replicas_missing_ops = try gpa.alloc(
             ReplicaSet,
             cluster_op_head - cluster_op_repair_min + 1,
         );
-        errdefer allocator.free(replicas_missing_ops);
+        errdefer gpa.free(replicas_missing_ops);
 
         for (replicas_missing_ops, cluster_op_repair_min..) |*replicas_missing_op, op| {
             replicas_missing_op.* = .{};
@@ -1066,7 +1066,7 @@ pub const Simulator = struct {
     /// Check whether the cluster is stuck because the entire core is missing the same block[s].
     pub fn core_missing_blocks(
         simulator: *const Simulator,
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
     ) error{OutOfMemory}!?usize {
         assert(simulator.core.count() > 0);
 
@@ -1074,7 +1074,7 @@ pub const Simulator = struct {
         var blocks_missing = std.AutoArrayHashMap(
             struct { address: u64, checksum: u128 },
             FaultyReplicas,
-        ).init(allocator);
+        ).init(gpa);
         defer blocks_missing.deinit();
 
         // Find all blocks that any replica in the core is missing.
