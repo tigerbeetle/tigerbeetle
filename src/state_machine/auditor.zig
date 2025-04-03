@@ -262,13 +262,14 @@ pub const AccountingAuditor = struct {
     }
 
     pub fn deinit(self: *AccountingAuditor, allocator: std.mem.Allocator) void {
-        allocator.free(self.accounts);
-        allocator.free(self.accounts_state);
-        self.pending_transfers.deinit(allocator);
-        self.pending_expiries.deinit();
-        self.in_flight.deinit(allocator);
-        allocator.free(self.creates_sent);
         allocator.free(self.creates_delivered);
+        allocator.free(self.creates_sent);
+        self.in_flight.deinit(allocator);
+        self.pending_expiries.deinit();
+        self.pending_transfers.deinit(allocator);
+        allocator.free(self.query_intersections);
+        allocator.free(self.accounts_state);
+        allocator.free(self.accounts);
     }
 
     pub fn done(self: *const AccountingAuditor) bool {

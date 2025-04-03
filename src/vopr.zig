@@ -85,10 +85,18 @@ pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
 
-    // TODO Use std.testing.allocator when all deinit() leaks are fixed.
-    const allocator = std.heap.page_allocator;
+    var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer {
+        _ = gpa_instance.detectLeaks();
+        switch (gpa_instance.deinit()) {
+            .ok => {},
+            .leak => @panic("memory leaked"),
+        }
+    }
 
-    var args = try std.process.argsWithAllocator(allocator);
+    const gpa = gpa_instance.allocator();
+
+    var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
     const cli_args = flags.parse(&args, CLIArgs);
@@ -204,8 +212,8 @@ pub fn main() !void {
         options.replica_restart_stability,
     });
 
-    var simulator = try Simulator.init(allocator, &prng, options);
-    defer simulator.deinit(allocator);
+    var simulator = try Simulator.init(gpa, &prng, options);
+    defer simulator.deinit(gpa);
 
     if (cli_args.performance) {
         // Simulate a missing replica by crashing it with ∞ stability.
@@ -279,7 +287,7 @@ pub fn main() !void {
             .{ simulator.options.requests_max, simulator.requests_replied },
         );
         simulator.cluster.log_cluster();
-        if (try simulator.cluster_recoverable(allocator)) {
+        if (try simulator.cluster_recoverable(gpa)) {
             log.err("you can reproduce this failure with seed={}", .{seed});
             fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
         } else return;
@@ -307,7 +315,7 @@ pub fn main() !void {
         }
 
         if (simulator.pending()) |reason| {
-            if (try simulator.cluster_recoverable(allocator)) {
+            if (try simulator.cluster_recoverable(gpa)) {
                 log.info("no liveness, final cluster state (core={b}):", .{simulator.core.bits});
                 simulator.cluster.log_cluster();
                 log.err("you can reproduce this failure with seed={}", .{seed});
@@ -610,7 +618,7 @@ pub const Simulator = struct {
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
 
-        // A replcia permanitely missing from the cluster, used in performance mode.
+        // A replcia premaritally missing from the cluster, used in performance mode.
         replica_missing: ?u8 = null,
 
         replica_pause_probability: Ratio,
@@ -1614,7 +1622,7 @@ fn log_override(
     comptime format: []const u8,
     args: anytype,
 ) void {
-    if (scope == .vsr and level == .err) {
+    if ((scope == .vsr and level == .err) or scope == .gpa) {
         // Always print a message for vsr.fatal.
     } else {
         if (vsr_vopr_options.log == .short) {
