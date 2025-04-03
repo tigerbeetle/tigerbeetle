@@ -367,6 +367,7 @@ const Command = struct {
 
         const trace_writer = if (trace_file) |file| file.writer() else null;
 
+        var time: Time = .{};
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -381,7 +382,7 @@ const Command = struct {
             .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
-            .time = .{},
+            .time = &time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .state_machine_options = .{
