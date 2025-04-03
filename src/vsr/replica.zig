@@ -645,6 +645,7 @@ pub fn ReplicaType(
 
             self.trace = try Tracer.init(
                 allocator,
+                options.time,
                 self.superblock.working.cluster,
                 replica,
                 options.tracer_options,

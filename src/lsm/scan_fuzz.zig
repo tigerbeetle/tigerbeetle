@@ -11,6 +11,7 @@ const ratio = stdx.PRNG.ratio;
 const log = std.log.scoped(.lsm_scan_fuzz);
 const lsm = @import("tree.zig");
 
+const Time = @import("../testing/time.zig").Time;
 const Storage = @import("../testing/storage.zig").Storage;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
@@ -492,7 +493,8 @@ const Environment = struct {
     state: State,
 
     storage: *Storage,
-    trace: vsr.trace.Tracer,
+    time: Time,
+    trace: Storage.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context = undefined,
     grid: Grid,
@@ -514,13 +516,15 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.trace = try vsr.trace.Tracer.init(gpa, 0, 0, .{});
+        env.time = Time.init_simple();
+        env.trace = try Storage.Tracer.init(gpa, &env.time, 0, 0, .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
             .storage = storage,
             .prng = prng,
             .state = .init,
+            .time = env.time,
             .trace = env.trace,
 
             .superblock = try SuperBlock.init(gpa, .{

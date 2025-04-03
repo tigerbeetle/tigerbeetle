@@ -5,7 +5,7 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Tracer = vsr.trace.TracerType();
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
 const StaticAllocator = @import("static_allocator.zig");
 const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(
@@ -296,7 +296,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
                         // When cursor reaches the last row of terminal, scroll content upward
                         // to create space for displaying completion menu.
-                        // \x1b[nS - Scroll whole page up by n lines; defualt 1 line.
+                        // \x1b[nS - Scroll whole page up by n lines; default 1 line.
                         // \x1b[nA - Moves cursor up n cells; default 1 cell up.
                         if (terminal_screen.cursor_row == terminal_screen.rows) {
                             try repl.terminal.print("\x1b[S\x1b[A", .{});

@@ -112,8 +112,9 @@ pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate
 
 const trace_span_size_max = 1024;
 
-pub fn TracerType() type {
+pub fn TracerType(comptime Time: type) type {
     return struct {
+        time: *Time,
         replica_index: u8,
         options: Options,
         buffer: []u8,
@@ -142,6 +143,7 @@ pub fn TracerType() type {
 
         pub fn init(
             allocator: std.mem.Allocator,
+            time: *Time,
             cluster: u128,
             replica_index: u8,
             options: Options,
@@ -176,6 +178,7 @@ pub fn TracerType() type {
             @memset(events_timing, null);
 
             return .{
+                .time = time,
                 .replica_index = replica_index,
                 .options = options,
                 .buffer = buffer,
@@ -184,7 +187,7 @@ pub fn TracerType() type {
                 .events_metric = events_metric,
                 .events_timing = events_timing,
 
-                .time_start = stdx.Instant.now(),
+                .time_start = time.monotonic_instant(),
             };
         }
 
@@ -211,8 +214,10 @@ pub fn TracerType() type {
             const event_timing = event.as(EventTiming);
             const stack = event_tracing.stack();
 
+            const time_now = tracer.time.monotonic_instant();
+
             assert(tracer.events_started[stack] == null);
-            tracer.events_started[stack] = stdx.Instant.now();
+            tracer.events_started[stack] = time_now;
 
             log.debug(
                 "{}: {s}({}): start: {}",
@@ -220,7 +225,6 @@ pub fn TracerType() type {
             );
 
             const writer = tracer.options.writer orelse return;
-            const time_now = stdx.Instant.now();
             const time_elapsed = time_now.duration_since(tracer.time_start);
 
             var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
@@ -267,7 +271,7 @@ pub fn TracerType() type {
             const stack = event_tracing.stack();
 
             const event_start = tracer.events_started[stack].?;
-            const event_end = stdx.Instant.now();
+            const event_end = tracer.time.monotonic_instant();
             const event_duration = event_end.duration_since(event_start);
 
             assert(tracer.events_started[stack] != null);
@@ -294,11 +298,11 @@ pub fn TracerType() type {
         pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
             const stack_base = EventTracing.stack_bases.get(event_tag);
             const cardinality = EventTracing.stack_limits.get(event_tag);
+            const event_end = tracer.time.monotonic_instant();
             for (stack_base..stack_base + cardinality) |stack| {
                 if (tracer.events_started[stack]) |event_start| {
                     log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
 
-                    const event_end = stdx.Instant.now();
                     const event_duration = event_end.duration_since(event_start);
 
                     tracer.events_started[stack] = null;
@@ -387,14 +391,22 @@ pub fn TracerType() type {
 }
 
 test "trace json" {
-    const Tracer = TracerType();
+    const Time = @import("testing/time.zig").Time;
+    const Tracer = TracerType(Time);
     const Snap = @import("testing/snaptest.zig").Snap;
     const snap = Snap.snap;
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var trace = try Tracer.init(std.testing.allocator, 0, 0, .{
+    var time: Time = .{
+        .resolution = constants.tick_ms * std.time.ns_per_ms,
+        .offset_type = .linear,
+        .offset_coefficient_A = 0,
+        .offset_coefficient_B = 0,
+    };
+
+    var trace = try Tracer.init(std.testing.allocator, &time, 0, 0, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);
@@ -415,12 +427,14 @@ test "trace json" {
 }
 
 test "timing overflow" {
-    const Tracer = TracerType();
+    const Time = @import("testing/time.zig").Time;
+    const Tracer = TracerType(Time);
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var trace = try Tracer.init(std.testing.allocator, 0, 0, .{
+    var time = Time.init_simple();
+    var trace = try Tracer.init(std.testing.allocator, &time, 0, 0, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);

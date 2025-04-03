@@ -1,5 +1,7 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
+const constants = @import("../constants.zig");
+const Instant = stdx.Instant;
 
 pub const OffsetType = enum {
     linear,
@@ -35,8 +37,21 @@ pub const Time = struct {
     /// The instant in time chosen as the origin of this time source.
     epoch: i64 = 0,
 
+    pub fn init_simple() Time {
+        return .{
+            .resolution = constants.tick_ms * std.time.ns_per_ms,
+            .offset_type = .linear,
+            .offset_coefficient_A = 0,
+            .offset_coefficient_B = 0,
+        };
+    }
+
     pub fn monotonic(self: *Time) u64 {
         return self.ticks * self.resolution;
+    }
+
+    pub fn monotonic_instant(self: *Time) Instant {
+        return .{ .base_ns = self.monotonic() };
     }
 
     pub fn realtime(self: *Time) i64 {
