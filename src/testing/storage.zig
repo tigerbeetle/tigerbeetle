@@ -44,6 +44,7 @@ const fuzz = @import("./fuzz.zig");
 const ReadyQueueType = fuzz.ReadyQueueType;
 const hash_log = @import("./hash_log.zig");
 const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
+const Time = @import("./time.zig").Time;
 
 const log = std.log.scoped(.storage);
 
@@ -134,6 +135,8 @@ pub const Storage = struct {
     };
 
     pub const NextTickSource = enum { lsm, vsr };
+
+    pub const Tracer = vsr.trace.TracerType(Time);
 
     /// See `Storage.overlays`.
     const overlays_count_max = 2;

@@ -149,6 +149,7 @@ pub fn ReplicaType(
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.ClockType(Time);
         const ForestTableIterator = ForestTableIteratorType(Forest);
+        const Tracer = Storage.Tracer;
 
         const ReplicateOptions = struct {
             closed_loop: bool = false,
@@ -562,7 +563,7 @@ pub fn ReplicaType(
         /// Simulator hooks.
         event_callback: ?*const fn (replica: *const Replica, event: ReplicaEvent) void = null,
 
-        trace: vsr.trace.Tracer,
+        trace: Tracer,
         trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
@@ -580,7 +581,7 @@ pub fn ReplicaType(
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
-            tracer_options: vsr.trace.Tracer.Options = .{},
+            tracer_options: Tracer.Options = .{},
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
@@ -642,8 +643,9 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
-            self.trace = try vsr.trace.Tracer.init(
+            self.trace = try Tracer.init(
                 allocator,
+                options.time,
                 self.superblock.working.cluster,
                 replica,
                 options.tracer_options,

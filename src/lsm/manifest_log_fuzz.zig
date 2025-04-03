@@ -16,6 +16,7 @@ const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
+const Time = @import("../testing/time.zig").Time;
 const Storage = @import("../testing/storage.zig").Storage;
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
@@ -255,8 +256,9 @@ const Environment = struct {
     gpa: std.mem.Allocator,
     storage: Storage,
     storage_verify: Storage,
-    trace: vsr.trace.Tracer,
-    trace_verify: vsr.trace.Tracer,
+    time: Time,
+    trace: Storage.Tracer,
+    trace_verify: Storage.Tracer,
     superblock: SuperBlock,
     superblock_verify: SuperBlock,
     superblock_context: SuperBlock.Context,
@@ -291,11 +293,14 @@ const Environment = struct {
         errdefer env.storage_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace = try vsr.trace.Tracer.init(gpa, 0, 0, .{});
+        env.time = Time.init_simple();
+
+        fields_initialized += 1;
+        env.trace = try Storage.Tracer.init(gpa, &env.time, 0, 0, .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try vsr.trace.Tracer.init(gpa, 0, 0, .{});
+        env.trace_verify = try Storage.Tracer.init(gpa, &env.time, 0, 0, .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -556,7 +561,7 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.gpa);
-            test_trace.* = try vsr.trace.Tracer.init(env.gpa, 0, 0, .{});
+            test_trace.* = try Storage.Tracer.init(env.gpa, &env.time, 0, 0, .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().

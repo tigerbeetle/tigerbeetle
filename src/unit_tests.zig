@@ -19,6 +19,7 @@ comptime {
     _ = @import("stdx/zipfian.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
+    _ = @import("time.zig");
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
     _ = @import("trace/statsd.zig");

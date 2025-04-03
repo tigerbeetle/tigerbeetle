@@ -9,7 +9,6 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 
-const CompositeKeyType = @import("composite_key.zig").CompositeKeyType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
@@ -627,23 +626,4 @@ test "table_count_max_for_level/tree" {
     try expectEqual(@as(u32, 4680 + 32768), table_count_max_for_tree(8, 5));
     try expectEqual(@as(u32, 37448 + 262144), table_count_max_for_tree(8, 6));
     try expectEqual(@as(u32, 299592 + 2097152), table_count_max_for_tree(8, 7));
-}
-
-test "TreeType" {
-    const CompositeKey = @import("composite_key.zig").CompositeKeyType(u64);
-    const Table = @import("table.zig").TableType(
-        CompositeKey.Key,
-        CompositeKey,
-        CompositeKey.key_from_value,
-        CompositeKey.sentinel_key,
-        CompositeKey.tombstone,
-        CompositeKey.tombstone_from_key,
-        constants.state_machine_config.lsm_compaction_ops * 1024,
-        .secondary_index,
-    );
-
-    const IO = @import("../io.zig").IO;
-    const Storage = @import("../storage.zig").StorageType(IO);
-
-    std.testing.refAllDecls(TreeType(Table, Storage));
 }

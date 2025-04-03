@@ -22,12 +22,8 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Storage = vsr.storage.StorageType(vsr.io.IO);
-const Grid = vsr.GridType(Storage);
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    constants.state_machine_config,
-);
+const StateMachine = @import("./main.zig").StateMachine;
+const Grid = @import("./main.zig").Grid;
 
 const CLIArgs = union(enum) {
     const Format = struct {
