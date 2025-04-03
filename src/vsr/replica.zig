@@ -258,8 +258,6 @@ pub fn ReplicaType(
         /// Presently, it is used to detect outdated start view messages in recovering head status.
         nonce: Nonce,
 
-        time: *Time,
-
         /// A distributed fault-tolerant clock for lower and upper bounds on the primary's wall
         /// clock:
         clock: Clock,
@@ -1066,8 +1064,6 @@ pub fn ReplicaType(
             assert(request_size_limit <= constants.message_size_max);
             assert(request_size_limit > @sizeOf(Header));
 
-            self.time = options.time;
-
             // The clock is special-cased for standbys. We want to balance two concerns:
             //   - standby clock should never affect cluster time,
             //   - standby should have up-to-date clock, such that it can quickly join the cluster
@@ -1078,7 +1074,7 @@ pub fn ReplicaType(
             //   - a standby clock tracks active replicas and the standby itself.
             self.clock = try Clock.init(
                 allocator,
-                self.time,
+                options.time,
                 if (replica_index < replica_count) .{
                     .replica_count = replica_count,
                     .replica = replica_index,
@@ -1187,9 +1183,6 @@ pub fn ReplicaType(
                 .release_execute = options.release_execute,
                 .release_execute_context = options.release_execute_context,
                 .nonce = options.nonce,
-                // Copy the (already-initialized) time back, to avoid regressing the monotonic
-                // clock guard.
-                .time = self.time,
                 .clock = self.clock,
                 .journal = self.journal,
                 .client_sessions = client_sessions,
