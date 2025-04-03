@@ -641,6 +641,7 @@ fn build_test(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    unit_tests.test_server_mode = false;
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
     unit_tests.addIncludePath(options.tb_client_header.path.dirname());
 

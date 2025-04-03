@@ -87,6 +87,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             packet_clone: *const fn (*PacketSimulator, Packet) Packet,
             packet_deinit: *const fn (*PacketSimulator, Packet) void,
             packet_deliver: *const fn (*PacketSimulator, Packet, Path) void,
+            packet_delay: ?*const fn (*PacketSimulator, Packet, Path) u64 = null,
         };
 
         const LinkPacket = struct {
@@ -294,14 +295,6 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return self.prng.chance(self.options.unpartition_probability);
         }
 
-        /// Return a value produced using an exponential distribution with
-        /// the minimum and mean specified in self.options
-        fn one_way_delay(self: *PacketSimulator) u64 {
-            const min = self.options.one_way_delay_min;
-            const mean = self.options.one_way_delay_mean;
-            return min + fuzz.random_int_exponential(&self.prng, u64, mean - min);
-        }
-
         /// Partitions the network. Guaranteed to isolate at least one replica.
         fn auto_partition_network(self: *PacketSimulator) void {
             assert(self.options.node_count > 1);
@@ -437,7 +430,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
 
             queue.add(.{
-                .ready_at_tick = self.ticks + self.one_way_delay(),
+                .ready_at_tick = self.ticks + self.one_way_delay(packet, path),
                 .packet = packet,
             });
 
@@ -507,6 +500,17 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         fn packet_deliver(self: *PacketSimulator, packet: Packet, path: Path) void {
             self.vtable.packet_deliver(self, packet, path);
+        }
+
+        fn one_way_delay(self: *PacketSimulator, packet: Packet, path: Path) u64 {
+            if (self.vtable.packet_delay) |packet_delay| {
+                return packet_delay(self, packet, path);
+            }
+            // Return a value produced using an exponential distribution with
+            // the minimum and mean specified in self.options.
+            const min = self.options.one_way_delay_min;
+            const mean = self.options.one_way_delay_mean;
+            return min + fuzz.random_int_exponential(&self.prng, u64, mean - min);
         }
     };
 }
