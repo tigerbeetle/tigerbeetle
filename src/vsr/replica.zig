@@ -412,6 +412,9 @@ pub fn ReplicaType(
         commit_stage: CommitStage = .idle,
         commit_dispatch_entered: bool = false,
 
+        /// The prepare message being committed.
+        commit_prepare: ?*Message.Prepare = null,
+
         /// Measures the time taken to commit a prepare, across the following stages:
         /// prefetch → reply_setup → execute → compact → checkpoint_data → checkpoint_superblock
         commit_completion_timer: std.time.Timer,
@@ -560,9 +563,6 @@ pub fn ReplicaType(
         test_context: ?*anyopaque,
         /// Simulator hooks.
         event_callback: ?*const fn (replica: *const Replica, event: ReplicaEvent) void = null,
-
-        /// The prepare message being committed.
-        commit_prepare: ?*Message.Prepare = null,
 
         trace: vsr.trace.Tracer,
         trace_emit_timeout: Timeout,
