@@ -60,7 +60,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const SuperBlock = vsr.SuperBlockType(Storage);
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
-        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, TimePointer, AOF);
+        pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
         pub const Client = vsr.ClientType(StateMachine, MessageBus, Time);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
@@ -115,9 +115,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
-        // Replica "owns" Time, but we want to own it too, so that we can tick time even while a
-        // replica is down, and thread it in between restarts. This is crucial to ensure that the
-        // cluster's clocks do not desynchronize too far to recover.
         replica_times: []Time,
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
@@ -608,7 +605,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .message_pool = &cluster.replica_pools[replica_index],
                     .nonce = options.nonce,
-                    .time = .{ .time = &cluster.replica_times[replica_index] },
+                    .time = &cluster.replica_times[replica_index],
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
                     .release = options.release,
@@ -999,23 +996,3 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
     };
 }
-
-const TimePointer = struct {
-    time: *Time,
-
-    pub fn monotonic(self: *TimePointer) u64 {
-        return self.time.monotonic();
-    }
-
-    pub fn realtime(self: *TimePointer) i64 {
-        return self.time.realtime();
-    }
-
-    pub fn offset(self: *TimePointer, ticks: u64) i64 {
-        return self.time.offset(ticks);
-    }
-
-    pub fn tick(self: *TimePointer) void {
-        return self.time.tick();
-    }
-};
