@@ -399,12 +399,7 @@ test "trace json" {
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var time: Time = .{
-        .resolution = constants.tick_ms * std.time.ns_per_ms,
-        .offset_type = .linear,
-        .offset_coefficient_A = 0,
-        .offset_coefficient_B = 0,
-    };
+    var time = Time.init_simple();
 
     var trace = try Tracer.init(std.testing.allocator, &time, 0, 0, .{
         .writer = trace_buffer.writer().any(),
@@ -412,16 +407,19 @@ test "trace json" {
     defer trace.deinit(std.testing.allocator);
 
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
+    time.ticks += 1;
     trace.start(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
+    time.ticks += 2;
     trace.stop(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
+    time.ticks += 3;
     trace.stop(.{ .replica_commit = .{ .stage = .idle, .op = 456 } });
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"ph":"B","ts":<snap:ignore>,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":4,"ph":"B","ts":<snap:ignore>,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":4,"ph":"E","ts":<snap:ignore>},
-        \\{"pid":0,"tid":0,"ph":"E","ts":<snap:ignore>},
+        \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":0,"tid":4,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":0,"tid":4,"ph":"E","ts":20000},
+        \\{"pid":0,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);
 }
