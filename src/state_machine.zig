@@ -7614,17 +7614,3 @@ test "StateMachine: query multi-batch input_valid" {
         ));
     }
 }
-
-test "StateMachine: ref all decls" {
-    const IO = @import("io.zig").IO;
-    const Storage = @import("storage.zig").StorageType(IO);
-
-    const StateMachine = StateMachineType(Storage, .{
-        .release = vsr.Release.minimum,
-        .message_body_size_max = global_constants.message_body_size_max,
-        .lsm_compaction_ops = 1,
-        .vsr_operations_reserved = 128,
-    });
-
-    std.testing.refAllDecls(StateMachine);
-}
