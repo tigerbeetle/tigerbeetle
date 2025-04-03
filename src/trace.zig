@@ -112,7 +112,11 @@ pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate
 
 const trace_span_size_max = 1024;
 
-pub const Tracer = struct {
+pub fn TracerType() type {
+    return Tracer;
+}
+
+const Tracer = struct {
     replica_index: u8,
     options: Options,
     buffer: []u8,

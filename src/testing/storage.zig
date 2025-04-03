@@ -135,6 +135,8 @@ pub const Storage = struct {
 
     pub const NextTickSource = enum { lsm, vsr };
 
+    pub const Tracer = vsr.trace.TracerType();
+
     /// See `Storage.overlays`.
     const overlays_count_max = 2;
 

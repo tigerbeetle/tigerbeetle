@@ -17,13 +17,15 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.StorageType(IO);
+const Tracer = vsr.trace.TracerType();
+pub const Storage = vsr.storage.StorageType(IO, Tracer);
 const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Grid = vsr.GridType(Storage);
+pub const StateMachine =
+    vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+pub const Grid = vsr.GridType(Storage);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);

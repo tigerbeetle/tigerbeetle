@@ -8,7 +8,7 @@ const stdx = vsr.stdx;
 const FIFOType = vsr.fifo.FIFOType;
 const constants = vsr.constants;
 
-pub fn StorageType(comptime IO: type) type {
+pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
     return struct {
         const Storage = @This();
 
@@ -86,6 +86,8 @@ pub fn StorageType(comptime IO: type) type {
         };
 
         pub const NextTickSource = enum { lsm, vsr };
+
+        pub const Tracer = _Tracer;
 
         io: *IO,
         fd: IO.fd_t,

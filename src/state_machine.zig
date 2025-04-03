@@ -4545,6 +4545,7 @@ test "sum_overflows" {
 }
 
 pub const TestContext = struct {
+    const Tracer = vsr.trace.TracerType();
     const Storage = @import("testing/storage.zig").Storage;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
@@ -4560,7 +4561,7 @@ pub const TestContext = struct {
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
-    trace: vsr.trace.Tracer,
+    trace: Tracer,
     superblock: SuperBlock,
     grid: Grid,
     state_machine: StateMachine,
@@ -4580,7 +4581,7 @@ pub const TestContext = struct {
         );
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.trace = try vsr.trace.Tracer.init(allocator, 0, 0, .{});
+        ctx.trace = try Tracer.init(allocator, 0, 0, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

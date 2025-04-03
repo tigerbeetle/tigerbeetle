@@ -5,8 +5,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
+const Tracer = vsr.trace.TracerType();
 const StaticAllocator = @import("static_allocator.zig");
-const Storage = vsr.storage.StorageType(IO);
+const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     constants.state_machine_config,
