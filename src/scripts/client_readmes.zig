@@ -7,6 +7,7 @@
 
 const std = @import("std");
 const assert = std.debug.assert;
+const log = std.log;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -573,7 +574,11 @@ const Context = struct {
             text = section_cut.suffix;
 
             var section = section_cut.prefix;
-            section = section[0..std.mem.lastIndexOfScalar(u8, section, '\n').?];
+            const newline_index = std.mem.lastIndexOfScalar(u8, section, '\n') orelse {
+                log.warn("empty section fragment: {s}", .{section_name});
+                @panic("empty section fragement");
+            };
+            section = section[0..newline_index];
 
             var indent_min: usize = std.math.maxInt(usize);
             var lines = std.mem.splitScalar(u8, section, '\n');
