@@ -7,10 +7,187 @@ const binary_search = @import("binary_search.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 
+const composite_key = @import("composite_key.zig");
+
+const BatchSlice = struct {
+    start: usize,
+    end: usize,
+};
+
+// TODO: replace with constants.cache_line_bytes
+// TODO handle composite_key better
+const cache_line_bytes = 64;
+
+pub fn LooserTreeType(
+    comptime Key: type,
+    comptime Value: type,
+    comptime K: usize,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+) type {
+    // Tree of loosers is binary tree, so requires K to be power two.
+    assert(std.math.isPowerOfTwo(K));
+
+    return struct {
+        const Self = @This();
+
+        const member_size = @sizeOf(Key) + @sizeOf(usize);
+        const padding_bytes = if (member_size % 64 == 0) 0 else cache_line_bytes - (member_size % cache_line_bytes);
+        const Node = struct {
+            key: Key,
+            batch_id: usize,
+            padding: [padding_bytes]u8 = [_]u8{0} ** padding_bytes,
+        };
+
+        comptime {
+            assert(@sizeOf(Node) % cache_line_bytes == 0);
+        }
+
+        // Prefetch two cache lines ahead to mitigate cache misses.
+        // The loser tree merges from K sorted batches.
+        // Although the access pattern is relatively predictable (cycling through K batches), the hardware prefetcher
+        // struggles to recognize it due to the interleaved reads from different batches.
+        // By prefetching explicitly, we ensure the necessary cache lines are loaded in advance.
+        // As always prefetch distance is based on empirical results.
+        const values_per_cache_line = cache_line_bytes / @sizeOf(Value);
+        const prefetch_distance = (values_per_cache_line + 1) * 2;
+
+        // Preallocate the tree structure.
+        const height = std.math.log2(K);
+        const inner_count = 2 * (K / 2) - 1;
+
+        tree: [inner_count]Node align(64) = undefined,
+        data: []Value,
+        batch_views: []BatchSlice,
+        winner: Node,
+
+        // should we do slices?
+        pub inline fn merge(input: []Value, batches: []BatchSlice, output: []Value) void {
+            assert(output.len == input.len);
+            // TODO: check that input slices are combined <- output.len
+            // TODO: check if batches are actually sorted
+            // TODO: check if all values are sorted
+
+            // populate_tree or make_tree
+            var tree = init(input, batches);
+
+            for (output) |*out| {
+                out.* = tree.next();
+            }
+        }
+
+        fn init(data: []Value, batches: []BatchSlice) Self {
+
+            // Prepopulate the competing nodes from every valid sorted batch.
+            var competitors: [K]Node = undefined;
+            for (0..K) |batch_id| {
+                // If the batch is empty, use a sentinel value to mark it as invalid.
+                // The sentinel is `maxInt(Key)`, which is safe because the batch_id serves as a tiebreaker.
+                // This ensures that sentinel values are never propagated to the final merge.
+                if (batches[batch_id].start >= batches[batch_id].end) {
+                    competitors[batch_id] = .{
+                        .key = std.math.maxInt(Key),
+                        .batch_id = K,
+                    };
+                } else {
+                    competitors[batch_id] = .{
+                        .key = key_from_value(&data[batches[batch_id].start]),
+                        .batch_id = batch_id,
+                    };
+                }
+            }
+
+            // Populate the tree of losers with the competitors.
+            // The tree is represented as a flat array for memory efficiency and ease of traversal.
+            // We start with the first inner level above the leaves and work our way up.
+            var tree: [inner_count]Node = undefined;
+            inline for (1..height + 1) |level| {
+                // Calculate the begin and end indexes (inclusive) of the current level in the tree.
+                const begin = (K / (1 << level)) - 1;
+                const end = (K / (1 << (level - 1))) - 1;
+                for (begin..end, 0..) |tree_index, competitor_index| {
+                    // Compare pairs of competitors at the current level.
+                    // The winner (smaller key) is retained in the `competitors` array to proceed to the next level.
+                    // The loser (larger key) is stored in the `tree` array at the current level.
+                    // This process continues until only one winner remains in the `competitors` array.
+                    const left_competitor = competitors[competitor_index * 2];
+                    const right_competitor = competitors[competitor_index * 2 + 1];
+                    if (left_competitor.key < right_competitor.key) {
+                        competitors[competitor_index] = left_competitor;
+                        tree[tree_index] = right_competitor;
+                    } else {
+                        competitors[competitor_index] = right_competitor;
+                        tree[tree_index] = left_competitor;
+                    }
+                }
+            }
+
+            return .{
+                .tree = tree,
+                .data = data,
+                .batch_views = batches,
+                .winner = competitors[0],
+            };
+        }
+
+        fn next(self: *Self) Value {
+            const batch_id = self.winner.batch_id;
+
+            // Increment the start position for the winning batch.
+            self.batch_views[batch_id].start += 1;
+            const current_pos = self.batch_views[batch_id].start;
+
+            // If the current position is out of bounds, set the winner to a sentinel value.
+            // The sentinel marks the batch as exhausted and ensures it is not chosen again.
+            // TODO: potential_winner
+            self.winner = if (current_pos < self.batch_views[batch_id].end) .{ .key = key_from_value(&self.data[current_pos]), .batch_id = batch_id } else .{ .key = std.math.maxInt(Key), .batch_id = K };
+            // TODO: hoist the first calculation of the parent_id out of the loop to actually be the parent id here instead of leaf id
+            var parent_id = (self.tree.len + batch_id);
+
+            inline for (0..height) |_| {
+                parent_id = (parent_id - 1) / 2;
+                // Determine if the current winner is larger than the node in the tree.
+                // If so, the node in the tree becomes the new winner, and the current winner is stored as the loser.
+                const is_larger = self.winner.key > self.tree[parent_id].key;
+                // Using `batch_id` as a tie breaker by preferring the key with the smaller batch_id.
+                // This ensures stability when keys are equal.
+                const tie_breaker = self.winner.key == self.tree[parent_id].key and self.winner.batch_id > self.tree[parent_id].batch_id;
+                const has_new_winner = is_larger or tie_breaker;
+
+                // Use branchless code to select the new winner.
+                // This avoids branch mispredictions and improves performance.
+                // TOOD: Maybe use @branchHint in zig 0.14 to write this more concise
+                const winner_ptr: *Node = if (has_new_winner) &self.tree[parent_id] else &self.winner;
+
+                // Manually swap the winner and loser to avoid inefficiencies in `std.mem.swap`.
+                // This is a performance optimization for the specific struct layout.
+                // TODO: Potentially revise this in zig 0.14.
+                // TODO: own_memswap
+                const tmp_batch_id = winner_ptr.batch_id;
+                const tmp_key = winner_ptr.key;
+                winner_ptr.batch_id = self.winner.batch_id;
+                winner_ptr.key = self.winner.key;
+                self.winner.key = tmp_key;
+                self.winner.batch_id = tmp_batch_id;
+            }
+
+            // The hardware prefetcher cannot predict this access pattern, so we help it.
+            // The pointer arithmetic might be "out of bounds", but since it is never dereferenced it is fine (see binary search)
+            @prefetch(
+                self.data.ptr + current_pos + prefetch_distance,
+                .{ .rw = .read, .locality = 3, .cache = .data },
+            );
+            // Return the value corresponding to the last winner.
+            return self.data[current_pos - 1];
+        }
+    };
+}
+
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
     const key_from_value = Table.key_from_value;
+
+    const LooserTree = LooserTreeType(Key, Value, constants.lsm_compaction_ops, key_from_value);
 
     return struct {
         const TableMemory = @This();
@@ -41,9 +218,14 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
+        values_scratch: []Value, // scratch values for immutable table only ugly hack.
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
+
+        batch_slices: [constants.lsm_compaction_ops]BatchSlice,
+        batch_slice_index: usize = 1,
+        batch_slice_prefix: [constants.lsm_compaction_ops + 1]?usize,
 
         pub fn init(
             table: *TableMemory,
@@ -64,13 +246,20 @@ pub fn TableMemoryType(comptime Table: type) type {
                 },
                 .name = name,
 
+                .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
+                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
+                // Allocated later
                 .values = undefined,
+                .values_scratch = undefined,
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            table.values_scratch = try allocator.alloc(Value, Table.value_count_max);
+            errdefer allocator.free(table.values_scratch);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -85,8 +274,12 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .values_scratch = table.values_scratch,
                 .value_context = .{},
                 .mutability = mutability,
+                .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
+                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
+                .batch_slice_index = 1,
                 .name = table.name,
             };
         }
@@ -154,8 +347,12 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .values_scratch = table.values_scratch,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
+                .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
+                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
+                .batch_slice_index = 1,
                 .name = table.name,
             };
         }
@@ -186,11 +383,59 @@ pub fn TableMemoryType(comptime Table: type) type {
                 table_mutable.values[0..table_mutable.count()],
             );
 
+            //var sorted_partitions: u32 = 0;
+            //for (table_mutable.batch_slice_prefix) |maybe_prefix| {
+            //sorted_partitions += if (maybe_prefix) |_| 1 else 0;
+            //}
+
+            //if (sorted_partitions == constants.lsm_compaction_ops) {
+            //const last_offset = table_mutable.batch_slice_prefix[constants.lsm_compaction_ops] orelse unreachable;
+            //const begin = table_mutable.batch_slice_prefix[constants.lsm_compaction_ops - 2] orelse unreachable;
+
+            //// now we sort this thing
+            //const new_partition_size =
+            //sort_suffix_from_offset(table_mutable.values[begin..last_offset], 0);
+
+            //table_mutable.batch_slice_prefix[constants.lsm_compaction_ops - 1] = new_partition_size + begin;
+            //table_mutable.batch_slice_prefix[constants.lsm_compaction_ops] = null;
+
+            //std.debug.print("sorted from {} to {} \n ", .{ begin, last_offset });
+            //std.debug.print("new prefix {any} \n", .{table_mutable.batch_slice_prefix});
+
+            //// then we need to merge two of the partitions to have enough space.
+            //// merge the two first ones then we can copy the whole thing over
+            //// then we need to adjust the offsets by the current size
+            //// we need to do this before we copy them over and then only use the end other wise the other offsets become corrupted
+            //// then we adjust the last two offsets
+            //}
+            //// then we copy it over
+            //// then we copy the prefixes over and adjust the offsets by table_immutable.count()
+
+            //std.debug.print("Sorted Partitiones {} \n", .{sorted_partitions});
+
+            // that means the first prefix could be 0..table_immutable.count
+            // the new prefixes are the copy from the old one, but it could be that we merge the smallest two neighboars if they are to full
+
             const tables_combined_count = table_immutable.count() + table_mutable.count();
-            table_immutable.value_context.count = tables_combined_count;
+            //table_immutable.value_context.count = tables_combined_count;
+            // here we know that the old values are sorted already.
+
+            // TODO: remove the sort here and use the merge
             // TODO: I think we do not need to sort here?
-            //table_immutable.value_context.count =
-            //sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
+            const table_count_after_deduplication =
+                sort_suffix_from_offset(table_immutable.values[table_immutable.count()..tables_combined_count], 0) + table_immutable.count();
+
+            // TODO do the merge here to
+            assert(table_immutable.count() <= table_count_after_deduplication);
+            table_immutable.batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1);
+            table_immutable.batch_slice_prefix[0] = 0;
+            table_immutable.batch_slice_prefix[1] = table_immutable.count(); // NOTE: start at one
+            table_immutable.batch_slice_prefix[2] = table_count_after_deduplication; // NOTE: start at one
+            table_immutable.value_context.count = table_count_after_deduplication;
+
+            // We now that the first prefix must be from 0 - table_immutable.count right?
+            // then we merge the other prefixes in or we only sort the new data?
+
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -203,8 +448,10 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn sort(table: *TableMemory) void {
             if (table.mutability == .immutable) {
+                // Here we simply use the new function
                 // This is the final sort
-                const target_count = sort_suffix_from_offset(table.values_used(), 0);
+                const target_count = merge_looser_tree(table);
+                //const target_count = sort_suffix_from_offset(table.values_used(), 0);
                 table.value_context.count = target_count;
                 table.value_context.sorted = true;
                 return;
@@ -222,7 +469,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
 
+            const batch_slice_id = table.batch_slice_index;
+            // check if before sorted
             table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            // just do prefix
+            // set after to table.count
+            table.batch_slice_prefix[batch_slice_id] = table.count();
+
+            table.batch_slice_index += 1;
 
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
@@ -235,6 +489,100 @@ pub fn TableMemoryType(comptime Table: type) type {
             const target_count = sort_suffix_from_offset(table.values_used(), offset);
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
+        }
+
+        /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
+        /// returned count may be less than or equal to the original `values.len`.)
+        fn merge_looser_tree(table: *TableMemory) u32 {
+            assert(table.mutability == .immutable);
+
+            if (table.count() == 0) {
+                return 0;
+            }
+
+            for (
+                table.batch_slice_prefix[0 .. table.batch_slice_index - 1],
+                table.batch_slice_prefix[1..table.batch_slice_index],
+                0..,
+            ) |
+                maybe_begin,
+                maybe_end,
+                i,
+            | {
+                const begin = maybe_begin orelse 0;
+                const end = maybe_end orelse 0;
+                table.batch_slices[i] = .{
+                    .start = begin,
+                    .end = end,
+                };
+            }
+
+            LooserTree.merge(table.values[0..table.count()], &table.batch_slices, table.values_scratch[0..table.count()]);
+
+            const sorted_values = table.values_scratch;
+            table.values_scratch = table.values;
+            table.values = sorted_values;
+
+            //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+
+            // Merge values with identical keys (last one wins) and collapse tombstones for
+            // secondary indexes.
+            const source_count: u32 = table.count(); //@intCast(table.count());
+            var source_index: u32 = 0;
+            var target_index: u32 = 0;
+            while (source_index < source_count) {
+                const value = table.values[source_index];
+                table.values[target_index] = value;
+
+                // If we're at the end of the source, there is no next value, so the next value
+                // can't be equal.
+                const value_next_equal = source_index + 1 < source_count and
+                    key_from_value(&table.values[source_index]) ==
+                    key_from_value(&table.values[source_index + 1]);
+
+                if (value_next_equal) {
+                    if (Table.usage == .secondary_index) {
+                        // Secondary index optimization --- cancel out put and remove.
+                        // NB: while this prevents redundant tombstones from getting to disk, we
+                        // still spend some extra CPU work to sort the entries in memory. Ideally,
+                        // we annihilate tombstones immediately, before sorting, but that's tricky
+                        // to do with scopes.
+                        assert(Table.tombstone(&table.values[source_index]) !=
+                            Table.tombstone(&table.values[source_index + 1]));
+                        source_index += 2;
+                        target_index += 0;
+                    } else {
+                        // The last value in a run of duplicates needs to be the one that ends up in
+                        // target.
+                        source_index += 1;
+                        target_index += 0;
+                    }
+                } else {
+                    source_index += 1;
+                    target_index += 1;
+                }
+            }
+
+            // At this point, source_index and target_index are actually counts.
+            // source_index will always be incremented after the final iteration as part of the
+            // continue expression.
+            // target_index will always be incremented, since either source_index runs out first
+            // so value_next_equal is false, or a new value is hit, which will increment it.
+            const target_count = target_index;
+            assert(target_count <= source_count);
+            assert(source_count == source_index);
+
+            if (constants.verify) {
+                if (0 < target_count) {
+                    for (
+                        table.values[0 .. target_count - 1],
+                        table.values[1..target_count],
+                    ) |*value, *value_next| {
+                        assert(key_from_value(value) < key_from_value(value_next));
+                    }
+                }
+            }
+            return target_count;
         }
 
         /// Returns the new length of `values`. (Values are deduplicated after sorting, so the

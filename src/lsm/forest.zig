@@ -521,10 +521,15 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
 
             if (last_half_beat) {
+                // sort all tables
+
+                var timer = std.time.Timer.start() catch unreachable;
                 inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
                     tree.table_immutable.sort();
                 }
+                const duration_ns = timer.read();
+                std.debug.print("sort took {} ms \n", .{duration_ns / std.time.ns_per_ms});
             }
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
