@@ -258,9 +258,12 @@ fn build_tigerbeetle_target(
     // We shell out to `zip` for creating archives, so we need an absolute path here.
     const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
 
-    const sha_date = try shell.exec_stdout("git show --no-patch --no-notes --pretty=%cI {sha}", .{
-        .sha = info.sha,
-    });
+    const commit_timestamp_seconds: u64 = commit_timestamp_seconds: {
+        const timestamp = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
+            .sha = info.sha,
+        });
+        break :commit_timestamp_seconds try std.fmt.parseInt(u64, timestamp, 10);
+    };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
     // `dist`.
@@ -305,10 +308,15 @@ fn build_tigerbeetle_target(
         assert(std.mem.indexOf(u8, output, build_mode) != null);
     }
 
-    try shell.exec("touch -d {sha_date} {exe_name}", .{
-        .sha_date = sha_date,
-        .exe_name = exe_name,
-    });
+    {
+        const fd = try shell.cwd.openFile(exe_name, .{ .mode = .write_only });
+        defer fd.close();
+
+        const atime_ns = commit_timestamp_seconds * std.time.ns_per_s;
+        const mtime_ns = atime_ns;
+        try fd.updateTimes(atime_ns, mtime_ns);
+    }
+
     try shell.exec("zip -9 {zip_path} {exe_name}", .{
         .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
         .exe_name = exe_name,
