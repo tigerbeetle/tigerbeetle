@@ -194,28 +194,28 @@ pub const AccountingAuditor = struct {
     creates_delivered: []usize,
 
     pub fn init(
-        allocator: std.mem.Allocator,
+        gpa: std.mem.Allocator,
         prng: *stdx.PRNG,
         options: Options,
     ) !AccountingAuditor {
         assert(options.accounts_max >= 2);
         assert(options.client_count > 0);
 
-        const accounts = try allocator.alloc(tb.Account, options.accounts_max);
-        errdefer allocator.free(accounts);
+        const accounts = try gpa.alloc(tb.Account, options.accounts_max);
+        errdefer gpa.free(accounts);
         @memset(accounts, undefined);
 
-        const accounts_state = try allocator.alloc(AccountState, options.accounts_max);
-        errdefer allocator.free(accounts_state);
+        const accounts_state = try gpa.alloc(AccountState, options.accounts_max);
+        errdefer gpa.free(accounts_state);
         @memset(accounts_state, AccountState{});
 
         // The number of known intersection values for the secondary indices is kept low enough to
         // explore different cardinalities.
-        const query_intersections = try allocator.alloc(
+        const query_intersections = try gpa.alloc(
             QueryIntersection,
             options.accounts_max / 2,
         );
-        errdefer allocator.free(query_intersections);
+        errdefer gpa.free(query_intersections);
         for (query_intersections, 1..) |*query_intersection, index| {
             query_intersection.* = .{
                 .user_data_64 = @intCast(index * 1_000_000),
@@ -225,26 +225,26 @@ pub const AccountingAuditor = struct {
         }
 
         var pending_transfers = std.AutoHashMapUnmanaged(u128, PendingTransfer){};
-        errdefer pending_transfers.deinit(allocator);
+        errdefer pending_transfers.deinit(gpa);
         try pending_transfers.ensureTotalCapacity(
-            allocator,
+            gpa,
             @intCast(options.transfers_pending_max),
         );
 
-        var pending_expiries = PendingExpiryQueue.init(allocator, {});
+        var pending_expiries = PendingExpiryQueue.init(gpa, {});
         errdefer pending_expiries.deinit();
         try pending_expiries.ensureTotalCapacity(options.transfers_pending_max);
 
         var in_flight = InFlightQueue{};
-        errdefer in_flight.deinit(allocator);
-        try in_flight.ensureTotalCapacity(allocator, @intCast(options.in_flight_max));
+        errdefer in_flight.deinit(gpa);
+        try in_flight.ensureTotalCapacity(gpa, @intCast(options.in_flight_max));
 
-        const creates_sent = try allocator.alloc(usize, options.client_count);
-        errdefer allocator.free(creates_sent);
+        const creates_sent = try gpa.alloc(usize, options.client_count);
+        errdefer gpa.free(creates_sent);
         @memset(creates_sent, 0);
 
-        const creates_delivered = try allocator.alloc(usize, options.client_count);
-        errdefer allocator.free(creates_delivered);
+        const creates_delivered = try gpa.alloc(usize, options.client_count);
+        errdefer gpa.free(creates_delivered);
         @memset(creates_delivered, 0);
 
         return .{
@@ -261,14 +261,15 @@ pub const AccountingAuditor = struct {
         };
     }
 
-    pub fn deinit(self: *AccountingAuditor, allocator: std.mem.Allocator) void {
-        allocator.free(self.accounts);
-        allocator.free(self.accounts_state);
-        self.pending_transfers.deinit(allocator);
+    pub fn deinit(self: *AccountingAuditor, gpa: std.mem.Allocator) void {
+        gpa.free(self.creates_delivered);
+        gpa.free(self.creates_sent);
+        self.in_flight.deinit(gpa);
         self.pending_expiries.deinit();
-        self.in_flight.deinit(allocator);
-        allocator.free(self.creates_sent);
-        allocator.free(self.creates_delivered);
+        self.pending_transfers.deinit(gpa);
+        gpa.free(self.query_intersections);
+        gpa.free(self.accounts_state);
+        gpa.free(self.accounts);
     }
 
     pub fn done(self: *const AccountingAuditor) bool {
