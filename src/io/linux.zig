@@ -1691,30 +1691,11 @@ pub const IO = struct {
 
         assert(flags.ACCMODE == .RDONLY or lock_acquired);
 
-        // Ask the file system to allocate contiguous sectors for the file (if possible):
-        // If the file system does not support `fallocate()`, then this could mean more seeks or a
-        // panic if we run out of disk space (ENOSPC).
+        // Ask the file system to allocate contiguous sectors for the file. fs_allocate calls
+        // fallocate without any special flags: this is supported on all filesystems.
         if (method == .create and kind == .file) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
-            fs_allocate(fd, size) catch |err| switch (err) {
-                error.OperationNotSupported => {
-                    log.warn("file system does not support fallocate(), an ENOSPC will panic", .{});
-                    log.info("allocating by writing to the last sector " ++
-                        "of the file instead...", .{});
-
-                    const sector_size = constants.sector_size;
-                    const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
-
-                    // Handle partial writes where the physical sector is
-                    // less than a logical sector:
-                    const write_offset = size - sector.len;
-                    var written: usize = 0;
-                    while (written < sector.len) {
-                        written += try posix.pwrite(fd, sector[written..], write_offset + written);
-                    }
-                },
-                else => |e| return e,
-            };
+            try fs_allocate(fd, size);
         }
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
@@ -1844,8 +1825,7 @@ pub const IO = struct {
         }
     }
 
-    /// Allocates a file contiguously using fallocate() if supported.
-    /// Alternatively, writes to the last sector so that at least the file size is correct.
+    /// Allocates a file contiguously using fallocate().
     fn fs_allocate(fd: fd_t, size: u64) !void {
         const mode: i32 = 0;
         const offset: i64 = 0;
