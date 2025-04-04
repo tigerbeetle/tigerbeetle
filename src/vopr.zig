@@ -994,7 +994,7 @@ pub const Simulator = struct {
             ReplicaSet,
             cluster_op_head - cluster_op_repair_min + 1,
         );
-        errdefer gpa.free(replicas_missing_ops);
+        defer gpa.free(replicas_missing_ops);
 
         for (replicas_missing_ops, cluster_op_repair_min..) |*replicas_missing_op, op| {
             replicas_missing_op.* = .{};
