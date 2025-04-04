@@ -6,6 +6,7 @@ const testing = std.testing;
 const tb_client = @import("tb_client.zig");
 const stdx = tb_client.vsr.stdx;
 const constants = @import("../../constants.zig");
+const tb = tb_client.vsr.tigerbeetle;
 
 const Mutex = std.Thread.Mutex;
 const Condition = std.Thread.Condition;
@@ -109,9 +110,18 @@ test "u128 consistency test" {
 test "tb_client echo" {
     // Using the create_accounts operation for this test.
     const RequestContext = RequestContextType(constants.message_body_size_max);
-    const create_accounts_operation: u8 = @intFromEnum(tb_client.Operation.create_accounts);
-    const event_size = @sizeOf(tb_client.exports.tb_account_t);
-    const event_request_max = @divFloor(constants.message_body_size_max, event_size);
+
+    // Test multiple operations to prevent all requests from ending up in the same batch.
+    const operations = [_]tb_client.Operation{
+        tb_client.Operation.create_accounts,
+        tb_client.Operation.create_transfers,
+        tb_client.Operation.lookup_accounts,
+        tb_client.Operation.lookup_transfers,
+        tb_client.Operation.get_account_transfers,
+        tb_client.Operation.get_account_balances,
+        tb_client.Operation.query_accounts,
+        tb_client.Operation.query_transfers,
+    };
 
     // Initializing an echo client for testing purposes.
     // We ensure that the retry mechanism is being tested
@@ -119,7 +129,7 @@ test "tb_client echo" {
     var client: tb_client.ClientInterface = undefined;
     const cluster_id: u128 = 0;
     const address = "3000";
-    const concurrency_max: u32 = constants.client_request_queue_max * 2;
+    const concurrency_max: u32 = constants.client_request_queue_max * operations.len;
     const tb_context: usize = 42;
     try tb_client.init_echo(
         testing.allocator,
@@ -133,15 +143,58 @@ test "tb_client echo" {
     defer client.deinit() catch unreachable;
     var prng = stdx.PRNG.from_seed(tb_context);
 
-    const requests: []RequestContext = try testing.allocator.alloc(RequestContext, concurrency_max);
+    const requests: []RequestContext = try testing.allocator.alloc(
+        RequestContext,
+        concurrency_max,
+    );
     defer testing.allocator.free(requests);
 
     // Repeating the same test multiple times to stress the
     // cycle of message exhaustion followed by completions.
     const repetitions_max = 100;
     var repetition: u32 = 0;
+    var operation_current: ?tb_client.Operation = null;
     while (repetition < repetitions_max) : (repetition += 1) {
         var completion = Completion{ .pending = concurrency_max };
+
+        const operation: tb_client.Operation = operation: {
+            if (operation_current == null or
+                // Sometimes repeat the same operation for testing multi-batch.
+                prng.boolean())
+            {
+                operation_current = operations[prng.index(operations)];
+            }
+            break :operation operation_current.?;
+        };
+
+        const event_size: u32, const event_request_max: u32 = switch (operation) {
+            // All multi-batched operations require a minimum trailer size of one element:
+            .create_accounts => .{
+                @sizeOf(tb.Account),
+                @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
+            },
+            .create_transfers => .{
+                @sizeOf(tb.Transfer),
+                @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
+            },
+            .lookup_accounts => .{
+                @sizeOf(u128),
+                @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
+            },
+            .lookup_transfers => .{
+                @sizeOf(u128),
+                @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
+            },
+            .get_account_transfers, .get_account_balances => .{
+                @sizeOf(tb.AccountFilter),
+                1,
+            },
+            .query_accounts, .query_transfers => .{
+                @sizeOf(tb.QueryFilter),
+                1,
+            },
+            else => unreachable,
+        };
 
         // Submitting some random data to be echoed back:
         for (requests) |*request| {
@@ -157,7 +210,7 @@ test "tb_client echo" {
             prng.fill(request.sent_data[0..request.sent_data_size]);
 
             const packet = &request.packet;
-            packet.operation = create_accounts_operation;
+            packet.operation = @intFromEnum(operation);
             packet.user_data = request;
             packet.data = &request.sent_data;
             packet.data_size = request.sent_data_size;

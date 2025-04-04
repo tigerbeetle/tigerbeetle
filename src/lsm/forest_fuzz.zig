@@ -13,6 +13,7 @@ const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
+const Time = @import("../testing/time.zig").Time;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig")
@@ -82,7 +83,7 @@ const Environment = struct {
         .lsm_forest_node_count = node_count,
         .cache_entries_accounts = cache_entries_max,
         .cache_entries_transfers = cache_entries_max,
-        .cache_entries_posted = cache_entries_max,
+        .cache_entries_transfers_pending = cache_entries_max,
     });
 
     const free_set_fragments_max = 2048;
@@ -112,7 +113,8 @@ const Environment = struct {
 
     state: State,
     storage: *Storage,
-    trace: vsr.trace.Tracer,
+    time: Time,
+    trace: Storage.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context,
     grid: Grid,
@@ -124,7 +126,8 @@ const Environment = struct {
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.trace = try vsr.trace.Tracer.init(gpa, 0, replica, .{});
+        env.time = Time.init_simple();
+        env.trace = try Storage.Tracer.init(gpa, &env.time, 0, replica, .{});
 
         env.superblock = try SuperBlock.init(gpa, .{
             .storage = env.storage,

@@ -6,7 +6,8 @@ const assert = std.debug.assert;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 
-const Storage = vsr.storage.StorageType(IO);
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const tb = vsr.tigerbeetle;
 
@@ -331,25 +332,25 @@ fn ctype_type_name(comptime Type: type) []const u8 {
     return comptime "C" ++ mapping_name_from_type(mappings_all, Type).?;
 }
 
-fn emit_method(buffer: *Buffer, comptime operation: std.builtin.Type.EnumField, options: struct {
-    is_async: bool,
-}) void {
-    const op: StateMachine.Operation = @enumFromInt(operation.value);
-
-    const event_type = comptime if (StateMachine.event_is_slice(op))
-        "list[" ++ zig_to_python(StateMachine.EventType(op)) ++ "]"
+fn emit_method(
+    buffer: *Buffer,
+    comptime operation: StateMachine.Operation,
+    options: struct { is_async: bool },
+) void {
+    const event_type = comptime if (StateMachine.operation_is_batchable(operation))
+        "list[" ++ zig_to_python(StateMachine.EventType(operation)) ++ "]"
     else
-        zig_to_python(StateMachine.EventType(op));
+        zig_to_python(StateMachine.EventType(operation));
 
     const result_type =
-        comptime "list[" ++ zig_to_python(StateMachine.ResultType(op)) ++ "]";
+        comptime "list[" ++ zig_to_python(StateMachine.ResultType(operation)) ++ "]";
 
     // For ergonomics, the client allows calling things like .query_accounts(filter) even
     // though the _submit function requires a list for everything. Wrap them here.
-    const event_name_or_list = comptime if (!StateMachine.event_is_slice(op))
-        "[" ++ StateMachine.event_name(op) ++ "]"
+    const event_name_or_list = comptime if (!StateMachine.operation_is_batchable(operation))
+        "[" ++ event_name(operation) ++ "]"
     else
-        StateMachine.event_name(op);
+        event_name(operation);
 
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
@@ -364,15 +365,15 @@ fn emit_method(buffer: *Buffer, comptime operation: std.builtin.Type.EnumField, 
     ,
         .{
             .prefix_fn = if (options.is_async) "async " else "",
-            .fn_name = operation.name,
-            .event_name = StateMachine.event_name(op),
+            .fn_name = @tagName(operation),
+            .event_name = event_name(operation),
             .event_type = event_type,
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = to_uppercase(operation.name),
-            .event_type_c = ctype_type_name(StateMachine.EventType(op)),
-            .result_type_c = ctype_type_name(StateMachine.ResultType(op)),
+            .uppercase_name = to_uppercase(@tagName(operation)),
+            .event_type_c = ctype_type_name(StateMachine.EventType(operation)),
+            .result_type_c = ctype_type_name(StateMachine.ResultType(operation)),
         },
     );
 }
@@ -523,12 +524,17 @@ pub fn main() !void {
             \\
         , .{prefix_class});
 
-        inline for (std.meta.fields(StateMachine.Operation)) |operation| {
-            const op: StateMachine.Operation = @enumFromInt(operation.value);
-            // TODO: Pulse shouldn't be hardcoded.
-            if (op == .pulse) continue;
-            if (op == .get_events) continue;
-
+        const operations: []const StateMachine.Operation = &.{
+            .create_accounts,
+            .create_transfers,
+            .lookup_accounts,
+            .lookup_transfers,
+            .get_account_transfers,
+            .get_account_balances,
+            .query_accounts,
+            .query_transfers,
+        };
+        inline for (operations) |operation| {
             emit_method(&buffer, operation, .{ .is_async = is_async });
         }
 
@@ -536,4 +542,21 @@ pub fn main() !void {
     }
 
     try std.io.getStdOut().writeAll(buffer.inner.items);
+}
+
+/// Used by client code generation to make clearer APIs: the name of the Event parameter,
+/// when used as a variable.
+/// Inline function so that `operation` can be known at comptime.
+fn event_name(comptime operation: StateMachine.Operation) []const u8 {
+    return switch (operation) {
+        .create_accounts => "accounts",
+        .create_transfers => "transfers",
+        .lookup_accounts => "accounts",
+        .lookup_transfers => "transfers",
+        .get_account_transfers => "filter",
+        .get_account_balances => "filter",
+        .query_accounts => "query_filter",
+        .query_transfers => "query_filter",
+        else => comptime unreachable,
+    };
 }

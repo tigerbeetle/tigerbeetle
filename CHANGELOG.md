@@ -3,6 +3,90 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.34
+
+Released: 2025-03-31
+
+### Safety And Performance
+
+- [#2861](https://github.com/tigerbeetle/tigerbeetle/pull/2861)
+
+  Add basic fuzzing for the state machine.
+
+- [#2846](https://github.com/tigerbeetle/tigerbeetle/pull/2846)
+
+  Re-do tickless VOPR to simulate fast IOPs.
+
+- [#2852](https://github.com/tigerbeetle/tigerbeetle/pull/2852)
+
+  Allow simulating one-replica-down scenario in the VOPR.
+
+- [#2858](https://github.com/tigerbeetle/tigerbeetle/pull/2858)
+
+  Print dropped packets in the VOPR.
+
+- [#2850](https://github.com/tigerbeetle/tigerbeetle/pull/2850)
+
+  Various changes for VOPR performance mode.
+
+- [#2821](https://github.com/tigerbeetle/tigerbeetle/pull/2821)
+
+  A quicker request protocol for VSR.
+
+- [#2848](https://github.com/tigerbeetle/tigerbeetle/pull/2848)
+
+  Account for pulses when computing the size of the request queue in VSR.
+
+- [#2853](https://github.com/tigerbeetle/tigerbeetle/pull/2853)
+
+  Fix a possible panic in the Node.js client by handling the "too much data" error.
+
+- [#2860](https://github.com/tigerbeetle/tigerbeetle/pull/2860)
+
+  Fix a possible replica crash if negative timestamps would be provided to AccountFilter or
+  QueryFilter.
+
+### Features
+
+- [#2830](https://github.com/tigerbeetle/tigerbeetle/pull/2830)
+
+  Allow `tigerbeetle inspect` to run on open data files. This helps with getting an idea what's
+  going on on a running cluster without needing to shut it down first.
+
+### Internals
+
+- [#2833](https://github.com/tigerbeetle/tigerbeetle/pull/2833)
+
+  Vendor our own BitSet in stdx, TigerBeetle's extended standard library.
+  This change reduces the Linux binary size by 38KiB.
+
+- [#2862](https://github.com/tigerbeetle/tigerbeetle/pull/2862)
+
+  Track the REPL execution time on [DevHub](https://devhub.tigerbeetle.com).
+
+- [#2859](https://github.com/tigerbeetle/tigerbeetle/pull/2859)
+
+  Fix the wording in the [correcting transfers
+  example](https://docs.tigerbeetle.com/coding/recipes/correcting-transfers/#example).
+  Thanks @shraddha38!
+
+- [#2845](https://github.com/tigerbeetle/tigerbeetle/pull/2845)
+
+  Remove the global allocator from the fuzzers and pass the allocator explicitly to align more with
+  TigerStyle.
+
+- [#2854](https://github.com/tigerbeetle/tigerbeetle/pull/2854)
+
+  Block merges in the CI based on DevHub pipeline results.
+
+- [#2840](https://github.com/tigerbeetle/tigerbeetle/pull/2840)
+
+  Add replica/lsm/grid/journal metrics to VSR.
+
+### TigerTracks 🎧
+
+- [Pushing Ownwards](https://www.youtube.com/watch?v=a7AhS0SxE1s)
+
 ## TigerBeetle 0.16.33
 
 Released: 2025-03-24

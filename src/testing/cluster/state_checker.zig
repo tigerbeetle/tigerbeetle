@@ -5,6 +5,7 @@ const mem = std.mem;
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 const stdx = @import("../../stdx.zig");
+const maybe = stdx.maybe;
 
 const message_pool = @import("../../message_pool.zig");
 const MessagePool = message_pool.MessagePool;
@@ -35,7 +36,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
         replicas: []const Replica,
         clients: []const Client,
+        /// Tracks the latest reply for every non-evicted client.
+        client_replies: std.AutoArrayHashMapUnmanaged(u128, vsr.Header.Reply),
         clients_exhaustive: bool = true,
+        clients_register_op_latest: u64 = 0,
 
         /// The number of times the canonical state has been advanced.
         requests_committed: u64 = 0,
@@ -62,6 +66,10 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .replicas = commit_replicas,
             });
 
+            var client_replies: std.AutoArrayHashMapUnmanaged(u128, vsr.Header.Reply) = .{};
+            try client_replies.ensureTotalCapacity(allocator, constants.clients_max);
+            errdefer client_replies.deinit(allocator);
+
             const replica_head_max = try allocator.alloc(ReplicaHead, options.replicas.len);
             errdefer allocator.free(replica_head_max);
             for (replica_head_max) |*head| head.* = .{ .view = 0, .op = 0 };
@@ -72,25 +80,66 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                 .commits = commits,
                 .replicas = options.replicas,
                 .clients = options.clients,
+                .client_replies = client_replies,
                 .replica_head_max = replica_head_max,
             };
         }
 
         pub fn deinit(state_checker: *StateChecker) void {
             const allocator = state_checker.commits.allocator;
-            state_checker.commits.deinit();
+
             allocator.free(state_checker.replica_head_max);
+            state_checker.client_replies.deinit(allocator);
+            state_checker.commits.deinit();
+        }
+
+        pub fn on_client_eviction(state_checker: *StateChecker, client_id: u128) void {
+            const removed = state_checker.client_replies.swapRemove(client_id);
+            maybe(removed);
+            // Disable checking of `Client.request_inflight`, to guard against the following panic:
+            // 1. Client `A` sends an `operation=register` to a fresh cluster. (`A₁`)
+            // 2. Cluster prepares + commits `A₁`, and sends the reply to `A`.
+            // 4. `A` receives the reply to `A₁`, and issues a second request (`A₂`).
+            // 5. `clients_max` other clients register, evicting `A`'s session.
+            // 6. An old retry (or replay) of `A₁` arrives at the cluster.
+            // 7. `A₁` is committed (for a second time, as a different op).
+            //    If `StateChecker` were to check `Client.request_inflight`, it would see that `A₁`
+            //    is not actually in-flight, despite being committed for the "first time" by a
+            //    replica.
+            state_checker.clients_exhaustive = false;
         }
 
         pub fn on_message(state_checker: *StateChecker, message: *const Message) void {
-            if (message.header.into_const(.prepare_ok)) |header| {
-                const head = &state_checker.replica_head_max[header.replica];
-                if (header.view > head.view or
-                    (header.view == head.view and header.op > head.op))
-                {
-                    head.view = header.view;
-                    head.op = header.op;
-                }
+            switch (message.header.into_any()) {
+                .prepare_ok => |header| {
+                    const head = &state_checker.replica_head_max[header.replica];
+                    if (header.view > head.view or
+                        (header.view == head.view and header.op > head.op))
+                    {
+                        head.view = header.view;
+                        head.op = header.op;
+                    }
+                },
+                .reply => |header| {
+                    if (header.operation == .register and
+                        header.op > state_checker.clients_register_op_latest)
+                    {
+                        state_checker.client_replies
+                            .putAssumeCapacityNoClobber(header.client, header.*);
+                        state_checker.clients_register_op_latest = header.op;
+                    } else {
+                        if (state_checker.client_replies.getEntry(header.client)) |entry| {
+                            if (entry.value_ptr.op < header.op) {
+                                entry.value_ptr.* = header.*;
+                            } else {
+                                // An old message is replayed.
+                            }
+                        } else {
+                            // Client was evicted, an old message is replayed.
+                        }
+                    }
+                },
+                else => {},
             }
         }
 

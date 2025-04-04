@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const stdx = @import("./stdx.zig");
+
 const os = std.os;
 const posix = std.posix;
 const system = posix.system;
@@ -8,6 +10,7 @@ const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
+const Instant = stdx.Instant;
 
 pub const Time = struct {
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
@@ -32,6 +35,10 @@ pub const Time = struct {
         if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
         return m;
+    }
+
+    pub fn monotonic_instant(self: *Time) Instant {
+        return Instant{ .base_ns = self.monotonic() };
     }
 
     fn monotonic_windows() u64 {
@@ -142,3 +149,11 @@ pub const Time = struct {
 
     pub fn tick(_: *Time) void {}
 };
+
+test "Time monotonic smoke" {
+    var time: Time = .{};
+    const instant_1 = time.monotonic_instant();
+    const instant_2 = time.monotonic_instant();
+    assert(instant_1.duration_since(instant_1).nanoseconds == 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+}

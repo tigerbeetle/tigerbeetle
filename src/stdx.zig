@@ -57,10 +57,10 @@ test "div_ceil" {
     try std.testing.expectEqual(div_ceil(@as(u64, max) - 2, 2), max / 2);
 }
 
-pub const CopyPrecision = enum { exact, inexact };
+pub const SizePrecision = enum { exact, inexact };
 
 pub inline fn copy_left(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -89,7 +89,7 @@ test "copy_left" {
 }
 
 pub inline fn copy_right(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -118,7 +118,7 @@ test "copy_right" {
 }
 
 pub inline fn copy_disjoint(
-    comptime precision: CopyPrecision,
+    comptime precision: SizePrecision,
     comptime T: type,
     target: []T,
     source: []const T,
@@ -176,6 +176,83 @@ pub fn zeroed(bytes: []const u8) bool {
         byte_bits |= byte;
     }
     return byte_bits == 0;
+}
+
+/// Similar to `std.mem.bytesAsSlice`, but allows buffers with inexact sizes,
+/// returning the largest possible slice that is less than or equal to the buffer length.
+/// Differently from `std.mem.bytesAsSlice` that can return `[]align(1) T`, this function
+/// always `@alignCast` the result.
+pub fn bytes_as_slice(
+    comptime precision: SizePrecision,
+    comptime T: type,
+    bytes: anytype,
+) type: {
+    const type_info = @typeInfo(@TypeOf(bytes));
+    switch (type_info) {
+        .Pointer => |info| switch (info.size) {
+            .One => switch (@typeInfo(info.child)) {
+                .Array => |array_info| assert(array_info.child == u8),
+                else => unreachable,
+            },
+            .Slice => assert(info.child == u8),
+            else => unreachable,
+        },
+        else => unreachable,
+    }
+
+    break :type if (type_info.Pointer.is_const) []const T else []T;
+} {
+    switch (precision) {
+        .exact => {
+            assert(bytes.len % @sizeOf(T) == 0);
+            return @alignCast(std.mem.bytesAsSlice(T, bytes));
+        },
+        .inexact => {
+            const size = @divFloor(bytes.len, @sizeOf(T)) * @sizeOf(T);
+            return @alignCast(std.mem.bytesAsSlice(T, bytes[0..size]));
+        },
+    }
+}
+
+test bytes_as_slice {
+    const testing = std.testing;
+    var buffer: [64]u8 = undefined;
+    const T10 = extern struct { content: [10]u8 };
+    const T16 = extern struct { content: [16]u8 };
+
+    try testing.expectEqual(
+        @as(usize, 4),
+        bytes_as_slice(.exact, T16, buffer[0..]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 6),
+        bytes_as_slice(.exact, T10, buffer[0..60]).len,
+    );
+
+    try testing.expectEqual(
+        @as(usize, 6),
+        bytes_as_slice(.inexact, T10, buffer[0..]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 4),
+        bytes_as_slice(.inexact, T16, buffer[0..]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 6),
+        bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 1]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 3),
+        bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 1]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 5),
+        bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 10]).len,
+    );
+    try testing.expectEqual(
+        @as(usize, 3),
+        bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 10]).len,
+    );
 }
 
 const Cut = struct {
@@ -846,23 +923,12 @@ pub fn array_print(
 }
 
 pub const Instant = struct {
-    // Sneak the std version of Instant past tidy.
-    const time = std.time;
+    base_ns: u64,
 
-    base: time.Instant,
-
-    pub fn now() Instant {
-        const instant = time.Instant.now() catch @panic("std.time." ++ "Instant.now() unsupported");
-        return .{ .base = instant };
-    }
-
-    pub fn duration_since(now_: Instant, earlier: Instant) Duration {
-        if (now_.base.order(earlier.base) == .lt) {
-            return .{ .nanoseconds = 0 };
-        } else {
-            const elapsed_ns = now_.base.since(earlier.base);
-            return .{ .nanoseconds = elapsed_ns };
-        }
+    pub fn duration_since(now: Instant, earlier: Instant) Duration {
+        assert(now.base_ns >= earlier.base_ns);
+        const elapsed_ns = now.base_ns - earlier.base_ns;
+        return .{ .nanoseconds = elapsed_ns };
     }
 };
 
@@ -879,21 +945,15 @@ pub const Duration = struct {
 };
 
 test "Instant/Duration" {
-    const instant_1 = Instant.now();
-    const instant_2 = Instant.now();
-    assert(instant_1.duration_since(instant_2).nanoseconds == 0);
-    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+    const instant_1: Instant = .{ .base_ns = 100 * std.time.ns_per_day };
+    const instant_2: Instant = .{ .base_ns = 100 * std.time.ns_per_day + std.time.ns_per_s };
+    assert(instant_1.duration_since(instant_1).nanoseconds == 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds == std.time.ns_per_s);
 
-    if (builtin.os.tag == .linux) {
-        var instant_3 = instant_1;
-        instant_3.base.timestamp.tv_sec += 1;
-        assert(instant_1.duration_since(instant_3).nanoseconds == 0);
-
-        const duration = instant_3.duration_since(instant_1);
-        assert(duration.nanoseconds == 1_000_000_000);
-        assert(duration.microseconds() == 1_000_000);
-        assert(duration.milliseconds() == 1_000);
-    }
+    const duration = instant_2.duration_since(instant_1);
+    assert(duration.nanoseconds == 1_000_000_000);
+    assert(duration.microseconds() == 1_000_000);
+    assert(duration.milliseconds() == 1_000);
 }
 
 // DateTime in UTC, intended primarily for logging.

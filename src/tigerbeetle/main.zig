@@ -17,13 +17,15 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Storage = vsr.storage.StorageType(IO);
+const Tracer = vsr.trace.TracerType(Time);
+pub const Storage = vsr.storage.StorageType(IO, Tracer);
 const AOF = vsr.aof.AOF;
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-const Grid = vsr.GridType(Storage);
+pub const StateMachine =
+    vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+pub const Grid = vsr.GridType(Storage);
 
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
 const SuperBlock = vsr.SuperBlockType(Storage);
@@ -367,6 +369,7 @@ const Command = struct {
 
         const trace_writer = if (trace_file) |file| file.writer() else null;
 
+        var time: Time = .{};
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -381,7 +384,7 @@ const Command = struct {
             .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
-            .time = .{},
+            .time = &time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .state_machine_options = .{
@@ -390,7 +393,7 @@ const Command = struct {
                 .lsm_forest_node_count = args.lsm_forest_node_count,
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
-                .cache_entries_posted = args.cache_transfers_pending,
+                .cache_entries_transfers_pending = args.cache_transfers_pending,
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),

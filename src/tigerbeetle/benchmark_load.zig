@@ -22,10 +22,9 @@ const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const StateMachine = @import("./main.zig").StateMachine;
 const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 const tb = vsr.tigerbeetle;
 const IdPermutation = vsr.testing.IdPermutation;
@@ -366,18 +365,28 @@ const Benchmark = struct {
         if (b.account_index >= b.account_count) {
             if (b.clients_busy.empty()) b.run_finish();
         } else {
-            const accounts_count = @min(b.account_count, b.account_batch_size);
-            const accounts_bytes = &b.client_requests[client_index];
-            const accounts = std.mem.bytesAsSlice(tb.Account, accounts_bytes)[0..accounts_count];
+            const account_count: u32 = @intCast(@min(b.account_count, b.account_batch_size));
+            const accounts = stdx.bytes_as_slice(
+                .exact,
+                tb.Account,
+                &b.client_requests[client_index],
+            )[0..account_count];
             b.build_accounts(accounts);
-            b.request(client_index, .create_accounts, std.mem.sliceAsBytes(accounts));
+            b.request(client_index, .create_accounts, .{
+                .batch_count = account_count,
+                .event_size = @sizeOf(tb.Account),
+            });
         }
     }
 
     fn create_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
         assert(b.stage == .create_accounts);
 
-        const create_accounts_results = std.mem.bytesAsSlice(tb.CreateAccountsResult, result);
+        const create_accounts_results = stdx.bytes_as_slice(
+            .exact,
+            tb.CreateAccountsResult,
+            result,
+        );
         if (create_accounts_results.len > 0) {
             panic("CreateAccountsResults: {any}", .{create_accounts_results});
         }
@@ -392,17 +401,26 @@ const Benchmark = struct {
         if (b.transfer_index >= b.transfer_count) {
             if (b.clients_busy.empty()) b.create_transfers_finish();
         } else {
-            const transfers_count = @min(b.transfer_count, b.transfer_batch_size);
-            const transfers_bytes = &b.client_requests[client_index];
-            const transfers =
-                std.mem.bytesAsSlice(tb.Transfer, transfers_bytes)[0..transfers_count];
+            const transfer_count: u32 = @intCast(@min(b.transfer_count, b.transfer_batch_size));
+            const transfers = stdx.bytes_as_slice(
+                .exact,
+                tb.Transfer,
+                &b.client_requests[client_index],
+            )[0..transfer_count];
             b.build_transfers(transfers);
-            b.request(client_index, .create_transfers, std.mem.sliceAsBytes(transfers));
+            b.request(client_index, .create_transfers, .{
+                .batch_count = transfer_count,
+                .event_size = @sizeOf(tb.Transfer),
+            });
         }
     }
 
     fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
-        const create_transfers_results = std.mem.bytesAsSlice(tb.CreateTransfersResult, result);
+        const create_transfers_results = stdx.bytes_as_slice(
+            .exact,
+            tb.CreateTransfersResult,
+            result,
+        );
         if (create_transfers_results.len > 0) {
             panic("CreateTransfersResults: {any}", .{create_transfers_results});
         }
@@ -460,7 +478,11 @@ const Benchmark = struct {
         // Use hot accounts for queries to equalize the number of results
         // returned on each execution.
         const account_index = b.choose_account_index(.hot);
-        std.mem.bytesAsValue(tb.AccountFilter, request_body).* = .{
+        const filter: *tb.AccountFilter = @alignCast(std.mem.bytesAsValue(
+            tb.AccountFilter,
+            request_body,
+        ));
+        filter.* = .{
             .account_id = b.account_id_permutation.encode(account_index + 1),
             .user_data_128 = 0,
             .user_data_64 = 0,
@@ -478,17 +500,23 @@ const Benchmark = struct {
                 .reversed = false,
             },
         };
-        b.request(client_index, .get_account_transfers, request_body);
+        b.request(client_index, .get_account_transfers, .{
+            .batch_count = 1,
+            .event_size = @sizeOf(tb.AccountFilter),
+        });
     }
 
     fn get_account_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
         assert(b.stage == .get_account_transfers);
 
-        const request_body = b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)];
-        const request_filter = std.mem.bytesAsValue(tb.AccountFilter, request_body);
-        for (std.mem.bytesAsSlice(tb.Transfer, result)) |*transfer| {
-            assert((transfer.debit_account_id == request_filter.account_id) !=
-                (transfer.credit_account_id == request_filter.account_id));
+        const filter: tb.AccountFilter = std.mem.bytesToValue(
+            tb.AccountFilter,
+            b.client_requests[client_index][0..@sizeOf(tb.AccountFilter)],
+        );
+        const results = stdx.bytes_as_slice(.exact, tb.Transfer, result);
+        for (results) |*transfer| {
+            assert((transfer.debit_account_id == filter.account_id) !=
+                (transfer.credit_account_id == filter.account_id));
         }
         b.get_account_transfers(client_index);
     }
@@ -512,29 +540,45 @@ const Benchmark = struct {
         if (b.account_index >= b.account_count) {
             if (b.clients_busy.empty()) b.validate_accounts_finish();
         } else {
-            const account_count = @min(b.account_count, b.account_batch_size);
-            const account_ids =
-                std.mem.bytesAsSlice(u128, &b.client_requests[client_index])[0..account_count];
-            const accounts =
-                std.mem.bytesAsSlice(tb.Account, &b.client_replies[client_index])[0..account_count];
+            const account_count: u32 = @intCast(@min(b.account_count, b.account_batch_size));
+            const account_ids = stdx.bytes_as_slice(
+                .exact,
+                u128,
+                &b.client_requests[client_index],
+            )[0..account_count];
+            const accounts = stdx.bytes_as_slice(
+                .exact,
+                tb.Account,
+                &b.client_replies[client_index],
+            )[0..account_count];
             b.build_accounts(accounts);
             for (account_ids, accounts) |*account_id, account| account_id.* = account.id;
-            b.request(client_index, .lookup_accounts, std.mem.sliceAsBytes(account_ids));
+            b.request(client_index, .lookup_accounts, .{
+                .batch_count = account_count,
+                .event_size = @sizeOf(u128),
+            });
         }
     }
 
     fn validate_accounts_callback(
         b: *Benchmark,
         client_index: u32,
-        result: []align(@sizeOf(tb.Account)) const u8,
+        result: []const u8,
     ) void {
         assert(b.stage == .validate_accounts);
 
         const accounts_count = @min(b.account_count, b.account_batch_size);
         const accounts_expected_body = &b.client_replies[client_index];
-        const accounts_expected =
-            std.mem.bytesAsSlice(tb.Account, accounts_expected_body)[0..accounts_count];
-        const accounts_actual = std.mem.bytesAsSlice(tb.Account, result);
+        const accounts_expected = stdx.bytes_as_slice(
+            .exact,
+            tb.Account,
+            accounts_expected_body,
+        )[0..accounts_count];
+        const accounts_actual = stdx.bytes_as_slice(
+            .exact,
+            tb.Account,
+            result,
+        );
         assert(accounts_actual.len == accounts_count);
         for (accounts_expected, accounts_actual) |expected, actual| {
             assert(expected.id == actual.id);
@@ -564,29 +608,44 @@ const Benchmark = struct {
         if (b.transfer_index >= b.transfer_count) {
             if (b.clients_busy.empty()) b.validate_transfers_finish();
         } else {
-            const transfer_count = @min(b.transfer_count, b.transfer_batch_size);
-            const transfer_ids =
-                std.mem.bytesAsSlice(u128, &b.client_requests[client_index])[0..transfer_count];
-            const transfers_bytes = &b.client_replies[client_index];
-            const transfers = std.mem.bytesAsSlice(tb.Transfer, transfers_bytes)[0..transfer_count];
+            const transfer_count: u32 = @intCast(@min(b.transfer_count, b.transfer_batch_size));
+            const transfer_ids = stdx.bytes_as_slice(
+                .exact,
+                u128,
+                &b.client_requests[client_index],
+            )[0..transfer_count];
+            const transfers = stdx.bytes_as_slice(
+                .exact,
+                tb.Transfer,
+                &b.client_replies[client_index],
+            )[0..transfer_count];
             b.build_transfers(transfers);
             for (transfer_ids, transfers) |*transfer_id, transfer| transfer_id.* = transfer.id;
-            b.request(client_index, .lookup_transfers, std.mem.sliceAsBytes(transfer_ids));
+            b.request(client_index, .lookup_transfers, .{
+                .batch_count = transfer_count,
+                .event_size = @sizeOf(u128),
+            });
         }
     }
 
     fn validate_transfers_callback(
         b: *Benchmark,
         client_index: u32,
-        result: []align(@sizeOf(tb.Transfer)) const u8,
+        result: []const u8,
     ) void {
         assert(b.stage == .validate_transfers);
 
         const transfers_count = @min(b.transfer_count, b.transfer_batch_size);
-        const transfers_expected_body = &b.client_replies[client_index];
-        const transfers_expected =
-            std.mem.bytesAsSlice(tb.Transfer, transfers_expected_body)[0..transfers_count];
-        const transfers_actual = std.mem.bytesAsSlice(tb.Transfer, result);
+        const transfers_expected = stdx.bytes_as_slice(
+            .exact,
+            tb.Transfer,
+            &b.client_replies[client_index],
+        )[0..transfers_count];
+        const transfers_actual = stdx.bytes_as_slice(
+            .exact,
+            tb.Transfer,
+            result,
+        );
         assert(transfers_actual.len == transfers_count);
         for (transfers_expected, transfers_actual) |expected, actual| {
             assert(expected.id == actual.id);
@@ -630,7 +689,10 @@ const Benchmark = struct {
         b: *Benchmark,
         client_index: usize,
         operation: StateMachine.Operation,
-        payload: []const u8,
+        options: struct {
+            batch_count: u32,
+            event_size: u32,
+        },
     ) void {
         assert(b.stage != .idle);
         assert(b.clients_busy.count() < b.clients.len);
@@ -640,6 +702,13 @@ const Benchmark = struct {
         b.clients_request_ns[client_index] = b.timer.read();
         b.request_index += 1;
 
+        var encoder = vsr.multi_batch.MultiBatchEncoder.init(
+            &b.client_requests[client_index],
+            .{ .element_size = options.event_size },
+        );
+        encoder.add(options.batch_count * options.event_size);
+        const bytes_written = encoder.finish();
+
         b.clients[client_index].request(
             request_complete,
             @bitCast(RequestContext{
@@ -648,7 +717,7 @@ const Benchmark = struct {
                 .request_index = @intCast(b.request_index - 1),
             }),
             operation,
-            payload,
+            b.client_requests[client_index][0..bytes_written],
         );
     }
 
@@ -671,12 +740,22 @@ const Benchmark = struct {
         const duration_ms = @divTrunc(duration_ns, std.time.ns_per_ms);
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
+        const input: []const u8 = input: {
+            assert(StateMachine.operation_is_multi_batch(operation));
+            var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(
+                result,
+                .{ .element_size = StateMachine.result_size_bytes(operation) },
+            ) catch unreachable;
+            assert(reply_decoder.batch_count() == 1);
+            break :input reply_decoder.peek();
+        };
+
         switch (operation) {
-            .create_accounts => b.create_accounts_callback(client, result),
-            .create_transfers => b.create_transfers_callback(client, result),
-            .lookup_accounts => b.validate_accounts_callback(client, @alignCast(result)),
-            .lookup_transfers => b.validate_transfers_callback(client, @alignCast(result)),
-            .get_account_transfers => b.get_account_transfers_callback(client, result),
+            .create_accounts => b.create_accounts_callback(client, input),
+            .create_transfers => b.create_transfers_callback(client, input),
+            .lookup_accounts => b.validate_accounts_callback(client, input),
+            .lookup_transfers => b.validate_transfers_callback(client, input),
+            .get_account_transfers => b.get_account_transfers_callback(client, input),
             else => unreachable,
         }
     }

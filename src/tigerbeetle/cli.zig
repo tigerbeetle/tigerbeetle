@@ -22,12 +22,8 @@ const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
-const Storage = vsr.storage.StorageType(vsr.io.IO);
-const Grid = vsr.GridType(Storage);
-const StateMachine = vsr.state_machine.StateMachineType(
-    Storage,
-    constants.state_machine_config,
-);
+const StateMachine = @import("./main.zig").StateMachine;
+const Grid = @import("./main.zig").Grid;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -112,16 +108,16 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
-        account_batch_size: usize = @divExact(
-            constants.message_size_max - @sizeOf(vsr.Header),
-            @sizeOf(tigerbeetle.Account),
+        account_batch_size: usize = StateMachine.operation_event_max(
+            .create_accounts,
+            constants.message_body_size_max,
         ),
         transfer_count: usize = 10_000_000,
         transfer_hot_percent: usize = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: usize = @divExact(
-            constants.message_size_max - @sizeOf(vsr.Header),
-            @sizeOf(tigerbeetle.Transfer),
+        transfer_batch_size: usize = StateMachine.operation_event_max(
+            .create_transfers,
+            constants.message_body_size_max,
         ),
         transfer_batch_delay_us: usize = 0,
         validate: bool = false,
@@ -874,6 +870,16 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     };
 }
 
+const account_batch_size_max = @divExact(
+    constants.message_size_max - @sizeOf(vsr.Header),
+    @sizeOf(tigerbeetle.Account),
+);
+
+const transfer_batch_size_max = @divExact(
+    constants.message_size_max - @sizeOf(vsr.Header),
+    @sizeOf(tigerbeetle.Transfer),
+);
+
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
     const addresses = if (benchmark.addresses) |addresses|
         parse_addresses(addresses, "--addresses", Command.Addresses)
@@ -882,6 +888,30 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
 
     if (benchmark.addresses != null and benchmark.file != null) {
         vsr.fatal(.cli, "--file: --addresses and --file are mutually exclusive", .{});
+    }
+
+    if (benchmark.account_batch_size == 0) {
+        vsr.fatal(.cli, "--account-batch-size must be greater than 0", .{});
+    }
+
+    if (benchmark.account_batch_size > account_batch_size_max) {
+        vsr.fatal(
+            .cli,
+            "--account-batch-size must be less than or equal to {}",
+            .{account_batch_size_max},
+        );
+    }
+
+    if (benchmark.transfer_batch_size == 0) {
+        vsr.fatal(.cli, "--transfer-batch-size must be greater than 0", .{});
+    }
+
+    if (benchmark.transfer_batch_size > transfer_batch_size_max) {
+        vsr.fatal(
+            .cli,
+            "--transfer-batch-size must be less than or equal to {}",
+            .{transfer_batch_size_max},
+        );
     }
 
     return .{

@@ -1945,8 +1945,8 @@ public class IntegrationTests
         var accountResults = client.CreateAccounts(accounts);
         Assert.IsTrue(accountResults.Length == 0);
 
-        var tasks = new Task<CreateTransferResult>[isAsync ? 1_000_000 : 10_000];
-        for (int i = 0; i < tasks.Length; i++)
+        var tasks = new Task[isAsync ? 1_000_000 : 10_000];
+        for (int i = 0; i < tasks.Length; i += 2)
         {
             var transfer = new Transfer
             {
@@ -1958,24 +1958,47 @@ public class IntegrationTests
                 Code = 1,
             };
 
-            // Starts multiple requests.
-            // Wraps the syncAction into a Task for unified logic handling both async and sync tests.
-            tasks[i] = isAsync ? client.CreateTransferAsync(transfer) : Task.Run(() => client.CreateTransfer(transfer));
+            // Starting two async requests of different operations.
+            if (isAsync)
+            {
+                tasks[i] = client.CreateTransferAsync(transfer);
+                tasks[i + 1] = client.LookupAccountAsync(accounts[0].Id);
+            }
+            else
+            {
+                tasks[i] = Task.Run(() => client.CreateTransfer(transfer));
+                tasks[i + 1] = Task.Run(() => client.LookupAccount(accounts[0].Id));
+            }
         }
-
         Task.WhenAll(tasks).Wait();
-        Assert.IsTrue(tasks.All(x => x.Result == CreateTransferResult.Ok));
+
+        foreach (var task in tasks)
+        {
+            switch (task)
+            {
+                case Task<CreateTransferResult> createAccount:
+                    Assert.IsTrue(createAccount.Result == CreateTransferResult.Ok);
+                    break;
+                case Task<Account?> lookupAccount:
+                    Assert.IsTrue(lookupAccount.Result != null &&
+                        lookupAccount.Result.Value.Id == accounts[0].Id);
+                    break;
+                default:
+                    Assert.Fail();
+                    break;
+            }
+        }
 
         var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
         AssertAccounts(accounts, lookupAccounts);
 
         // Assert that all tasks ran to the conclusion
 
-        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (uint)tasks.Length);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, (uint)tasks.Length / 2);
         Assert.AreEqual(lookupAccounts[0].DebitsPosted, 0LU);
 
         Assert.AreEqual(lookupAccounts[1].CreditsPosted, 0LU);
-        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (uint)tasks.Length);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, (uint)tasks.Length / 2);
     }
 
     /// <summary>

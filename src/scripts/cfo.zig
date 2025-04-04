@@ -86,7 +86,9 @@ const Fuzzer = enum {
     vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
+    vsr_multi_batch,
     signal,
+    state_machine,
 
     const weights = std.enums.EnumArray(Fuzzer, u32).init(.{
         .canary = 1,
@@ -107,7 +109,9 @@ const Fuzzer = enum {
         .vsr_journal_format = 1,
         .vsr_superblock_quorums = 1,
         .vsr_superblock = 1,
+        .vsr_multi_batch = 1,
         .signal = 1,
+        .state_machine = 2,
     });
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {

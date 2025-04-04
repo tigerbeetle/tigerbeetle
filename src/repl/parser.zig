@@ -4,7 +4,8 @@ const assert = std.debug.assert;
 const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Storage = vsr.storage.StorageType(IO);
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     constants.state_machine_config,
@@ -39,6 +40,20 @@ pub const Parser = struct {
         get_account_balances,
         query_accounts,
         query_transfers,
+
+        pub fn state_machine_op(operation: Operation) StateMachine.Operation {
+            return switch (operation) {
+                .none, .help => unreachable,
+                .create_accounts => .create_accounts,
+                .create_transfers => .create_transfers,
+                .lookup_accounts => .lookup_accounts,
+                .lookup_transfers => .lookup_transfers,
+                .get_account_transfers => .get_account_transfers,
+                .get_account_balances => .get_account_balances,
+                .query_accounts => .query_accounts,
+                .query_transfers => .query_transfers,
+            };
+        }
     };
 
     pub const LookupSyntaxTree = struct {
@@ -55,7 +70,7 @@ pub const Parser = struct {
 
     pub const Statement = struct {
         operation: Operation,
-        arguments: []const u8,
+        arguments: *std.ArrayListUnmanaged(u8),
     };
 
     fn print_current_position(parser: *const Parser) !void {
@@ -266,7 +281,9 @@ pub const Parser = struct {
             .create_accounts => .{ .account = std.mem.zeroInit(tb.Account, .{}) },
             .create_transfers => .{ .transfer = std.mem.zeroInit(tb.Transfer, .{}) },
             .lookup_accounts, .lookup_transfers => .{ .id = .{ .id = 0 } },
-            .get_account_transfers, .get_account_balances => .{ .account_filter = tb.AccountFilter{
+            inline .get_account_transfers,
+            .get_account_balances,
+            => |operation_comptime| .{ .account_filter = tb.AccountFilter{
                 .account_id = 0,
                 .user_data_128 = 0,
                 .user_data_64 = 0,
@@ -274,20 +291,19 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = switch (operation) {
-                    .get_account_transfers => StateMachine.constants
-                        .batch_max.get_account_transfers,
-                    .get_account_balances => StateMachine.constants
-                        .batch_max.get_account_balances,
-                    else => unreachable,
-                },
+                .limit = StateMachine.operation_result_max(
+                    operation_comptime.state_machine_op(),
+                    StateMachine.constants.message_body_size_max,
+                ),
                 .flags = .{
                     .credits = true,
                     .debits = true,
                     .reversed = false,
                 },
             } },
-            .query_accounts, .query_transfers => .{ .query_filter = tb.QueryFilter{
+            inline .query_accounts,
+            .query_transfers,
+            => |operation_comptime| .{ .query_filter = tb.QueryFilter{
                 .user_data_128 = 0,
                 .user_data_64 = 0,
                 .user_data_32 = 0,
@@ -295,13 +311,10 @@ pub const Parser = struct {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = switch (operation) {
-                    .query_accounts => StateMachine.constants
-                        .batch_max.query_accounts,
-                    .query_transfers => StateMachine.constants
-                        .batch_max.query_transfers,
-                    else => unreachable,
-                },
+                .limit = StateMachine.operation_result_max(
+                    operation_comptime.state_machine_op(),
+                    StateMachine.constants.message_body_size_max,
+                ),
                 .flags = .{
                     .reversed = false,
                 },
@@ -326,12 +339,9 @@ pub const Parser = struct {
                         arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
                     }
                 }
-                const state_machine_op = std.meta.stringToEnum(
-                    StateMachine.Operation,
-                    @tagName(operation),
-                ).?;
 
-                if (!StateMachine.event_is_slice(state_machine_op)) {
+                const state_machine_op = operation.state_machine_op();
+                if (!StateMachine.operation_is_batchable(state_machine_op)) {
                     try parser.print_current_position();
                     try parser.terminal.print_error(
                         "{s} expects a single {s} but received multiple.\n",
@@ -461,7 +471,7 @@ pub const Parser = struct {
 
         return Statement{
             .operation = operation,
-            .arguments = arguments.items,
+            .arguments = arguments,
         };
     }
 };
@@ -690,7 +700,11 @@ test "parser.zig: Parser single transfer successfully" {
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -756,7 +770,7 @@ test "parser.zig: Parser multiple transfers successfully" {
         try std.testing.expectEqual(statement.operation, .create_transfers);
         try std.testing.expectEqualSlices(
             u8,
-            statement.arguments,
+            statement.arguments.items,
             std.mem.sliceAsBytes(&vector.result),
         );
     }
@@ -848,7 +862,11 @@ test "parser.zig: Parser single account successfully" {
         const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, .create_accounts);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -869,7 +887,10 @@ test "parser.zig: Parser account filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.constants.batch_max.get_account_transfers,
+                .limit = StateMachine.operation_result_max(
+                    .get_account_transfers,
+                    StateMachine.constants.message_body_size_max,
+                ),
                 .flags = .{
                     .credits = true,
                     .debits = true,
@@ -919,7 +940,11 @@ test "parser.zig: Parser account filter successfully" {
         const statement = try Parser.parse_statement(vector.string, &null_terminal, &arguments);
 
         try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -940,7 +965,10 @@ test "parser.zig: Parser query filter successfully" {
                 .code = 0,
                 .timestamp_min = 0,
                 .timestamp_max = 0,
-                .limit = StateMachine.constants.batch_max.query_transfers,
+                .limit = StateMachine.operation_result_max(
+                    .query_transfers,
+                    StateMachine.constants.message_body_size_max,
+                ),
                 .flags = .{
                     .reversed = false,
                 },
@@ -990,7 +1018,11 @@ test "parser.zig: Parser query filter successfully" {
         );
 
         try std.testing.expectEqual(statement.operation, vector.operation);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 
@@ -1056,7 +1088,7 @@ test "parser.zig: Parser multiple accounts successfully" {
         try std.testing.expectEqual(statement.operation, .create_accounts);
         try std.testing.expectEqualSlices(
             u8,
-            statement.arguments,
+            statement.arguments.items,
             std.mem.sliceAsBytes(&vector.result),
         );
     }
@@ -1192,7 +1224,11 @@ test "parser.zig: Parser odd but correct formatting" {
         );
 
         try std.testing.expectEqual(statement.operation, .create_transfers);
-        try std.testing.expectEqualSlices(u8, statement.arguments, std.mem.asBytes(&vector.result));
+        try std.testing.expectEqualSlices(
+            u8,
+            statement.arguments.items,
+            std.mem.asBytes(&vector.result),
+        );
     }
 }
 

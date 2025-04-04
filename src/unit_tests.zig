@@ -19,6 +19,7 @@ comptime {
     _ = @import("stdx/zipfian.zig");
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
+    _ = @import("time.zig");
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
     _ = @import("trace/statsd.zig");
@@ -54,6 +55,7 @@ comptime {
     _ = @import("repl/parser.zig");
 
     _ = @import("state_machine.zig");
+    _ = @import("state_machine_fuzz.zig");
     _ = @import("state_machine/auditor.zig");
     _ = @import("state_machine/workload.zig");
 
@@ -79,6 +81,7 @@ comptime {
     _ = @import("vsr/free_set.zig");
     _ = @import("vsr/superblock_quorums.zig");
     _ = @import("vsr/sync.zig");
+    _ = @import("vsr/multi_batch.zig");
 
     _ = @import("scripts/release.zig");
     _ = @import("scripts/changelog.zig");
