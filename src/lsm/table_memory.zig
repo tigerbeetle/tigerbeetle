@@ -466,8 +466,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (last_merge) {
                 end = table_count;
             }
+
             LooserTree.merge(table.values[0..table_count], &table.batch_slices, table.values_scratch[begin..end]);
-            // we need to remember the immutable values and values scratch
 
             if (last_merge) {
                 // deduplicate
@@ -537,8 +537,12 @@ pub fn TableMemoryType(comptime Table: type) type {
             var source_index: u32 = 0;
             var target_index: u32 = 0;
             while (source_index < source_count) {
-                const value = table.values[source_index];
-                table.values[target_index] = value;
+                // Minor optimization for deduplication
+                if (source_index != target_index) {
+                    table.values[target_index] = table.values[source_index];
+                }
+                //const value = table.values[source_index];
+                //table.values[target_index] = value;
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.

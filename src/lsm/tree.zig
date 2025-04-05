@@ -555,7 +555,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(tree.table_mutable.value_context.count == 0);
 
                 const duration_ns = timer.read();
-
                 std.debug.print("absorb took {} ms \n", .{duration_ns / std.time.ns_per_ms});
             }
 
