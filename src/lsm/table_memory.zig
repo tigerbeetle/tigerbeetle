@@ -224,8 +224,8 @@ pub fn TableMemoryType(comptime Table: type) type {
         name: []const u8,
 
         batch_slices: [constants.lsm_compaction_ops]BatchSlice,
-        batch_slice_index: usize = 1,
-        batch_slice_prefix: [constants.lsm_compaction_ops + 1]?usize,
+        batch_slice_index: usize = 0,
+        batch_start: usize = 0,
 
         pub fn init(
             table: *TableMemory,
@@ -247,7 +247,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .name = name,
 
                 .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
-                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
+                .batch_start = 0,
+                .batch_slice_index = 0,
                 // Allocated later
                 .values = undefined,
                 .values_scratch = undefined,
@@ -278,8 +279,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .value_context = .{},
                 .mutability = mutability,
                 .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
-                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
-                .batch_slice_index = 1,
+                .batch_start = 0,
+                .batch_slice_index = 0,
                 .name = table.name,
             };
         }
@@ -351,8 +352,8 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
                 .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
-                .batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1),
-                .batch_slice_index = 1,
+                .batch_slice_index = 0,
+                .batch_start = 0,
                 .name = table.name,
             };
         }
@@ -376,62 +377,56 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_mutable.count() <= values_count_limit);
             assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
 
+            // count how many full partitions the mutable table has.
+            // if it is full we need to merge and sort two to make room for the immutable part.
+
+            var mutable_parition_count: u32 = 0;
+
+            for (table_mutable.batch_slices) |slice| {
+                mutable_parition_count += if (slice.start == slice.end) 0 else 1;
+            }
+
+            if (mutable_parition_count == constants.lsm_compaction_ops) {
+                // merge last two to preserve the other offsets.
+                const min = table_mutable.batch_slices[constants.lsm_compaction_ops - 2].start;
+                const max = table_mutable.batch_slices[constants.lsm_compaction_ops - 1].end;
+                const element_count = sort_suffix_from_offset(table_mutable.values[min..max], 0);
+                table_mutable.batch_slices[constants.lsm_compaction_ops - 2].end = min + element_count;
+                table_mutable.value_context.count = @as(u32, @intCast(min)) + element_count;
+                // reset last index
+                table_mutable.batch_slices[constants.lsm_compaction_ops - 1] = .{
+                    .start = 0,
+                    .end = 0,
+                };
+            }
+
+            // Perform the copy here
             stdx.copy_disjoint(
                 .inexact,
                 Value,
                 table_immutable.values[table_immutable.count()..],
-                table_mutable.values[0..table_mutable.count()],
+                table_mutable.values[0..table_mutable.count()], // this should be the new length!
             );
 
-            //var sorted_partitions: u32 = 0;
-            //for (table_mutable.batch_slice_prefix) |maybe_prefix| {
-            //sorted_partitions += if (maybe_prefix) |_| 1 else 0;
-            //}
-
-            //if (sorted_partitions == constants.lsm_compaction_ops) {
-            //const last_offset = table_mutable.batch_slice_prefix[constants.lsm_compaction_ops] orelse unreachable;
-            //const begin = table_mutable.batch_slice_prefix[constants.lsm_compaction_ops - 2] orelse unreachable;
-
-            //// now we sort this thing
-            //const new_partition_size =
-            //sort_suffix_from_offset(table_mutable.values[begin..last_offset], 0);
-
-            //table_mutable.batch_slice_prefix[constants.lsm_compaction_ops - 1] = new_partition_size + begin;
-            //table_mutable.batch_slice_prefix[constants.lsm_compaction_ops] = null;
-
-            //std.debug.print("sorted from {} to {} \n ", .{ begin, last_offset });
-            //std.debug.print("new prefix {any} \n", .{table_mutable.batch_slice_prefix});
-
-            //// then we need to merge two of the partitions to have enough space.
-            //// merge the two first ones then we can copy the whole thing over
-            //// then we need to adjust the offsets by the current size
-            //// we need to do this before we copy them over and then only use the end other wise the other offsets become corrupted
-            //// then we adjust the last two offsets
-            //}
-            //// then we copy it over
-            //// then we copy the prefixes over and adjust the offsets by table_immutable.count()
-
-            //std.debug.print("Sorted Partitiones {} \n", .{sorted_partitions});
-
-            // that means the first prefix could be 0..table_immutable.count
-            // the new prefixes are the copy from the old one, but it could be that we merge the smallest two neighboars if they are to full
-
             const tables_combined_count = table_immutable.count() + table_mutable.count();
-            //table_immutable.value_context.count = tables_combined_count;
-            // here we know that the old values are sorted already.
 
-            // TODO: remove the sort here and use the merge
-            // TODO: I think we do not need to sort here?
-            const table_count_after_deduplication =
-                sort_suffix_from_offset(table_immutable.values[table_immutable.count()..tables_combined_count], 0) + table_immutable.count();
+            table_immutable.batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops;
 
-            // TODO do the merge here to
-            assert(table_immutable.count() <= table_count_after_deduplication);
-            table_immutable.batch_slice_prefix = [_]?u64{null} ** (constants.lsm_compaction_ops + 1);
-            table_immutable.batch_slice_prefix[0] = 0;
-            table_immutable.batch_slice_prefix[1] = table_immutable.count(); // NOTE: start at one
-            table_immutable.batch_slice_prefix[2] = table_count_after_deduplication; // NOTE: start at one
-            table_immutable.value_context.count = table_count_after_deduplication;
+            table_immutable.batch_slices[0] = .{
+                .start = 0,
+                .end = table_immutable.count(),
+            };
+            // copy over the entries now from begin to end -1
+
+            for (table_mutable.batch_slices[0 .. constants.lsm_compaction_ops - 1], 1..) |slice, i| {
+                const offset = @as(usize, @intCast(table_immutable.count()));
+                table_immutable.batch_slices[i] = .{
+                    .start = slice.start + offset,
+                    .end = slice.end + offset,
+                };
+            }
+
+            table_immutable.value_context.count = tables_combined_count;
 
             // We now that the first prefix must be from 0 - table_immutable.count right?
             // then we merge the other prefixes in or we only sort the new data?
@@ -474,8 +469,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
             // just do prefix
             // set after to table.count
-            table.batch_slice_prefix[batch_slice_id] = table.count();
-
+            table.batch_slices[batch_slice_id].start = table.batch_start;
+            table.batch_slices[batch_slice_id].end = table.count();
+            table.batch_start = table.count();
             table.batch_slice_index += 1;
 
             assert(table.mutability.mutable.suffix_offset == table.count());
@@ -500,22 +496,22 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return 0;
             }
 
-            for (
-                table.batch_slice_prefix[0 .. table.batch_slice_index - 1],
-                table.batch_slice_prefix[1..table.batch_slice_index],
-                0..,
-            ) |
-                maybe_begin,
-                maybe_end,
-                i,
-            | {
-                const begin = maybe_begin orelse 0;
-                const end = maybe_end orelse 0;
-                table.batch_slices[i] = .{
-                    .start = begin,
-                    .end = end,
-                };
-            }
+            //for (
+            //table.batch_slice_prefix[0 .. table.batch_slice_index - 1],
+            //table.batch_slice_prefix[1..table.batch_slice_index],
+            //0..,
+            //) |
+            //maybe_begin,
+            //maybe_end,
+            //i,
+            //| {
+            //const begin = maybe_begin orelse 0;
+            //const end = maybe_end orelse 0;
+            //table.batch_slices[i] = .{
+            //.start = begin,
+            //.end = end,
+            //};
+            //}
 
             LooserTree.merge(table.values[0..table.count()], &table.batch_slices, table.values_scratch[0..table.count()]);
 
