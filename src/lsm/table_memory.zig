@@ -62,12 +62,13 @@ pub fn LooserTreeType(
 
         // should we do slices?
         pub inline fn merge(input: []Value, batches: []BatchSlice, output: []Value) void {
-            assert(output.len == input.len);
+            //assert(output.len == input.len);
             // TODO: check that input slices are combined <- output.len
             // TODO: check if batches are actually sorted
             // TODO: check if all values are sorted
 
             // populate_tree or make_tree
+            // TODO: need to be able to remember state but batch slices are updated.
             var tree = init(input, batches);
 
             for (output) |*out| {
@@ -219,6 +220,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         values: []Value,
         values_scratch: []Value, // scratch values for immutable table only ugly hack.
+        values_scratch_count: usize = 0,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -252,6 +254,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // Allocated later
                 .values = undefined,
                 .values_scratch = undefined,
+                .values_scratch_count = 0,
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
@@ -282,6 +285,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .batch_start = 0,
                 .batch_slice_index = 0,
                 .name = table.name,
+                .values_scratch_count = 0,
             };
         }
 
@@ -353,6 +357,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .mutability = .{ .mutable = .{} },
                 .batch_slices = [_]BatchSlice{.{ .start = 0, .end = 0 }} ** constants.lsm_compaction_ops,
                 .batch_slice_index = 0,
+                .values_scratch_count = 0,
                 .batch_start = 0,
                 .name = table.name,
             };
@@ -441,15 +446,47 @@ pub fn TableMemoryType(comptime Table: type) type {
             } };
         }
 
-        pub fn sort(table: *TableMemory) void {
-            if (table.mutability == .immutable) {
-                // Here we simply use the new function
-                // This is the final sort
-                const target_count = merge_looser_tree(table);
-                //const target_count = sort_suffix_from_offset(table.values_used(), 0);
+        pub fn incremental_merge(table: *TableMemory, step: u64) void {
+            assert(table.mutability == .immutable);
+
+            // The idea is to make it incremental
+            // pass in the values scratch + block_size
+            // batch_slices should be updated still
+            // input is also fine
+
+            // TODO verify in forrest
+            const merge_steps = @divExact(constants.lsm_compaction_ops, 2);
+            const last_merge = (step == @divExact(constants.lsm_compaction_ops, 2) - 1);
+
+            // here we take input.
+            const table_count = table.count();
+            const block_size = table_count / merge_steps;
+            const begin = step * block_size;
+            var end = begin + block_size;
+            if (last_merge) {
+                end = table_count;
+            }
+            LooserTree.merge(table.values[0..table_count], &table.batch_slices, table.values_scratch[begin..end]);
+            // we need to remember the immutable values and values scratch
+
+            if (last_merge) {
+                // deduplicate
+                const target_count = table.swap_and_deduplicate();
                 table.value_context.count = target_count;
                 table.value_context.sorted = true;
-                return;
+            }
+        }
+
+        pub fn sort(table: *TableMemory) void {
+            if (table.mutability == .immutable) {
+                unreachable;
+                // Here we simply use the new function
+                // This is the final sort
+                //const target_count = merge_looser_tree(table);
+                //const target_count = sort_suffix_from_offset(table.values_used(), 0);
+                //table.value_context.count = target_count;
+                //table.value_context.sorted = true;
+                //return;
             }
 
             assert(table.mutability == .mutable);
@@ -489,40 +526,13 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
         /// returned count may be less than or equal to the original `values.len`.)
-        fn merge_looser_tree(table: *TableMemory) u32 {
+        fn swap_and_deduplicate(table: *TableMemory) u32 {
             assert(table.mutability == .immutable);
-
-            if (table.count() == 0) {
-                return 0;
-            }
-
-            //for (
-            //table.batch_slice_prefix[0 .. table.batch_slice_index - 1],
-            //table.batch_slice_prefix[1..table.batch_slice_index],
-            //0..,
-            //) |
-            //maybe_begin,
-            //maybe_end,
-            //i,
-            //| {
-            //const begin = maybe_begin orelse 0;
-            //const end = maybe_end orelse 0;
-            //table.batch_slices[i] = .{
-            //.start = begin,
-            //.end = end,
-            //};
-            //}
-
-            LooserTree.merge(table.values[0..table.count()], &table.batch_slices, table.values_scratch[0..table.count()]);
 
             const sorted_values = table.values_scratch;
             table.values_scratch = table.values;
             table.values = sorted_values;
 
-            //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
-
-            // Merge values with identical keys (last one wins) and collapse tombstones for
-            // secondary indexes.
             const source_count: u32 = table.count(); //@intCast(table.count());
             var source_index: u32 = 0;
             var target_index: u32 = 0;
