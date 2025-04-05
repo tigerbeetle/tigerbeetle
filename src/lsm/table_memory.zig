@@ -432,6 +432,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             table_immutable.value_context.count = tables_combined_count;
+            table_immutable.values_scratch_count = 0;
 
             // We now that the first prefix must be from 0 - table_immutable.count right?
             // then we merge the other prefixes in or we only sort the new data?
@@ -446,13 +447,90 @@ pub fn TableMemoryType(comptime Table: type) type {
             } };
         }
 
+        // get all values up untils this point with min ,max index
+        fn incremental_deduplication(values: []Value, min: usize, max: usize) u32 {
+            // if we have elements to the left than scan to the left to see if there is a duplicate
+            // on the boundary
+            var min_adjusted = min;
+            if (min > 0) {
+                for (1..min + 1) |i| {
+                    const value_equal_to_min =
+                        key_from_value(&values[min]) ==
+                        key_from_value(&values[min - i]);
+                    // if it is different we can break the loop
+                    if (!value_equal_to_min) {
+                        break;
+                    }
+                    min_adjusted -= 1;
+                }
+            }
+            // adjust the beginning if we have duplicates to the left
+            // scan to the left until we find a different element than the current begin.
+
+            const source_count: u32 = @intCast(max); // Calculate this with max - adjusted min.
+            var source_index: u32 = @intCast(min_adjusted);
+            var target_index: u32 = @intCast(min_adjusted);
+            while (source_index < source_count) {
+                // Minor optimization for deduplication
+                if (source_index != target_index) {
+                    values[target_index] = values[source_index];
+                }
+                //const value = values[source_index];
+                //values[target_index] = value;
+
+                // If we're at the end of the source, there is no next value, so the next value
+                // can't be equal.
+                const value_next_equal = source_index + 1 < source_count and
+                    key_from_value(&values[source_index]) ==
+                    key_from_value(&values[source_index + 1]);
+
+                if (value_next_equal) {
+                    if (Table.usage == .secondary_index) {
+                        // Secondary index optimization --- cancel out put and remove.
+                        // NB: while this prevents redundant tombstones from getting to disk, we
+                        // still spend some extra CPU work to sort the entries in memory. Ideally,
+                        // we annihilate tombstones immediately, before sorting, but that's tricky
+                        // to do with scopes.
+                        assert(Table.tombstone(&values[source_index]) !=
+                            Table.tombstone(&values[source_index + 1]));
+                        source_index += 2;
+                        target_index += 0;
+                    } else {
+                        // The last value in a run of duplicates needs to be the one that ends up in
+                        // target.
+                        source_index += 1;
+                        target_index += 0;
+                    }
+                } else {
+                    source_index += 1;
+                    target_index += 1;
+                }
+            }
+
+            // At this point, source_index and target_index are actually counts.
+            // source_index will always be incremented after the final iteration as part of the
+            // continue expression.
+            // target_index will always be incremented, since either source_index runs out first
+            // so value_next_equal is false, or a new value is hit, which will increment it.
+            const target_count = target_index;
+            assert(target_count <= source_count);
+            assert(source_count == source_index);
+
+            if (constants.verify) {
+                if (0 < target_count) {
+                    for (
+                        values[0 .. target_count - 1],
+                        values[1..target_count],
+                    ) |*value, *value_next| {
+                        assert(key_from_value(value) < key_from_value(value_next));
+                    }
+                }
+            }
+            return target_count;
+        }
+
         pub fn incremental_merge(table: *TableMemory, step: u64) void {
             assert(table.mutability == .immutable);
-
-            // The idea is to make it incremental
-            // pass in the values scratch + block_size
-            // batch_slices should be updated still
-            // input is also fine
 
             // TODO verify in forrest
             const merge_steps = @divExact(constants.lsm_compaction_ops, 2);
@@ -467,12 +545,24 @@ pub fn TableMemoryType(comptime Table: type) type {
                 end = table_count;
             }
 
-            LooserTree.merge(table.values[0..table_count], &table.batch_slices, table.values_scratch[begin..end]);
+            const min = table.values_scratch_count;
+            const max = table.values_scratch_count + (end - begin); // this is the input range we process
+
+            LooserTree.merge(table.values[0..table_count], &table.batch_slices, table.values_scratch[min..max]);
+            // now let us always deduplicate the whole array for testing
+
+            const table_unique_count = incremental_deduplication(table.values_scratch[0..max], min, max);
+
+            // update the values_scratch_count
+            table.values_scratch_count = table_unique_count;
 
             if (last_merge) {
-                // deduplicate
-                const target_count = table.swap_and_deduplicate();
-                table.value_context.count = target_count;
+                // swap the arrays
+                const sorted_values = table.values_scratch;
+                table.values_scratch = table.values;
+                table.values = sorted_values;
+                // update the variables
+                table.value_context.count = @as(u32, @intCast(table.values_scratch_count));
                 table.value_context.sorted = true;
             }
         }

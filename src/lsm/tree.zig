@@ -543,7 +543,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.table_immutable.make_mutable();
                 std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
             } else {
-                var timer = std.time.Timer.start() catch unreachable;
                 // TZ: we skip we absorb the file in one, this would mean now that we keep it right?
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
@@ -553,9 +552,6 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
 
                 assert(tree.table_mutable.value_context.count == 0);
-
-                const duration_ns = timer.read();
-                std.debug.print("absorb took {} ms \n", .{duration_ns / std.time.ns_per_ms});
             }
 
             // TODO

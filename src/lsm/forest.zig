@@ -524,13 +524,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 
             // do incremental merge in the first half bar
             if (incremental_merge) {
-                var timer = std.time.Timer.start() catch unreachable;
                 inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
                     tree.table_immutable.incremental_merge(compaction_beat);
                 }
-                const duration_ns = timer.read();
-                std.debug.print("sort took {} ms \n", .{duration_ns / std.time.ns_per_ms});
             }
 
             //if (last_half_beat) {
