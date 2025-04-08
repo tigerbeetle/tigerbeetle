@@ -5,7 +5,7 @@ const log = std.log.scoped(.storage);
 
 const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
-const FIFOType = vsr.fifo.FIFOType;
+const QueueType = vsr.queue.QueueType;
 const constants = vsr.constants;
 
 pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
@@ -92,7 +92,7 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         io: *IO,
         fd: IO.fd_t,
 
-        next_tick_queue: FIFOType(NextTick) = .{ .name = "storage_next_tick" },
+        next_tick_queue: QueueType(NextTick) = .{ .name = "storage_next_tick" },
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 

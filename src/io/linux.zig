@@ -11,7 +11,7 @@ const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
 const stdx = @import("../stdx.zig");
 const common = @import("./common.zig");
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 const DoublyLinkedListType = @import("../list.zig").DoublyLinkedListType;
@@ -25,10 +25,10 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: FIFOType(Completion) = .{ .name = "io_unqueued" },
+    unqueued: QueueType(Completion) = .{ .name = "io_unqueued" },
 
     /// Completions that are ready to have their callbacks run.
-    completed: FIFOType(Completion) = .{ .name = "io_completed" },
+    completed: QueueType(Completion) = .{ .name = "io_completed" },
 
     // TODO Track these as metrics:
     ios_queued: u32 = 0,

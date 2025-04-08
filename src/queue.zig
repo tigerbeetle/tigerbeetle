@@ -5,9 +5,9 @@ const constants = @import("./constants.zig");
 
 /// An intrusive first in/first out linked list.
 /// The element type T must have a field called "next" of type ?*T
-pub fn FIFOType(comptime T: type) type {
+pub fn QueueType(comptime T: type) type {
     return struct {
-        const FIFO = @This();
+        const Queue = @This();
 
         in: ?*T = null,
         out: ?*T = null,
@@ -20,7 +20,7 @@ pub fn FIFOType(comptime T: type) type {
         // expensive. Allow the user to gate it. Could also be a comptime param?
         verify_push: bool = true,
 
-        pub fn push(self: *FIFO, elem: *T) void {
+        pub fn push(self: *Queue, elem: *T) void {
             if (constants.verify and self.verify_push) assert(!self.contains(elem));
 
             assert(elem.next == null);
@@ -35,7 +35,7 @@ pub fn FIFOType(comptime T: type) type {
             self.count += 1;
         }
 
-        pub fn pop(self: *FIFO) ?*T {
+        pub fn pop(self: *Queue) ?*T {
             const ret = self.out orelse return null;
             self.out = ret.next;
             ret.next = null;
@@ -44,20 +44,20 @@ pub fn FIFOType(comptime T: type) type {
             return ret;
         }
 
-        pub fn peek_last(self: FIFO) ?*T {
+        pub fn peek_last(self: Queue) ?*T {
             return self.in;
         }
 
-        pub fn peek(self: FIFO) ?*T {
+        pub fn peek(self: Queue) ?*T {
             return self.out;
         }
 
-        pub fn empty(self: FIFO) bool {
+        pub fn empty(self: Queue) bool {
             return self.peek() == null;
         }
 
         /// Returns whether the linked list contains the given *exact element* (pointer comparison).
-        pub fn contains(self: *const FIFO, elem_needle: *const T) bool {
+        pub fn contains(self: *const Queue, elem_needle: *const T) bool {
             var iterator = self.peek();
             while (iterator) |elem| : (iterator = elem.next) {
                 if (elem == elem_needle) return true;
@@ -65,10 +65,10 @@ pub fn FIFOType(comptime T: type) type {
             return false;
         }
 
-        /// Remove an element from the FIFO. Asserts that the element is
-        /// in the FIFO. This operation is O(N), if this is done often you
+        /// Remove an element from the Queue. Asserts that the element is
+        /// in the Queue. This operation is O(N), if this is done often you
         /// probably want a different data structure.
-        pub fn remove(self: *FIFO, to_remove: *T) void {
+        pub fn remove(self: *Queue, to_remove: *T) void {
             if (to_remove == self.out) {
                 _ = self.pop();
                 return;
@@ -85,13 +85,13 @@ pub fn FIFOType(comptime T: type) type {
             } else unreachable;
         }
 
-        pub fn reset(self: *FIFO) void {
+        pub fn reset(self: *Queue) void {
             self.* = .{ .name = self.name };
         }
     };
 }
 
-test "FIFO: push/pop/peek/remove/empty" {
+test "Queue: push/pop/peek/remove/empty" {
     const testing = @import("std").testing;
 
     const Foo = struct { next: ?*@This() = null };
@@ -100,7 +100,7 @@ test "FIFO: push/pop/peek/remove/empty" {
     var two: Foo = .{};
     var three: Foo = .{};
 
-    var fifo: FIFOType(Foo) = .{ .name = null };
+    var fifo: QueueType(Foo) = .{ .name = null };
     try testing.expect(fifo.empty());
 
     fifo.push(&one);

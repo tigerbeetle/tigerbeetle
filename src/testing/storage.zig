@@ -31,7 +31,7 @@ const mem = std.mem;
 const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -194,7 +194,7 @@ pub const Storage = struct {
     writes: ReadyQueueType(*Storage.Write),
 
     ticks: u64 = 0,
-    next_tick_queue: FIFOType(NextTick) = .{ .name = "storage_next_tick" },
+    next_tick_queue: QueueType(NextTick) = .{ .name = "storage_next_tick" },
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(size <= constants.storage_size_limit_max);
