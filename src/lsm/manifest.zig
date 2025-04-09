@@ -191,14 +191,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        tracer: *vsr.trace.Tracer,
+        tracer: *Storage.Tracer,
 
         pub fn init(
             manifest: *Manifest,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             config: TreeConfig,
-            tracer: *vsr.trace.Tracer,
+            tracer: *Storage.Tracer,
         ) !void {
             manifest.* = .{
                 .node_pool = node_pool,

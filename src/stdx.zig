@@ -923,23 +923,12 @@ pub fn array_print(
 }
 
 pub const Instant = struct {
-    // Sneak the std version of Instant past tidy.
-    const time = std.time;
+    base_ns: u64,
 
-    base: time.Instant,
-
-    pub fn now() Instant {
-        const instant = time.Instant.now() catch @panic("std.time." ++ "Instant.now() unsupported");
-        return .{ .base = instant };
-    }
-
-    pub fn duration_since(now_: Instant, earlier: Instant) Duration {
-        if (now_.base.order(earlier.base) == .lt) {
-            return .{ .nanoseconds = 0 };
-        } else {
-            const elapsed_ns = now_.base.since(earlier.base);
-            return .{ .nanoseconds = elapsed_ns };
-        }
+    pub fn duration_since(now: Instant, earlier: Instant) Duration {
+        assert(now.base_ns >= earlier.base_ns);
+        const elapsed_ns = now.base_ns - earlier.base_ns;
+        return .{ .nanoseconds = elapsed_ns };
     }
 };
 
@@ -956,21 +945,15 @@ pub const Duration = struct {
 };
 
 test "Instant/Duration" {
-    const instant_1 = Instant.now();
-    const instant_2 = Instant.now();
-    assert(instant_1.duration_since(instant_2).nanoseconds == 0);
-    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+    const instant_1: Instant = .{ .base_ns = 100 * std.time.ns_per_day };
+    const instant_2: Instant = .{ .base_ns = 100 * std.time.ns_per_day + std.time.ns_per_s };
+    assert(instant_1.duration_since(instant_1).nanoseconds == 0);
+    assert(instant_2.duration_since(instant_1).nanoseconds == std.time.ns_per_s);
 
-    if (builtin.os.tag == .linux) {
-        var instant_3 = instant_1;
-        instant_3.base.timestamp.tv_sec += 1;
-        assert(instant_1.duration_since(instant_3).nanoseconds == 0);
-
-        const duration = instant_3.duration_since(instant_1);
-        assert(duration.nanoseconds == 1_000_000_000);
-        assert(duration.microseconds() == 1_000_000);
-        assert(duration.milliseconds() == 1_000);
-    }
+    const duration = instant_2.duration_since(instant_1);
+    assert(duration.nanoseconds == 1_000_000_000);
+    assert(duration.microseconds() == 1_000_000);
+    assert(duration.milliseconds() == 1_000);
 }
 
 // DateTime in UTC, intended primarily for logging.

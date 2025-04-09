@@ -3,6 +3,57 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.35
+
+Released: 2025-04-07
+
+Please note that after [#2787](https://github.com/tigerbeetle/tigerbeetle/pull/2787), which adds
+batching support for all operations, the `batch_max` limit has changed from 8190 to 8189
+accounts/transfers per batch.
+
+### Safety And Performance
+
+- [#2787](https://github.com/tigerbeetle/tigerbeetle/pull/2787)
+
+  Add support for batching multiple independent requests of the same operation within a single VSR
+  message, amortizing network and consensus costs.
+
+  Earlier, we batched only create_accounts and create_transfers. Now, we can batch any operation!
+
+### Internals
+
+- [#2878](https://github.com/tigerbeetle/tigerbeetle/pull/2878)
+
+  Use TigerBeetle's time abstraction as opposed to raw OS time in the tracer.
+
+- [#2881](https://github.com/tigerbeetle/tigerbeetle/pull/2881)
+
+  Allow custom network packet delay functions in the VOPR. This allows us to simulate latencies for
+  different network topologies, for example the ring/star topology.
+
+- [#2866](https://github.com/tigerbeetle/tigerbeetle/pull/2866),
+  [#2874](https://github.com/tigerbeetle/tigerbeetle/pull/2874)
+
+  Fix a VOPR false positive wherein we were accessing a crashed replica's uninitialized memory.
+
+- [#2869](https://github.com/tigerbeetle/tigerbeetle/pull/2869)
+
+  Improve error thrown when an invalid --account/transfer-batch-size is passed to the benchmark CLI.
+
+- [#2876](https://github.com/tigerbeetle/tigerbeetle/pull/2876),
+  [#2877](https://github.com/tigerbeetle/tigerbeetle/pull/2877)
+
+  Minor refactors to VSR and VOPR.
+
+- [#2872](https://github.com/tigerbeetle/tigerbeetle/pull/2872),
+  [#2873](https://github.com/tigerbeetle/tigerbeetle/pull/2873)
+
+  Fixes and improvemenents in the documentation.
+
+### TigerTracks 🎧
+
+- [All Things Must Pass](https://open.spotify.com/track/1AGridgU0QAWZykQReGWk5?si=5be31abf23d24ef3)
+
 ## TigerBeetle 0.16.34
 
 Released: 2025-03-31

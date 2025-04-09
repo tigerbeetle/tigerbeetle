@@ -5,7 +5,8 @@ pub const exports = @import("tb_client_exports.zig");
 
 const constants = @import("../../constants.zig");
 const IO = @import("../../io.zig").IO;
-const Storage = @import("../../storage.zig").StorageType(IO);
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Storage = @import("../../storage.zig").StorageType(IO, Tracer);
 const MessageBus = @import("../../message_bus.zig").MessageBusClient;
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const StateMachine = StateMachineType(Storage, constants.state_machine_config);

@@ -152,10 +152,9 @@ pub fn open_section(shell: *Shell, name: []const u8) !Section {
 const Section = struct {
     ci: bool,
     name: []const u8,
-    start: stdx.Instant,
+    timer: std.time.Timer,
 
     fn open(ci: bool, name: []const u8) !Section {
-        const start = stdx.Instant.now();
         if (ci) {
             // See
             // https://docs.github.com/en/actions/using-workflows/workflow-commands-for-github-actions#grouping-log-lines
@@ -166,14 +165,13 @@ const Section = struct {
         return .{
             .ci = ci,
             .name = name,
-            .start = start,
+            .timer = try std.time.Timer.start(),
         };
     }
 
     pub fn close(section: *Section) void {
-        const now = stdx.Instant.now();
-        const elapsed = now.duration_since(section.start);
-        std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed.nanoseconds) });
+        const elapsed_ns = section.timer.lap();
+        std.debug.print("{s}: {}\n", .{ section.name, std.fmt.fmtDuration(elapsed_ns) });
         if (section.ci) {
             std.io.getStdOut().writer().print("::endgroup::\n", .{}) catch {};
         }

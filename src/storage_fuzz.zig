@@ -5,7 +5,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
-const Storage = @import("storage.zig").StorageType(IO);
+const Time = @import("testing/time.zig").Time;
+const Tracer = vsr.trace.TracerType(Time);
+const Storage = @import("storage.zig").StorageType(IO, Tracer);
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 
