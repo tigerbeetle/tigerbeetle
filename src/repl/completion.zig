@@ -165,8 +165,8 @@ test "completion.zig: Split buffer and complete" {
         ),
         .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
         .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
-        .matches = try BoundedArray([]const u8, 10).from_slice(&.{ "code", 
-        "create_accounts", "lookup_accounts", "get_account_transfers", "get_account_balances", "query_accounts", "account_id", "debit_account_id", "credit_account_id" }),
+        .matches = try BoundedArray([]const u8, 10).from_slice(
+            &.{ "code", "create_accounts", "lookup_accounts", "get_account_transfers", "get_account_balances", "query_accounts", "account_id", "debit_account_id", "credit_account_id" }),
     }, .{
         .buffer = "create_accounts id=1 cod ledger=700",
         .idx = 24,
