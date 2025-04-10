@@ -561,7 +561,7 @@ pub fn GrooveType(
         /// keeping table_mutable as an array, and simplifying the compaction path
         /// is faster than trying to amortize and save memory.
         ///
-        /// Invariant: if there is an objects_cache then if something is in the mutable or immutable
+        /// Invariant: if there is an objects_cache then if something is in the mutable
         /// table, it _must_ exist in our object cache.
         /// Otherwise, the ObjectsCache is of type void.
         objects_cache: ObjectsCache,
