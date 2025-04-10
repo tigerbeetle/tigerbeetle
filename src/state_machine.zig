@@ -165,7 +165,7 @@ pub fn StateMachineType(
                     }.closed,
                 },
                 .orphaned_ids = false,
-                .object_cache = true,
+                .objects_cache = true,
             },
         );
 
@@ -207,7 +207,7 @@ pub fn StateMachineType(
                     }.closing,
                 },
                 .orphaned_ids = true,
-                .object_cache = true,
+                .objects_cache = true,
             },
         );
 
@@ -227,7 +227,7 @@ pub fn StateMachineType(
                 },
                 .derived = .{},
                 .orphaned_ids = false,
-                .object_cache = true,
+                .objects_cache = true,
             },
         );
 
@@ -352,7 +352,7 @@ pub fn StateMachineType(
                     }.prunable,
                 },
                 .orphaned_ids = false,
-                .object_cache = false,
+                .objects_cache = false,
             },
         );
 

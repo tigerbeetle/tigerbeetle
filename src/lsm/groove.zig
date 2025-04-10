@@ -168,9 +168,9 @@ pub fn GrooveType(
     ///     Whether Groove should store objectless `id`s to prevent their reuse.
     ///     Should be `true` only if the object contains an `id` field.
     ///
-    /// - object_cache: bool:
+    /// - objects_cache: bool:
     ///     Whether Groove should have an ObjectCache.
-    ///     Should be `false` only if both `prefetch_entries_for_update_max` and 
+    ///     Should be `false` only if both `prefetch_entries_for_update_max` and
     ///     `prefetch_entries_for_read_max` are set to 0.
     comptime groove_options: anytype,
 ) type {
@@ -336,7 +336,7 @@ pub fn GrooveType(
 
     const has_scan = index_fields.len > 0;
 
-    const has_objects_cache = groove_options.object_cache;
+    const has_objects_cache = groove_options.objects_cache;
 
     // Verify groove index count:
     const indexes_count_actual = std.meta.fields(_IndexTrees).len;
@@ -563,7 +563,7 @@ pub fn GrooveType(
         /// keeping table_mutable as an array, and simplifying the compaction path
         /// is faster than trying to amortize and save memory.
         ///
-        /// Invariant: if there is an object_cache then if something is in the mutable or immutable 
+        /// Invariant: if there is an object_cache then if something is in the mutable or immutable
         /// table, it _must_ exist in our object cache.
         objects_cache: if (has_objects_cache) ObjectsCache else void,
 
@@ -611,9 +611,9 @@ pub fn GrooveType(
                 true => blk: {
                     break :blk try ObjectsCache.init(allocator, .{
                         .cache_value_count_max = options.cache_entries_max,
-                        // In the worst case, each stash must be able to store 
-                        // batch_value_count_limit per beat (to contain either TableMutable or 
-                        // TableImmutable) as well as the maximum number of prefetches a bar may 
+                        // In the worst case, each stash must be able to store
+                        // batch_value_count_limit per beat (to contain either TableMutable or
+                        // TableImmutable) as well as the maximum number of prefetches a bar may
                         // perform, excluding prefetches already accounted
                         // for by batch_value_count_limit.
                         .stash_value_count_max = constants.lsm_compaction_ops *
@@ -622,8 +622,7 @@ pub fn GrooveType(
 
                         // Scopes are limited to a single beat, so the maximum number of entries in
                         // a single scope is batch_value_count_limit (total – not per beat).
-                        .scope_value_count_max = 
-                            options.tree_options_object.batch_value_count_limit,
+                        .scope_value_count_max = options.tree_options_object.batch_value_count_limit,
 
                         .name = ObjectTree.tree_name(),
                     });
@@ -1426,11 +1425,10 @@ pub fn GrooveType(
 
             // Compact the objects_cache on the last beat of the bar, just like the trees do to
             // their mutable tables.
-            if (has_objects_cache){
+            if (has_objects_cache) {
                 const compaction_beat = op % constants.lsm_compaction_ops;
                 if (compaction_beat == constants.lsm_compaction_ops - 1) {
                     groove.objects_cache.compact();
-
                 }
             }
         }

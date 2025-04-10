@@ -106,7 +106,7 @@ const ThingsGroove = GrooveType(
         .optional = &[_][]const u8{},
         .derived = .{},
         .orphaned_ids = false,
-        .object_cache = true,
+        .objects_cache = true,
     },
 );
 
