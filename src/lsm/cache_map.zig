@@ -8,18 +8,10 @@ const maybe = stdx.maybe;
 const SetAssociativeCacheType = @import("set_associative_cache.zig").SetAssociativeCacheType;
 const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 
-/// A CacheMap is a hybrid between our SetAssociativeCache and a HashMap (stash). The
-/// SetAssociativeCache sits on top and absorbs the majority of get / put requests. Below that,
-/// lives a HashMap. Should an insert() cause an eviction (which can happen either because the Key
-/// is the same, or because our Way is full), the evicted value is caught and put in the stash.
+/// A CacheMap is a wrapper around a HashMap (stash) that enables scopes.
 ///
-/// This allows for a potentially huge cache, with all the advantages of CLOCK Nth-Chance, while
-/// still being able to give hard guarantees that values will be present. The stash will often be
-/// significantly smaller, as the amount of values we're required to guarantee is less than what
-/// we'd like to optimistically keep in memory.
-///
-/// Within our LSM, the CacheMap is the backing for the combined Groove prefetch + cache. The cache
-/// part fills the use case of an object cache, while the stash ensures that prefetched values
+/// Within our LSM, the CacheMap is the backing for the combined Groove prefetch + cache.
+/// It serves as  an object cache that ensures that prefetched values
 /// are available in memory during their respective commit.
 ///
 /// Cache invalidation for the stash is handled by `compact`.
@@ -145,8 +137,7 @@ pub fn CacheMapType(
             }
         }
 
-        // Upserts the cache and stash and returns the old value in case of
-        // an update.
+        // Upserts the stash and returns the old value in case of an update.
         fn fetch_upsert(self: *CacheMap, value: *const Value) ?Value {
             // No cache.
             // Upserting the stash directly.
@@ -172,8 +163,7 @@ pub fn CacheMapType(
             // Make sure we aren't being called in regular code without another once over.
             comptime assert(constants.verify);
 
-            // We don't allow stale values, so we need to remove from the stash as well,
-            // since both can have different versions with the same key.
+            // We don't allow stale values, so we need to remove from the stash.
             const stash_removed: ?Value = self.stash_remove(key);
 
             if (self.scope_is_active) {
@@ -223,7 +213,7 @@ pub fn CacheMapType(
                     // exist.
                     const key = key_from_value(rollback_value);
 
-                    // The key should be in the stash iff it wasn't in the cache.
+                    // The key must be in the stash.
                     _ = self.stash_remove(key) != null;
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.

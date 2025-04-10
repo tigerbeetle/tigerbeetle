@@ -13,8 +13,7 @@ const Key = TestTable.Key;
 const Value = TestTable.Value;
 
 const stash_value_count_max = 1024;
-// Use a large scope (relative to stash_value_count_max) to increase the chances of
-// (SetAssociativeCache) hash collisions.
+// Use a large scope (relative to stash_value_count_max) to increase the chances of hash collisions.
 const scope_value_count_max = stash_value_count_max;
 
 const OpValue = struct {
@@ -118,12 +117,10 @@ const Environment = struct {
     /// the positive space by iterating over our model, and ensuring everything exists and is
     /// equal in the cache_map.
     ///
-    /// We verify the negative space by iterating over the cache_map's cache and maps directly,
+    /// We verify the negative space by iterating over the cache_map's stash and maps directly,
     /// ensuring that:
     /// 1. The values in the cache all exist and are equal in the model.
-    /// 2. The values in stash either exists and are equal in the model, or there's the same key
-    ///    in the cache.
-    /// 3. The values in stash_2 either exists and are equal in the model, or there's the same key
+    /// 2. The values in stash_2 either exists and are equal in the model, or there's the same key
     ///    in stash_1 or the cache.
     pub fn verify(env: *Environment) void {
         var checked: u32 = 0;
@@ -144,19 +141,16 @@ const Environment = struct {
 
         log.info("Verified {} items from model exist and match in cache_map.", .{checked});
 
-        // The stash can have stale values, but in that case the real value _must_ exist
-        // in the cache. It should be impossible for the stash to have a value that isn't in the
-        // model, since cache_map.remove() removes from both the cache and stash.
+        // The real value _must_ exist in the stash
         var stash_iterator = env.cache_map.stash.keyIterator();
         while (stash_iterator.next()) |stash_value| {
             // Get account from model.
             const model_value = env.model.get(TestTable.key_from_value(stash_value));
 
-            // Even if the stash has stale values, the key must still exist in the model.
+            // The key must exist in the model.
             assert(model_value != null);
 
             const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
-
             assert(stash_value_equal);
         }
 
