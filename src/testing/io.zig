@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
@@ -34,7 +34,7 @@ pub const IO = struct {
     options: Options,
     prng: stdx.PRNG,
 
-    completed: FIFOType(Completion) = .{ .name = "io_completed" },
+    completed: QueueType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(files: []const File, options: Options) IO {
         return .{

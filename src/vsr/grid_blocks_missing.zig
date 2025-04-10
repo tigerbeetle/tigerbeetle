@@ -16,7 +16,7 @@ const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
 const vsr = @import("../vsr.zig");
 
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const BlockPtrConst = *align(constants.sector_size) const [constants.block_size]u8;
 
 pub const GridBlocksMissing = struct {
@@ -100,8 +100,8 @@ pub const GridBlocksMissing = struct {
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
-    faulty_tables: FIFOType(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
-    faulty_tables_free: FIFOType(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
+    faulty_tables: QueueType(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
+    faulty_tables_free: QueueType(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
 
     checkpoint_durable: ?struct {
         /// The number of faulty_blocks with state=aborting.
@@ -482,7 +482,7 @@ pub const GridBlocksMissing = struct {
             }
         }
 
-        var tables: FIFOType(RepairTable) = .{ .name = queue.faulty_tables.name };
+        var tables: QueueType(RepairTable) = .{ .name = queue.faulty_tables.name };
         while (queue.faulty_tables.pop()) |table| {
             assert(!free_set.is_free(table.index_address));
 

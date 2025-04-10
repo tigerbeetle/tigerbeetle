@@ -14,7 +14,7 @@ pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
         assert(info == .Int);
         assert(info.Int.signedness == .unsigned);
     }
-    // Note: we use floats and rely on std implementaion. Ideally, we should do neither, but I
+    // Note: we use floats and rely on std implementation. Ideally, we should do neither, but I
     // wasn't able to find a quick way to generate geometrically distributed integers using only
     // integer arithmetic.
     const random = std.Random.init(prng, stdx.PRNG.fill);
@@ -24,24 +24,24 @@ pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
 
 /// Return a distribution for use with `random_enum`.
 ///
-/// This is swarm testing: sm   ome variants are disabled completely,
-/// and the rest have wildly different probabilites.
+/// This is swarm testing: some variants are disabled completely,
+/// and the rest have wildly different probabilities.
 pub fn random_enum_weights(
     prng: *stdx.PRNG,
     comptime Enum: type,
 ) stdx.PRNG.EnumWeightsType(Enum) {
-    const fields = std.meta.fieldNames(Enum);
+    const fields = comptime std.meta.fieldNames(Enum);
 
     var combination = stdx.PRNG.Combination.init(.{
-        .total_count = fields.len,
-        .sample_count = prng.range_inclusive(u32, 1, fields.len),
+        .total = fields.len,
+        .sample = prng.range_inclusive(u32, 1, fields.len),
     });
     defer assert(combination.done());
 
     var weights: PRNG.EnumWeightsType(Enum) = undefined;
     inline for (fields) |field| {
         @field(weights, field) = if (combination.take(prng))
-            prng.int_inclusive(u64, 100)
+            prng.range_inclusive(u64, 1, 100)
         else
             0;
     }

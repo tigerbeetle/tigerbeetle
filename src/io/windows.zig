@@ -6,7 +6,7 @@ const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
@@ -15,8 +15,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFOType(Completion) = .{ .name = "io_completed" },
+    timeouts: QueueType(Completion) = .{ .name = "io_timeouts" },
+    completed: QueueType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;

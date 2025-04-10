@@ -15,7 +15,7 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 
 const IO = vsr.io.IO;
-const FIFOType = vsr.fifo.FIFOType;
+const QueueType = vsr.queue.QueueType;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
@@ -176,8 +176,8 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
-        submitted: FIFOType(Packet),
-        pending: FIFOType(Packet),
+        submitted: QueueType(Packet),
+        pending: QueueType(Packet),
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
