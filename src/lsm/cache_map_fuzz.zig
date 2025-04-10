@@ -144,20 +144,6 @@ const Environment = struct {
 
         log.info("Verified {} items from model exist and match in cache_map.", .{checked});
 
-        // It's fine for the cache_map to have values older than .compact() in it; good, in fact,
-        // but they _MUST NOT_ be stale.
-        if (env.cache_map.cache) |*cache| {
-            for (cache.values, 0..) |*cache_value, i| {
-                // If the count for an index is 0, the value doesn't exist.
-                if (cache.counts.get(i) == 0) {
-                    continue;
-                }
-
-                const model_val = env.model.get(TestTable.key_from_value(cache_value));
-                assert(std.meta.eql(cache_value.*, model_val.?.value));
-            }
-        }
-
         // The stash can have stale values, but in that case the real value _must_ exist
         // in the cache. It should be impossible for the stash to have a value that isn't in the
         // model, since cache_map.remove() removes from both the cache and stash.
@@ -171,16 +157,7 @@ const Environment = struct {
 
             const stash_value_equal = std.meta.eql(stash_value.*, model_value.?.value);
 
-            if (!stash_value_equal) {
-                if (env.cache_map.cache) |*cache| {
-                    // We verified all cache entries were equal and correct above, so if it exists,
-                    // it must be right.
-                    const cache_value = cache.get(
-                        TestTable.key_from_value(stash_value),
-                    );
-                    assert(cache_value != null);
-                }
-            }
+            assert(stash_value_equal);
         }
 
         log.info(

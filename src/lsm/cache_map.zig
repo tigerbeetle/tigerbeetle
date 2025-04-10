@@ -66,12 +66,6 @@ pub fn CacheMapType(
             name: []const u8,
         };
 
-        // The hierarchy for lookups is cache (if present) -> stash -> immutable table -> lsm.
-        // Lower levels _may_ have stale values, provided the correct value exists
-        // in one of the levels above.
-        // Evictions from the cache first flow into stash, with `.compact()` clearing it.
-        // When cache is null, the stash mirrors the mutable table.
-        cache: ?Cache,
         stash: Map,
 
         // Scopes allow you to perform operations on the CacheMap before either persisting or
@@ -86,13 +80,6 @@ pub fn CacheMapType(
             maybe(options.cache_value_count_max == 0);
             maybe(options.scope_value_count_max == 0);
 
-            var cache: ?Cache = if (options.cache_value_count_max == 0) null else try Cache.init(
-                allocator,
-                options.cache_value_count_max,
-                .{ .name = options.name },
-            );
-            errdefer if (cache) |*cache_unwrapped| cache_unwrapped.deinit(allocator);
-
             var stash: Map = .{};
             try stash.ensureTotalCapacity(allocator, options.stash_value_count_max);
             errdefer stash.deinit(allocator);
@@ -104,7 +91,6 @@ pub fn CacheMapType(
             errdefer scope_rollback_log.deinit(allocator);
 
             return CacheMap{
-                .cache = cache,
                 .stash = stash,
                 .scope_rollback_log = scope_rollback_log,
                 .options = options,
@@ -118,7 +104,6 @@ pub fn CacheMapType(
 
             self.scope_rollback_log.deinit(allocator);
             self.stash.deinit(allocator);
-            if (self.cache) |*cache| cache.deinit(allocator);
         }
 
         pub fn reset(self: *CacheMap) void {
@@ -126,11 +111,9 @@ pub fn CacheMapType(
             assert(self.scope_rollback_log.items.len == 0);
             assert(self.stash.count() <= self.options.stash_value_count_max);
 
-            if (self.cache) |*cache| cache.reset();
             self.stash.clearRetainingCapacity();
 
             self.* = .{
-                .cache = self.cache,
                 .stash = self.stash,
                 .scope_rollback_log = self.scope_rollback_log,
                 .options = self.options,
@@ -142,8 +125,7 @@ pub fn CacheMapType(
         }
 
         pub fn get(self: *const CacheMap, key: Key) ?*Value {
-            return (if (self.cache) |*cache| cache.get(key) else null) orelse
-                self.stash.getKeyPtr(tombstone_from_key(key));
+            return self.stash.getKeyPtr(tombstone_from_key(key));
         }
 
         pub fn upsert(self: *CacheMap, value: *const Value) void {
@@ -166,44 +148,9 @@ pub fn CacheMapType(
         // Upserts the cache and stash and returns the old value in case of
         // an update.
         fn fetch_upsert(self: *CacheMap, value: *const Value) ?Value {
-            if (self.cache) |*cache| {
-                const key = key_from_value(value);
-                const result = cache.upsert(value);
-
-                if (result.evicted) |*evicted| {
-                    switch (result.updated) {
-                        .update => {
-                            assert(key_from_value(evicted) == key);
-                            if (constants.verify) assert(!self.stash.contains(value.*));
-
-                            // There was an eviction because an item was updated,
-                            // the evicted item is always its previous version.
-                            return evicted.*;
-                        },
-                        .insert => {
-                            assert(key_from_value(evicted) != key);
-
-                            // There was an eviction because a new item was inserted,
-                            // the evicted item will be added to the stash.
-                            const stash_updated = self.stash_upsert(evicted);
-
-                            // We don't expect stale values on the stash.
-                            assert(stash_updated == null);
-                        },
-                    }
-                } else {
-                    // It must be an insert without eviction,
-                    // since updates always evict the old version.
-                    assert(result.updated == .insert);
-                }
-
-                // The stash may have the old value if nothing was evicted.
-                return self.stash_remove(key);
-            } else {
-                // No cache.
-                // Upserting the stash directly.
-                return self.stash_upsert(value);
-            }
+            // No cache.
+            // Upserting the stash directly.
+            return self.stash_upsert(value);
         }
 
         fn stash_upsert(self: *CacheMap, value: *const Value) ?Value {
@@ -225,11 +172,6 @@ pub fn CacheMapType(
             // Make sure we aren't being called in regular code without another once over.
             comptime assert(constants.verify);
 
-            const cache_removed: ?Value = if (self.cache) |*cache|
-                cache.remove(key)
-            else
-                null;
-
             // We don't allow stale values, so we need to remove from the stash as well,
             // since both can have different versions with the same key.
             const stash_removed: ?Value = self.stash_remove(key);
@@ -237,8 +179,7 @@ pub fn CacheMapType(
             if (self.scope_is_active) {
                 // TODO: Actually, does the fuzz catch this...
                 self.scope_rollback_log.appendAssumeCapacity(
-                    cache_removed orelse
-                        stash_removed orelse return,
+                    stash_removed orelse return,
                 );
             }
         }
@@ -282,14 +223,8 @@ pub fn CacheMapType(
                     // exist.
                     const key = key_from_value(rollback_value);
 
-                    // A tombstone in the rollback log can only occur when the value doesn't exist
-                    // in _both_ the cache and stash on insert.
-                    const cache_removed =
-                        if (self.cache) |*cache| cache.remove(key) != null else false;
-
                     // The key should be in the stash iff it wasn't in the cache.
-                    const stash_removed = self.stash_remove(key) != null;
-                    assert(stash_removed != cache_removed);
+                    _ = self.stash_remove(key) != null;
                 } else {
                     // Reverting an update or delete consists of an insert of the original value.
                     self.upsert(rollback_value);
