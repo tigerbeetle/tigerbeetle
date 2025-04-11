@@ -269,7 +269,7 @@ pub fn main() !void {
         \\);
         \\
         \\// Registers or unregisters the application log callback.
-        \\TB_REGISTER_LOG_CALLBACK_STATUS register_log_callback(
+        \\TB_REGISTER_LOG_CALLBACK_STATUS tb_client_register_log_callback(
         \\    void (*callback)(TB_LOG_LEVEL, const uint8_t*, uint32_t),
         \\    bool debug
         \\);
