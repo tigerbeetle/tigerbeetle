@@ -117,6 +117,20 @@ const type_mappings = .{
         .private_fields = &.{"reserved"},
         .docs_link = "reference/query-filter#",
     } },
+    .{ tb.TransferPendingStatus, TypeMapping{
+        .name = "TransferPendingStatus",
+        .visibility = .public,
+    } },
+    .{ tb.AccountEventFilter, TypeMapping{
+        .name = "AccountEventFilter",
+        .visibility = .public,
+        .private_fields = &.{"reserved"},
+    } },
+    .{ tb.AccountEvent, TypeMapping{
+        .name = "AccountEvent",
+        .visibility = .public,
+        .private_fields = &.{"reserved"},
+    } },
     .{ exports.tb_init_status, TypeMapping{
         .name = "InitializationStatus",
         .visibility = .public,

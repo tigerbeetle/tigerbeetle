@@ -68,7 +68,7 @@ pub fn main() !void {
     var command = cli.parse_args(&arg_iterator);
 
     switch (command) {
-        .inspect, .version => {},
+        .inspect, .version, .amqp => {},
         inline else => |*args| {
             if (args.log_debug) {
                 log_level_runtime = .debug;
@@ -99,6 +99,7 @@ pub fn main() !void {
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
+        .amqp => |*args| try Command.amqp(allocator, args),
     }
 }
 
@@ -574,6 +575,38 @@ const Command = struct {
         defer repl_instance.deinit(allocator);
 
         try repl_instance.run(args.statements);
+    }
+
+    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.Amqp) !void {
+        const Runner = @import("amqp_runner.zig").Runner;
+
+        const amqp_address = std.net.Address.parseIp4("127.0.0.1", 5672) catch unreachable;
+
+        var io: IO = try IO.init(128, 0);
+        defer io.deinit();
+
+        var runner: Runner = undefined;
+        try runner.init(
+            allocator,
+            &io,
+            .{
+                .tb_cluster_id = 0,
+                .tb_addresses = args.addresses.?.const_slice(),
+                .amqp_address = amqp_address,
+                .amqp_user = "guest",
+                .amqp_password = "guest",
+                .amqp_vhost = "/",
+                .amqp_publish_exchange_name = "tigerbeetle",
+                .amqp_queue_state_tracker_name = "tigerbeetle_state_tracker",
+                .idle_check_seconds = 1,
+            },
+        );
+        defer runner.deinit();
+
+        while (true) {
+            runner.tick();
+            io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
+        }
     }
 };
 

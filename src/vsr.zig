@@ -5,6 +5,7 @@ const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
 
 // vsr.zig is the root of a zig package, reexport all public APIs.
+pub const amqp = @import("cdc/amqp/amqp.zig");
 //
 // Note that we don't promise any stability of these interfaces yet.
 pub const constants = @import("constants.zig");

@@ -1,0 +1,6 @@
+{
+    "recommendations": [
+        "ziglang.vscode-zig",
+        "ms-vscode.cpptools"
+    ]
+}

@@ -157,6 +157,16 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequestAsync<Transfer, QueryFilter>(TBOperation.QueryTransfers, new[] { filter });
     }
 
+    public AccountEvent[] GetEvents(AccountEventFilter filter)
+    {
+        return nativeClient.CallRequest<AccountEvent, AccountEventFilter>(TBOperation.GetEvents, new[] { filter });
+    }
+
+    public Task<AccountEvent[]> GetEventsAsync(AccountEventFilter filter)
+    {
+        return nativeClient.CallRequestAsync<AccountEvent, AccountEventFilter>(TBOperation.GetEvents, new[] { filter });
+    }
+
     public void Dispose()
     {
         GC.SuppressFinalize(this);

@@ -1,0 +1,37 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "format debug server",
+            "type": "shell",
+            "command": "${workspaceFolder}/.vscode/format_debug_server.sh",
+            "args": [],
+            "problemMatcher": [],
+            "group": "build",
+        },
+        {
+            "label": "build server",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "install" ],
+            "problemMatcher": [],
+            "group": "build",
+        },
+        {
+            "label": "build vopr",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "vopr:build", "--", "1" ],
+            "problemMatcher": [],
+            "group": "build",
+        },
+        {
+            "label": "build test",
+            "type": "shell",
+            "command": "${workspaceFolder}/zig/zig",
+            "args": [ "build", "test:unit:build", "--", "\"repl.zig: Parser single transfer successfully\"" ],
+            "problemMatcher": [],
+            "group": "build",
+        },
+   ]
+}

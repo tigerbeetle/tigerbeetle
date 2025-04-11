@@ -1150,6 +1150,210 @@ public struct QueryFilter
 
 }
 
+public enum TransferPendingStatus : byte
+{
+    None = 0,
+
+    Pending = 1,
+
+    Posted = 2,
+
+    Voided = 3,
+
+    Expired = 4,
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
+public struct AccountEventFilter
+{
+    public const int SIZE = 64;
+
+
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 44;
+        private const int LENGTH = 44;
+
+        private fixed byte raw[LENGTH];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != LENGTH)
+            {
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
+            }
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
+            }
+        }
+    }
+
+    private ulong timestampMin;
+
+    private ulong timestampMax;
+
+    private uint limit;
+
+    private ReservedData reserved;
+
+    public ulong TimestampMin { get => timestampMin; set => timestampMin = value; }
+
+    public ulong TimestampMax { get => timestampMax; set => timestampMax = value; }
+
+    public uint Limit { get => limit; set => limit = value; }
+
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
+public struct AccountEvent
+{
+    public const int SIZE = 256;
+
+
+    [StructLayout(LayoutKind.Sequential, Size = ReservedData.SIZE)]
+    private unsafe struct ReservedData
+    {
+        public const int SIZE = 11;
+        private const int LENGTH = 11;
+
+        private fixed byte raw[LENGTH];
+
+        public byte[] GetData()
+        {
+            fixed (void* ptr = raw)
+            {
+                return new ReadOnlySpan<byte>(ptr, LENGTH).ToArray();
+            }
+        }
+
+        public void SetData(byte[] value)
+        {
+            if (value == null) throw new ArgumentNullException(nameof(value));
+            if (value.Length != LENGTH)
+            {
+                throw new ArgumentException(
+                    "Expected a byte[" + LENGTH + "] array",
+                    nameof(value));
+            }
+
+            fixed (void* ptr = raw)
+            {
+                value.CopyTo(new Span<byte>(ptr, LENGTH));
+            }
+        }
+    }
+
+    private UInt128 drAccountId;
+
+    private UInt128 drDebitsPending;
+
+    private UInt128 drDebitsPosted;
+
+    private UInt128 drCreditsPending;
+
+    private UInt128 drCreditsPosted;
+
+    private UInt128 crAccountId;
+
+    private UInt128 crDebitsPending;
+
+    private UInt128 crDebitsPosted;
+
+    private UInt128 crCreditsPending;
+
+    private UInt128 crCreditsPosted;
+
+    private ulong timestamp;
+
+    private ulong drAccountTimestamp;
+
+    private ulong crAccountTimestamp;
+
+    private AccountFlags drAccountFlags;
+
+    private AccountFlags crAccountFlags;
+
+    private TransferFlags transferFlags;
+
+    private TransferFlags transferPendingFlags;
+
+    private UInt128 transferPendingId;
+
+    private UInt128 amountRequested;
+
+    private UInt128 amount;
+
+    private uint ledger;
+
+    private TransferPendingStatus transferPendingStatus;
+
+    private ReservedData reserved;
+
+    public UInt128 DrAccountId { get => drAccountId; set => drAccountId = value; }
+
+    public UInt128 DrDebitsPending { get => drDebitsPending; set => drDebitsPending = value; }
+
+    public UInt128 DrDebitsPosted { get => drDebitsPosted; set => drDebitsPosted = value; }
+
+    public UInt128 DrCreditsPending { get => drCreditsPending; set => drCreditsPending = value; }
+
+    public UInt128 DrCreditsPosted { get => drCreditsPosted; set => drCreditsPosted = value; }
+
+    public UInt128 CrAccountId { get => crAccountId; set => crAccountId = value; }
+
+    public UInt128 CrDebitsPending { get => crDebitsPending; set => crDebitsPending = value; }
+
+    public UInt128 CrDebitsPosted { get => crDebitsPosted; set => crDebitsPosted = value; }
+
+    public UInt128 CrCreditsPending { get => crCreditsPending; set => crCreditsPending = value; }
+
+    public UInt128 CrCreditsPosted { get => crCreditsPosted; set => crCreditsPosted = value; }
+
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
+
+    public ulong DrAccountTimestamp { get => drAccountTimestamp; set => drAccountTimestamp = value; }
+
+    public ulong CrAccountTimestamp { get => crAccountTimestamp; set => crAccountTimestamp = value; }
+
+    public AccountFlags DrAccountFlags { get => drAccountFlags; set => drAccountFlags = value; }
+
+    public AccountFlags CrAccountFlags { get => crAccountFlags; set => crAccountFlags = value; }
+
+    public TransferFlags TransferFlags { get => transferFlags; set => transferFlags = value; }
+
+    public TransferFlags TransferPendingFlags { get => transferPendingFlags; set => transferPendingFlags = value; }
+
+    public UInt128 TransferPendingId { get => transferPendingId; set => transferPendingId = value; }
+
+    public UInt128 AmountRequested { get => amountRequested; set => amountRequested = value; }
+
+    public UInt128 Amount { get => amount; set => amount = value; }
+
+    public uint Ledger { get => ledger; set => ledger = value; }
+
+    public TransferPendingStatus TransferPendingStatus { get => transferPendingStatus; set => transferPendingStatus = value; }
+
+    internal byte[] Reserved { get => reserved.GetData(); set => reserved.SetData(value); }
+
+}
+
 public enum InitializationStatus : uint
 {
     Success = 0,

@@ -240,6 +240,10 @@ const CLIArgs = union(enum) {
         },
     };
 
+    const Amqp = struct {
+        addresses: ?[]const u8 = null,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -247,6 +251,7 @@ const CLIArgs = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: Amqp,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -525,6 +530,10 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
+    pub const Amqp = struct {
+        addresses: ?Addresses,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -532,6 +541,7 @@ pub const Command = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: Amqp,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -547,6 +557,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
+        .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
     };
 }
 
@@ -984,6 +995,17 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
     return .{
         .path = multiversion.positional.path,
         .log_debug = multiversion.log_debug,
+    };
+}
+
+fn parse_args_amqp(benchmark: CLIArgs.Amqp) Command.Amqp {
+    const addresses = if (benchmark.addresses) |addresses|
+        parse_addresses(addresses, "--addresses", Command.Addresses)
+    else
+        null;
+
+    return .{
+        .addresses = addresses,
     };
 }
 
