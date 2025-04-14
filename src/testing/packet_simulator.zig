@@ -511,7 +511,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         fn packet_delay_default(self: *PacketSimulator, _: Packet, _: Path) u64 {
             const min = self.options.one_way_delay_min;
             const mean = self.options.one_way_delay_mean;
-            return min + fuzz.random_int_exponential(&self.prng, u64, mean - min);
+            return @max(min, fuzz.random_int_exponential(&self.prng, u64, mean));
         }
     };
 }
