@@ -454,6 +454,8 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
             multi_batch_per_request_limit,
     });
 
+    const simulator_requests_max = constants.journal_slot_count * 1000;
+
     return .{
         .cluster = cluster_options,
         .network = network_options,
@@ -474,7 +476,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .replica_release_advance_probability = ratio(1, 1_000_000),
         .replica_release_catchup_probability = ratio(1, 100_000),
 
-        .requests_max = constants.journal_slot_count * 3,
+        .requests_max = simulator_requests_max,
         .request_probability = ratio(prng.range_inclusive(u8, 1, 100), 100),
         .request_idle_on_probability = ratio(prng.range_inclusive(u8, 0, 20), 100),
         .request_idle_off_probability = ratio(prng.range_inclusive(u8, 10, 20), 100),
@@ -486,6 +488,7 @@ fn options_lite(prng: *stdx.PRNG) Simulator.Options {
     base.cluster.replica_count = 3;
     base.cluster.standby_count = 0;
     base.network.node_count = 3;
+    base.requests_max = constants.journal_slot_count * 50;
     return base;
 }
 
