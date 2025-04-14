@@ -5340,6 +5340,14 @@ pub fn ReplicaType(
                 return true;
             }
 
+            // We must only ever send our view number to a client via a pong message if we are
+            // in normal status. Otherwise, we may be partitioned from the cluster with a newer
+            // view number, leak this to the client, which would then pass this to the cluster
+            // in subsequent client requests, which would then ignore these client requests with
+            // a newer view number, locking out the client. The principle here is that we must
+            // never send view numbers for views that have not yet started.
+            if (self.status != .normal) return true;
+
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
@@ -5348,10 +5356,13 @@ pub fn ReplicaType(
                     message.header.release,
                     self.release_client_min,
                 });
-                self.send_eviction_message_to_client(
-                    message.header.client,
-                    .client_release_too_low,
-                );
+                if (self.primary()) {
+                    self.send_eviction_message_to_client(
+                        message.header.client,
+                        .client_release_too_low,
+                    );
+                }
+
                 return true;
             }
 
@@ -5363,20 +5374,14 @@ pub fn ReplicaType(
                     message.header.release,
                     self.release,
                 });
-                self.send_eviction_message_to_client(
-                    message.header.client,
-                    .client_release_too_high,
-                );
+                if (self.primary()) {
+                    self.send_eviction_message_to_client(
+                        message.header.client,
+                        .client_release_too_high,
+                    );
+                }
                 return true;
             }
-
-            // We must only ever send our view number to a client via a pong message if we are
-            // in normal status. Otherwise, we may be partitioned from the cluster with a newer
-            // view number, leak this to the client, which would then pass this to the cluster
-            // in subsequent client requests, which would then ignore these client requests with
-            // a newer view number, locking out the client. The principle here is that we must
-            // never send view numbers for views that have not yet started.
-            if (self.status != .normal) return true;
 
             return false;
         }
