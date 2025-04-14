@@ -3,6 +3,35 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.36
+
+Released: 2025-04-14
+
+### Safety And Performance
+
+- [#2891](https://github.com/tigerbeetle/tigerbeetle/pull/2891)
+
+  Fix journal disjoint-buffer assertion.
+
+- [#2887](https://github.com/tigerbeetle/tigerbeetle/pull/2887)
+
+  Make object cache optional. This improves throughput by ~10%, as we can omit the object cache from
+  the account events groove, which never uses it.
+
+### Internals
+
+- [#2888](https://github.com/tigerbeetle/tigerbeetle/pull/2888)
+
+  Rename FIFO to Queue
+
+- [#2882](https://github.com/tigerbeetle/tigerbeetle/pull/2882)
+
+  Add `zig build ci` to help run CI checks locally.
+
+### TigerTracks 🎧
+
+- [The Great Gig in the Sky](https://www.youtube.com/watch?v=2PMnJ_Luk_o)
+
 ## TigerBeetle 0.16.35
 
 Released: 2025-04-07
