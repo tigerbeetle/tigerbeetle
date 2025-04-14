@@ -51,7 +51,7 @@ pub const Time = struct {
     }
 
     pub fn monotonic_instant(self: *Time) Instant {
-        return .{ .base_ns = self.monotonic() };
+        return .{ .ns = self.monotonic() };
     }
 
     pub fn realtime(self: *Time) i64 {

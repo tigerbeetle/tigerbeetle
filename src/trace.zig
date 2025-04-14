@@ -283,11 +283,11 @@ pub fn TracerType(comptime Time: type) type {
                 @tagName(event),
                 event_tracing,
                 event_timing,
-                if (event_duration.nanoseconds < us_log_threshold_ns)
+                if (event_duration.ns < us_log_threshold_ns)
                     event_duration.microseconds()
                 else
                     event_duration.milliseconds(),
-                if (event_duration.nanoseconds < us_log_threshold_ns) "us" else "ms",
+                if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
             });
 
             tracer.timing(event_timing, event_duration.microseconds());

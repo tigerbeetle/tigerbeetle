@@ -38,7 +38,7 @@ pub const Time = struct {
     }
 
     pub fn monotonic_instant(self: *Time) Instant {
-        return Instant{ .base_ns = self.monotonic() };
+        return Instant{ .ns = self.monotonic() };
     }
 
     fn monotonic_windows() u64 {
@@ -154,6 +154,6 @@ test "Time monotonic smoke" {
     var time: Time = .{};
     const instant_1 = time.monotonic_instant();
     const instant_2 = time.monotonic_instant();
-    assert(instant_1.duration_since(instant_1).nanoseconds == 0);
-    assert(instant_2.duration_since(instant_1).nanoseconds >= 0);
+    assert(instant_1.duration_since(instant_1).ns == 0);
+    assert(instant_2.duration_since(instant_1).ns >= 0);
 }
