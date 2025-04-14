@@ -673,7 +673,7 @@ pub const Storage = struct {
     }
 
     fn latency(storage: *Storage, min: u64, mean: u64) u64 {
-        return min + fuzz.random_int_exponential(&storage.prng, u64, mean - min);
+        return @max(min, fuzz.random_int_exponential(&storage.prng, u64, mean));
     }
 
     fn pick_faulty_sector(
