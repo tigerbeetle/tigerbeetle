@@ -20,10 +20,8 @@ pub fn StackType(comptime T: type) type {
         pub inline fn init(options: struct {
             capacity: u32,
             verify_push: bool,
-            name: ?[]const u8,
         }) Stack {
             return .{ .any = .{
-                .name = options.name,
                 .capacity = options.capacity,
                 .verify_push = options.verify_push,
             } };
@@ -77,9 +75,6 @@ const StackAny = struct {
     count: u32 = 0,
     capacity: u32,
 
-    // This should only be null if you're sure we'll never want to monitor `count`.
-    name: ?[]const u8,
-
     // If the number of elements is large, the constants.verify check in push() can be too
     // expensive. Allow the user to gate it.
     verify_push: bool,
@@ -128,7 +123,6 @@ const StackAny = struct {
 
     fn reset(self: *StackAny) void {
         self.* = .{
-            .name = self.name,
             .capacity = self.capacity,
             .verify_push = self.verify_push,
         };
@@ -171,7 +165,6 @@ test "Stack: fuzz" {
 
     var stack = Stack.init(.{
         .capacity = item_count_max,
-        .name = "fuzz",
         .verify_push = true,
     });
 
@@ -246,7 +239,6 @@ test "Stack: push/pop/peek/empty" {
 
     var stack: StackType(Item) = StackType(Item).init(.{
         .capacity = 3,
-        .name = "fuzz",
         .verify_push = true,
     });
 

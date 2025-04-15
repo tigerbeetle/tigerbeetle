@@ -179,7 +179,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
 
             var blocks = StackType(Block).init(.{
                 .capacity = blocks_allocated,
-                .name = "compaction_blocks",
                 .verify_push = false,
             });
             for (blocks_backing_storage) |*block| blocks.push(block);
@@ -201,7 +200,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             pool.* = .{
                 .blocks = StackType(Block).init(.{
                     .capacity = pool.blocks.capacity(),
-                    .name = "compaction_blocks",
                     .verify_push = false,
                 }),
                 .blocks_backing_storage = pool.blocks_backing_storage,
