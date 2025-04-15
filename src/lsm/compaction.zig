@@ -153,7 +153,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             // to the next index block.
             last_block_in_the_table: bool,
 
-            next: ?*Block, // For Stack.
+            link: StackType(Block).Link,
         };
 
         pub fn init(allocator: mem.Allocator, block_count: u32) !ResourcePool {
@@ -171,7 +171,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                     .ptr = try allocate_block(allocator),
                     .stage = .free,
                     .last_block_in_the_table = false,
-                    .next = null,
+                    .link = .{},
                 };
                 blocks_allocated += 1;
             }
@@ -199,11 +199,11 @@ pub fn ResourcePoolType(comptime Grid: type) type {
 
         pub fn reset(pool: *ResourcePool) void {
             pool.* = .{
-                .blocks = .{
-                    .count_max = pool.blocks.count_max,
+                .blocks = StackType(Block).init(.{
+                    .capacity = pool.blocks.capacity(),
                     .name = "compaction_blocks",
                     .verify_push = false,
-                },
+                }),
                 .blocks_backing_storage = pool.blocks_backing_storage,
             };
             for (pool.blocks_backing_storage) |*block| {
@@ -211,7 +211,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                     .ptr = block.ptr,
                     .stage = .free,
                     .last_block_in_the_table = false,
-                    .next = null,
+                    .link = .{},
                 };
                 pool.blocks.push(block);
             }
@@ -226,25 +226,25 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         }
 
         pub fn blocks_acquired(pool: *ResourcePool) u32 {
-            assert(pool.blocks.count <= pool.blocks_backing_storage.len);
-            return @as(u32, @intCast(pool.blocks_backing_storage.len - pool.blocks.count));
+            assert(pool.blocks.count() <= pool.blocks_backing_storage.len);
+            return @as(u32, @intCast(pool.blocks_backing_storage.len - pool.blocks.count()));
         }
 
         pub fn blocks_free(pool: *ResourcePool) u32 {
-            return @as(u32, @intCast(pool.blocks.count));
+            return pool.blocks.count();
         }
 
         fn block_acquire(pool: *@This()) ?*Block {
             const block = pool.blocks.pop() orelse return null;
             assert(block.stage == .free);
-            assert(block.next == null);
+            assert(block.link.next == null);
             assert(!block.last_block_in_the_table);
             return block;
         }
 
         fn block_release(pool: *@This(), block: *Block) void {
             assert(block.stage == .free);
-            assert(block.next == null);
+            assert(block.link.next == null);
             assert(!block.last_block_in_the_table);
             pool.blocks.push(block);
         }
