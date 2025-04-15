@@ -1337,7 +1337,7 @@ pub fn ReplicaType(
             }
 
             if (self.loopback_queue) |loopback_message| {
-                assert(loopback_message.next == null);
+                assert(loopback_message.link.next == null);
                 self.message_bus.unref(loopback_message);
                 self.loopback_queue = null;
             }
@@ -5320,7 +5320,7 @@ pub fn ReplicaType(
 
                 assert(!self.standby());
 
-                assert(message.next == null);
+                assert(message.link.next == null);
                 self.loopback_queue = null;
                 assert(message.header.replica == self.replica);
                 self.on_message(message);

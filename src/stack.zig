@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 
 const constants = @import("./constants.zig");
 
-pub const StackLink = struct {
+pub const StackLink = extern struct {
     next: ?*StackLink = null,
 };
 
@@ -27,11 +27,11 @@ pub fn StackType(comptime T: type) type {
             } };
         }
 
-        pub inline fn count(self: *Stack) u64 {
+        pub inline fn count(self: *Stack) u32 {
             return self.any.count;
         }
 
-        pub inline fn capacity(self: *Stack) u64 {
+        pub inline fn capacity(self: *Stack) u32 {
             return self.any.capacity;
         }
 
