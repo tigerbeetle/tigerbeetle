@@ -141,51 +141,56 @@ test "completion.zig: Split buffer and complete" {
         suffix: BoundedArray(u8, completion_entry_bytes),
         query: BoundedArray(u8, completion_entry_bytes),
         matches: BoundedArray([]const u8, 10),
-    }{ .{
-        .buffer = "",
-        .idx = 0,
-        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .query = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .matches = try BoundedArray([]const u8, 10).from_slice(&.{}),
-    }, .{
-        .buffer = "creat",
-        .idx = 5,
-        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("creat"),
-        .matches = try BoundedArray([]const u8, 10).from_slice(
-            &.{ "create_accounts", "create_transfers" },
-        ),
-    }, .{
-        .buffer = "create_accounts id=1 co",
-        .idx = 23,
-        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
-            "create_accounts id=1 ",
-        ),
-        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
-        .matches = try BoundedArray([]const u8, 10).from_slice(
-            &.{ "code", "create_accounts", "lookup_accounts", "get_account_transfers", "get_account_balances", "query_accounts", "account_id", "debit_account_id", "credit_account_id" }),
-    }, .{
-        .buffer = "create_accounts id=1 cod ledger=700",
-        .idx = 24,
-        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
-            "create_accounts id=1 ",
-        ),
-        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(" ledger=700"),
-        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("cod"),
-        .matches = try BoundedArray([]const u8, 10).from_slice(&.{"code"}),
-    }, .{
-        .buffer = "nsf",
-        .idx = 3,
-        .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
-        .query = try BoundedArray(u8, completion_entry_bytes).from_slice("nsf"),
-        .matches = try BoundedArray([]const u8, 10).from_slice(
-            &.{ "create_transfers", "lookup_transfers", "get_account_transfers", "query_transfers" },
-        ),
-    } };
+    }{
+        .{
+            .buffer = "",
+            .idx = 0,
+            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .query = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .matches = try BoundedArray([]const u8, 10).from_slice(&.{}),
+        },
+        .{
+            .buffer = "creat",
+            .idx = 5,
+            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("creat"),
+            .matches = try BoundedArray([]const u8, 10).from_slice(
+                &.{ "create_accounts", "create_transfers" },
+            ),
+        },
+        .{
+            .buffer = "create_accounts id=1 co",
+            .idx = 23,
+            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
+                "create_accounts id=1 ",
+            ),
+            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("co"),
+            .matches = try BoundedArray([]const u8, 10).from_slice(&.{ "code", "create_accounts", "lookup_accounts", "get_account_transfers", "get_account_balances", "query_accounts", "account_id", "debit_account_id", "credit_account_id" }),
+        },
+        .{
+            .buffer = "create_accounts id=1 cod ledger=700",
+            .idx = 24,
+            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(
+                "create_accounts id=1 ",
+            ),
+            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(" ledger=700"),
+            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("cod"),
+            .matches = try BoundedArray([]const u8, 10).from_slice(&.{"code"}),
+        },
+        .{
+            .buffer = "nsf",
+            .idx = 3,
+            .prefix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .suffix = try BoundedArray(u8, completion_entry_bytes).from_slice(""),
+            .query = try BoundedArray(u8, completion_entry_bytes).from_slice("nsf"),
+            .matches = try BoundedArray([]const u8, 10).from_slice(
+                &.{ "create_transfers", "lookup_transfers", "get_account_transfers", "query_transfers" },
+            ),
+        },
+    };
 
     for (tests) |t| {
         var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
