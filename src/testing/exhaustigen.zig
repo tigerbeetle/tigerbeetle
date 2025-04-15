@@ -9,13 +9,13 @@ test "generate all permutations" {
         var pool_buffer: [4]u8 = "abcd".*;
         var permutation: [4]u8 = undefined;
 
-        for (0..permutation.len) |index| {
-            const pool = pool_buffer[0 .. pool_buffer.len - index];
+        for (0..permutation.len) |i| {
+            const pool = pool_buffer[0 .. pool_buffer.len - i];
 
             // Pick a "random" number from the pool, append it to the permutation,
             // and swap-remove it from the pool.
-            const pool_index = g.int_inclusive(usize, pool.len - 1);
-            permutation[index] = pool[pool_index];
+            const pool_index = g.index(pool);
+            permutation[i] = pool[pool_index];
             pool[pool_index] = pool[pool.len - 1];
         }
         // Here, `permutation` enumerates all permutations of `abcd`:
@@ -89,7 +89,12 @@ pub fn int_inclusive(g: *Gen, Int: type, bound: Int) Int {
     return @intCast(g.gen(@intCast(bound)));
 }
 
+pub fn index(g: *Gen, slice: anytype) usize {
+    assert(slice.len > 0);
+    return g.int_inclusive(usize, slice.len - 1);
+}
+
 pub fn enum_value(g: *Gen, Enum: type) Enum {
     const values = std.enums.values(Enum);
-    return values[g.int_inclusive(usize, values.len - 1)];
+    return values[g.index(values)];
 }

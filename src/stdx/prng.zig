@@ -12,7 +12,7 @@
 //! - isolate our test suite from stdlib API churn
 //! - isolate TigerBeetle from the churn in the PRNG algorithms
 //! - simplify and extend the API
-//! - remove dynamic-dispatch idirection (a minor bonus).
+//! - remove dynamic-dispatch indirection (a minor bonus).
 
 const std = @import("std");
 const stdx = @import("../stdx.zig");
@@ -189,26 +189,26 @@ test fill {
     ).diff_fmt("{d}", .{distribution});
 }
 
-/// Genrate an unbiased, uniformly distributed integer r such that 0 ≤ r ≤ max.
+/// Generate an unbiased, uniformly distributed integer r such that 0 ≤ r ≤ max.
 ///
 /// No biased version is provided --- while biased generation is simpler&faster, the bias can be
 /// quite high depending on max!
-pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
-    if (max == std.math.maxInt(T)) {
-        return prng.int(T);
+pub fn int_inclusive(prng: *PRNG, Int: anytype, max: Int) Int {
+    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    if (max == std.math.maxInt(Int)) {
+        return prng.int(Int);
     }
 
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
-    const bits = @typeInfo(T).Int.bits;
+    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    const bits = @typeInfo(Int).Int.bits;
     const less_than = max + 1;
 
     // adapted from:
     //   http://www.pcg-random.org/posts/bounded-rands.html
     //   "Lemire's (with an extra tweak from Zig)"
-    var x = prng.int(T);
-    var m = math.mulWide(T, x, less_than);
-    var l: T = @truncate(m);
+    var x = prng.int(Int);
+    var m = math.mulWide(Int, x, less_than);
+    var l: Int = @truncate(m);
     if (l < less_than) {
         var t = -%less_than;
 
@@ -219,8 +219,8 @@ pub fn int_inclusive(prng: *PRNG, T: anytype, max: T) T {
             }
         }
         while (l < t) {
-            x = prng.int(T);
-            m = math.mulWide(T, x, less_than);
+            x = prng.int(Int);
+            m = math.mulWide(Int, x, less_than);
             l = @truncate(m);
         }
     }
@@ -263,7 +263,7 @@ test int_inclusive {
 }
 
 // Deliberately excluded from the API to normalize everything to closed ranges.
-// Somewhat surprisingly, closed ranges are more conveinient for generating random numbers:
+// Somewhat surprisingly, closed ranges are more convenient for generating random numbers:
 // - passing zero is not a subtle error
 // - passing intMax allows generating any integer
 // - at the call-site, inclusive is usually somewhat more obvious.
@@ -288,10 +288,10 @@ test index {
 }
 
 /// Generates a uniform, unbiased integer r such that max ≤ r ≤ max.
-pub fn range_inclusive(prng: *PRNG, T: type, min: T, max: T) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+pub fn range_inclusive(prng: *PRNG, Int: type, min: Int, max: Int) Int {
+    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
     assert(min <= max);
-    return min + prng.int_inclusive(T, max - min);
+    return min + prng.int_inclusive(Int, max - min);
 }
 
 test range_inclusive {
@@ -312,37 +312,37 @@ test range_inclusive {
 /// Returns a uniformly distributed integer of type T.
 ///
 /// That is, fills @sizeOf(T) bytes with random bits.
-pub fn int(prng: *PRNG, T: anytype) T {
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
-    if (T == u64) return prng.next();
-    if (@sizeOf(T) < @sizeOf(u64)) return @truncate(prng.next());
-    var result: T = undefined;
+pub fn int(prng: *PRNG, Int: type) Int {
+    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    if (Int == u64) return prng.next();
+    if (@sizeOf(Int) < @sizeOf(u64)) return @truncate(prng.next());
+    var result: Int = undefined;
     prng.fill(std.mem.asBytes(&result));
     return result;
 }
 
 test int {
-    try test_bytes_T(u8, snap(@src(),
+    try test_bytes_int(u8, snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ));
-    try test_bytes_T(u64, snap(@src(),
+    try test_bytes_int(u64, snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ));
-    try test_bytes_T(u128, snap(@src(),
+    try test_bytes_int(u128, snap(@src(),
         \\{ 130, 143, 107, 135, 111, 119, 132, 123 }
     ));
 }
 
-fn test_bytes_T(T: type, want: Snap) !void {
+fn test_bytes_int(Int: type, want: Snap) !void {
     var prng = PRNG.from_seed(92);
     var distribution: [8]u32 = .{0} ** 8;
     for (0..1000) |_| {
-        distribution[@intCast(prng.int(T) % 8)] += 1;
+        distribution[@intCast(prng.int(Int) % 8)] += 1;
     }
     try want.diff_fmt("{d}", .{distribution});
 }
 
-/// Returns true with probaility 0.5.
+/// Returns true with probability 0.5.
 pub fn boolean(prng: *PRNG) bool {
     return prng.next() & 1 == 1;
 }
@@ -503,7 +503,7 @@ test Combination {
 }
 
 /// An iterator style API for selecting a single element out of the given weighted sequence,
-/// without apriory knowledge about the total weight.
+/// without a priori knowledge about the total weight.
 pub const Reservoir = struct {
     total: u64,
 
