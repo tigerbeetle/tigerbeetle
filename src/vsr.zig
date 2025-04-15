@@ -66,6 +66,7 @@ pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").Checkpoi
 pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
 pub const CountingAllocator = @import("counting_allocator.zig");
 pub const IOPSType = @import("iops.zig").IOPSType;
+pub const StackType = @import("stack.zig").StackType;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
