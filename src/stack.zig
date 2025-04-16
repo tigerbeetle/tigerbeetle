@@ -61,11 +61,6 @@ pub fn StackType(comptime T: type) type {
         inline fn contains(self: *const Stack, needle: *const T) bool {
             return self.any.contains(&needle.link);
         }
-
-        /// Resets the state.
-        pub inline fn reset(self: *Stack) void {
-            self.any.reset();
-        }
     };
 }
 
@@ -119,13 +114,6 @@ const StackAny = struct {
             if (link == needle) return true;
             next = link.next;
         } else unreachable;
-    }
-
-    fn reset(self: *StackAny) void {
-        self.* = .{
-            .capacity = self.capacity,
-            .verify_push = self.verify_push,
-        };
     }
 };
 
