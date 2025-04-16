@@ -85,6 +85,9 @@ pub const Storage = struct {
 
         /// Accessed by the Grid for extra verification of grid coherence.
         grid_checker: ?*GridChecker = null,
+
+        iops_read_max: u64 = constants.iops_read_max,
+        iops_write_max: u64 = constants.iops_write_max,
     };
 
     /// See usage in Journal.write_sectors() for details.
@@ -218,10 +221,10 @@ pub const Storage = struct {
         const overlay_buffers = std.mem.bytesAsValue(OverlayBuffers, overlay_buffers_alloc);
         errdefer allocator.destroy(overlay_buffers);
 
-        var reads = try ReadyQueueType(*Storage.Read).init(allocator, constants.iops_read_max);
+        var reads = try ReadyQueueType(*Storage.Read).init(allocator, options.iops_read_max);
         errdefer reads.deinit(allocator);
 
-        var writes = try ReadyQueueType(*Storage.Write).init(allocator, constants.iops_write_max);
+        var writes = try ReadyQueueType(*Storage.Write).init(allocator, options.iops_write_max);
         errdefer writes.deinit(allocator);
 
         return Storage{
