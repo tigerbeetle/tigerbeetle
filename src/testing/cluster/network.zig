@@ -78,15 +78,14 @@ pub const Network = struct {
         // - replica → client paths
         // - client → replica paths
         // but not client→client paths; clients never message one another.
-        const node_count = @as(usize, options.node_count);
-        const client_count = @as(usize, options.client_count);
-        const path_count = node_count * (node_count - 1) + 2 * node_count * client_count;
+        const node_count: u32 = options.node_count;
+        const client_count: u32 = options.client_count;
+        const path_count: u32 = node_count * (node_count - 1) + 2 * node_count * client_count;
         const message_pool = try MessagePool.init_capacity(
             allocator,
             // +1 so we can allocate an extra packet when all packet queues are at capacity,
             // so that `PacketSimulator.submit_packet` can choose which packet to drop.
-            1 + @as(usize, options.path_maximum_capacity) * path_count +
-                options.recorded_count_max,
+            1 + options.path_maximum_capacity * path_count + options.recorded_count_max,
         );
         errdefer message_pool.deinit(allocator);
 
