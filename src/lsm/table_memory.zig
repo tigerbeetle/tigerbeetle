@@ -237,8 +237,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             var source_index: u32 = offset;
             var target_index: u32 = offset;
             while (source_index < source_count) {
-                const value = values[source_index];
-                values[target_index] = value;
+                if (source_index != target_index) {
+                    values[target_index] = values[source_index];
+                }
 
                 // If we're at the end of the source, there is no next value, so the next value
                 // can't be equal.
