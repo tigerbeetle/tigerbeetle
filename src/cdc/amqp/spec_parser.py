@@ -37,7 +37,7 @@ reader = {
 
 write_types = {
         'shortstr': "[]const u8",
-        'longstr': "[]const u8",
+        'longstr': "?Encoder.Body",
         'bit': "bool",
         'octet': "u8",
         'short': "u16",
@@ -54,7 +54,7 @@ writer = {
         'longlong': "write_int(u64, ",
         'bit': "write_int(u8, ",
         'shortstr': 'write_short_string(',
-        'longstr': 'write_long_string(',
+        'longstr': 'write_long_string_body(',
         'table': "write_table(",
         'timestamp': 'write_int(u64, ',
     }
@@ -66,7 +66,6 @@ write_defaults = {
         'u16': "0",
         'u32': "0",
         'u64': "0",
-        '?Encoder.Table': "null",
     }
 
 class Source:

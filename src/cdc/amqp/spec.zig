@@ -864,7 +864,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// Security response data.
         /// A block of opaque data passed to the security mechanism. The contents of this
         /// data are defined by the SASL security mechanism.
-        response: []const u8,
+        response: ?Encoder.Body,
         /// Selected message locale.
         /// A single message locale selected by the client, which must be one of those
         /// specified by the server.
@@ -873,7 +873,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         fn write(self: *const @This(), encoder: *Encoder) void {
             encoder.write_table(self.client_properties);
             encoder.write_short_string(self.mechanism);
-            encoder.write_long_string(self.response);
+            encoder.write_long_string_body(self.response);
             encoder.write_short_string(self.locale);
         }
     },
@@ -884,10 +884,10 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// Security response data.
         /// A block of opaque data passed to the security mechanism. The contents of this
         /// data are defined by the SASL security mechanism.
-        response: []const u8,
+        response: ?Encoder.Body,
 
         fn write(self: *const @This(), encoder: *Encoder) void {
-            encoder.write_long_string(self.response);
+            encoder.write_long_string_body(self.response);
         }
     },
     /// Negotiate connection tuning parameters.

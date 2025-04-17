@@ -1152,12 +1152,12 @@ const Message = struct {
             .write = &struct {
                 fn write(context: *const anyopaque, buffer: []u8) usize {
                     const message: *const Message = @ptrCast(@alignCast(context));
-                    var array_list = std.ArrayListUnmanaged(u8).initBuffer(buffer);
+                    var fbs = std.io.fixedBufferStream(buffer);
                     std.json.stringify(message, .{
                         .whitespace = .minified,
                         .emit_nonportable_numbers_as_strings = true,
-                    }, array_list.fixedWriter()) catch unreachable;
-                    return array_list.items.len;
+                    }, fbs.writer()) catch unreachable;
+                    return fbs.pos;
                 }
             }.write,
         };

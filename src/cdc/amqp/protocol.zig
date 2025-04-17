@@ -36,8 +36,7 @@
 ///! │ variable size │
 ///! └───────────────┘
 ///! The body frame contains the application-specific content of the message.
-///! While the body can be split across multiple frames if `body_size` exceeds the frame size,
-///! this implementation supports only single-frame bodies.
+///! The body can be split across multiple frames if `body_size` exceeds the frame size.
 ///!
 ///! # Endianness:
 ///! Integers are encoded in network byte order (big endian).
@@ -492,6 +491,26 @@ pub const Encoder = struct {
         assert(self.index + value.len <= self.buffer.len);
         stdx.copy_left(.inexact, u8, self.buffer[self.index..], value);
         self.index += value.len;
+    }
+
+    pub fn write_long_string_body(self: *Encoder, body: ?Body) void {
+        if (body == null) {
+            self.write_int(u32, 0); // Zero sized string.
+            return;
+        }
+
+        const start_index = self.index;
+        self.index += @sizeOf(u32);
+        assert(self.index <= self.buffer.len);
+
+        self.index += body.?.write(self.buffer[self.index..]);
+        assert(self.index <= self.buffer.len);
+        const end_index = self.index;
+
+        const size: u32 = @intCast(end_index - start_index - @sizeOf(u32));
+        self.index = start_index;
+        self.write_int(u32, size);
+        self.index = end_index;
     }
 
     pub fn write_table(self: *Encoder, table: ?Table) void {

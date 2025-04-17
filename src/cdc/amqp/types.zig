@@ -115,6 +115,31 @@ pub const ClientCapabilities = struct {
     }
 };
 
+pub const SASLPlainAuth = struct {
+    pub const mechanism = "PLAIN";
+
+    user_name: []const u8,
+    password: []const u8,
+
+    /// Response returns the SASL PLAIN mechanism encoding, delimited by null characters.
+    pub fn response(self: *const SASLPlainAuth) Encoder.Body {
+        const vtable: Encoder.Body.VTable = comptime .{
+            .write = &struct {
+                fn write(context: *const anyopaque, buffer: []u8) usize {
+                    const auth: *const SASLPlainAuth = @ptrCast(@alignCast(context));
+                    var fbs = std.io.fixedBufferStream(buffer);
+                    std.fmt.format(fbs.writer(), "\x00{s}\x00{s}", .{
+                        auth.user_name,
+                        auth.password,
+                    }) catch unreachable;
+                    return fbs.pos;
+                }
+            }.write,
+        };
+        return .{ .context = self, .vtable = &vtable };
+    }
+};
+
 pub const QueueOverflow = enum {
     drop_head,
     reject_publish,

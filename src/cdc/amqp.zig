@@ -223,19 +223,14 @@ pub const Client = struct {
                 log.info("mechanisms {s}", .{args.mechanisms});
                 try log_table("server_properties", args.server_properties);
 
-                var response_buffer: [255]u8 = undefined;
-                const response: []const u8 = std.fmt.bufPrint(&response_buffer, "\x00{s}\x00{s}", .{
-                    self.connection_options.?.user_name,
-                    self.connection_options.?.password,
-                }) catch {
-                    log.err("Username and password are too long.", .{});
-                    return error.Unexpected;
+                const plain_auth: types.SASLPlainAuth = .{
+                    .user_name = self.connection_options.?.user_name,
+                    .password = self.connection_options.?.password,
                 };
-
                 const start_ok: spec.ServerMethod = .{ .connection_start_ok = .{
                     .client_properties = self.connection_options.?.properties.table(),
-                    .mechanism = "PLAIN",
-                    .response = response,
+                    .mechanism = types.SASLPlainAuth.mechanism,
+                    .response = plain_auth.response(),
                     .locale = self.connection_options.?.locale orelse first: {
                         var iterator = std.mem.splitScalar(u8, args.locales, ' ');
                         break :first iterator.next().?;
