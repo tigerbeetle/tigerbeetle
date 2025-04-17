@@ -240,6 +240,23 @@ const CLIArgs = union(enum) {
         },
     };
 
+    // CDC connector for AMQP targets.
+    const Amqp = struct {
+        addresses: []const u8,
+        cluster_id: u128,
+        amqp_address: []const u8,
+        amqp_user: []const u8,
+        amqp_password: []const u8,
+        amqp_vhost: []const u8,
+        amqp_publish_exchange: ?[]const u8 = null,
+        amqp_publish_routing_key: ?[]const u8 = null,
+        amqp_progress_tracker_queue: ?[]const u8 = null,
+        event_count_max: ?u32 = null,
+        idle_interval_seconds: ?u32 = null,
+        timestamp_last: ?u64 = null,
+        verbose: bool = false,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -247,6 +264,7 @@ const CLIArgs = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: Amqp,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -274,6 +292,8 @@ const CLIArgs = union(enum) {
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
         \\  repl       Enter the TigerBeetle client REPL.
+        \\
+        \\  amqp       CDC connector for AMQP targets.
         \\
         \\Options:
         \\
@@ -525,6 +545,22 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
+    pub const Amqp = struct {
+        addresses: Addresses,
+        cluster: u128,
+        amqp_address: std.net.Address,
+        amqp_user: []const u8,
+        amqp_password: []const u8,
+        amqp_vhost: []const u8,
+        amqp_publish_exchange: ?[]const u8,
+        amqp_publish_routing_key: ?[]const u8,
+        amqp_progress_tracker_queue: ?[]const u8,
+        event_count_max: ?u32,
+        idle_interval_seconds: ?u32,
+        timestamp_last: ?u64,
+        verbose: bool,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -532,6 +568,7 @@ pub const Command = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: Amqp,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -547,6 +584,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
+        .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
     };
 }
 
@@ -987,6 +1025,40 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
     };
 }
 
+fn parse_args_amqp(amqp: CLIArgs.Amqp) Command.Amqp {
+    const port = vsr.amqp.Client.tcp_port_default;
+    const addresses = parse_addresses(amqp.addresses, "--addresses", Command.Addresses);
+    const amqp_address = parse_address_and_port(
+        amqp.amqp_address,
+        "--amqp-address",
+        port,
+    );
+
+    if (amqp.amqp_publish_exchange == null and amqp.amqp_publish_routing_key == null) {
+        vsr.fatal(
+            .cli,
+            "--amqp-publish-exchange and --amqp-publish-routing-key cannot both be empty.",
+            .{},
+        );
+    }
+
+    return .{
+        .addresses = addresses,
+        .cluster = amqp.cluster_id,
+        .amqp_address = amqp_address,
+        .amqp_user = amqp.amqp_user,
+        .amqp_password = amqp.amqp_password,
+        .amqp_vhost = amqp.amqp_vhost,
+        .amqp_publish_exchange = amqp.amqp_publish_exchange,
+        .amqp_publish_routing_key = amqp.amqp_publish_routing_key,
+        .amqp_progress_tracker_queue = amqp.amqp_progress_tracker_queue,
+        .event_count_max = amqp.event_count_max,
+        .idle_interval_seconds = amqp.idle_interval_seconds,
+        .timestamp_last = amqp.timestamp_last,
+        .verbose = amqp.verbose,
+    };
+}
+
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(
     raw_addresses: []const u8,
@@ -1019,6 +1091,27 @@ fn parse_addresses(
     assert(addresses_parsed.len <= result.capacity());
     result.resize(addresses_parsed.len) catch unreachable;
     return result;
+}
+
+fn parse_address_and_port(
+    raw_address: []const u8,
+    comptime flag: []const u8,
+    port_default: u16,
+) std.net.Address {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+
+    const address = vsr.parse_address_and_port(.{
+        .string = raw_address,
+        .port_default = port_default,
+    }) catch |err| switch (err) {
+        error.AddressHasMoreThanOneColon => {
+            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
+        },
+        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
+    };
+    return address;
 }
 
 /// Given a limit like `10GiB`, a SetAssociativeCache and T return the largest `value_count_max`

@@ -142,6 +142,7 @@ pub fn ContextType(
             .get_account_balances,
             .query_accounts,
             .query_transfers,
+            .get_events,
         };
 
         const UserData = extern struct {

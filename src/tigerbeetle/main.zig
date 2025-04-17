@@ -68,7 +68,7 @@ pub fn main() !void {
     var command = cli.parse_args(&arg_iterator);
 
     switch (command) {
-        .inspect, .version => {},
+        .inspect, .version, .amqp => {},
         inline else => |*args| {
             if (args.log_debug) {
                 log_level_runtime = .debug;
@@ -99,6 +99,7 @@ pub fn main() !void {
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
+        .amqp => |*args| try Command.amqp(allocator, args),
     }
 }
 
@@ -574,6 +575,41 @@ const Command = struct {
         defer repl_instance.deinit(allocator);
 
         try repl_instance.run(args.statements);
+    }
+
+    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.Amqp) !void {
+        const Runner = @import("amqp_runner.zig").Runner;
+        var io: IO = try IO.init(128, 0);
+        defer io.deinit();
+
+        var runner: Runner = undefined;
+        try runner.init(
+            allocator,
+            &io,
+            .{
+                .tb_cluster_id = args.cluster,
+                .tb_addresses = args.addresses.const_slice(),
+                .amqp_address = args.amqp_address,
+                .amqp_user = args.amqp_user,
+                .amqp_password = args.amqp_password,
+                .amqp_vhost = args.amqp_vhost,
+                .amqp_publish_exchange = args.amqp_publish_exchange,
+                .amqp_publish_routing_key = args.amqp_publish_routing_key,
+                .amqp_progress_tracker_queue = args.amqp_progress_tracker_queue,
+                .event_count_max = args.event_count_max,
+                .idle_check_seconds = args.idle_interval_seconds,
+                .recovery_mode = if (args.timestamp_last) |timestamp_last|
+                    .{ .override = timestamp_last }
+                else
+                    .recover,
+            },
+        );
+        defer runner.deinit();
+
+        while (true) {
+            runner.tick();
+            io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
+        }
     }
 };
 
