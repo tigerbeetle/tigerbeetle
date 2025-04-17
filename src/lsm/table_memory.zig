@@ -7,6 +7,9 @@ const binary_search = @import("binary_search.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 
+// BUG: the sorted flag previously started sorted already.
+//       it was set to false if the values were not insert in sorted order
+//       Need to figure out a good way to do this.
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -17,8 +20,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub const ValueContext = struct {
             count: u32 = 0,
-            /// When true, `values` is strictly ascending-ordered (no duplicates).
-            sorted: bool = true,
+            // When true, `values` is strictly ascending-ordered (no duplicates).
+            //sorted: bool = true,
         };
 
         const Mutability = union(enum) {
@@ -39,6 +42,22 @@ pub fn TableMemoryType(comptime Table: type) type {
                 snapshot_min: u64 = 0,
             },
         };
+
+        // `sort_suffix` breaks the `values` array into “sorted runs” (sorted sub‑arrays).
+        // Each SortedRun captures the start (min) and end (max) indices of one sorted run.
+        // We can exploit this knowledge to check if the full array is sorted in O(k) and avoid
+        // the final sort, which reduces tail latency.
+        // The number of calls to `sort_suffix` are determined by `constants.lsm_compaction_ops`.
+        const SortedRun = struct {
+            min: u32, // inclusive
+            max: u32, // exclusive
+        };
+        // Allow one extra sorted run beyond lsm_compaction_ops:
+        // Scans perform an ad‑hoc full-table sort, producing a full run.
+        // Then there could be still number lsm_compaction_ops producing the remaining sorted runs.
+        const sorted_runs_max = constants.lsm_compaction_ops + 1;
+        sorted_runs: [sorted_runs_max]SortedRun,
+        sorted_runs_count: u16,
 
         values: []Value,
         value_context: ValueContext,
@@ -62,6 +81,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .mutable => .{ .mutable = .{} },
                     .immutable => .{ .immutable = .{} },
                 },
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .name = name,
 
                 .values = undefined,
@@ -84,6 +108,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             };
 
             table.* = .{
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .values = table.values,
                 .value_context = .{},
                 .mutability = mutability,
@@ -102,12 +131,13 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count < table.values.len);
-            if (table.value_context.sorted) {
-                table.value_context.sorted = table.value_context.count == 0 or
-                    key_from_value(&table.values[table.value_context.count - 1]) <
-                    key_from_value(value);
-            } else {
-                assert(table.value_context.count > 0);
+            // NOTE: this used to cover the case when we only append so what do we do now?
+            if (table.sorted()) {
+                assert(table.sorted_runs_count == 1);
+                assert(table.count() > 0);
+                // We expand the sorted run if the new key is strictly larger then the old max.
+                const max_key = key_from_value(&table.values[table.sorted_runs[0].max - 1]);
+                table.sorted_runs[0].max += if (max_key < key_from_value(value)) 1 else 0;
             }
 
             table.values[table.value_context.count] = value.*;
@@ -117,7 +147,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
             assert(table.value_context.count <= table.values.len);
-            assert(table.value_context.sorted);
+            assert(table.sorted());
 
             return binary_search.binary_search_values(
                 Key,
@@ -132,7 +162,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= table.values.len);
-            defer assert(table.value_context.sorted);
+            defer assert(table.sorted());
 
             table.sort();
 
@@ -147,9 +177,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
             assert(table.value_context.count <= table.values.len);
-            assert(table.value_context.sorted);
+            assert(table.sorted());
 
             table.* = .{
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .values = table.values,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
@@ -166,9 +201,9 @@ pub fn TableMemoryType(comptime Table: type) type {
         ) void {
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
-            assert(table_immutable.value_context.sorted);
+            assert(table_immutable.sorted());
             assert(table_mutable.mutability == .mutable);
-            maybe(table_mutable.value_context.sorted);
+            maybe(table_mutable.sorted());
 
             const values_count_limit = table_immutable.values.len;
             assert(values_count_limit == values_count_limit);
@@ -196,12 +231,16 @@ pub fn TableMemoryType(comptime Table: type) type {
             } };
         }
 
+        // The table is sorted if we have exactly one sorted run.
+        pub fn sorted(table: *const TableMemory) bool {
+            return table.sorted_runs_count == 1;
+        }
+
         pub fn sort(table: *TableMemory) void {
             assert(table.mutability == .mutable);
 
-            if (!table.value_context.sorted) {
+            if (!table.sorted()) {
                 table.mutable_sort_suffix_from_offset(0);
-                table.value_context.sorted = true;
             }
         }
 
@@ -219,9 +258,49 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
             assert(offset <= table.count());
 
+            const run_min = table.mutability.mutable.suffix_offset;
             const target_count = sort_suffix_from_offset(table.values_used(), offset);
+            const run_max = table.mutability.mutable.suffix_offset;
+
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
+
+            // New sorted run was created.
+            if (run_min < run_max) {
+                const run_new: SortedRun = .{ .min = run_min, .max = run_max };
+
+                // First run, no chance to coalesce, so just append it.
+                if (table.sorted_runs_count == 0) {
+                    table.sorted_runs[table.sorted_runs_count] = run_new;
+                    table.sorted_runs_count += 1;
+                    return;
+                }
+
+                const run_old = &table.sorted_runs[table.sorted_runs_count - 1];
+
+                const key_max_old = key_from_value(&table.values[run_new.max - 1]);
+                const key_min_new = key_from_value(&table.values[run_old.min]);
+
+                // Try to coalesce the new run with the old run.
+                // Ensure adjacent runs neither overlap nor contain duplicates:
+                // If the max key of run a is < the min key of run b, their union is
+                // strictly increasing and we do not have to deduplicate and we coalesce them.
+                if (key_max_old < key_min_new) {
+                    run_old.max = run_new.max;
+
+                    if (constants.verify) {
+                        for (
+                            table.values[0 .. table.count() - 1],
+                            table.values[0 + 1 .. table.count()],
+                        ) |*value, *value_next| {
+                            assert(key_from_value(value) < key_from_value(value_next));
+                        }
+                    }
+                } else {
+                    table.sorted_runs[table.sorted_runs_count] = run_new;
+                    table.sorted_runs_count += 1;
+                }
+            }
         }
 
         /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
