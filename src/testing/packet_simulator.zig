@@ -419,7 +419,8 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const queue_count = queue.count();
             if (queue_count + 1 > self.options.path_maximum_capacity) {
                 const link_packet = queue.remove_random(&self.prng).?;
-                self.packet_deinit(link_packet.packet);
+                defer self.packet_deinit(link_packet.packet);
+
                 log.warn("submit_packet: {} reached capacity, dropped packet: {}", .{
                     path,
                     if (@typeInfo(Packet) == .Pointer)
