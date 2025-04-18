@@ -134,7 +134,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             const process: std.meta.FieldType(MessageBus, .process) = switch (process_type) {
                 .replica => blk: {
-                    const tcp = try init_tcp(options.io, options.configuration[process_id.replica]);
+                    const tcp = try init_tcp_listen(
+                        options.io,
+                        options.configuration[process_id.replica],
+                    );
                     break :blk .{
                         .replica = process_id.replica,
                         .accept_fd = tcp.fd,
@@ -188,18 +191,15 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             allocator.free(bus.replicas_connect_attempts);
         }
 
-        fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: IO.socket_t,
-            address: std.net.Address,
-        } {
+        fn init_tcp(io: *IO, family: u32) !IO.socket_t {
             const fd = try io.open_socket(
-                address.any.family,
+                family,
                 posix.SOCK.STREAM,
                 posix.IPPROTO.TCP,
             );
             errdefer io.close_socket(fd);
 
-            const address_resolved = try io.listen(fd, address, .{
+            try io.socket_options(fd, .{
                 .rcvbuf = constants.tcp_rcvbuf,
                 .sndbuf = switch (process_type) {
                     .replica => constants.tcp_sndbuf_replica,
@@ -212,6 +212,16 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 } else null,
                 .user_timeout_ms = constants.tcp_user_timeout_ms,
                 .nodelay = constants.tcp_nodelay,
+            });
+            return fd;
+        }
+
+        fn init_tcp_listen(io: *IO, address: std.net.Address) !struct {
+            fd: IO.socket_t,
+            address: std.net.Address,
+        } {
+            const fd = try init_tcp(io, address.any.family);
+            const address_resolved = try io.listen(fd, address, .{
                 .backlog = constants.tcp_backlog,
             });
 
@@ -454,8 +464,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // The first replica's network address family determines the
                 // family for all other replicas:
                 const family = bus.configuration[0].any.family;
-                connection.fd =
-                    bus.io.open_socket(family, posix.SOCK.STREAM, posix.IPPROTO.TCP) catch return;
+                connection.fd = init_tcp(bus.io, family) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;
