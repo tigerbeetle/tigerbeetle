@@ -579,13 +579,10 @@ const Command = struct {
 
     pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.Amqp) !void {
         const Runner = @import("amqp_runner.zig").Runner;
-        var io: IO = try IO.init(128, 0);
-        defer io.deinit();
 
         var runner: Runner = undefined;
         try runner.init(
             allocator,
-            &io,
             .{
                 .tb_cluster_id = args.cluster,
                 .tb_addresses = args.addresses.const_slice(),
@@ -608,7 +605,6 @@ const Command = struct {
 
         while (true) {
             runner.tick();
-            io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
         }
     }
 };

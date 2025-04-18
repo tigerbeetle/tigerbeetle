@@ -41,7 +41,7 @@ pub const Runner = struct {
         );
     };
 
-    io: *IO,
+    io: IO,
     idle_completion: IO.Completion = undefined,
     idle_check_ns: u63,
     event_count_max: u32,
@@ -103,7 +103,6 @@ pub const Runner = struct {
     pub fn init(
         self: *Runner,
         allocator: std.mem.Allocator,
-        io: *IO,
         options: struct {
             tb_cluster_id: u128,
             tb_addresses: []const std.net.Address,
@@ -197,7 +196,6 @@ pub const Runner = struct {
         errdefer self.buffer.deinit(allocator);
 
         self.* = .{
-            .io = io,
             .idle_check_ns = idle_check_ns,
             .event_count_max = event_count_max,
             .amqp_publish_exchange = amqp_publish_exchange,
@@ -205,6 +203,7 @@ pub const Runner = struct {
             .amqp_progress_tracker_queue = amqp_progress_tracker_queue,
             .amqp_locker_queue = amqp_locker_queue,
             .connected = .{},
+            .io = undefined,
             .producer = .idle,
             .consumer = .idle,
             .state = .{ .unknown = options.recovery_mode },
@@ -213,6 +212,9 @@ pub const Runner = struct {
             .vsr_client = undefined,
             .amqp_client = undefined,
         };
+
+        self.io = try IO.init(32, 0);
+        errdefer self.io.deinit();
 
         self.message_pool = try MessagePool.init(allocator, .client);
         errdefer self.message_pool.deinit(allocator);
@@ -223,12 +225,12 @@ pub const Runner = struct {
             .replica_count = @intCast(options.tb_addresses.len),
             .time = .{},
             .message_pool = &self.message_pool,
-            .message_bus_options = .{ .configuration = options.tb_addresses, .io = io },
+            .message_bus_options = .{ .configuration = options.tb_addresses, .io = &self.io },
         });
         errdefer self.vsr_client.deinit(allocator);
 
         self.amqp_client = try amqp.Client.init(allocator, .{
-            .io = io,
+            .io = &self.io,
             .message_count_max = self.event_count_max,
             .message_body_size_max = Message.json_string_size_max,
         });
@@ -840,6 +842,7 @@ pub const Runner = struct {
     }
 
     pub fn tick(self: *Runner) void {
+        self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
         if (!self.vsr_client.evicted) {
             self.vsr_client.tick();
         }

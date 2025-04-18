@@ -119,26 +119,27 @@ pub const Client = struct {
         assert(options.message_count_max > 0);
         assert(options.message_body_size_max > 0);
 
-        // Large messages are not expected.
-        const receive_buffer = try allocator.alloc(u8, spec.FRAME_MIN_SIZE);
-        errdefer allocator.free(receive_buffer);
-
-        // The worst-case size required to write a message containing the JSON payload plus
-        // the custom key/value headers.
-        const frame_size_max =
-            Encoder.FrameHeader.SIZE +
-            @sizeOf(protocol.MethodHeader) +
-            Encoder.Header.SIZE +
-            Encoder.basic_properties_size_max +
+        // The worst-case size required to write a frame containing the message body.
+        const body_frame_size = Encoder.FrameHeader.SIZE +
             options.message_body_size_max +
             @sizeOf(protocol.FrameEnd);
 
-        // Rounded up to a multiple of 1 KiB.
-        const send_buffer_size = @max(spec.FRAME_MIN_SIZE, stdx.div_ceil(
-            frame_size_max * options.message_count_max,
-            1024,
-        ) * 1024);
+        const frame_size = @max(spec.FRAME_MIN_SIZE, body_frame_size);
 
+        // Large messages are not expected, but we must be able to receive at least
+        // the same frame size we send.
+        const receive_buffer = try allocator.alloc(u8, frame_size);
+        errdefer allocator.free(receive_buffer);
+
+        // When publishing messages, three frames are sent:
+        // Method (including arguments) + Header (including metadata) + Body.
+        // Rounded up to multiples of the frame size.
+        // TODO: The size could be more effiently calculated if we were aware of
+        // the actual variable data we will send.
+        const send_buffer_size = stdx.div_ceil(
+            ((2 * spec.FRAME_MIN_SIZE) + body_frame_size) * options.message_count_max,
+            frame_size,
+        ) * frame_size;
         const send_buffer = try allocator.alloc(u8, send_buffer_size);
         errdefer allocator.free(send_buffer);
 
@@ -147,7 +148,7 @@ pub const Client = struct {
             .connection_options = null,
             .receive_buffer = .{ .buffer = receive_buffer },
             .send_buffer = .{ .buffer = send_buffer },
-            .frame_size_max = frame_size_max,
+            .frame_size_max = frame_size,
         };
     }
 
