@@ -134,22 +134,25 @@ pub const ErrorCodes = enum(u16) {
 
 pub const FieldValueTag = enum(u8) {
     boolean = 't',
-    short_short_int = 'b',
     short_short_uint = 'B',
-    short_int = 's',
     short_uint = 'u',
-    long_int = 'I',
     long_uint = 'i',
-    long_long_int = 'L',
     long_long_uint = 'l',
     string = 'S',
     timestamp = 'T',
     field_table = 'F',
     void = 'V',
-    field_array = 'A',
-    float = 'f',
-    double = 'd',
-    decimal_value = 'D',
+
+    // We don't send or expect to receive these types from the AMQP server.
+    // Only user-defined tables would use them.
+    not_implemented_long_long_int = 'L',
+    not_implemented_long_int = 'I',
+    not_implemented_short_int = 's',
+    not_implemented_short_short_int = 'b',
+    not_implemented_field_array = 'A',
+    not_implemented_float = 'f',
+    not_implemented_double = 'd',
+    not_implemented_decimal_value = 'D',
 };
 
 pub const Decoder = struct {
@@ -261,13 +264,6 @@ pub const Decoder = struct {
         return value != 0;
     }
 
-    pub fn read_bitset(self: *Decoder) Error!stdx.BitSetType(8) {
-        const value = try self.read_int(u8);
-        return .{
-            .bits = value,
-        };
-    }
-
     pub fn read_short_string(self: *Decoder) Error![]const u8 {
         const length: u8 = try self.read_int(u8);
         if (self.index + length > self.buffer.len) return error.BufferExhausted;
@@ -299,22 +295,27 @@ pub const Decoder = struct {
         const tag = try self.read_enum(FieldValueTag);
         const value: FieldValue = switch (tag) {
             .boolean => .{ .boolean = try self.read_bool() },
-            .short_short_int => .{ .short_short_int = try self.read_int(i8) },
             .short_short_uint => .{ .short_short_uint = try self.read_int(u8) },
-            .short_int => .{ .short_int = try self.read_int(i16) },
             .short_uint => .{ .short_uint = try self.read_int(u16) },
-            .long_int => .{ .long_int = try self.read_int(i32) },
             .long_uint => .{ .long_uint = try self.read_int(u32) },
-            .long_long_int => .{ .long_long_int = try self.read_int(i64) },
             .long_long_uint => .{ .long_long_uint = try self.read_int(u64) },
             .string => .{ .string = try self.read_long_string() },
             .timestamp => .{ .timestamp = try self.read_int(u64) },
             .field_table => .{ .field_table = try self.read_table() },
             .void => .void,
-            .field_array => @panic("AMQP array not implemented"),
-            .float => @panic("AMQP float not implemented"),
-            .double => @panic("AMQP double not implemented"),
-            .decimal_value => @panic("AMQP decimal not implemented"),
+
+            .not_implemented_long_long_int,
+            .not_implemented_long_int,
+            .not_implemented_short_int,
+            .not_implemented_short_short_int,
+            .not_implemented_field_array,
+            .not_implemented_float,
+            .not_implemented_double,
+            .not_implemented_decimal_value,
+            => std.debug.panic(
+                "AMQP type '{c}' not supported.",
+                .{@intFromEnum(tag)},
+            ),
         };
         assert(value == tag);
         return value;
@@ -422,8 +423,6 @@ pub const Encoder = struct {
             self.vtable.write(self.context, encoder);
         }
     };
-
-    pub const basic_properties_size_max = 256;
 
     /// Interface for user-defined content to be written directly
     /// into the send buffer without copying.
@@ -538,22 +537,27 @@ pub const Encoder = struct {
         self.write_int(u8, @intFromEnum(tag));
         switch (field) {
             .boolean => |value| self.write_bool(value),
-            .short_short_int => |value| self.write_int(i8, value),
             .short_short_uint => |value| self.write_int(u8, value),
-            .short_int => |value| self.write_int(i16, value),
             .short_uint => |value| self.write_int(u16, value),
-            .long_int => |value| self.write_int(i32, value),
             .long_uint => |value| self.write_int(u32, value),
-            .long_long_int => |value| self.write_int(i64, value),
             .long_long_uint => |value| self.write_int(u64, value),
             .string => |value| self.write_long_string(value),
             .timestamp => |value| self.write_int(u64, value),
             .field_table => |value| self.write_table(value),
             .void => {},
-            .field_array => @panic("AMQP array not implemented"),
-            .float => @panic("AMQP float not implemented"),
-            .double => @panic("AMQP double not implemented"),
-            .decimal_value => @panic("AMQP decimal not implemented"),
+
+            .not_implemented_long_long_int,
+            .not_implemented_long_int,
+            .not_implemented_short_int,
+            .not_implemented_short_short_int,
+            .not_implemented_field_array,
+            .not_implemented_float,
+            .not_implemented_double,
+            .not_implemented_decimal_value,
+            => std.debug.panic(
+                "AMQP type '{c}' not supported.",
+                .{@intFromEnum(tag)},
+            ),
         }
     }
 
@@ -629,13 +633,9 @@ pub const Encoder = struct {
 fn FieldValueType(comptime target: enum { encode, decode }) type {
     return union(FieldValueTag) {
         boolean: bool,
-        short_short_int: i8,
         short_short_uint: u8,
-        short_int: i16,
         short_uint: u16,
-        long_int: i32,
         long_uint: u32,
-        long_long_int: i64,
         long_long_uint: u64,
         string: []const u8,
         timestamp: u64,
@@ -644,10 +644,15 @@ fn FieldValueType(comptime target: enum { encode, decode }) type {
             .decode => Decoder.Table,
         },
         void,
-        field_array,
-        float,
-        double,
-        decimal_value,
+
+        not_implemented_long_long_int,
+        not_implemented_long_int,
+        not_implemented_short_int,
+        not_implemented_short_short_int,
+        not_implemented_field_array,
+        not_implemented_float,
+        not_implemented_double,
+        not_implemented_decimal_value,
     };
 }
 
@@ -697,7 +702,7 @@ fn BasicPropertiesType(comptime target: enum { encode, decode }) type {
 
         pub usingnamespace switch (target) {
             .decode => struct {
-                pub fn read(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
+                pub fn decode(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
                     var reader = Decoder.init(content);
                     var bitset: stdx.BitSetType(16) = .{ .bits = @bitReverse(flags) };
                     var properties: BasicProperties = .{};
@@ -719,8 +724,7 @@ fn BasicPropertiesType(comptime target: enum { encode, decode }) type {
                 }
             },
             .encode => struct {
-                pub fn write(self: *const BasicProperties, encoder: *Encoder) void {
-                    const initial_index = encoder.index;
+                pub fn encode(self: *const BasicProperties, encoder: *Encoder) void {
                     encoder.write_int(u16, self.property_flags());
                     inline for (std.meta.fields(BasicProperties)) |field| {
                         if (@field(self, field.name)) |value| {
@@ -734,44 +738,388 @@ fn BasicPropertiesType(comptime target: enum { encode, decode }) type {
                             }
                         }
                     }
-                    assert(encoder.index <
-                        initial_index + Encoder.basic_properties_size_max);
                 }
             },
         };
     };
 }
 
-comptime {
-    @setEvalBranchQuota(10_000);
+const testing = std.testing;
 
-    // Sets the field with an `undefined` value, just to compute the `property_flags`.
+test "amqp: Encoder/Decoder primitives" {
+    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    defer testing.allocator.free(buffer);
+
+    const Primitives = enum {
+        bool,
+        uint64,
+        uint32,
+        uint16,
+        uint8,
+        short_string,
+        long_string,
+    };
+
+    for (0..2048) |index| {
+        var prng = stdx.PRNG.from_seed(index);
+        var encoder = Encoder.init(buffer);
+
+        switch (prng.enum_uniform(Primitives)) {
+            .bool => {
+                const value = prng.boolean();
+                encoder.write_bool(value);
+
+                var decoder = Decoder.init(buffer[0..encoder.index]);
+                try testing.expectEqual(value, try decoder.read_bool());
+            },
+            inline .uint64, .uint32, .uint16, .uint8 => |tag| {
+                const Int = switch (tag) {
+                    .uint64 => u64,
+                    .uint32 => u32,
+                    .uint16 => u16,
+                    .uint8 => u8,
+                    else => comptime unreachable,
+                };
+                const value = prng.int(Int);
+                encoder.write_int(Int, value);
+
+                var decoder = Decoder.init(buffer[0..encoder.index]);
+                try testing.expectEqual(value, try decoder.read_int(Int));
+            },
+            .short_string => {
+                const size = prng.range_inclusive(u32, 0, 255);
+                const value = try testing.allocator.alloc(u8, size);
+                defer testing.allocator.free(value);
+
+                prng.fill(value);
+                encoder.write_short_string(value);
+
+                var decoder = Decoder.init(buffer[0..encoder.index]);
+                try testing.expectEqualStrings(value, try decoder.read_short_string());
+            },
+            .long_string => {
+                const size = prng.range_inclusive(u32, 256, spec.FRAME_MIN_SIZE - @sizeOf(u32));
+                const value = try testing.allocator.alloc(u8, size);
+                defer testing.allocator.free(value);
+
+                prng.fill(value);
+                encoder.write_long_string(value);
+
+                var decoder = Decoder.init(buffer[0..encoder.index]);
+                try testing.expectEqualStrings(value, try decoder.read_long_string());
+            },
+        }
+    }
+}
+
+test "amqp: BasicProperties property_flags" {
+    // Sets the field with any value, just to compute the `property_flags`.
+    const BasicProperties = BasicPropertiesType(.decode);
     const set_flag = struct {
-        const BasicProperties = BasicPropertiesType(.encode);
-        fn set_flag(comptime field: std.meta.FieldEnum(BasicProperties)) u16 {
+        fn set_flag(set_field: std.meta.FieldEnum(BasicProperties)) u16 {
             var properties: BasicProperties = .{};
-            const NotNull = std.meta.Child(@TypeOf(
-                @field(properties, @tagName(field)),
-            ));
-            const not_null: NotNull = undefined;
-            @field(properties, @tagName(field)) = not_null;
-
+            switch (set_field) {
+                inline else => |field| {
+                    const Field = std.meta.Child(std.meta.FieldType(BasicProperties, field));
+                    @field(properties, @tagName(field)) = switch (Field) {
+                        []const u8 => "",
+                        DeliveryMode => .persistent,
+                        u8, u64 => 0,
+                        Decoder.Table => Decoder.Table.init(&.{}),
+                        else => comptime unreachable,
+                    };
+                },
+            }
             return properties.property_flags();
         }
     }.set_flag;
 
-    // The last bit corresponding to the first property.
-    assert(set_flag(.content_type) == 0x8000);
-    assert(set_flag(.content_encoding) == 0x4000);
-    assert(set_flag(.headers) == 0x2000);
-    assert(set_flag(.delivery_mode) == 0x1000);
-    assert(set_flag(.priority) == 0x0800);
-    assert(set_flag(.correlation_id) == 0x0400);
-    assert(set_flag(.reply_to) == 0x0200);
-    assert(set_flag(.expiration) == 0x0100);
-    assert(set_flag(.message_id) == 0x0080);
-    assert(set_flag(.timestamp) == 0x0040);
-    assert(set_flag(.type) == 0x0020);
-    assert(set_flag(.user_id) == 0x0010);
-    assert(set_flag(.app_id) == 0x0008);
+    const empty: BasicProperties = .{};
+    try testing.expectEqual(@as(u16, 0x0000), empty.property_flags());
+
+    // The last bit corresponding to the first property (it's big endian).
+    try testing.expectEqual(@as(u16, 0x8000), set_flag(.content_type));
+    try testing.expectEqual(@as(u16, 0x4000), set_flag(.content_encoding));
+    try testing.expectEqual(@as(u16, 0x2000), set_flag(.headers));
+    try testing.expectEqual(@as(u16, 0x1000), set_flag(.delivery_mode));
+    try testing.expectEqual(@as(u16, 0x0800), set_flag(.priority));
+    try testing.expectEqual(@as(u16, 0x0400), set_flag(.correlation_id));
+    try testing.expectEqual(@as(u16, 0x0200), set_flag(.reply_to));
+    try testing.expectEqual(@as(u16, 0x0100), set_flag(.expiration));
+    try testing.expectEqual(@as(u16, 0x0080), set_flag(.message_id));
+    try testing.expectEqual(@as(u16, 0x0040), set_flag(.timestamp));
+    try testing.expectEqual(@as(u16, 0x0020), set_flag(.type));
+    try testing.expectEqual(@as(u16, 0x0010), set_flag(.user_id));
+    try testing.expectEqual(@as(u16, 0x0008), set_flag(.app_id));
+    try testing.expectEqual(@as(u16, 0x0004), set_flag(.cluster_id));
 }
+
+test "amqp: BasicProperties encode/decode" {
+    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    defer testing.allocator.free(buffer);
+
+    for (0..4096) |index| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+
+        var prng = stdx.PRNG.from_seed(index);
+        const properties = try TestingBasicProperties.random(.{
+            .arena = arena.allocator(),
+            .prng = &prng,
+        });
+
+        var encoder = Encoder.init(buffer);
+        properties.encode(&encoder);
+
+        // Decoding:
+        var decoder = Decoder.init(buffer[0..encoder.index]);
+        const flags = try decoder.read_int(u16);
+        const properties_decoded = try Decoder.BasicProperties.decode(
+            flags,
+            decoder.buffer[decoder.index..],
+        );
+        try testing.expect(try TestingBasicProperties.eql(
+            arena.allocator(),
+            properties,
+            properties_decoded,
+        ));
+    }
+}
+
+test "amqp: Table encode/decode" {
+    // 64k ought to be enough for any random!
+    var buffer = try testing.allocator.alloc(u8, 64 * 1024);
+    defer testing.allocator.free(buffer);
+
+    for (0..4096) |index| {
+        var arena = std.heap.ArenaAllocator.init(testing.allocator);
+        defer arena.deinit();
+
+        var prng = stdx.PRNG.from_seed(index);
+        const object = try TestingTable.random(.{
+            .arena = arena.allocator(),
+            .prng = &prng,
+            .recursive = true,
+        });
+
+        // Encoding the complex object:
+        var encoder = Encoder.init(buffer);
+        encoder.write_table(object.table());
+
+        // Decoding:
+        var decoder = Decoder.init(buffer[0..encoder.index]);
+        const object_decoded = try TestingTable.from_table(
+            arena.allocator(),
+            try decoder.read_table(),
+        );
+        try testing.expect(TestingTable.eql(object, object_decoded));
+    }
+}
+
+const TestingTable = struct {
+    const Timestamp = u63;
+
+    boolean: ?bool = null,
+    string: ?[]const u8 = null,
+    long: ?u64 = null,
+    int: ?u32 = null,
+    short: ?u16 = null,
+    byte: ?u8 = null,
+    field_table: ?*const TestingTable = null,
+    timestamp: ?Timestamp = null,
+
+    const empty: TestingTable = .{};
+
+    fn table(self: *const TestingTable) Encoder.Table {
+        const vtable: Encoder.Table.VTable = comptime .{
+            .write = &struct {
+                fn write(context: *const anyopaque, encoder: *Encoder.TableEncoder) void {
+                    const object: *const TestingTable = @ptrCast(@alignCast(context));
+                    inline for (std.meta.fields(TestingTable)) |field| {
+                        if (@field(object, field.name)) |value| {
+                            encoder.put(field.name, switch (std.meta.Child(field.type)) {
+                                bool => .{ .boolean = value },
+                                []const u8 => .{ .string = value },
+                                u64 => .{ .long_long_uint = value },
+                                u32 => .{ .long_uint = value },
+                                u16 => .{ .short_uint = value },
+                                u8 => .{ .short_short_uint = value },
+                                *const TestingTable => .{ .field_table = value.table() },
+                                Timestamp => .{ .timestamp = value },
+                                else => comptime unreachable,
+                            });
+                        }
+                    }
+                }
+            }.write,
+        };
+        return .{ .context = self, .vtable = &vtable };
+    }
+
+    fn from_table(arena: std.mem.Allocator, decoder: Decoder.Table) !*const TestingTable {
+        var object = try arena.create(TestingTable);
+        object.* = TestingTable.empty;
+
+        var iterator = decoder.iterator();
+        while (try iterator.next()) |entry| {
+            const FieldEnum = std.meta.FieldEnum(TestingTable);
+            const entry_field = std.meta.stringToEnum(FieldEnum, entry.key).?;
+            switch (entry_field) {
+                inline else => |field| {
+                    const Field = std.meta.FieldType(TestingTable, field);
+                    @field(object, @tagName(field)) = switch (std.meta.Child(Field)) {
+                        bool => entry.value.boolean,
+                        []const u8 => entry.value.string,
+                        u64 => entry.value.long_long_uint,
+                        u32 => entry.value.long_uint,
+                        u16 => entry.value.short_uint,
+                        u8 => entry.value.short_short_uint,
+                        *const TestingTable => try from_table(arena, entry.value.field_table),
+                        Timestamp => @intCast(entry.value.timestamp),
+                        else => comptime unreachable,
+                    };
+                },
+            }
+        }
+        return object;
+    }
+
+    fn eql(table1: *const TestingTable, table2: *const TestingTable) bool {
+        inline for (std.meta.fields(TestingTable)) |field| {
+            const both_null = @field(table1, field.name) == null and
+                @field(table2, field.name) == null;
+            if (!both_null) {
+                const value1 = @field(table1, field.name) orelse return false;
+                const value2 = @field(table2, field.name) orelse return false;
+
+                const equals = switch (std.meta.Child(field.type)) {
+                    bool => value1 == value2,
+                    []const u8 => std.mem.eql(u8, value1, value2),
+                    u64, u32, u16, u8 => value1 == value2,
+                    *const TestingTable => eql(value1, value2),
+                    Timestamp => value1 == value2,
+                    else => comptime unreachable,
+                };
+                if (!equals) return false;
+            }
+        }
+
+        return true;
+    }
+
+    fn random(options: struct {
+        arena: std.mem.Allocator,
+        prng: *stdx.PRNG,
+        recursive: bool,
+    }) !*const TestingTable {
+        const ratio = stdx.PRNG.ratio;
+
+        const is_empty = options.prng.chance(ratio(5, 100));
+        if (is_empty) return &TestingTable.empty;
+
+        var object = try options.arena.create(TestingTable);
+        inline for (std.meta.fields(TestingTable)) |field| {
+            const is_null = options.prng.chance(ratio(5, 100));
+            if (is_null) {
+                @field(object, field.name) = null;
+            } else switch (std.meta.Child(field.type)) {
+                bool => {
+                    @field(object, field.name) = options.prng.boolean();
+                },
+                []const u8 => {
+                    const size = options.prng.range_inclusive(u32, 0, 255);
+                    const str = try options.arena.alloc(u8, size);
+                    options.prng.fill(str);
+                    @field(object, field.name) = str;
+                },
+                u64, u32, u16, u8 => |Int| {
+                    @field(object, field.name) = options.prng.int(Int);
+                },
+                *const TestingTable => {
+                    @field(object, field.name) = if (options.recursive)
+                        try random(options)
+                    else
+                        null;
+                },
+                Timestamp => {
+                    @field(object, field.name) = options.prng.int(Timestamp);
+                },
+                else => comptime unreachable,
+            }
+        }
+        return object;
+    }
+};
+
+const TestingBasicProperties = struct {
+    fn random(options: struct {
+        arena: std.mem.Allocator,
+        prng: *stdx.PRNG,
+    }) !Encoder.BasicProperties {
+        const ratio = stdx.PRNG.ratio;
+        var properties: Encoder.BasicProperties = .{};
+        inline for (std.meta.fields(Encoder.BasicProperties)) |field| {
+            const is_null = options.prng.chance(ratio(5, 100));
+            if (is_null) {
+                @field(properties, field.name) = null;
+            } else switch (std.meta.Child(field.type)) {
+                []const u8 => {
+                    const size = options.prng.range_inclusive(u32, 0, 255);
+                    const str = try options.arena.alloc(u8, size);
+                    options.prng.fill(str);
+                    @field(properties, field.name) = str;
+                },
+                u64, u8 => |Int| {
+                    @field(properties, field.name) = options.prng.int(Int);
+                },
+                DeliveryMode => {
+                    @field(properties, field.name) = options.prng.enum_uniform(DeliveryMode);
+                },
+                Encoder.Table => {
+                    const object = try TestingTable.random(.{
+                        .arena = options.arena,
+                        .prng = options.prng,
+                        .recursive = false,
+                    });
+                    @field(properties, field.name) = object.table();
+                },
+                else => comptime unreachable,
+            }
+        }
+        return properties;
+    }
+
+    fn eql(
+        arena: std.mem.Allocator,
+        properties1: Encoder.BasicProperties,
+        properties2: Decoder.BasicProperties,
+    ) !bool {
+        inline for (std.meta.fields(Encoder.BasicProperties)) |field| {
+            const both_null = @field(properties1, field.name) == null and
+                @field(properties2, field.name) == null;
+            if (!both_null) {
+                const value1 = @field(properties1, field.name) orelse return false;
+                const value2 = @field(properties2, field.name) orelse return false;
+
+                const equals = switch (std.meta.Child(field.type)) {
+                    []const u8 => std.mem.eql(u8, value1, value2),
+                    u64, u8 => value1 == value2,
+                    DeliveryMode => value1 == value2,
+                    Encoder.Table => eql: {
+                        const encoded_object: *const TestingTable = @ptrCast(@alignCast(
+                            value1.context,
+                        ));
+                        const decoded_object: *const TestingTable = try TestingTable.from_table(
+                            arena,
+                            value2,
+                        );
+                        break :eql TestingTable.eql(encoded_object, decoded_object);
+                    },
+                    else => comptime unreachable,
+                };
+                if (!equals) return false;
+            }
+        }
+        return true;
+    }
+};

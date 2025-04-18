@@ -145,7 +145,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// locale defines the language in which the server will send reply texts.
         locales: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const version_major = try decoder.read_int(u8);
             const version_minor = try decoder.read_int(u8);
             const server_properties = try decoder.read_table();
@@ -171,7 +171,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// mechanism.
         challenge: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const challenge = try decoder.read_long_string();
 
             return .{
@@ -198,7 +198,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Zero means the server does not want a heartbeat.
         heartbeat: u16,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const channel_max = try decoder.read_int(u16);
             const frame_max = try decoder.read_int(u32);
             const heartbeat = try decoder.read_int(u16);
@@ -215,7 +215,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     connection_open_ok: struct {
         reserved_1: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reserved_1 = try decoder.read_short_string();
 
             return .{
@@ -239,7 +239,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// When the close is provoked by a method exception, this is the ID of the method.
         method_id: u16,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reply_code = try decoder.read_int(u16);
             const reply_text = try decoder.read_short_string();
             const class_id = try decoder.read_int(u16);
@@ -257,7 +257,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms a Connection.Close method and tells the recipient that it is
     /// safe to release resources for the connection and close the socket.
     connection_close_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -270,7 +270,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// The reason the connection was blocked.
         reason: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reason = try decoder.read_short_string();
 
             return .{
@@ -282,7 +282,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method indicates that a connection has been unblocked
     /// and now accepts publishes.
     connection_unblocked: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -298,7 +298,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// The reason for the secret update.
         reason: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const new_secret = try decoder.read_long_string();
             const reason = try decoder.read_short_string();
 
@@ -313,7 +313,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     channel_open_ok: struct {
         reserved_1: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reserved_1 = try decoder.read_long_string();
 
             return .{
@@ -333,8 +333,8 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// content frames.
         active: bool,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
-            const bitset_1 = try decoder.read_bitset();
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const active = bitset_1.is_set(0);
 
             return .{
@@ -350,8 +350,8 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// sending or continue to send content frames; 0 means it will not.
         active: bool,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
-            const bitset_1 = try decoder.read_bitset();
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const active = bitset_1.is_set(0);
 
             return .{
@@ -375,7 +375,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// When the close is provoked by a method exception, this is the ID of the method.
         method_id: u16,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reply_code = try decoder.read_int(u16);
             const reply_text = try decoder.read_short_string();
             const class_id = try decoder.read_int(u16);
@@ -393,7 +393,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms a Channel.Close method and tells the recipient that it is safe
     /// to release resources for the channel.
     channel_close_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -402,7 +402,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms a Declare method and confirms the name of the exchange,
     /// essential for automatically-named exchanges.
     exchange_declare_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -410,7 +410,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm deletion of an exchange.
     /// This method confirms the deletion of an exchange.
     exchange_delete_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -418,7 +418,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm bind successful.
     /// This method confirms that the bind was successful.
     exchange_bind_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -426,7 +426,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm unbind successful.
     /// This method confirms that the unbind was successful.
     exchange_unbind_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -444,7 +444,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// suspend activity (Channel.Flow) in which case they do not appear in this count.
         consumer_count: u32,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const queue = try decoder.read_short_string();
             const message_count = try decoder.read_int(u32);
             const consumer_count = try decoder.read_int(u32);
@@ -459,7 +459,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm bind successful.
     /// This method confirms that the bind was successful.
     queue_bind_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -467,7 +467,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm unbind successful.
     /// This method confirms that the unbind was successful.
     queue_unbind_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -478,7 +478,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Reports the number of messages purged.
         message_count: u32,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const message_count = try decoder.read_int(u32);
 
             return .{
@@ -492,7 +492,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Reports the number of messages deleted.
         message_count: u32,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const message_count = try decoder.read_int(u32);
 
             return .{
@@ -505,7 +505,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// server. The requested QoS applies to all active consumers until a new QoS is
     /// defined.
     basic_qos_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -517,7 +517,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Holds the consumer tag specified by the client or provided by the server.
         consumer_tag: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const consumer_tag = try decoder.read_short_string();
 
             return .{
@@ -544,9 +544,9 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         consumer_tag: []const u8,
         no_wait: bool,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const consumer_tag = try decoder.read_short_string();
-            const bitset_1 = try decoder.read_bitset();
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const no_wait = bitset_1.is_set(0);
 
             return .{
@@ -560,7 +560,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     basic_cancel_ok: struct {
         consumer_tag: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const consumer_tag = try decoder.read_short_string();
 
             return .{
@@ -583,7 +583,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Specifies the routing key name specified when the message was published.
         routing_key: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reply_code = try decoder.read_int(u16);
             const reply_text = try decoder.read_short_string();
             const exchange = try decoder.read_short_string();
@@ -613,10 +613,10 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Specifies the routing key name specified when the message was published.
         routing_key: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const consumer_tag = try decoder.read_short_string();
             const delivery_tag = try decoder.read_int(u64);
-            const bitset_1 = try decoder.read_bitset();
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const redelivered = bitset_1.is_set(0);
             const exchange = try decoder.read_short_string();
             const routing_key = try decoder.read_short_string();
@@ -645,9 +645,9 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         routing_key: []const u8,
         message_count: u32,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const delivery_tag = try decoder.read_int(u64);
-            const bitset_1 = try decoder.read_bitset();
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const redelivered = bitset_1.is_set(0);
             const exchange = try decoder.read_short_string();
             const routing_key = try decoder.read_short_string();
@@ -668,7 +668,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     basic_get_empty: struct {
         reserved_1: []const u8,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const reserved_1 = try decoder.read_short_string();
 
             return .{
@@ -695,9 +695,9 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// all outstanding messages.
         multiple: bool,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const delivery_tag = try decoder.read_int(u64);
-            const bitset_1 = try decoder.read_bitset();
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const multiple = bitset_1.is_set(0);
 
             return .{
@@ -709,7 +709,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// Confirm recovery.
     /// This method acknowledges a Basic.Recover method.
     basic_recover_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -737,9 +737,9 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         /// Clients receiving the Nack methods should ignore this flag.
         requeue: bool,
 
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             const delivery_tag = try decoder.read_int(u64);
-            const bitset_1 = try decoder.read_bitset();
+            const bitset_1: stdx.BitSetType(8) = .{ .bits = try decoder.read_int(u8) };
             const multiple = bitset_1.is_set(0);
             const requeue = bitset_1.is_set(1);
 
@@ -754,7 +754,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms to the client that the channel was successfully set to use
     /// standard transactions.
     tx_select_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -763,7 +763,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms to the client that the commit succeeded. Note that if a commit
     /// fails, the server raises a channel exception.
     tx_commit_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -772,7 +772,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms to the client that the rollback succeeded. Note that if an
     /// rollback fails, the server raises a channel exception.
     tx_rollback_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -780,7 +780,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
     /// This method confirms to the client that the channel was successfully
     /// set to use publisher acknowledgements.
     confirm_select_ok: struct {
-        fn read(decoder: *Decoder) Decoder.Error!@This() {
+        fn decode(decoder: *Decoder) Decoder.Error!@This() {
             _ = decoder;
             return .{};
         }
@@ -790,7 +790,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
         return @bitCast(@as(u32, @intFromEnum(self)));
     }
 
-    pub fn read(header: MethodHeader, decoder: *Decoder) Decoder.Error!ClientMethod {
+    pub fn decode(header: MethodHeader, decoder: *Decoder) Decoder.Error!ClientMethod {
         @setEvalBranchQuota(10_000);
         const tag: Tag = @enumFromInt(@as(u32, @bitCast(header)));
         const value: ClientMethod = switch (tag) {
@@ -799,7 +799,7 @@ pub const ClientMethod = union(ClientMethod.Tag) {
                 break :value @unionInit(
                     ClientMethod,
                     @tagName(tag_comptime),
-                    try Method.read(decoder),
+                    try Method.decode(decoder),
                 );
             },
         };
@@ -870,7 +870,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// specified by the server.
         locale: []const u8,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_table(self.client_properties);
             encoder.write_short_string(self.mechanism);
             encoder.write_long_string_body(self.response);
@@ -886,7 +886,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// data are defined by the SASL security mechanism.
         response: ?Encoder.Body,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_long_string_body(self.response);
         }
     },
@@ -909,7 +909,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// means the client does not want a heartbeat.
         heartbeat: u16,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.channel_max);
             encoder.write_int(u32, self.frame_max);
             encoder.write_int(u16, self.heartbeat);
@@ -927,7 +927,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         reserved_1: []const u8 = "",
         reserved_2: bool = false,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_short_string(self.virtual_host);
             encoder.write_short_string(self.reserved_1);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -951,7 +951,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// When the close is provoked by a method exception, this is the ID of the method.
         method_id: u16,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reply_code);
             encoder.write_short_string(self.reply_text);
             encoder.write_int(u16, self.class_id);
@@ -962,7 +962,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// This method confirms a Connection.Close method and tells the recipient that it is
     /// safe to release resources for the connection and close the socket.
     connection_close_ok: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -975,7 +975,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// The reason the connection was blocked.
         reason: []const u8,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_short_string(self.reason);
         }
     },
@@ -983,7 +983,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// This method indicates that a connection has been unblocked
     /// and now accepts publishes.
     connection_unblocked: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -991,7 +991,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// Update secret response.
     /// This method confirms the updated secret is valid.
     connection_update_secret_ok: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -1001,7 +1001,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     channel_open: struct {
         reserved_1: []const u8 = "",
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_short_string(self.reserved_1);
         }
     },
@@ -1017,7 +1017,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// content frames.
         active: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.active);
             encoder.write_int(u8, bitset_1.bits);
@@ -1031,7 +1031,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// sending or continue to send content frames; 0 means it will not.
         active: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.active);
             encoder.write_int(u8, bitset_1.bits);
@@ -1053,7 +1053,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// When the close is provoked by a method exception, this is the ID of the method.
         method_id: u16,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reply_code);
             encoder.write_short_string(self.reply_text);
             encoder.write_int(u16, self.class_id);
@@ -1064,7 +1064,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// This method confirms a Channel.Close method and tells the recipient that it is safe
     /// to release resources for the channel.
     channel_close_ok: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -1110,7 +1110,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// arguments depends on the server implementation.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.exchange);
             encoder.write_short_string(self.type);
@@ -1137,7 +1137,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         if_unused: bool,
         no_wait: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.exchange);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1168,7 +1168,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// of these arguments depends on the exchange class.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.destination);
             encoder.write_short_string(self.source);
@@ -1195,7 +1195,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// Specifies the arguments of the binding to unbind.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.destination);
             encoder.write_short_string(self.source);
@@ -1245,7 +1245,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// arguments depends on the server implementation.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1285,7 +1285,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// depends on the exchange class.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             encoder.write_short_string(self.exchange);
@@ -1311,7 +1311,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// Specifies the arguments of the binding to unbind.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             encoder.write_short_string(self.exchange);
@@ -1328,7 +1328,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         queue: []const u8,
         no_wait: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1354,7 +1354,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         if_empty: bool,
         no_wait: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1398,7 +1398,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// settings should apply per-channel.
         global: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u32, self.prefetch_size);
             encoder.write_int(u16, self.prefetch_count);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1430,7 +1430,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// arguments depends on the server implementation.
         arguments: ?Encoder.Table,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             encoder.write_short_string(self.consumer_tag);
@@ -1462,7 +1462,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         consumer_tag: []const u8,
         no_wait: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_short_string(self.consumer_tag);
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.no_wait);
@@ -1474,7 +1474,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     basic_cancel_ok: struct {
         consumer_tag: []const u8,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_short_string(self.consumer_tag);
         }
     },
@@ -1504,7 +1504,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// will queue the message, but with no guarantee that it will ever be consumed.
         immediate: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.exchange);
             encoder.write_short_string(self.routing_key);
@@ -1524,7 +1524,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         queue: []const u8,
         no_ack: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u16, self.reserved_1);
             encoder.write_short_string(self.queue);
             var bitset_1: stdx.BitSetType(8) = .{};
@@ -1551,7 +1551,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// all outstanding messages.
         multiple: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u64, self.delivery_tag);
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.multiple);
@@ -1569,7 +1569,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// is false or the requeue  attempt fails the messages are discarded or dead-lettered.
         requeue: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u64, self.delivery_tag);
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.requeue);
@@ -1587,7 +1587,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// potentially then delivering it to an alternative subscriber.
         requeue: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.requeue);
             encoder.write_int(u8, bitset_1.bits);
@@ -1604,7 +1604,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// potentially then delivering it to an alternative subscriber.
         requeue: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.requeue);
             encoder.write_int(u8, bitset_1.bits);
@@ -1633,7 +1633,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         /// Clients receiving the Nack methods should ignore this flag.
         requeue: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             encoder.write_int(u64, self.delivery_tag);
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.multiple);
@@ -1645,7 +1645,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// This method sets the channel to use standard transactions. The client must use this
     /// method at least once on a channel before using the Commit or Rollback methods.
     tx_select: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -1654,7 +1654,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// This method commits all message publications and acknowledgments performed in
     /// the current transaction.  A new transaction starts immediately after a commit.
     tx_commit: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -1665,7 +1665,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     /// Note that unacked messages will not be automatically redelivered by rollback;
     /// if that is required an explicit recover call should be issued.
     tx_rollback: struct {
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             _ = self;
             _ = encoder;
         }
@@ -1676,7 +1676,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
     confirm_select: struct {
         nowait: bool,
 
-        fn write(self: *const @This(), encoder: *Encoder) void {
+        fn encode(self: *const @This(), encoder: *Encoder) void {
             var bitset_1: stdx.BitSetType(8) = .{};
             bitset_1.set_value(0, self.nowait);
             encoder.write_int(u8, bitset_1.bits);
@@ -1687,7 +1687,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         return @bitCast(@as(u32, @intFromEnum(self)));
     }
 
-    pub fn write(self: ServerMethod, channel: u16, encoder: *Encoder) void {
+    pub fn encode(self: ServerMethod, channel: u16, encoder: *Encoder) void {
         const frame_reference = encoder.begin_frame(.{
             .type = .method,
             .channel = channel,
@@ -1695,7 +1695,7 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         switch (self) {
             inline else => |method| {
                 encoder.write_method_header(self.method_header());
-                method.write(encoder);
+                method.encode(encoder);
             },
         }
         encoder.finish_frame(frame_reference);

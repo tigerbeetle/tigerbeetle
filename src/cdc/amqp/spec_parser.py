@@ -28,7 +28,7 @@ reader = {
         'short': "read_int(u16)",
         'long': "read_int(u32)",
         'longlong': "read_int(u64)",
-        'bit': "read_bitset()",
+        'bit': "read_int(u8)",
         'shortstr': 'read_short_string()',
         'longstr': 'read_long_string()',
         'table': "read_table()",
@@ -141,7 +141,7 @@ def client_methods(root):
     print(f"        return @bitCast(@as(u32, @intFromEnum(self)));")
     print(f"    }}")
     print(f"")
-    print(f"    pub fn read(header: MethodHeader, decoder: *Decoder) Decoder.Error!ClientMethod {{")
+    print(f"    pub fn decode(header: MethodHeader, decoder: *Decoder) Decoder.Error!ClientMethod {{")
     print(f"        @setEvalBranchQuota(10_000);")
     print(f"        const tag: Tag = @enumFromInt(@as(u32, @bitCast(header)));")
     print(f"        const value: ClientMethod = switch (tag) {{")
@@ -150,7 +150,7 @@ def client_methods(root):
     print(f"                break :value @unionInit(")
     print(f"                    ClientMethod,")
     print(f"                    @tagName(tag_comptime),")
-    print(f"                    try Method.read(decoder),")
+    print(f"                    try Method.decode(decoder),")
     print(f"                );")
     print(f"            }},")
     print(f"        }};")
@@ -191,7 +191,7 @@ def server_methods(root):
     print(f"        return @bitCast(@as(u32, @intFromEnum(self)));")
     print(f"    }}")
     print(f"")
-    print(f"    pub fn write(self: ServerMethod, channel: u16, encoder: *Encoder) void {{")
+    print(f"    pub fn encode(self: ServerMethod, channel: u16, encoder: *Encoder) void {{")
     print(f"        const frame_reference = encoder.begin_frame(.{{")
     print(f"            .type = .method,")
     print(f"            .channel = channel,")
@@ -199,7 +199,7 @@ def server_methods(root):
     print(f"        switch (self) {{")
     print(f"            inline else => |method| {{")
     print(f"                encoder.write_method_header(self.method_header());")
-    print(f"                method.write(encoder);")
+    print(f"                method.encode(encoder);")
     print(f"            }},")
     print(f"        }}")
     print(f"        encoder.finish_frame(frame_reference);")
@@ -208,8 +208,8 @@ def server_methods(root):
 
 def class_method(source, method, indent=""):
     method_fields(source, method, indent)
-    if source == Source.client: read(method, indent)
-    if source == Source.server: write(method, indent)
+    if source == Source.client: decode(method, indent)
+    if source == Source.server: encode(method, indent)
 
 def method_fields(source, method, indent=""):
     indent += "    "
@@ -225,10 +225,10 @@ def method_fields(source, method, indent=""):
             print(f"{indent}{field}: {type}{default},")
         print(f"")
 
-def read(method, indent=""):
+def decode(method, indent=""):
     if method.find("chassis[@name='client']") is None: return
     indent += "    "
-    print(f"{indent}fn read(decoder: *Decoder) Decoder.Error!@This() {{")
+    print(f"{indent}fn decode(decoder: *Decoder) Decoder.Error!@This() {{")
     fields = method.findall('field')
     if fields:
         bitset_octets = 0
@@ -240,7 +240,7 @@ def read(method, indent=""):
             if type == 'bool':
                 if bitset_index == 0:
                     bitset_octets += 1
-                    print(f"{indent}    const bitset_{bitset_octets} = try decoder.{read_function};")
+                    print(f"{indent}    const bitset_{bitset_octets}: stdx.BitSetType(8) = .{{ .bits = try decoder.{read_function} }};")
                 print(f"{indent}    const {field} = bitset_{bitset_octets}.is_set({bitset_index});")
                 bitset_index += 1
             else:
@@ -257,10 +257,10 @@ def read(method, indent=""):
         print(f"{indent}    return .{{}};")
     print(f"{indent}}}")
 
-def write(method, indent = ""):
+def encode(method, indent = ""):
     if method.find("chassis[@name='server']") is None: return
     indent += "    "
-    print(f"{indent}fn write(self: *const @This(), encoder: *Encoder) void {{")
+    print(f"{indent}fn encode(self: *const @This(), encoder: *Encoder) void {{")
     fields = method.findall('field')
     if fields:
         bitset_octets = 0

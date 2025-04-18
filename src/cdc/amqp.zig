@@ -228,7 +228,7 @@ pub const Client = struct {
                     .user_name = self.connection_options.?.user_name,
                     .password = self.connection_options.?.password,
                 };
-                const start_ok: spec.ServerMethod = .{ .connection_start_ok = .{
+                const method: spec.ServerMethod = .{ .connection_start_ok = .{
                     .client_properties = self.connection_options.?.properties.table(),
                     .mechanism = types.SASLPlainAuth.mechanism,
                     .response = plain_auth.response(),
@@ -239,7 +239,7 @@ pub const Client = struct {
                 } };
 
                 const encoder = self.send_buffer.encoder();
-                start_ok.write(channel_global, encoder);
+                method.encode(channel_global, encoder);
                 self.send_and_await_reply(channel_global, &connect_dispatch);
             },
             .connection_secure => unreachable, // Not implemented,
@@ -251,22 +251,24 @@ pub const Client = struct {
 
                 const encoder = self.send_buffer.encoder();
 
-                const tune_ok: spec.ServerMethod = .{ .connection_tune_ok = .{
+                // Since `tune-ok` has no reply (send-and-forget),
+                // we can flush it together with `open`.
+                const method_tune_ok: spec.ServerMethod = .{ .connection_tune_ok = .{
                     .channel_max = 1,
                     .frame_max = @max(spec.FRAME_MIN_SIZE, self.frame_size_max),
                     .heartbeat = self.connection_options.?.heartbeat orelse args.heartbeat,
                 } };
-                tune_ok.write(channel_global, encoder);
+                method_tune_ok.encode(channel_global, encoder);
 
-                const open: spec.ServerMethod = .{ .connection_open = .{
+                const method_open: spec.ServerMethod = .{ .connection_open = .{
                     .virtual_host = self.connection_options.?.vhost,
                 } };
-                open.write(channel_global, encoder);
+                method_open.encode(channel_global, encoder);
                 self.send_and_await_reply(channel_global, &connect_dispatch);
             },
             .connection_open_ok => {
-                const channel_open: spec.ServerMethod = .{ .channel_open = .{} };
-                channel_open.write(channel_current, self.send_buffer.encoder());
+                const method: spec.ServerMethod = .{ .channel_open = .{} };
+                method.encode(channel_current, self.send_buffer.encoder());
                 self.send_and_await_reply(channel_current, &connect_dispatch);
             },
             .channel_open_ok => {
@@ -283,7 +285,7 @@ pub const Client = struct {
         self.callback = .{ .tx_select = callback };
 
         const method: spec.ServerMethod = .{ .tx_select = .{} };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_await_reply(channel_current, &struct {
             fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                 assert(reply == .tx_select_ok);
@@ -300,7 +302,7 @@ pub const Client = struct {
         self.callback = .{ .tx_commit = callback };
 
         const method: spec.ServerMethod = .{ .tx_commit = .{} };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_await_reply(channel_current, &struct {
             fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                 assert(reply == .tx_commit_ok);
@@ -333,7 +335,7 @@ pub const Client = struct {
                 .arguments = null,
             },
         };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_await_reply(
             channel_current,
             &struct {
@@ -363,7 +365,7 @@ pub const Client = struct {
                 .arguments = options.arguments.table(),
             },
         };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_await_reply(
             channel_current,
             &struct {
@@ -393,7 +395,7 @@ pub const Client = struct {
             .mandatory = options.mandatory,
             .immediate = options.immediate,
         } };
-        method.write(channel_current, encoder);
+        method.encode(channel_current, encoder);
 
         // 2. Header frame — contains the `Basic` properties and custom headers.
         const frame_header_ref = encoder.begin_frame(.{
@@ -404,7 +406,7 @@ pub const Client = struct {
             .class = method.method_header().class,
             .weight = 0,
         });
-        options.properties.write(encoder);
+        options.properties.encode(encoder);
         encoder.finish_frame(frame_header_ref);
 
         // 3. Body frame (optional) — contains the message payload.
@@ -463,7 +465,7 @@ pub const Client = struct {
             .queue = options.queue,
             .no_ack = options.no_ack,
         } };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_await_reply(channel_current, &get_message_dispatch);
     }
 
@@ -485,7 +487,7 @@ pub const Client = struct {
                         header: Decoder.Header,
                     ) Decoder.Error!void {
                         assert(context.callback == .get_message);
-                        const properties = try Decoder.BasicProperties.read(
+                        const properties = try Decoder.BasicProperties.decode(
                             header.property_flags,
                             header.properties,
                         );
@@ -510,7 +512,7 @@ pub const Client = struct {
             .requeue = options.requeue,
             .multiple = options.multiple,
         } };
-        method.write(channel_current, self.send_buffer.encoder());
+        method.encode(channel_current, self.send_buffer.encoder());
         self.send_and_forget(&struct {
             fn dispatch(context: *Client) void {
                 assert(context.callback == .nack);
@@ -689,7 +691,7 @@ pub const Client = struct {
         decoder: *Decoder,
     ) Decoder.Error!void {
         assert(frame_header.type == .method);
-        const client_method = try spec.ClientMethod.read(method_header, decoder);
+        const client_method = try spec.ClientMethod.decode(method_header, decoder);
         switch (client_method) {
             inline .connection_close, .channel_close => |close_reason, tag| {
                 const error_code: ErrorCodes = @enumFromInt(close_reason.reply_code);
