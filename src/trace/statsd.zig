@@ -129,11 +129,7 @@ pub const StatsD = struct {
         io: *IO,
         address: std.net.Address,
     ) !StatsD {
-        const socket = try io.open_socket(
-            address.any.family,
-            std.posix.SOCK.DGRAM,
-            std.posix.IPPROTO.UDP,
-        );
+        const socket = try io.open_socket_udp(address.any.family);
         errdefer io.close_socket(socket);
 
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);

@@ -1,7 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
-const posix = std.posix;
 
 const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
@@ -135,10 +134,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             const process: std.meta.FieldType(MessageBus, .process) = switch (process_type) {
                 .replica => blk: {
                     const address = options.configuration[process_id.replica];
-                    const fd = try init_tcp(
-                        options.io,
-                        address.any.family,
-                    );
+                    const fd = try init_tcp(options.io, address.any.family);
                     errdefer options.io.close_socket(fd);
 
                     const accept_address = try options.io.listen(fd, address, .{
@@ -199,14 +195,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         }
 
         fn init_tcp(io: *IO, family: u32) !IO.socket_t {
-            const fd = try io.open_socket(
-                family,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
-            errdefer io.close_socket(fd);
-
-            try io.tcp_options(fd, .{
+            return try io.open_socket_tcp(family, .{
                 .rcvbuf = constants.tcp_rcvbuf,
                 .sndbuf = switch (process_type) {
                     .replica => constants.tcp_sndbuf_replica,
@@ -220,7 +209,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .user_timeout_ms = constants.tcp_user_timeout_ms,
                 .nodelay = constants.tcp_nodelay,
             });
-            return fd;
         }
 
         pub fn tick(bus: *MessageBus) void {

@@ -8,15 +8,15 @@ const assert = std.debug.assert;
 const is_linux = builtin.target.os.tag == .linux;
 
 pub const TCPOptions = struct {
-    rcvbuf: c_int,
-    sndbuf: c_int,
+    rcvbuf: c_int = 0,
+    sndbuf: c_int = 0,
     keepalive: ?struct {
         keepidle: c_int,
         keepintvl: c_int,
         keepcnt: c_int,
-    },
-    user_timeout_ms: c_int,
-    nodelay: bool,
+    } = null,
+    user_timeout_ms: c_int = 0,
+    nodelay: bool = false,
 };
 
 pub const ListenOptions = struct {
@@ -43,6 +43,9 @@ pub fn listen(
     return address_resolved;
 }
 
+/// Sets the socket options.
+/// Although some options are generic at the socket level,
+/// these settings are intended only for TCP sockets.
 pub fn tcp_options(
     fd: posix.socket_t,
     options: TCPOptions,

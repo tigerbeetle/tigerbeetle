@@ -776,14 +776,38 @@ pub const IO = struct {
     pub const INVALID_SOCKET = -1;
 
     /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
-        const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
+    pub fn open_socket_tcp(self: *IO, family: u32, options: common.TCPOptions) !socket_t {
+        const fd = try self.open_socket(
+            family,
+            posix.SOCK.STREAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.TCP,
+        );
         errdefer self.close_socket(fd);
 
-        // darwin doesn't support SOCK_CLOEXEC.
-        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        try common.tcp_options(fd, options);
+        return fd;
+    }
 
-        // darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+    /// Creates a socket that can be used for async operations with the IO instance.
+    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+        return try self.open_socket(
+            family,
+            posix.SOCK.DGRAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.UDP,
+        );
+    }
+
+    fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
+        const fd = try posix.socket(
+            family,
+            sock_type | posix.SOCK.NONBLOCK,
+            protocol,
+        );
+        errdefer self.close_socket(fd);
+
+        // Darwin doesn't support SOCK_CLOEXEC.
+        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        // Darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
         try common.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, 1);
 
         return fd;
@@ -805,17 +829,6 @@ pub const IO = struct {
         options: common.ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
-    }
-
-    /// Sets the socket options.
-    /// Although some options are generic at the socket level,
-    /// these settings are intended only for TCP sockets.
-    pub fn tcp_options(
-        _: *IO,
-        fd: socket_t,
-        options: common.TCPOptions,
-    ) !void {
-        try common.tcp_options(fd, options);
     }
 
     pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {

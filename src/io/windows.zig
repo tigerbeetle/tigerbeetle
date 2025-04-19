@@ -1087,28 +1087,49 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
-    /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
-        // SOCK_NONBLOCK | SOCK_CLOEXEC
-        var flags: os.windows.DWORD = 0;
-        flags |= os.windows.ws2_32.WSA_FLAG_OVERLAPPED;
-        flags |= os.windows.ws2_32.WSA_FLAG_NO_HANDLE_INHERIT;
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: common.TCPOptions) !socket_t {
+        const socket = try self.open_socket(
+            @bitCast(family),
+            posix.SOCK.STREAM,
+            posix.IPPROTO.TCP,
+        );
+        errdefer self.close_socket(socket);
+
+        try common.tcp_options(socket, options);
+        return socket;
+    }
+
+    /// Creates a UDP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+        return try self.open_socket(
+            @bitCast(family),
+            posix.SOCK.DGRAM,
+            posix.IPPROTO.UDP,
+        );
+    }
+
+    fn open_socket(self: *IO, family: u32, sock_type: i32, protocol: i32) !socket_t {
+        // Equivalent to SOCK_NONBLOCK | SOCK_CLOEXEC.
+        const socket_flags: os.windows.DWORD =
+            os.windows.ws2_32.WSA_FLAG_OVERLAPPED |
+            os.windows.ws2_32.WSA_FLAG_NO_HANDLE_INHERIT;
 
         const socket = try os.windows.WSASocketW(
-            @as(i32, @bitCast(family)),
-            @bitCast(sock_type),
-            @bitCast(protocol),
+            @bitCast(family),
+            sock_type,
+            protocol,
             null,
             0,
-            flags,
+            socket_flags,
         );
         errdefer self.close_socket(socket);
 
         try self.register_handle(@ptrCast(socket));
-
         return socket;
     }
 
+    /// Register the IO handle for overlapped operations.
     fn register_handle(self: *IO, handle: os.windows.HANDLE) !void {
         const iocp_handle = try os.windows.CreateIoCompletionPort(handle, self.iocp, 0, 0);
         assert(iocp_handle == self.iocp);
@@ -1137,17 +1158,6 @@ pub const IO = struct {
         options: common.ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
-    }
-
-    /// Sets the socket options.
-    /// Although some options are generic at the socket level,
-    /// these settings are intended only for TCP sockets.
-    pub fn tcp_options(
-        _: *IO,
-        fd: socket_t,
-        options: common.TCPOptions,
-    ) !void {
-        try common.tcp_options(fd, options);
     }
 
     pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
