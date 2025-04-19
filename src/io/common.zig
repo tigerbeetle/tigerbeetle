@@ -7,7 +7,7 @@ const assert = std.debug.assert;
 
 const is_linux = builtin.target.os.tag == .linux;
 
-pub const SocketOptions = struct {
+pub const TCPOptions = struct {
     rcvbuf: c_int,
     sndbuf: c_int,
     keepalive: ?struct {
@@ -43,9 +43,9 @@ pub fn listen(
     return address_resolved;
 }
 
-pub fn socket_options(
+pub fn tcp_options(
     fd: posix.socket_t,
-    options: SocketOptions,
+    options: TCPOptions,
 ) !void {
     if (options.rcvbuf > 0) rcvbuf: {
         if (is_linux) {
@@ -97,6 +97,6 @@ pub fn socket_options(
     }
 }
 
-fn setsockopt(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
+pub fn setsockopt(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
     try posix.setsockopt(_fd, level, option, &std.mem.toBytes(value));
 }

@@ -1478,12 +1478,15 @@ pub const IO = struct {
         return common.listen(fd, address, options);
     }
 
-    pub fn socket_options(
+    /// Sets the socket options.
+    /// Although some options are generic at the socket level,
+    /// these settings are intended only for TCP sockets.
+    pub fn tcp_options(
         _: *IO,
         fd: socket_t,
-        options: common.SocketOptions,
+        options: common.TCPOptions,
     ) !void {
-        try common.socket_options(fd, options);
+        try common.tcp_options(fd, options);
     }
 
     pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
