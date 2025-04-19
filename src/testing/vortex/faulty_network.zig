@@ -295,10 +295,9 @@ const Connection = struct {
         };
         connection.origin_fd = fd;
 
-        const remote_fd = connection.io.open_socket(
+        const remote_fd = connection.io.open_socket_tcp(
             connection.remote_address.?.any.family,
-            std.posix.SOCK.STREAM,
-            std.posix.IPPROTO.TCP,
+            .{},
         ) catch |err| {
             log.warn("couldn't open socket for remote ({d},{d}): {}", .{
                 connection.replica_index,
@@ -496,11 +495,7 @@ pub const Network = struct {
         };
 
         for (address_mappings, proxies, 0..) |mapping, *proxy, replica_index| {
-            const listen_fd = try io.open_socket(
-                mapping.origin.any.family,
-                std.posix.SOCK.STREAM,
-                std.posix.IPPROTO.TCP,
-            );
+            const listen_fd = try io.open_socket_tcp(mapping.origin.any.family, .{});
             errdefer io.close_socket(listen_fd);
 
             proxy.io = io;
