@@ -446,7 +446,7 @@ fn build_ci(
     }
     if (all or mode == .aof) {
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
-        build_ci_check_status(aof);
+        hide_stderr(aof);
         step_ci.dependOn(&aof.step);
     }
     inline for (&.{ CIMode.dotnet, .go, .java, .node, .python }) |language| {
@@ -482,7 +482,7 @@ fn build_ci_step(
 ) void {
     const argv = .{ b.graph.zig_exe, "build" } ++ command;
     const system_command = b.addSystemCommand(&argv);
-    build_ci_check_status(system_command);
+    hide_stderr(system_command);
     step_ci.dependOn(&system_command.step);
 }
 
@@ -495,16 +495,32 @@ fn build_ci_script(
     const run_artifact = b.addRunArtifact(scripts);
     run_artifact.addArgs(argv);
     run_artifact.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
-    build_ci_check_status(run_artifact);
+    hide_stderr(run_artifact);
     step_ci.dependOn(&run_artifact.step);
 }
 
-fn build_ci_check_status(step: *std.Build.Step.Run) void {
-    // NB: The purpose here is not to check status (Zig does that automatically), but rather to
-    // prevent inheriting stdio, which causes everything to execute sequentially due to stdio lock!
-    step.stdio = .{ .check = .{} };
-    step.addCheck(.{ .expect_term = .{ .Exited = 0 } });
-    step.has_side_effects = true;
+// Hide step's stderr unless it fails, to prevent zig build ci output being dominated by VOPR logs.
+// Sadly, this requires "overriding" Build.Step.Run make function.
+fn hide_stderr(run: *std.Build.Step.Run) void {
+    const b = run.step.owner;
+
+    run.addCheck(.{ .expect_term = .{ .Exited = 0 } });
+    run.has_side_effects = true;
+
+    const override = struct {
+        var global_map: std.AutoHashMapUnmanaged(usize, std.Build.Step.MakeFn) = .{};
+
+        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) anyerror!void {
+            const original = global_map.get(@intFromPtr(step)).?;
+            try original(step, prog_node);
+            assert(step.result_error_msgs.items.len == 0);
+            step.result_stderr = "";
+        }
+    };
+
+    const original = run.step.makeFn;
+    override.global_map.put(b.allocator, @intFromPtr(&run.step), original) catch @panic("OOM");
+    run.step.makeFn = &override.make;
 }
 
 // Run a tigerbeetle build without running codegen and waiting for llvm
