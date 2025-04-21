@@ -19,6 +19,7 @@ const parse_dirty_semver = stdx.parse_dirty_semver;
 const maybe = stdx.maybe;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
@@ -1454,10 +1455,27 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
-    /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+        const fd = try posix.socket(
+            family,
+            posix.SOCK.STREAM | posix.SOCK.CLOEXEC,
+            posix.IPPROTO.TCP,
+        );
+        errdefer self.close_socket(fd);
+
+        try common.tcp_options(fd, options);
+        return fd;
+    }
+
+    /// Creates a UDP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
         _ = self;
-        return posix.socket(family, sock_type | posix.SOCK.CLOEXEC, protocol);
+        return try posix.socket(
+            family,
+            std.posix.SOCK.DGRAM | posix.SOCK.CLOEXEC,
+            posix.IPPROTO.UDP,
+        );
     }
 
     /// Closes a socket opened by the IO instance.

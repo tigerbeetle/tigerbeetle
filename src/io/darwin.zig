@@ -13,6 +13,8 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
+
     kq: fd_t,
     event_id: Event = 0,
     time: Time = .{},
@@ -768,16 +770,40 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
-    /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
-        const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+        const fd = try self.open_socket(
+            family,
+            posix.SOCK.STREAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.TCP,
+        );
         errdefer self.close_socket(fd);
 
-        // darwin doesn't support SOCK_CLOEXEC.
-        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        try common.tcp_options(fd, options);
+        return fd;
+    }
 
-        // darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
-        try posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+    /// Creates a UDP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+        return try self.open_socket(
+            family,
+            posix.SOCK.DGRAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.UDP,
+        );
+    }
+
+    fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
+        const fd = try posix.socket(
+            family,
+            sock_type | posix.SOCK.NONBLOCK,
+            protocol,
+        );
+        errdefer self.close_socket(fd);
+
+        // Darwin doesn't support SOCK_CLOEXEC.
+        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        // Darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        try common.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, 1);
 
         return fd;
     }
