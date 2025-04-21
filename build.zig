@@ -431,6 +431,7 @@ fn build_ci(
     if (default or mode == .@"test") {
         build_ci_step(b, step_ci, .{"test"});
         build_ci_step(b, step_ci, .{"clients:c:sample"});
+        build_ci_script(b, step_ci, options.scripts, &.{"--help"});
     }
     if (default or mode == .fuzz) {
         build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
@@ -460,6 +461,7 @@ fn build_ci(
             });
         }
     }
+
     if (all or mode == .@"devhub-dry-run") {
         build_ci_script(b, step_ci, options.scripts, &.{
             "devhub",
