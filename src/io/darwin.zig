@@ -77,14 +77,13 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
-        var io_pending = self.io_pending.peek();
         var events: [256]posix.Kevent = undefined;
 
         // Check timeouts and fill events with completions in io_pending
         // (they will be submitted through kevent).
         // Timeouts are expired here and possibly pushed to the completed queue.
         const next_timeout = self.flush_timeouts();
-        const change_events = self.flush_io(&events, &io_pending);
+        const change_events = self.flush_io(&events);
 
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
         if (change_events > 0 or self.completed.empty()) {
@@ -113,17 +112,12 @@ pub const IO = struct {
             );
 
             // Mark the io events submitted only after kevent() successfully processed them
-            self.io_pending.out = io_pending;
-            if (io_pending == null) {
-                self.io_pending.in = null;
-            }
-
             self.io_inflight += change_events;
             self.io_inflight -= new_events;
 
             for (events[0..new_events]) |event| {
                 const completion: *Completion = @ptrFromInt(event.udata);
-                completion.next = null;
+                assert(completion.next == null);
                 self.completed.push(completion);
             }
         }
@@ -135,10 +129,9 @@ pub const IO = struct {
         }
     }
 
-    fn flush_io(_: *IO, events: []posix.Kevent, io_pending_top: *?*Completion) usize {
+    fn flush_io(self: *IO, events: []posix.Kevent) usize {
         for (events, 0..) |*event, flushed| {
-            const completion = io_pending_top.* orelse return flushed;
-            io_pending_top.* = completion.next;
+            const completion = self.io_pending.pop() orelse return flushed;
 
             const event_info = switch (completion.operation) {
                 .accept => |op| [2]c_int{ op.socket, posix.system.EVFILT_READ },
