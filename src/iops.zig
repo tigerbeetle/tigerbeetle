@@ -2,8 +2,8 @@ const std = @import("std");
 const stdx = @import("./stdx.zig");
 const assert = std.debug.assert;
 
-/// Take a u8 to limit to 256 items max (2^8 = 256)
-pub fn IOPSType(comptime T: type, comptime size: u8) type {
+/// `size` is further bounded by the maximum the underlying BitSetType supports.
+pub fn IOPSType(comptime T: type, comptime size: u16) type {
     const Map = stdx.BitSetType(size);
 
     return struct {
