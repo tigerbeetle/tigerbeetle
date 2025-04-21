@@ -585,11 +585,10 @@ const DeadFilesDetector = struct {
     fn visit(detector: *DeadFilesDetector, file: SourceFile) !void {
         (try detector.file_state(file.path)).definition_count += 1;
 
-        var text: []const u8 = file.text;
+        var rest: []const u8 = file.text;
         for (0..1024) |_| {
-            const cut = stdx.cut(text, "@import(\"") orelse break;
-            text = cut.suffix;
-            const import_path = stdx.cut(text, "\")").?.prefix;
+            _, rest = stdx.cut(rest, "@import(\"") orelse break;
+            const import_path, rest = stdx.cut(rest, "\")").?;
             if (std.mem.endsWith(u8, import_path, ".zig")) {
                 (try detector.file_state(import_path)).import_count += 1;
             }
@@ -711,9 +710,8 @@ test "tidy no large blobs" {
         //     blob 1032 client/package.json
         const blob = stdx.cut_prefix(line, "blob ") orelse continue;
 
-        const cut = stdx.cut(blob, " ").?;
-        const size = try std.fmt.parseInt(u64, cut.prefix, 10);
-        const path = cut.suffix;
+        const size_string, const path = stdx.cut(blob, " ").?;
+        const size = try std.fmt.parseInt(u64, size_string, 10);
 
         if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
         if (std.mem.eql(u8, path, "src/state_machine.zig")) continue; // :-|
@@ -802,9 +800,9 @@ fn has_link(line: []const u8) bool {
 
 /// If a line is a `\\` string literal, extract its value.
 fn parse_multiline_string(line: []const u8) ?[]const u8 {
-    const cut = stdx.cut(line, "\\\\") orelse return null;
-    for (cut.prefix) |c| if (c != ' ') return null;
-    return cut.suffix;
+    const indentation, const value = stdx.cut(line, "\\\\") orelse return null;
+    for (indentation) |c| if (c != ' ') return null;
+    return value;
 }
 
 /// Lists all files in the repository.

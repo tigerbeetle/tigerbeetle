@@ -157,8 +157,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             '\n',
         );
         while (lines.next()) |line| {
+            // line looks like
+            // timing: compact_mutable_suffix(tree)=136
             if (line.len != 0) {
-                stats_count += try std.fmt.parseInt(u32, stdx.cut(line, "=").?.suffix, 10);
+                _, const value_string = stdx.cut(line, "=").?;
+                stats_count += try std.fmt.parseInt(u32, value_string, 10);
             }
         }
         break :blk stats_count;
@@ -246,7 +249,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .template = "{{range .}}{{.startedAt}} {{.updatedAt}}{{end}}",
         });
         const iso8601_started_at, const iso8601_updated_at =
-            (stdx.cut(times_gh, " ") orelse break :blk null).unpack();
+            stdx.cut(times_gh, " ") orelse break :blk null;
 
         const epoch_started_at = try shell.iso8601_to_timestamp_seconds(iso8601_started_at);
         const epoch_updated_at = try shell.iso8601_to_timestamp_seconds(iso8601_updated_at);
@@ -313,10 +316,11 @@ fn get_measurement(
         std.log.err("can't extract '" ++ label ++ "' measurement", .{});
     }
 
-    var cut = stdx.cut(benchmark_stdout, label ++ " = ") orelse return error.BadMeasurement;
-    cut = stdx.cut(cut.suffix, " " ++ unit) orelse return error.BadMeasurement;
+    _, const rest = stdx.cut(benchmark_stdout, label ++ " = ") orelse
+        return error.BadMeasurement;
+    const value_string, _ = stdx.cut(rest, " " ++ unit) orelse return error.BadMeasurement;
 
-    return try std.fmt.parseInt(u64, cut.prefix, 10);
+    return try std.fmt.parseInt(u64, value_string, 10);
 }
 
 fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {

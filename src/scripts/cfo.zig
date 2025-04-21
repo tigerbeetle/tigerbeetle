@@ -619,8 +619,8 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
             var pr_fuzzers_count: u32 = 0;
             for (std.enums.values(Fuzzer)) |fuzzer| {
                 const labeled = for (pr.labels) |label| {
-                    if (stdx.cut(label.name, "fuzz ")) |cut| {
-                        if (std.mem.eql(u8, cut.suffix, @tagName(fuzzer))) {
+                    if (stdx.cut_prefix(label.name, "fuzz ")) |suffix| {
+                        if (std.mem.eql(u8, suffix, @tagName(fuzzer))) {
                             break true;
                         }
                     }
