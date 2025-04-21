@@ -4953,9 +4953,13 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_ms = @divFloor(
+            const commit_completion_time_us = @divFloor(
                 self.commit_completion_timer.read(),
-                std.time.ns_per_ms,
+                std.time.ns_per_us,
+            );
+            const commit_completion_time_ms = @divFloor(
+                commit_completion_time_us,
+                std.time.us_per_ms,
             );
             if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
                 log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
@@ -4965,6 +4969,26 @@ pub fn ReplicaType(
                     self.commit_prepare.?.header.operation.tag_name(StateMachine),
                     commit_completion_time_ms,
                 });
+            }
+
+            // In most cases, this should be equal to the latency the client sees when sending a
+            // request, less the language client overhead, MessageBus queue and network latency.
+            //
+            // Only time operations when:
+            // * Running with the real state machine - as otherwise there's a circular dependency,
+            // * and when the replica's status is .normal - otherwise things like WAL replay at
+            //   startup will skew these numbers.
+            if (StateMachine.Operation == @import("../state_machine.zig").Operation_ and
+                self.status == .normal)
+            {
+                if (StateMachine.operation_from_vsr(
+                    self.commit_prepare.?.header.operation,
+                )) |operation| {
+                    self.trace.timing(
+                        .{ .replica_request = .{ .operation = operation } },
+                        commit_completion_time_us,
+                    );
+                }
             }
 
             self.message_bus.unref(self.commit_prepare.?);
