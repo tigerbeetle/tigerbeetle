@@ -19,6 +19,7 @@ const parse_dirty_semver = stdx.parse_dirty_semver;
 const maybe = stdx.maybe;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
@@ -1454,8 +1455,8 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
-    /// Creates a UDP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: common.TCPOptions) !socket_t {
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
         const fd = try posix.socket(
             family,
             posix.SOCK.STREAM | posix.SOCK.CLOEXEC,

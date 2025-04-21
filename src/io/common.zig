@@ -8,15 +8,15 @@ const assert = std.debug.assert;
 const is_linux = builtin.target.os.tag == .linux;
 
 pub const TCPOptions = struct {
-    rcvbuf: c_int = 0,
-    sndbuf: c_int = 0,
+    rcvbuf: c_int,
+    sndbuf: c_int,
     keepalive: ?struct {
         keepidle: c_int,
         keepintvl: c_int,
         keepcnt: c_int,
-    } = null,
-    user_timeout_ms: c_int = 0,
-    nodelay: bool = false,
+    },
+    user_timeout_ms: c_int,
+    nodelay: bool,
 };
 
 pub const ListenOptions = struct {
@@ -100,6 +100,6 @@ pub fn tcp_options(
     }
 }
 
-pub fn setsockopt(_fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
-    try posix.setsockopt(_fd, level, option, &std.mem.toBytes(value));
+pub fn setsockopt(fd: posix.socket_t, level: i32, option: u32, value: c_int) !void {
+    try posix.setsockopt(fd, level, option, &std.mem.toBytes(value));
 }

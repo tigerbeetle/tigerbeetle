@@ -444,9 +444,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .free);
                 assert(connection.fd == IO.INVALID_SOCKET);
 
-                // The first replica's network address family determines the
-                // family for all other replicas:
-                const family = bus.configuration[0].any.family;
+                const family = bus.configuration[replica].any.family;
                 connection.fd = init_tcp(bus.io, family) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;

@@ -13,6 +13,8 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
+
     kq: fd_t,
     event_id: Event = 0,
     time: Time = .{},
@@ -775,8 +777,8 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
-    /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: common.TCPOptions) !socket_t {
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
         const fd = try self.open_socket(
             family,
             posix.SOCK.STREAM | posix.SOCK.NONBLOCK,
@@ -788,7 +790,7 @@ pub const IO = struct {
         return fd;
     }
 
-    /// Creates a socket that can be used for async operations with the IO instance.
+    /// Creates a UDP socket that can be used for async operations with the IO instance.
     pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
         return try self.open_socket(
             family,

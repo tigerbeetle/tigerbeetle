@@ -12,6 +12,8 @@ const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
+
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
@@ -1088,7 +1090,7 @@ pub const IO = struct {
     pub const INVALID_SOCKET = os.windows.ws2_32.INVALID_SOCKET;
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
-    pub fn open_socket_tcp(self: *IO, family: u32, options: common.TCPOptions) !socket_t {
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
         const socket = try self.open_socket(
             @bitCast(family),
             posix.SOCK.STREAM,
