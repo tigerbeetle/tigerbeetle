@@ -3,6 +3,40 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.37
+
+Released: 2025-04-21
+
+### Safety And Performance
+
+- [#2896](https://github.com/tigerbeetle/tigerbeetle/pull/2896)
+
+  Fix a bug where VOPR latencies were computed incorrectly when the minimum
+  and mean were equal.
+
+### Internals
+
+- [#2893](https://github.com/tigerbeetle/tigerbeetle/pull/2893)
+
+  Improve binary size and compilation time by making implementation of intrusive stack non-generic.
+
+- [#2898](https://github.com/tigerbeetle/tigerbeetle/pull/2898)
+
+  Make the Docs website pass the W3C HTML validation test.
+
+- [#2883](https://github.com/tigerbeetle/tigerbeetle/pull/2883)
+
+  Fix a memory leak in VOPR and apply idiomatic naming conventions for the allocator.
+
+- [#2901](https://github.com/tigerbeetle/tigerbeetle/pull/2901)
+
+  Fix a panic where the VOPR attempts to print a deinitialized packet when debug
+  logs are enabled.
+
+### TigerTracks 🎧
+
+- [Money](https://www.youtube.com/watch?v=mSNTa9kmUsk)
+
 ## TigerBeetle 0.16.36
 
 Released: 2025-04-14
