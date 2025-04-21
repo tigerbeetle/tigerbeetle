@@ -18,17 +18,11 @@ Released: 2025-04-21
 
 - [#2893](https://github.com/tigerbeetle/tigerbeetle/pull/2893)
 
-  Make the `stdx.StackType(T)` intrusive pointer non-generic (`*StackLink`) over the
-  pointee type (`*T`), while keeping the overall API generic for type safety.
+  Improve binary size and compilation time by making implementation of intrusive stack non-generic.
 
 - [#2898](https://github.com/tigerbeetle/tigerbeetle/pull/2898)
 
   Make the Docs website pass the W3C HTML validation test.
-
-- [#2897](https://github.com/tigerbeetle/tigerbeetle/pull/2897)
-
-  Rename the generic type `T` to `Int` in `stdx.PRNG` to better convey its purpose.
-  Also fix a few typos in the comments.
 
 - [#2883](https://github.com/tigerbeetle/tigerbeetle/pull/2883)
 
