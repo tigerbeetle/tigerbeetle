@@ -482,6 +482,8 @@ fn build_ci_step(
 ) void {
     const argv = .{ b.graph.zig_exe, "build" } ++ command;
     const system_command = b.addSystemCommand(&argv);
+    const name = std.mem.join(b.allocator, " ", &command) catch @panic("OOM");
+    system_command.setName(name);
     hide_stderr(system_command);
     step_ci.dependOn(&system_command.step);
 }
