@@ -1,4 +1,5 @@
 name: CI
+permissions: {}
 
 concurrency:
   group: core-${{ github.event.pull_request.number || github.ref }}
