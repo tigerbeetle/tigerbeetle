@@ -121,8 +121,6 @@ pub fn build(b: *std.Build) !void {
             "config-release-client-min",
             "Minimum client release triple.",
         ),
-        // We run extra checks in "CI-mode" build.
-        .ci = b.graph.env_map.get("CI") != null,
         .emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false,
         // The "tigerbeetle version" command includes the build-time commit hash.
         .git_commit = b.option(

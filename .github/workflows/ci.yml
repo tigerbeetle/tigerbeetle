@@ -12,7 +12,6 @@ on:
     branches: ["main"]
 
 env:
-  CI: 1 # build.zig enables extra sanity checks if CI is set.
   GH_TOKEN: ${{ github.token }}
 
 jobs:
