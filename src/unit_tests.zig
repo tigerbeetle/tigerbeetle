@@ -3,7 +3,7 @@ comptime {
     _ = @import("copyhound.zig");
     _ = @import("ewah_benchmark.zig");
     _ = @import("ewah.zig");
-    _ = @import("fifo.zig");
+    _ = @import("queue.zig");
     _ = @import("stack.zig");
     _ = @import("flags.zig");
     _ = @import("io.zig");

@@ -833,8 +833,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const buffer: []u8 = message.buffer[0..message_size];
 
             // Memory must not be owned by `journal.headers` as these may be modified concurrently:
-            assert(@intFromPtr(buffer.ptr) < @intFromPtr(journal.headers.ptr) or
-                @intFromPtr(buffer.ptr) > @intFromPtr(journal.headers.ptr) + headers_size);
+            assert(stdx.disjoint_slices(u8, vsr.Header.Prepare, buffer, journal.headers));
 
             journal.storage.read_sectors(
                 read_prepare_with_op_and_checksum_callback,

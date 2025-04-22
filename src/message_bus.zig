@@ -1,7 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const mem = std.mem;
-const posix = std.posix;
 
 const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
@@ -134,11 +133,18 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             const process: std.meta.FieldType(MessageBus, .process) = switch (process_type) {
                 .replica => blk: {
-                    const tcp = try init_tcp(options.io, options.configuration[process_id.replica]);
+                    const address = options.configuration[process_id.replica];
+                    const fd = try init_tcp(options.io, address.any.family);
+                    errdefer options.io.close_socket(fd);
+
+                    const accept_address = try options.io.listen(fd, address, .{
+                        .backlog = constants.tcp_backlog,
+                    });
+
                     break :blk .{
                         .replica = process_id.replica,
-                        .accept_fd = tcp.fd,
-                        .accept_address = tcp.address,
+                        .accept_fd = fd,
+                        .accept_address = accept_address,
                     };
                 },
                 .client => {},
@@ -188,18 +194,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             allocator.free(bus.replicas_connect_attempts);
         }
 
-        fn init_tcp(io: *IO, address: std.net.Address) !struct {
-            fd: IO.socket_t,
-            address: std.net.Address,
-        } {
-            const fd = try io.open_socket(
-                address.any.family,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
-            errdefer io.close_socket(fd);
-
-            const address_resolved = try io.listen(fd, address, .{
+        fn init_tcp(io: *IO, family: u32) !IO.socket_t {
+            return try io.open_socket_tcp(family, .{
                 .rcvbuf = constants.tcp_rcvbuf,
                 .sndbuf = switch (process_type) {
                     .replica => constants.tcp_sndbuf_replica,
@@ -212,10 +208,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 } else null,
                 .user_timeout_ms = constants.tcp_user_timeout_ms,
                 .nodelay = constants.tcp_nodelay,
-                .backlog = constants.tcp_backlog,
             });
-
-            return .{ .fd = fd, .address = address_resolved };
         }
 
         pub fn tick(bus: *MessageBus) void {
@@ -451,11 +444,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .free);
                 assert(connection.fd == IO.INVALID_SOCKET);
 
-                // The first replica's network address family determines the
-                // family for all other replicas:
-                const family = bus.configuration[0].any.family;
-                connection.fd =
-                    bus.io.open_socket(family, posix.SOCK.STREAM, posix.IPPROTO.TCP) catch return;
+                const family = bus.configuration[replica].any.family;
+                connection.fd = init_tcp(bus.io, family) catch return;
                 connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
                 bus.connections_used += 1;

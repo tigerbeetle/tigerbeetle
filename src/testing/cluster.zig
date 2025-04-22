@@ -563,13 +563,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.log_replica(.crash, replica_index);
 
             // Ensure that none of the replica's messages leaked when it was deinitialized.
-            var messages_in_pool: usize = 0;
             const message_bus = cluster.network.get_message_bus(.{ .replica = replica_index });
-            {
-                var it = message_bus.pool.free_list;
-                while (it) |message| : (it = message.next) messages_in_pool += 1;
-            }
-            assert(messages_in_pool == message_bus.pool.messages_max);
+            assert(message_bus.pool.free_list.count() == message_bus.pool.messages_max);
         }
 
         fn replica_enable(cluster: *Cluster, replica_index: u8) void {

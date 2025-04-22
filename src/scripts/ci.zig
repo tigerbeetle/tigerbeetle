@@ -26,14 +26,11 @@ const LanguageCI = .{
 pub const CLIArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
-    build_docs: bool = false,
 };
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (cli_args.validate_release) {
         try validate_release(shell, gpa, cli_args.language);
-    } else if (cli_args.build_docs) {
-        try build_docs(shell);
     } else {
         try generate_readmes(shell, gpa, cli_args.language);
         try run_tests(shell, gpa, cli_args.language);
@@ -66,13 +63,6 @@ fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Languag
             }
         }
     }
-}
-
-fn build_docs(shell: *Shell) !void {
-    try shell.pushd("./src/docs_website");
-    defer shell.popd();
-
-    try shell.exec_zig("build", .{});
 }
 
 fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {

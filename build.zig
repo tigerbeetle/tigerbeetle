@@ -81,6 +81,7 @@ pub fn build(b: *std.Build) !void {
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
         .run = b.step("run", "Run TigerBeetle"),
+        .ci = b.step("ci", "Run the full suite of CI checks"),
         .scripts = b.step("scripts", "Free form automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .@"test" = b.step("test", "Run all tests"),
@@ -259,7 +260,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build scripts -- ci --language=java
-    build_scripts(b, build_steps.scripts, .{
+    const scripts = build_scripts(b, build_steps.scripts, .{
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
@@ -328,6 +329,12 @@ pub fn build(b: *std.Build) !void {
         nested_build.setCwd(b.path("./src/docs_website/"));
         break :blk &nested_build.step;
     });
+
+    // zig build ci
+    build_ci(b, build_steps.ci, .{
+        .scripts = scripts,
+        .git_commit = build_options.git_commit,
+    });
 }
 
 fn build_vsr_module(b: *std.Build, options: struct {
@@ -363,6 +370,147 @@ fn build_vsr_module(b: *std.Build, options: struct {
     vsr_module.addOptions("vsr_options", vsr_options);
 
     return .{ vsr_options, vsr_module };
+}
+
+/// This is what is called by CI infrastructure, but you can also use it locally. In particular,
+///
+///     ./zig/zig build ci
+///
+/// is useful to run locally to get a set of somewhat comprehensive checks without needing many
+/// external dependencies.
+///
+/// Various CI machines pass filters to select a subset of checks:
+///
+///     ./zig/zig build ci -- all
+fn build_ci(
+    b: *std.Build,
+    step_ci: *std.Build.Step,
+    options: struct {
+        scripts: *std.Build.Step.Compile,
+        git_commit: []const u8,
+    },
+) void {
+    const CIMode = enum {
+        smoke, // Quickly check formatting and such.
+        @"test", // Main test suite, excluding VOPR and clients.
+        fuzz, // Smoke tests for fuzzers and VOPR.
+        aof, // Dedicated test for AOF, which is somewhat slow to run.
+
+        clients, // Tests for all language clients below.
+        dotnet,
+        go,
+        java,
+        node,
+        python,
+
+        devhub, // Things that run on known-good commit on main branch after merge.
+        @"devhub-dry-run",
+        default, // smoke + test + building Zig parts of clients.
+        all,
+    };
+
+    const mode: CIMode = if (b.args) |args| mode: {
+        if (args.len != 1) {
+            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            return;
+        }
+        if (std.meta.stringToEnum(CIMode, args[0])) |m| {
+            break :mode m;
+        } else {
+            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            return;
+        }
+    } else .default;
+
+    const all = mode == .all;
+    const default = all or mode == .default;
+
+    if (default or mode == .smoke) {
+        build_ci_step(b, step_ci, .{"test:fmt"});
+        build_ci_step(b, step_ci, .{"check"});
+
+        const build_docs = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
+        build_docs.has_side_effects = true;
+        build_docs.cwd = b.path("./src/docs_website");
+        step_ci.dependOn(&build_docs.step);
+    }
+    if (default or mode == .@"test") {
+        build_ci_step(b, step_ci, .{"test"});
+        build_ci_step(b, step_ci, .{"clients:c:sample"});
+    }
+    if (default or mode == .fuzz) {
+        build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
+        inline for (.{ "testing", "accounting" }) |state_machine| {
+            build_ci_step(b, step_ci, .{
+                "vopr",
+                "-Dvopr-state-machine=" ++ state_machine,
+                "-Drelease",
+                "--",
+                options.git_commit,
+            });
+        }
+    }
+    if (all or mode == .aof) {
+        const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
+        build_ci_check_status(aof);
+        step_ci.dependOn(&aof.step);
+    }
+    inline for (&.{ CIMode.dotnet, .go, .java, .node, .python }) |language| {
+        if (default or mode == .clients or mode == language) {
+            build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)});
+        }
+        if (all or mode == .clients or mode == language) {
+            build_ci_script(b, step_ci, options.scripts, &.{
+                "ci",
+                "--language=" ++ @tagName(language),
+            });
+        }
+    }
+    if (all or mode == .@"devhub-dry-run") {
+        build_ci_script(b, step_ci, options.scripts, &.{
+            "devhub",
+            b.fmt("--sha={s}", .{options.git_commit}),
+            "--skip-kcov",
+        });
+    }
+    if (mode == .devhub) {
+        build_ci_script(b, step_ci, options.scripts, &.{
+            "devhub",
+            b.fmt("--sha={s}", .{options.git_commit}),
+        });
+    }
+}
+
+fn build_ci_step(
+    b: *std.Build,
+    step_ci: *std.Build.Step,
+    command: anytype,
+) void {
+    const argv = .{ b.graph.zig_exe, "build" } ++ command;
+    const system_command = b.addSystemCommand(&argv);
+    build_ci_check_status(system_command);
+    step_ci.dependOn(&system_command.step);
+}
+
+fn build_ci_script(
+    b: *std.Build,
+    step_ci: *std.Build.Step,
+    scripts: *std.Build.Step.Compile,
+    argv: []const []const u8,
+) void {
+    const run_artifact = b.addRunArtifact(scripts);
+    run_artifact.addArgs(argv);
+    run_artifact.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
+    build_ci_check_status(run_artifact);
+    step_ci.dependOn(&run_artifact.step);
+}
+
+fn build_ci_check_status(step: *std.Build.Step.Run) void {
+    // NB: The purpose here is not to check status (Zig does that automatically), but rather to
+    // prevent inheriting stdio, which causes everything to execute sequentially due to stdio lock!
+    step.stdio = .{ .check = .{} };
+    step.addCheck(.{ .expect_term = .{ .Exited = 0 } });
+    step.has_side_effects = true;
 }
 
 // Run a tigerbeetle build without running codegen and waiting for llvm
@@ -892,7 +1040,7 @@ fn build_scripts(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) void {
+) *std.Build.Step.Compile {
     const scripts = b.addExecutable(.{
         .name = "scripts",
         .root_source_file = b.path("src/scripts.zig"),
@@ -904,6 +1052,8 @@ fn build_scripts(
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
     step_scripts.dependOn(&scripts_run.step);
+
+    return scripts;
 }
 
 fn build_vortex(

@@ -9,7 +9,8 @@ const log = std.log.scoped(.vsr);
 // Note that we don't promise any stability of these interfaces yet.
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
-pub const fifo = @import("fifo.zig");
+pub const queue = @import("queue.zig");
+pub const stack = @import("stack.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
 pub const state_machine = @import("state_machine.zig");

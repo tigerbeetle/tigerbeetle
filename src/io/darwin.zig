@@ -7,19 +7,21 @@ const log = std.log.scoped(.io);
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
+    pub const TCPOptions = common.TCPOptions;
+
     kq: fd_t,
     event_id: Event = 0,
     time: Time = .{},
     io_inflight: usize = 0,
-    timeouts: FIFOType(Completion) = .{ .name = "io_timeouts" },
-    completed: FIFOType(Completion) = .{ .name = "io_completed" },
-    io_pending: FIFOType(Completion) = .{ .name = "io_pending" },
+    timeouts: QueueType(Completion) = .{ .name = "io_timeouts" },
+    completed: QueueType(Completion) = .{ .name = "io_completed" },
+    io_pending: QueueType(Completion) = .{ .name = "io_pending" },
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -77,14 +79,13 @@ pub const IO = struct {
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
-        var io_pending = self.io_pending.peek();
         var events: [256]posix.Kevent = undefined;
 
         // Check timeouts and fill events with completions in io_pending
         // (they will be submitted through kevent).
         // Timeouts are expired here and possibly pushed to the completed queue.
         const next_timeout = self.flush_timeouts();
-        const change_events = self.flush_io(&events, &io_pending);
+        const change_events = self.flush_io(&events);
 
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
         if (change_events > 0 or self.completed.empty()) {
@@ -113,17 +114,12 @@ pub const IO = struct {
             );
 
             // Mark the io events submitted only after kevent() successfully processed them
-            self.io_pending.out = io_pending;
-            if (io_pending == null) {
-                self.io_pending.in = null;
-            }
-
             self.io_inflight += change_events;
             self.io_inflight -= new_events;
 
             for (events[0..new_events]) |event| {
                 const completion: *Completion = @ptrFromInt(event.udata);
-                completion.next = null;
+                assert(completion.next == null);
                 self.completed.push(completion);
             }
         }
@@ -135,10 +131,9 @@ pub const IO = struct {
         }
     }
 
-    fn flush_io(_: *IO, events: []posix.Kevent, io_pending_top: *?*Completion) usize {
+    fn flush_io(self: *IO, events: []posix.Kevent) usize {
         for (events, 0..) |*event, flushed| {
-            const completion = io_pending_top.* orelse return flushed;
-            io_pending_top.* = completion.next;
+            const completion = self.io_pending.pop() orelse return flushed;
 
             const event_info = switch (completion.operation) {
                 .accept => |op| [2]c_int{ op.socket, posix.system.EVFILT_READ },
@@ -775,16 +770,40 @@ pub const IO = struct {
     pub const socket_t = posix.socket_t;
     pub const INVALID_SOCKET = -1;
 
-    /// Creates a socket that can be used for async operations with the IO instance.
-    pub fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
-        const fd = try posix.socket(family, sock_type | posix.SOCK.NONBLOCK, protocol);
+    /// Creates a TCP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+        const fd = try self.open_socket(
+            family,
+            posix.SOCK.STREAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.TCP,
+        );
         errdefer self.close_socket(fd);
 
-        // darwin doesn't support SOCK_CLOEXEC.
-        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        try common.tcp_options(fd, options);
+        return fd;
+    }
 
-        // darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
-        try posix.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, &mem.toBytes(@as(c_int, 1)));
+    /// Creates a UDP socket that can be used for async operations with the IO instance.
+    pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+        return try self.open_socket(
+            family,
+            posix.SOCK.DGRAM | posix.SOCK.NONBLOCK,
+            posix.IPPROTO.UDP,
+        );
+    }
+
+    fn open_socket(self: *IO, family: u32, sock_type: u32, protocol: u32) !socket_t {
+        const fd = try posix.socket(
+            family,
+            sock_type | posix.SOCK.NONBLOCK,
+            protocol,
+        );
+        errdefer self.close_socket(fd);
+
+        // Darwin doesn't support SOCK_CLOEXEC.
+        _ = try posix.fcntl(fd, posix.F.SETFD, posix.FD_CLOEXEC);
+        // Darwin doesn't support posix.MSG_NOSIGNAL, but instead a socket option to avoid SIGPIPE.
+        try common.setsockopt(fd, posix.SOL.SOCKET, posix.SO.NOSIGPIPE, 1);
 
         return fd;
     }

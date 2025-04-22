@@ -640,3 +640,5 @@ The collection of logical and magical art behind TigerBeetle:
   Changfoot and Joran Dirk Greef, a performance analysis of Mojaloop's central ledger that sparked
   the idea for "an accounting database" as Adrian Hope-Bailie put it. And the rest, as they say, is
   history!
+
+- [Swarm Testing](https://users.cs.utah.edu/~regehr/papers/swarm12.pdf)

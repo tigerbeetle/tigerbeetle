@@ -8,7 +8,7 @@ const vsr = @import("../vsr.zig");
 const schema = @import("../lsm/schema.zig");
 
 const SuperBlockType = vsr.SuperBlockType;
-const FIFOType = @import("../fifo.zig").FIFOType;
+const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("../stdx.zig");
@@ -101,7 +101,7 @@ pub fn GridType(comptime Storage: type) type {
             cache_read: bool,
             cache_write: bool,
             pending: ReadPending = .{},
-            resolves: FIFOType(ReadPending) = .{ .name = null },
+            resolves: QueueType(ReadPending) = .{ .name = null },
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
@@ -180,21 +180,21 @@ pub fn GridType(comptime Storage: type) type {
         cache_blocks: []BlockPtr,
 
         write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
-        write_queue: FIFOType(Write) = .{ .name = "grid_write" },
+        write_queue: QueueType(Write) = .{ .name = "grid_write" },
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPSType(ReadIOP, read_iops_max) = .{},
-        read_queue: FIFOType(Read) = .{ .name = "grid_read" },
+        read_queue: QueueType(Read) = .{ .name = "grid_read" },
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: FIFOType(ReadPending) = .{ .name = "grid_read_pending" },
+        read_pending_queue: QueueType(ReadPending) = .{ .name = "grid_read_pending" },
         /// List of `Read`s which are waiting for a block repair from another replica.
         /// (Reads in this queue have already failed locally).
         ///
         /// Invariants:
         /// - For each read, read.callback=from_local_or_global_storage.
-        read_global_queue: FIFOType(Read) = .{ .name = "grid_read_global" },
+        read_global_queue: QueueType(Read) = .{ .name = "grid_read_global" },
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
@@ -657,7 +657,7 @@ pub fn GridType(comptime Storage: type) type {
         fn assert_not_reading(grid: *Grid, address: u64, block: ?BlockPtrConst) void {
             assert(address > 0);
 
-            for ([_]*const FIFOType(Read){
+            for ([_]*const QueueType(Read){
                 &grid.read_queue,
                 &grid.read_global_queue,
             }) |queue| {
@@ -1017,7 +1017,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(read.address > 0);
 
             // Check if a read is already processing/recovering and merge with it.
-            for ([_]*const FIFOType(Read){
+            for ([_]*const QueueType(Read){
                 &grid.read_queue,
                 &grid.read_global_queue,
             }) |queue| {
@@ -1216,7 +1216,7 @@ pub fn GridType(comptime Storage: type) type {
                 assert(header.checksum == read.checksum);
             }
 
-            var read_remote_resolves: FIFOType(ReadPending) = .{ .name = read.resolves.name };
+            var read_remote_resolves: QueueType(ReadPending) = .{ .name = read.resolves.name };
 
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {

@@ -7,6 +7,7 @@ const constants = @import("constants.zig");
 
 const vsr = @import("vsr.zig");
 const Header = vsr.Header;
+const StackType = @import("./stack.zig").StackType;
 
 comptime {
     // message_size_max must be a multiple of sector_size for Direct I/O
@@ -21,10 +22,10 @@ pub const Options = union(vsr.ProcessType) {
     client,
 
     /// The number of messages allocated at initialization by the message pool.
-    fn messages_max(options: *const Options) usize {
+    fn messages_max(options: *const Options) u32 {
         return switch (options.*) {
             .client => messages_max: {
-                var sum: usize = 0;
+                var sum: u32 = 0;
 
                 sum += constants.replicas_max; // Connection.recv_message
                 // Connection.send_queue:
@@ -48,7 +49,7 @@ pub const Options = union(vsr.ProcessType) {
                 assert(replica.pipeline_requests_limit >= 0);
                 assert(replica.pipeline_requests_limit <= constants.pipeline_request_queue_max);
 
-                var sum: usize = 0;
+                var sum: u32 = 0;
 
                 const pipeline_limit =
                     constants.pipeline_prepare_queue_max + replica.pipeline_requests_limit;
@@ -56,11 +57,12 @@ pub const Options = union(vsr.ProcessType) {
                 // -1 since we never connect to ourself.
                 const connections_max = replica.members_count + pipeline_limit - 1;
 
-                sum += constants.journal_iops_read_max; // Journal reads
-                sum += constants.journal_iops_write_max; // Journal writes
-                sum += constants.client_replies_iops_read_max; // Client-reply reads
-                sum += constants.client_replies_iops_write_max; // Client-reply writes
-                sum += constants.grid_repair_reads_max; // Replica.grid_reads (Replica.BlockRead)
+                sum += @intCast(constants.journal_iops_read_max); // Journal reads
+                sum += @intCast(constants.journal_iops_write_max); // Journal writes
+                sum += @intCast(constants.client_replies_iops_read_max); // Client-reply reads
+                sum += @intCast(constants.client_replies_iops_write_max); // Client-reply writes
+                // Replica.grid_reads (Replica.BlockRead)
+                sum += @intCast(constants.grid_repair_reads_max);
                 sum += 1; // Replica.loopback_queue
                 sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
                 sum += 1; // Replica.commit_prepare
@@ -119,12 +121,12 @@ pub const MessagePool = struct {
         header: *Header,
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32 = 0,
-        next: ?*Message,
+        link: FreeList.Link,
 
         /// Increment the reference count of the message and return the same pointer passed.
         pub fn ref(message: *Message) *Message {
             assert(message.references > 0);
-            assert(message.next == null);
+            assert(message.link.next == null);
 
             message.references += 1;
             return message;
@@ -169,8 +171,9 @@ pub const MessagePool = struct {
         }
     };
 
+    const FreeList = StackType(Message);
     /// List of currently unused messages.
-    free_list: ?*Message,
+    free_list: StackType(Message),
 
     messages_max: usize,
 
@@ -183,10 +186,13 @@ pub const MessagePool = struct {
 
     pub fn init_capacity(
         allocator: mem.Allocator,
-        messages_max: usize,
+        messages_max: u32,
     ) error{OutOfMemory}!MessagePool {
         var pool: MessagePool = .{
-            .free_list = null,
+            .free_list = FreeList.init(.{
+                .capacity = messages_max,
+                .verify_push = false,
+            }),
             .messages_max = messages_max,
         };
         {
@@ -200,9 +206,9 @@ pub const MessagePool = struct {
                 message.* = .{
                     .header = undefined,
                     .buffer = buffer[0..constants.message_size_max],
-                    .next = pool.free_list,
+                    .link = .{},
                 };
-                pool.free_list = message;
+                pool.free_list.push(message);
             }
         }
 
@@ -211,9 +217,8 @@ pub const MessagePool = struct {
 
     /// Frees all messages that were unused or returned to the pool via unref().
     pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
-        var free_count: usize = 0;
-        while (pool.free_list) |message| {
-            pool.free_list = message.next;
+        var free_count: u32 = 0;
+        while (pool.free_list.pop()) |message| {
             allocator.free(message.buffer);
             allocator.destroy(message);
             free_count += 1;
@@ -242,9 +247,8 @@ pub const MessagePool = struct {
     }
 
     fn get_message_base(pool: *MessagePool) *Message {
-        const message = pool.free_list.?;
-        pool.free_list = message.next;
-        message.next = null;
+        const message = pool.free_list.pop().?;
+        assert(message.link.next == null);
         message.header = mem.bytesAsValue(Header, message.buffer[0..@sizeOf(Header)]);
         assert(message.references == 0);
 
@@ -269,7 +273,7 @@ pub const MessagePool = struct {
     }
 
     fn unref_base(pool: *MessagePool, message: *Message) void {
-        assert(message.next == null);
+        assert(message.link.next == null);
 
         message.references -= 1;
         if (message.references == 0) {
@@ -277,8 +281,7 @@ pub const MessagePool = struct {
             if (constants.verify) {
                 @memset(message.buffer, undefined);
             }
-            message.next = pool.free_list;
-            pool.free_list = message;
+            pool.free_list.push(message);
         }
     }
 };
@@ -311,7 +314,7 @@ fn CommandMessageType(comptime command: vsr.Command) type {
         header: *CommandHeader,
         buffer: *align(constants.sector_size) [constants.message_size_max]u8,
         references: u32,
-        next: ?*Message,
+        link: MessagePool.FreeList.Link,
 
         pub fn base(message: *CommandMessage) *Message {
             return @ptrCast(message);

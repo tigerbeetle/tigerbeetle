@@ -1117,9 +1117,9 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     try run_fuzz_ops(gpa, Storage.Options{
         .seed = prng.int(u64),
         .read_latency_min = 0,
-        .read_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),
+        .read_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
         .write_latency_min = 0,
-        .write_latency_mean = 0 + fuzz.random_int_exponential(&prng, u64, io_latency_mean),
+        .write_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
         .crash_fault_probability = ratio(0, 100),
