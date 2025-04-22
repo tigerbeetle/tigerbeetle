@@ -635,6 +635,10 @@ OnCompletion = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CPacket),
                                 ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint32)
 LogHandler = ctypes.CFUNCTYPE(None, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint)
 
+class InitParameters(ctypes.Structure):
+    _fields_ = [("cluster_id", c_uint128), ("client_id", c_uint128),
+                ("addresses_ptr", ctypes.c_void_p), ("addresses_len", ctypes.c_uint64)]
+
 # Initialize a new TigerBeetle client which connects to the addresses provided and
 # completes submitted packets by invoking the callback with the given context.
 tb_client_init = tbclient.tb_client_init
@@ -649,6 +653,13 @@ tb_client_init_echo.restype = InitStatus
 tb_client_init_echo.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(ctypes.c_uint8 * 16),
                                 ctypes.c_char_p, ctypes.c_uint32, ctypes.c_void_p,
                                 OnCompletion]
+
+# Returns the cluster_id and addresses passed in to either tb_client_init or
+# tb_client_init_echo.
+tb_client_init_parameters = tbclient.tb_client_init_parameters
+tb_client_init_parameters.restype = ClientStatus
+tb_client_init_parameters.argtypes = [ctypes.POINTER(CClient),
+                                      ctypes.POINTER(InitParameters)]
 
 # Closes the client, causing any previously submitted packets to be completed with
 # `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.

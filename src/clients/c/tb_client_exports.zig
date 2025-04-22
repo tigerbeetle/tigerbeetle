@@ -60,6 +60,7 @@ pub const tb_log_level = enum(c_int) {
 
 pub const tb_operation = tb.Operation;
 pub const tb_completion_t = tb.CompletionCallback;
+pub const tb_init_parameters = tb.InitParameters;
 
 pub const tb_account_t = vsr.tigerbeetle.Account;
 pub const tb_transfer_t = vsr.tigerbeetle.Transfer;
@@ -158,6 +159,17 @@ pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.C) tb_cl
 pub fn deinit(tb_client: ?*tb_client_t) callconv(.C) tb_client_status {
     const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
     client.deinit() catch |err| switch (err) {
+        error.ClientInvalid => return .invalid,
+    };
+    return .ok;
+}
+
+pub fn init_parameters(
+    tb_client: ?*tb_client_t,
+    out_parameters: *tb_init_parameters,
+) callconv(.C) tb_client_status {
+    const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
+    client.init_parameters(out_parameters) catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
     };
     return .ok;
