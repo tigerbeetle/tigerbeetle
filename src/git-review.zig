@@ -214,7 +214,7 @@ fn parse_diff(diff: []const u8) !ParseDiffResult {
         defer line_index += 1;
 
         if (stdx.cut_prefix(line, "diff --git a/")) |suffix| {
-            _, file_name = stdx.cut(suffix, " ").?.unpack();
+            _, file_name = stdx.cut(suffix, " ").?;
             continue;
         }
         assert(file_name.len > 0);
