@@ -44,11 +44,12 @@ pub const Ratio = struct {
     }
 
     pub fn parse_flag_value(value: []const u8) union(enum) { ok: Ratio, err: []const u8 } {
-        const cut = stdx.cut(value, "/") orelse
+        const numerator_string, const denominator_string = stdx.cut(value, "/") orelse
             return .{ .err = "expected 'a/b' ratio, but found:" };
-        const numerator = std.fmt.parseInt(u64, cut.prefix, 16) catch
+
+        const numerator = std.fmt.parseInt(u64, numerator_string, 16) catch
             return .{ .err = "invalid numerator:" };
-        const denominator = std.fmt.parseInt(u64, cut.suffix, 16) catch
+        const denominator = std.fmt.parseInt(u64, denominator_string, 16) catch
             return .{ .err = "invalid denominator:" };
         if (numerator > denominator) {
             return .{ .err = "ratio greater than 1:" };

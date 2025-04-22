@@ -138,19 +138,15 @@ fn format_changelog_cut_single_merge(merges_left: *[]const u8) !?struct {
     //
     //    Client: add ULID helper functions
 
-    var cut = stdx.cut(merges_left.*, "Merge pull request #") orelse return null;
-    merges_left.* = cut.suffix;
+    _, merges_left.* = stdx.cut(merges_left.*, "Merge pull request #") orelse return null;
 
-    cut = stdx.cut(merges_left.*, " from ") orelse return error.ParseMergeLog;
-    const pr = try std.fmt.parseInt(u16, cut.prefix, 10);
-    merges_left.* = cut.suffix;
+    const pr_string, merges_left.* = stdx.cut(merges_left.*, " from ") orelse
+        return error.ParseMergeLog;
+    const pr = try std.fmt.parseInt(u16, pr_string, 10);
 
-    cut = stdx.cut(merges_left.*, "\n    \n    ") orelse return error.ParseMergeLog;
-    merges_left.* = cut.suffix;
+    _, merges_left.* = stdx.cut(merges_left.*, "\n    \n    ") orelse return error.ParseMergeLog;
 
-    cut = stdx.cut(merges_left.*, "\n") orelse return error.ParseMergeLog;
-    const summary = cut.prefix;
-    merges_left.* = cut.suffix;
+    const summary, merges_left.* = stdx.cut(merges_left.*, "\n") orelse return error.ParseMergeLog;
 
     return .{ .pr = pr, .summary = summary };
 }
@@ -214,7 +210,7 @@ pub const ChangelogIterator = struct {
         assert(std.mem.endsWith(u8, text_full, "\n"));
         assert(!std.mem.endsWith(u8, text_full, "\n\n"));
 
-        const first_line, var body = stdx.cut(text_full, "\n").?.unpack();
+        const first_line, var body = stdx.cut(text_full, "\n").?;
         const release = if (std.mem.eql(u8, first_line, "## TigerBeetle (unreleased)"))
             null
         else
@@ -222,7 +218,7 @@ pub const ChangelogIterator = struct {
                 @panic("invalid changelog");
 
         body = stdx.cut_prefix(body, "\nReleased:").?;
-        _, body = stdx.cut(body, "\n").?.unpack();
+        _, body = stdx.cut(body, "\n").?;
         return .{ .release = release, .text_full = text_full, .text_body = body };
     }
 };

@@ -107,7 +107,7 @@ pub fn main() !void {
 fn extract_function_name(define: []const u8, buf: []u8) ?[]const u8 {
     if (!std.mem.endsWith(u8, define, "{")) return null;
 
-    const mangled_name = (stdx.cut(define, "@") orelse return null).suffix;
+    _, const mangled_name = stdx.cut(define, "@") orelse return null;
     var buf_count: usize = 0;
     var level: u32 = 0;
     for (mangled_name) |c| {
@@ -138,7 +138,7 @@ test "extract_function_name" {
 
 /// Parses out the size argument of an memcpy call.
 fn extract_memcpy_size(memcpy_call: []const u8) ?u32 {
-    const call_args = (stdx.cut(memcpy_call, "(") orelse return null).suffix;
+    _, const call_args = stdx.cut(memcpy_call, "(") orelse return null;
     var level: u32 = 0;
     var arg_count: u32 = 0;
 
@@ -156,9 +156,9 @@ fn extract_memcpy_size(memcpy_call: []const u8) ?u32 {
         }
     } else return null;
 
-    const size_arg = (stdx.cut(args_after_size, ",") orelse return null).prefix;
+    const size_arg, _ = stdx.cut(args_after_size, ",") orelse return null;
 
-    const size_value = (stdx.cut(size_arg, " ") orelse return null).suffix;
+    _, const size_value = stdx.cut(size_arg, " ") orelse return null;
 
     // Runtime-known memcpy size, assume that's OK.
     if (std.mem.startsWith(u8, size_value, "%")) return 0;

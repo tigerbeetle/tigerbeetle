@@ -110,7 +110,7 @@ fn readme_root(ctx: *Context) !void {
                 "Then create `{s}` and copy this into it:\n\n",
                 .{ctx.docs.project_file_name},
             );
-            const project_file_language = stdx.cut(ctx.docs.project_file_name, ".").?.suffix;
+            _, const project_file_language = stdx.cut(ctx.docs.project_file_name, ".").?;
             ctx.code(project_file_language, ctx.docs.project_file);
         }
 
@@ -565,14 +565,11 @@ const Context = struct {
         const section_end =
             ctx.shell.fmt("endsection:{s}\n", .{section_name}) catch @panic("OOM");
 
-        var text = ctx.walkthrough;
+        var rest = ctx.walkthrough;
         for (0..10) |_| {
-            text = (stdx.cut(text, section_start) orelse break).suffix;
+            _, rest = stdx.cut(rest, section_start) orelse break;
 
-            const section_cut = stdx.cut(text, section_end).?;
-            text = section_cut.suffix;
-
-            var section = section_cut.prefix;
+            var section, rest = stdx.cut(rest, section_end).?;
             section = section[0..std.mem.lastIndexOfScalar(u8, section, '\n').?];
 
             var indent_min: usize = std.math.maxInt(usize);
