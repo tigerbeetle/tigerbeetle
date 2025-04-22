@@ -501,7 +501,7 @@ fn upload_results(
 
     _ = try shell.cwd.deleteTree("./devhubdb");
     try shell.exec(
-        \\git clone --depth 1
+        \\git clone --single-branch --depth 1
         \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb.git
         \\  devhubdb
     , .{
@@ -515,7 +515,7 @@ fn upload_results(
         var arena = std.heap.ArenaAllocator.init(gpa);
         defer arena.deinit();
 
-        try shell.exec("git fetch origin", .{});
+        try shell.exec("git fetch origin main", .{});
         try shell.exec("git reset --hard origin/main", .{});
 
         const max_size = 1024 * 1024;
