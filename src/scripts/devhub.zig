@@ -326,7 +326,7 @@ fn get_measurement(
 fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
     const token = try shell.env_get("DEVHUBDB_PAT");
     try shell.exec(
-        \\git clone --depth 1
+        \\git clone --single-branch --depth 1
         \\  https://oauth2:{token}@github.com/tigerbeetle/devhubdb.git
         \\  devhubdb
     , .{
@@ -337,7 +337,7 @@ fn upload_run(shell: *Shell, batch: *const MetricBatch) !void {
     defer shell.popd();
 
     for (0..32) |_| {
-        try shell.exec("git fetch origin", .{});
+        try shell.exec("git fetch origin main", .{});
         try shell.exec("git reset --hard origin/main", .{});
 
         {
