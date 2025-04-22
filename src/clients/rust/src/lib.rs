@@ -182,7 +182,7 @@ impl Client {
             let msg = rx.await.expect("channel");
             let result: &[Transfer] = handle_message(&msg)?;
 
-            Ok(result.iter().cloned().map(Into::into).collect())
+            Ok(result.to_vec())
         }
     }
 
@@ -204,7 +204,7 @@ impl Client {
             let msg = rx.await.expect("channel");
             let result: &[AccountBalance] = handle_message(&msg)?;
 
-            Ok(result.iter().cloned().map(Into::into).collect())
+            Ok(result.to_vec())
         }
     }
 
@@ -224,7 +224,7 @@ impl Client {
             let msg = rx.await.expect("channel");
             let result: &[Account] = handle_message(&msg)?;
 
-            Ok(result.iter().cloned().map(Into::into).collect())
+            Ok(result.to_vec())
         }
     }
 
@@ -244,7 +244,7 @@ impl Client {
             let msg = rx.await.expect("channel");
             let result: &[Transfer] = handle_message(&msg)?;
 
-            Ok(result.iter().cloned().map(Into::into).collect())
+            Ok(result.to_vec())
         }
     }
 

@@ -18,6 +18,7 @@ const Language = @import("./ci.zig").Language;
 
 const LanguageDocs = .{
     .go = @import("../clients/go/docs.zig").GoDocs,
+    .rust = @import("../clients/rust/docs.zig").RustDocs,
     .node = @import("../clients/node/docs.zig").NodeDocs,
     .java = @import("../clients/java/docs.zig").JavaDocs,
     .dotnet = @import("../clients/dotnet/docs.zig").DotnetDocs,

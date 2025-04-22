@@ -66,6 +66,7 @@ impl TestHarness {
             "--addresses=0", // tell us the port to use
             "0_0.tigerbeetle",
         ])
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped());
         let mut child = cmd.spawn()?;
         let child_stdout = mem::take(&mut child.stdout).unwrap();
