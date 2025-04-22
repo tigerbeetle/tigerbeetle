@@ -1,4 +1,5 @@
 name: Release
+permissions: {}
 
 on:
   workflow_dispatch: # Manual triggering to re-run a release with a different run_number
