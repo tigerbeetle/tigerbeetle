@@ -109,30 +109,32 @@ async function mainSeeds() {
 
     if (!include) continue;
 
-    const seedDuration = formatDuration(
-      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
-    );
-    const seedFreshness = formatDuration(
-      Date.now() - (record.seed_timestamp_start * 1000),
-    );
-    const rowDom = document.createElement("tr");
+    const seed_duration_ms = (record.seed_timestamp_end - record.seed_timestamp_start) * 1000;
+    const seed_freshness_ms = Date.now() - (record.seed_timestamp_start * 1000);
+    const staleness_threshold_ms = 2 * 60 * 60 * 1000;
+    const canery_is_stale = record.fuzzer === "canary" &&
+      !pullRequestNumber(record) &&
+      seed_freshness_ms > staleness_threshold_ms;
 
-    const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
-    if (seedSuccess) {
-      rowDom.classList.add("success");
+    const row_dom = document.createElement("tr");
+
+    let seed_success = record.fuzzer === "canary" ? !record.ok : record.ok;
+    if (canery_is_stale) seed_success = false;
+    if (seed_success) {
+      row_dom.classList.add("success");
     } else {
       seedFailCount++;
     }
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
-      rowDom.classList.add("group-start");
+      row_dom.classList.add("group-start");
     }
 
     const pull = pullsByURL.get(record.branch);
     const prLink = pullRequestNumber(record)
       ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
       : "";
-    rowDom.innerHTML = `
+    row_dom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${record.commit_sha.substring(0, 7)}</code></a>
             ${prLink}
@@ -140,11 +142,20 @@ async function mainSeeds() {
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
-          <td><time>${seedDuration}</time></td>
-          <td><time>${seedFreshness} ago</time></td>
+          <td><time>${formatDuration(seed_duration_ms)}</time></td>
+          <td><time>${formatDuration(seed_freshness_ms)} ago</time></td>
           <td>${record.count.toLocaleString('en-US').replace(/,/g, '&nbsp;')}</td>
       `;
-    tableDom.appendChild(rowDom);
+    if (canery_is_stale) {
+      // Wrap table cell content in blinking spans. We don't want to let the cell border blink.
+      row_dom.querySelectorAll("td").forEach(td => {
+        const span = document.createElement("span");
+        span.classList.add("blink");
+        span.innerHTML = td.innerHTML;
+        td.replaceChildren(span);
+      });
+    }
+    tableDom.appendChild(row_dom);
   }
 
   let mainBranchFail = 0;
