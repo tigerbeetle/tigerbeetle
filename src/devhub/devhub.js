@@ -3,7 +3,7 @@
 // At the moment, it isn't clear what's the right style for this kind of non-Zig developer facing
 // code, so the following is somewhat arbitrary:
 //
-// - camelCase naming
+// - snake_case naming
 // - `deno fmt` for style
 // - no TypeScript, no build step
 
@@ -71,7 +71,9 @@ async function main_seeds() {
   document.querySelector("#untriaged-issues-count").innerText =
     untriaged_issues.length;
   if (untriaged_issues.length) {
-    document.querySelector("#untriaged-issues-count").classList.add("untriaged");
+    document.querySelector("#untriaged-issues-count").classList.add(
+      "untriaged",
+    );
   }
 
   // Filtering:
@@ -109,7 +111,8 @@ async function main_seeds() {
 
     if (!include) continue;
 
-    const seed_duration_ms = (record.seed_timestamp_end - record.seed_timestamp_start) * 1000;
+    const seed_duration_ms =
+      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000;
     const seed_freshness_ms = Date.now() - (record.seed_timestamp_start * 1000);
     const staleness_threshold_ms = 2 * 60 * 60 * 1000;
     const canery_is_stale = record.fuzzer === "canary" &&
@@ -136,7 +139,9 @@ async function main_seeds() {
       : "";
     row_dom.innerHTML = `
           <td>
-            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${record.commit_sha.substring(0, 7)}</code></a>
+            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
+      record.commit_sha.substring(0, 7)
+    }</code></a>
             ${pr_link}
           </td>
           <td>${pull ? pull.user.login : ""}</td>
@@ -144,11 +149,13 @@ async function main_seeds() {
           <td><code>${record.command}</code></td>
           <td><time>${format_duration(seed_duration_ms)}</time></td>
           <td><time>${format_duration(seed_freshness_ms)} ago</time></td>
-          <td>${record.count.toLocaleString('en-US').replace(/,/g, '&nbsp;')}</td>
+          <td>${
+      record.count.toLocaleString("en-US").replace(/,/g, "&nbsp;")
+    }</td>
       `;
     if (canery_is_stale) {
       // Wrap table cell content in blinking spans. We don't want to let the cell border blink.
-      row_dom.querySelectorAll("td").forEach(td => {
+      row_dom.querySelectorAll("td").forEach((td) => {
         const span = document.createElement("span");
         span.classList.add("blink");
         span.innerHTML = td.innerHTML;
@@ -313,7 +320,7 @@ function plot_series(series_list, root_node, batch_count) {
           dataPointSelection: (event, chartContext, { dataPointIndex }) => {
             window.open(
               "https://github.com/tigerbeetle/tigerbeetle/commit/" +
-              series.git_commit[dataPointIndex],
+                series.git_commit[dataPointIndex],
             );
           },
         },
@@ -351,8 +358,9 @@ function plot_series(series_list, root_node, batch_count) {
             const formattedDate = format_date_day_time(
               new Date(series.timestamp[dataPointIndex] * 1000),
             );
-            return `<div>${series.git_commit[dataPointIndex]
-              }</div><div>${formattedDate}</div>`;
+            return `<div>${
+              series.git_commit[dataPointIndex]
+            }</div><div>${formattedDate}</div>`;
           },
         },
       },
