@@ -34,6 +34,10 @@ comptime {
     _ = @import("clients/c/tb_client/signal.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
 
+    _ = @import("cdc/amqp.zig");
+    _ = @import("cdc/runner.zig");
+    _ = @import("cdc/amqp/protocol.zig");
+
     _ = @import("io/test.zig");
 
     _ = @import("lsm/binary_search.zig");
