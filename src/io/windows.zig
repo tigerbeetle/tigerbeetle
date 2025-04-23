@@ -17,8 +17,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: QueueType(Completion) = .{ .name = "io_timeouts" },
-    completed: QueueType(Completion) = .{ .name = "io_completed" },
+    timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
+    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -123,7 +123,7 @@ pub const IO = struct {
                         raw_overlapped,
                     );
                     const completion = overlapped.completion;
-                    completion.next = null;
+                    completion.link = .{};
                     self.completed.push(completion);
                 }
             }
@@ -145,12 +145,10 @@ pub const IO = struct {
     fn flush_timeouts(self: *IO) ?u64 {
         var min_expires: ?u64 = null;
         var current_time: ?u64 = null;
-        var timeouts: ?*Completion = self.timeouts.peek();
 
         // Iterate through the timeouts, returning min_expires at the end.
-        while (timeouts) |completion| {
-            timeouts = completion.next;
-
+        var timeouts_iterator = self.timeouts.iterate();
+        while (timeouts_iterator.next()) |completion| {
             // Lazily get the current time.
             const now = current_time orelse self.timer.monotonic();
             current_time = now;
@@ -176,7 +174,7 @@ pub const IO = struct {
 
     /// This struct holds the data needed for a single IO operation.
     pub const Completion = struct {
-        next: ?*Completion,
+        link: QueueType(Completion).Link,
         context: ?*anyopaque,
         callback: *const fn (Context) void,
         operation: Operation,
@@ -282,7 +280,7 @@ pub const IO = struct {
 
         // Setup the completion with the callback wrapper above.
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = @ptrCast(context),
             .callback = Callback.onComplete,
             .operation = @unionInit(Completion.Operation, @tagName(op_tag), op_data),
@@ -1000,7 +998,7 @@ pub const IO = struct {
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
             completion.* = .{
-                .next = null,
+                .link = .{},
                 .context = @ptrCast(context),
                 .operation = undefined,
                 .callback = struct {
@@ -1051,7 +1049,7 @@ pub const IO = struct {
     ) void {
         assert(event != INVALID_EVENT);
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = null,
             .operation = .{
                 .event = .{

@@ -64,6 +64,7 @@ pub fn StackType(comptime T: type) type {
     };
 }
 
+// Non-generic implementation for smaller binary and faster compile times.
 const StackAny = struct {
     head: ?*StackLink = null,
 

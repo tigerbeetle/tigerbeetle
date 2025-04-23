@@ -5,6 +5,8 @@ const tb_client = @import("../tb_client.zig");
 const stdx = tb_client.vsr.stdx;
 const maybe = stdx.maybe;
 
+const QueueType = tb_client.vsr.queue.QueueType;
+
 pub const Packet = extern struct {
     pub const Status = enum(u8) {
         ok,
@@ -40,6 +42,8 @@ pub const Packet = extern struct {
         complete,
     };
 
+    pub const Queue = QueueType(Packet);
+
     user_data: ?*anyopaque,
     data: ?*anyopaque,
     data_size: u32,
@@ -47,7 +51,7 @@ pub const Packet = extern struct {
     operation: u8,
     status: Status,
 
-    next: ?*Packet,
+    link: Queue.Link,
 
     multi_batch_next: ?*Packet,
     multi_batch_tail: ?*Packet,
@@ -84,7 +88,7 @@ pub const Packet = extern struct {
 
         switch (expected) {
             .submitted => {
-                assert(packet.next == null);
+                assert(packet.link.next == null);
                 assert(packet.multi_batch_next == null);
                 assert(packet.multi_batch_tail == null);
                 assert(packet.multi_batch_count == 0);
@@ -98,10 +102,10 @@ pub const Packet = extern struct {
                 maybe(packet.data_size == 0);
                 maybe(packet.multi_batch_event_count == 0);
                 maybe(packet.multi_batch_result_count_expected == 0);
-                maybe(packet.next == null);
+                maybe(packet.link.next == null);
             },
             .batched => {
-                assert(packet.next == null);
+                assert(packet.link.next == null);
                 assert(packet.multi_batch_tail == null);
                 assert(packet.multi_batch_count == 0);
                 assert(packet.multi_batch_event_count == 0);
@@ -109,7 +113,7 @@ pub const Packet = extern struct {
                 maybe(packet.multi_batch_next != null);
             },
             .sent => {
-                assert(packet.next == null);
+                assert(packet.link.next == null);
                 assert(packet.multi_batch_count > 0);
                 assert(packet.multi_batch_next == null or packet.multi_batch_count > 1);
                 assert((packet.multi_batch_next == null) == (packet.multi_batch_tail == null));
@@ -131,7 +135,7 @@ pub const Packet = extern struct {
         assert(@sizeOf(Packet) == @sizeOf(Extern));
         assert(@alignOf(Packet) == @alignOf(Extern));
 
-        // Asseting the fields are identical.
+        // Asserting the fields are identical.
         for (std.meta.fields(Extern)) |field_extern| {
             if (std.mem.eql(u8, field_extern.name, "opaque")) continue;
             const field_packet = std.meta.fields(Packet)[

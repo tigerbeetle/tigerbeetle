@@ -19,9 +19,9 @@ pub const IO = struct {
     event_id: Event = 0,
     time: Time = .{},
     io_inflight: usize = 0,
-    timeouts: QueueType(Completion) = .{ .name = "io_timeouts" },
-    completed: QueueType(Completion) = .{ .name = "io_completed" },
-    io_pending: QueueType(Completion) = .{ .name = "io_pending" },
+    timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
+    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
+    io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -119,7 +119,7 @@ pub const IO = struct {
 
             for (events[0..new_events]) |event| {
                 const completion: *Completion = @ptrFromInt(event.udata);
-                assert(completion.next == null);
+                assert(completion.link.next == null);
                 self.completed.push(completion);
             }
         }
@@ -159,9 +159,8 @@ pub const IO = struct {
 
     fn flush_timeouts(self: *IO) ?u64 {
         var min_timeout: ?u64 = null;
-        var timeouts: ?*Completion = self.timeouts.peek();
-        while (timeouts) |completion| {
-            timeouts = completion.next;
+        var timeouts_iterator = self.timeouts.iterate();
+        while (timeouts_iterator.next()) |completion| {
 
             // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
             const now = self.time.monotonic();
@@ -187,7 +186,7 @@ pub const IO = struct {
 
     /// This struct holds the data needed for a single IO operation.
     pub const Completion = struct {
-        next: ?*Completion,
+        link: QueueType(Completion).Link = .{},
         context: ?*anyopaque,
         callback: *const fn (*IO, *Completion) void,
         operation: Operation,
@@ -255,7 +254,7 @@ pub const IO = struct {
                     .accept, .connect, .read, .write, .send, .recv => {
                         _ = result catch |err| switch (err) {
                             error.WouldBlock => {
-                                _completion.next = null;
+                                _completion.link = .{};
                                 io.io_pending.push(_completion);
                                 return;
                             },
@@ -275,7 +274,7 @@ pub const IO = struct {
         }.on_complete;
 
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = context,
             .callback = on_complete_fn,
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
@@ -620,7 +619,7 @@ pub const IO = struct {
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
             completion.* = .{
-                .next = null,
+                .link = .{},
                 .context = context,
                 .operation = undefined,
                 .callback = struct {
@@ -727,7 +726,7 @@ pub const IO = struct {
     ) void {
         assert(event != INVALID_EVENT);
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = null,
             .operation = undefined,
             .callback = struct {

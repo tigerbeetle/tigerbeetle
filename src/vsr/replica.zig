@@ -2994,7 +2994,7 @@ pub fn ReplicaType(
             maybe(message.header.protocol < vsr.Version);
 
             if (self.grid.callback == .cancel) {
-                assert(self.grid.read_global_queue.count == 0);
+                assert(self.grid.read_global_queue.empty());
 
                 log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={})", .{
                     self.replica,

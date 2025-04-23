@@ -965,7 +965,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         replica.grid.free_set.count_acquired()
                     else
                         null,
-                    .grid_blocks_global = replica.grid.read_global_queue.count,
+                    .grid_blocks_global = replica.grid.read_global_queue.count(),
                     .grid_blocks_repair = replica.grid.blocks_missing.faulty_blocks.count(),
                 }) catch unreachable;
 
