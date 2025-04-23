@@ -79,10 +79,11 @@ TigerBeetle clients automatically batch events. There may be instances where you
 makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web 
 server where each HTTP request is handled on a different thread. 
 
-In these cases, if you share a TigerBeetle client across threads (or tasks, depending on your 
-paradigm), the client automatically groups together batches of small sizes into one request. Since 
-TigerBeetle clients can have [**at most one in-flight request**](../reference/sessions.md#client-sessions), 
-the client accumulates smaller batches together while waiting for a reply to the last request.
+The TigerBeetle client should be shared across threads (or tasks, depending on your paradigm), since 
+it automatically groups together batches of small sizes into one request. Since  TigerBeetle clients 
+can have [**at most one in-flight request**](../reference/sessions.md), the client 
+accumulates smaller batches together while waiting for a reply to the last request.
+
 
 ## Guarantees
 
