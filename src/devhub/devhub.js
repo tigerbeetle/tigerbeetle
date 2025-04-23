@@ -35,6 +35,7 @@ function main_release_rotation() {
       "cb22",
       "chaitanyabhandari",
       "fabioarnold",
+      "lewisdaly",
       "matklad",
       "sentientwaffle",
     ];
