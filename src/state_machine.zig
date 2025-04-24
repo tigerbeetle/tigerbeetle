@@ -2636,7 +2636,7 @@ pub fn StateMachineType(
                     operation,
                     batch, // The batch's body.
                 );
-                const bytes_writen: usize = switch (operation) {
+                const bytes_written: usize = switch (operation) {
                     .create_accounts,
                     .create_transfers,
                     => self.execute_create(
@@ -2655,7 +2655,7 @@ pub fn StateMachineType(
                     ),
                     else => comptime unreachable,
                 };
-                reply_encoder.add(@intCast(bytes_writen));
+                reply_encoder.add(@intCast(bytes_written));
             }
             assert(execute_timestamp == timestamp);
             assert(body_decoder.batch_count() == reply_encoder.batch_count);

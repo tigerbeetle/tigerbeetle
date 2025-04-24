@@ -131,11 +131,11 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
     }
 
     if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
-        return "use stdx.Duration instead of std veresion";
+        return "use stdx.Duration instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "std.time." ++ "Instant") != null) {
-        return "use stdx.Instant instead of std veresion";
+        return "use stdx.Instant instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
@@ -512,7 +512,7 @@ fn tidy_generic_functions(
             continue;
         };
 
-        // Skipping naming convetions that requires upper-case functions.
+        // Skipping naming convention that requires upper-case functions.
         if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
 
         if (std.ascii.isUpper(function_name[0])) {

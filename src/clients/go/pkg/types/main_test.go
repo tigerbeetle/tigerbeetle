@@ -116,7 +116,7 @@ func Test_ID(t *testing.T) {
 	// Verify monotonic IDs across multiple threads.
 	var barrier, finish sync.WaitGroup
 	concurrency := 10
-	barrier.Add(concurrency) // To sync up all goroutines before verifier() to maximize contetion.
+	barrier.Add(concurrency) // To sync up all goroutines before verifier() to maximize contention.
 	finish.Add(concurrency)  // To wait for all goroutines to finish running verifier().
 
 	for i := 0; i < concurrency; i++ {

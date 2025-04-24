@@ -7287,7 +7287,7 @@ pub fn ReplicaType(
             assert(self.commit_min == self.commit_max);
             assert(self.valid_hash_chain_between(self.commit_max, self.op));
 
-            // But we still need to check that we are reparing the right prepare.
+            // But we still need to check that we are repairing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
                 log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{self.replica});
                 return;
@@ -7368,7 +7368,7 @@ pub fn ReplicaType(
             // Iterate through op_min..=self.op, but make sure to iterate commit_min+1..=self.op
             // sub range first:
             // - our first priority is to commit further,
-            // - afterwards, repair commited prepares which are at risk of getting evicted from
+            // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
             const repair_ranges_exclusive: [2]struct { u64, u64 } = .{
                 .{ @max(op_min, self.commit_min + 1), self.op + 1 },

@@ -68,7 +68,7 @@ pub fn IOPSType(comptime T: type, comptime size: u8) type {
             }
         };
 
-        /// Iteratos over all currenty executiong IOPs.
+        /// Iterates over all currently executing IOPs.
         pub fn iterate(self: *IOPS) Iterator {
             return .{
                 .iops = self,
@@ -76,7 +76,7 @@ pub fn IOPSType(comptime T: type, comptime size: u8) type {
             };
         }
 
-        /// Iteratos over all currenty executiong IOPs.
+        /// Iterates over all currently executing IOPs.
         pub fn iterate_const(self: *const IOPS) IteratorConst {
             return .{
                 .iops = self,

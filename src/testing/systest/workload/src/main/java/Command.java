@@ -168,16 +168,16 @@ record CreateTransfersResult(ArrayList<ResultEntry<NewTransfer>> entries)
       });
       previousEntry = Optional.of(current);
 
-      // No further validation needed for failed tranfers.
+      // No further validation needed for failed transfers.
       if (!current.successful()) {
         continue;
       }
 
       if (TransferFlags.hasPending(transfer.flags())) {
-        assert model.pendingTransfers.add(transfer.id()) 
+        assert model.pendingTransfers.add(transfer.id())
           : "pending transfers already contained %d".formatted(transfer.id());
       }
-      if (TransferFlags.hasVoidPendingTransfer(transfer.flags()) 
+      if (TransferFlags.hasVoidPendingTransfer(transfer.flags())
           || TransferFlags.hasPostPendingTransfer(transfer.flags())) {
         assert model.pendingTransfers.remove(transfer.pendingId())
           : "pending transfers did not contain %d".formatted(transfer.id());
@@ -235,9 +235,9 @@ record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements 
 
     // All accounts found are in the correct ledger.
     for (var account : accountsFound) {
-      assert account.ledger() == model.ledger 
+      assert account.ledger() == model.ledger
         : "found account with another ledger than the model ({} != {})".formatted(
-            account.ledger(), 
+            account.ledger(),
             model.ledger);
     }
 
@@ -257,4 +257,3 @@ record LookupAccountsResult(ArrayList<QueriedAccount> accountsFound) implements 
     return debits.subtract(credits);
   }
 }
-

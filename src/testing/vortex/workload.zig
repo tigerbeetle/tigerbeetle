@@ -212,11 +212,11 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
             ) |transfer, transfer_result, transfer_index| {
                 // Check that linked transfers fail together.
                 if (transfer_index > 0) {
-                    const preceeding_transfer = transfers[transfer_index - 1];
-                    if (preceeding_transfer.flags.linked) {
-                        const preceeding_entry = entries[transfer_index - 1];
-                        try testing.expect(preceeding_entry.index == transfer_index - 1);
-                        try testing.expect(preceeding_entry.result != .ok);
+                    const preceding_transfer = transfers[transfer_index - 1];
+                    if (preceding_transfer.flags.linked) {
+                        const preceding_entry = entries[transfer_index - 1];
+                        try testing.expect(preceding_entry.index == transfer_index - 1);
+                        try testing.expect(preceding_entry.result != .ok);
                     }
                 }
 
