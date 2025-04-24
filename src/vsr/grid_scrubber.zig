@@ -78,7 +78,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
             /// Whether the read is ready to be released.
             done: bool,
 
-            /// "next" belongs to the FIFOs.
+            /// For `reads_busy`/`reads_done` queues.
             link: QueueType(Read).Link = .{},
         };
 

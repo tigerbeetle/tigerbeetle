@@ -69,7 +69,7 @@ pub const GridBlocksMissing = struct {
         /// When non-null, the table is awaiting data blocks.
         /// This count includes the index block.
         table_blocks_total: ?u32 = null,
-        /// "next" belongs to the `faulty_tables`/`faulty_tables_free` FIFOs.
+        /// For `faulty_tables`/`faulty_tables_free` queues.
         link: QueueType(RepairTable).Link = .{},
     };
 

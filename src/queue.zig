@@ -8,7 +8,7 @@ const QueueLink = extern struct {
 };
 
 /// An intrusive first in/first out linked list.
-/// The element type T must have a field called "next" of type ?*T
+/// The element type T must have a field called "link" of type QueueType(T).Link.
 pub fn QueueType(comptime T: type) type {
     return struct {
         any: QueueAny,
