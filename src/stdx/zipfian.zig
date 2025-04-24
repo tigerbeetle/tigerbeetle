@@ -5,7 +5,7 @@
 //! have very low probability of being selected.
 //! It is commonly understood to model the "80-20" Pareto principle,
 //! and to be a discreet version of the Pareto distribution,
-//! and terminology related to both are often used interchangably.
+//! and terminology related to both are often used interchangeably.
 //!
 //! Zipfian numbers follow an inverse power law, where the 1st item
 //! is selected with high probability, and subsequent items
@@ -229,7 +229,7 @@ fn zeta_incremental(
 pub const ZipfianShuffled = struct {
     const HotArray = stdx.BoundedArrayType(u64, hot_items_limit);
 
-    /// We prefer to store enough hot items to fill the cumulative probablity here.
+    /// We prefer to store enough hot items to fill the cumulative probability here.
     /// Other items have uniform probability. In practice though most uses of this
     /// type first hit the `hot_items_min_probability_limit` below.
     const hot_items_cumulative_distribution_function = 0.8;

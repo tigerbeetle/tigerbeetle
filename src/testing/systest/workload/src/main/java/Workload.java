@@ -12,7 +12,7 @@ import com.tigerbeetle.TransferFlags;
 /**
  * This workload runs an infinite loop, generating and executing operations on a cluster.
  *
- * Any sucessful operations are reconciled with a model, tracking what accounts exist. Future
+ * Any successful operations are reconciled with a model, tracking what accounts exist. Future
  * operations are generated based on this model.
  *
  * After every operation, all accounts are queried, and basic invariants are checked.
@@ -79,8 +79,8 @@ public class Workload implements Callable<Void> {
   }
 
   Command<?> randomCommand() {
-    // Commands are `Supplier`s of values. They are intially wrapped in `Optional`, to represent if
-    // they are enabled. Further, they are wrapped in `WithOdds`, increasing the likelyhood of
+    // Commands are `Supplier`s of values. They are initially wrapped in `Optional`, to represent if
+    // they are enabled. Further, they are wrapped in `WithOdds`, increasing the likelihood of
     // certain commands being chosen.
     var commandsAll = List.of(WithOdds.of(1, createAccounts()), WithOdds.of(5, createTransfers()));
 
@@ -209,4 +209,3 @@ public class Workload implements Callable<Void> {
     return Optional.empty();
   }
 }
-

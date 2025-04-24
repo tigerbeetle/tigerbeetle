@@ -61,7 +61,7 @@ test "valid tb_client.h" {
                 var c_enum_prefix: []const u8 = c_type_name[0 .. prefix_offset + 1];
                 assert(c_type == c_uint);
 
-                // TB_STATUS and TB_OPERATION are special casees in naming
+                // TB_STATUS and TB_OPERATION are special cases in naming
                 if (std.mem.eql(u8, c_type_name, "TB_STATUS") or
                     std.mem.eql(u8, c_type_name, "TB_OPERATION"))
                 {
