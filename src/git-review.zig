@@ -121,7 +121,16 @@ fn review_status(shell: *Shell) !enum { resolved, unresolved } {
         log.info("no review", .{});
         return error.NoReview;
     }
-
+    //? batiati: What if the reviewer isn't careful engough to keep the comments at 100 columns maximum?
+    //? To avoid breaking the CI checks, we could either skip \\? from tidy, or include the tidy
+    //? step in `git-review status`.
+    //?
+    //? matklad: I think we should keep review comments under 100 columns to make them readable. If
+    //? anything, I'd _reduce_ the maximum allowed width for all comments, as, for prose, you want
+    //? about 60 characters per line, not 100 for code. But that's too complicated for little gain,
+    //? so I'd stay with 100! No super strong feelings here! (FYI, I use stkb.rewrap VS Code plugin
+    //? to reflow comments).
+    //? resolved.
     const diff_review = try shell.exec_stdout("git diff --unified=0 HEAD~ HEAD", .{});
     const review = try Review.parse(shell.arena.allocator(), diff_review);
 
@@ -257,6 +266,21 @@ const Review = struct {
                 assert(hunk_line != null);
 
                 const comment = std.mem.trimLeft(u8, line_added, " ");
+                //? batiati: Should we allow empty lines?
+                //? For example a line break between the author's code and the reviewer comment.
+                //?
+                //? matklad: That's an open design question! The current design is that _every_ line
+                //? of review comment is marked with '//?', so that you can do a very simple line-by
+                //? line parsing, very much inspired by Zig's `\\` syntax. An alternative is to do
+                //? "block parsing": say that a review comment starts with a special marker, like
+                //? '// CR', and continues until the first non- comment line. I am actually leaning
+                //? towards that design, as it would make it easier to reflow comments to make them
+                //? fit under 100 columns. I'll let it simmer for a bit, as first I want to add a
+                //? helper which would allow to modify code "in-place" during review, and than,
+                //? using this helper, split review commit into comments part and changes part.
+                //? After I do that (with some tests), I'll probably switch to more complicated to
+                //? parse, but easier to use format for review comments.
+                //? resolved.
                 if (!std.mem.startsWith(u8, comment, "//?")) {
                     return error.InvalidDiff;
                 }
