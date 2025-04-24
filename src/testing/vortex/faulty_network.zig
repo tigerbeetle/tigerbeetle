@@ -16,7 +16,7 @@
 //! corresponding faults according to the probabilities.
 //!
 //! NOTE: The pipe is not yet message-aware (and perhaps shouldn't be?), which means that we deal
-//! with whatever chunks of bytes we receieve immediately, instead of collecting a buffer with a
+//! with whatever chunks of bytes we receive immediately, instead of collecting a buffer with a
 //! full message before piping it through.
 const std = @import("std");
 const stdx = @import("../../stdx.zig");

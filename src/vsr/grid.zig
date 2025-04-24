@@ -62,7 +62,7 @@ pub fn GridType(comptime Storage: type) type {
             checkpoint_id: u128,
 
             /// Link for the Grid.write_queue linked list.
-            next: ?*Write = null,
+            link: QueueType(Write).Link = .{},
         };
 
         const WriteIOP = struct {
@@ -101,13 +101,13 @@ pub fn GridType(comptime Storage: type) type {
             cache_read: bool,
             cache_write: bool,
             pending: ReadPending = .{},
-            resolves: QueueType(ReadPending) = .{ .name = null },
+            resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{ .name = null }),
 
             grid: *Grid,
             next_tick: Grid.NextTick = undefined,
 
             /// Link for Grid.read_queue/Grid.read_global_queue linked lists.
-            next: ?*Read = null,
+            link: QueueType(Read).Link = .{},
         };
 
         /// Although we distinguish between the reasons why the block is invalid, we only use this
@@ -130,7 +130,7 @@ pub fn GridType(comptime Storage: type) type {
 
         const ReadPending = struct {
             /// Link for Read.resolves linked lists.
-            next: ?*ReadPending = null,
+            link: QueueType(ReadPending).Link = .{},
         };
 
         const ReadIOP = struct {
@@ -180,21 +180,23 @@ pub fn GridType(comptime Storage: type) type {
         cache_blocks: []BlockPtr,
 
         write_iops: IOPSType(WriteIOP, write_iops_max) = .{},
-        write_queue: QueueType(Write) = .{ .name = "grid_write" },
+        write_queue: QueueType(Write) = QueueType(Write).init(.{ .name = "grid_write" }),
 
         // Each read_iops has a corresponding block.
         read_iop_blocks: [read_iops_max]BlockPtr,
         read_iops: IOPSType(ReadIOP, read_iops_max) = .{},
-        read_queue: QueueType(Read) = .{ .name = "grid_read" },
+        read_queue: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_read" }),
 
         // List of Read.pending's which are in `read_queue` but also waiting for a free `read_iops`.
-        read_pending_queue: QueueType(ReadPending) = .{ .name = "grid_read_pending" },
+        read_pending_queue: QueueType(ReadPending) = QueueType(ReadPending).init(.{
+            .name = "grid_read_pending",
+        }),
         /// List of `Read`s which are waiting for a block repair from another replica.
         /// (Reads in this queue have already failed locally).
         ///
         /// Invariants:
         /// - For each read, read.callback=from_local_or_global_storage.
-        read_global_queue: QueueType(Read) = .{ .name = "grid_read_global" },
+        read_global_queue: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_read_global" }),
         // True if there's a read that is resolving callbacks.
         // If so, the read cache must not be invalidated.
         read_resolving: bool = false,
@@ -478,15 +480,15 @@ pub fn GridType(comptime Storage: type) type {
                 return;
             }
 
-            var write_queue = grid.write_queue.peek();
-            while (write_queue) |write| : (write_queue = write.next) {
+            var write_queue_iterator = grid.write_queue.iterate();
+            while (write_queue_iterator.next()) |write| {
                 assert(write.repair);
                 assert(!grid.free_set.is_free(write.address));
                 assert(!grid.free_set.to_be_freed_at_checkpoint_durability(write.address));
             }
 
-            var write_iops = grid.write_iops.iterate();
-            while (write_iops.next()) |iop| {
+            var write_iops_iterator = grid.write_iops.iterate();
+            while (write_iops_iterator.next()) |iop| {
                 assert(!grid.free_set.is_free(iop.write.address));
                 assert(!grid.free_set.to_be_freed_at_checkpoint_durability(iop.write.address));
             }
@@ -630,8 +632,8 @@ pub fn GridType(comptime Storage: type) type {
 
             var result = Writing.not_writing;
             {
-                var it = grid.write_queue.peek();
-                while (it) |queued_write| : (it = queued_write.next) {
+                var it = grid.write_queue.iterate();
+                while (it.next()) |queued_write| {
                     assert(block != queued_write.block.*);
                     if (address == queued_write.address) {
                         assert(result == .not_writing);
@@ -661,8 +663,8 @@ pub fn GridType(comptime Storage: type) type {
                 &grid.read_queue,
                 &grid.read_global_queue,
             }) |queue| {
-                var it = queue.peek();
-                while (it) |queued_read| : (it = queued_read.next) {
+                var it = queue.iterate();
+                while (it.next()) |queued_read| {
                     if (queued_read.coherent) {
                         assert(address != queued_read.address);
                     }
@@ -684,14 +686,14 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.callback != .cancel);
             assert(grid.read_global_queue.empty());
 
-            var read_queue = grid.read_queue.peek();
-            while (read_queue) |read| : (read_queue = read.next) {
+            var read_queue_iterator = grid.read_queue.iterate();
+            while (read_queue_iterator.next()) |read| {
                 // Scrubber reads are independent from LSM operations.
                 assert(!read.coherent);
             }
 
-            var write_queue = grid.write_queue.peek();
-            while (write_queue) |write| : (write_queue = write.next) {
+            var write_queue_iterator = grid.write_queue.iterate();
+            while (write_queue_iterator.next()) |write| {
                 assert(write.repair);
                 assert(!grid.free_set.is_free(write.address));
             }
@@ -711,8 +713,8 @@ pub fn GridType(comptime Storage: type) type {
             assert(block_header.release.value <=
                 grid.superblock.working.vsr_state.checkpoint.release.value);
 
-            var reads_iterator = grid.read_global_queue.peek();
-            while (reads_iterator) |read| : (reads_iterator = read.next) {
+            var reads_iterator = grid.read_global_queue.iterate();
+            while (reads_iterator.next()) |read| {
                 if (read.checksum == block_header.checksum and
                     read.address == block_header.address)
                 {
@@ -1026,8 +1028,8 @@ pub fn GridType(comptime Storage: type) type {
                     if (queue == &grid.read_global_queue) continue;
                 }
 
-                var it = queue.peek();
-                while (it) |queued_read| : (it = queued_read.next) {
+                var it = queue.iterate();
+                while (it.next()) |queued_read| {
                     if (queued_read.address == read.address) {
                         // TODO check all read options match
                         if (queued_read.checksum == read.checksum) {
@@ -1216,7 +1218,9 @@ pub fn GridType(comptime Storage: type) type {
                 assert(header.checksum == read.checksum);
             }
 
-            var read_remote_resolves: QueueType(ReadPending) = .{ .name = read.resolves.name };
+            var read_remote_resolves: QueueType(ReadPending) = QueueType(ReadPending).init(.{
+                .name = read.resolves.any.name,
+            });
 
             // Resolve all reads queued to the address with the block.
             while (read.resolves.pop()) |pending| {
@@ -1296,7 +1300,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(request_faults_count_max >= @divFloor(requests.len, 2));
 
             const request_faults_count = @min(
-                grid.read_global_queue.count,
+                grid.read_global_queue.count(),
                 request_faults_count_max,
             );
             // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.

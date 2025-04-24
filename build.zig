@@ -92,6 +92,8 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
+        .git_review = b.step("git-review", "Run git-review"),
+        .git_review_build = b.step("git-review:build", "Build git-review"),
     };
 
     // Build options passed with `-D` flags.
@@ -119,8 +121,6 @@ pub fn build(b: *std.Build) !void {
             "config-release-client-min",
             "Minimum client release triple.",
         ),
-        // We run extra checks in "CI-mode" build.
-        .ci = b.graph.env_map.get("CI") != null,
         .emit_llvm_ir = b.option(bool, "emit-llvm-ir", "Emit LLVM IR (.ll file)") orelse false,
         // The "tigerbeetle version" command includes the build-time commit hash.
         .git_commit = b.option(
@@ -317,6 +317,12 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
+    // zig build git-review
+    build_git_review(b, .{
+        .run = build_steps.git_review,
+        .install = build_steps.git_review_build,
+    });
+
     // zig build docs
     build_steps.docs.dependOn(blk: {
         const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
@@ -431,6 +437,7 @@ fn build_ci(
     if (default or mode == .@"test") {
         build_ci_step(b, step_ci, .{"test"});
         build_ci_step(b, step_ci, .{"clients:c:sample"});
+        build_ci_script(b, step_ci, options.scripts, &.{"--help"});
     }
     if (default or mode == .fuzz) {
         build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
@@ -460,6 +467,7 @@ fn build_ci(
             });
         }
     }
+
     if (all or mode == .@"devhub-dry-run") {
         build_ci_script(b, step_ci, options.scripts, &.{
             "devhub",
@@ -1549,6 +1557,30 @@ fn build_clients_c_sample(
 
     const install_step = b.addInstallArtifact(sample, .{});
     step_clients_c_sample.dependOn(&install_step.step);
+}
+
+fn build_git_review(
+    b: *std.Build,
+    steps: struct {
+        run: *std.Build.Step,
+        install: *std.Build.Step,
+    },
+) void {
+    const git_review = b.addExecutable(.{
+        .name = "git-review",
+        .target = b.graph.host,
+        .root_source_file = b.path("./src/git-review.zig"),
+        .optimize = .Debug,
+    });
+
+    steps.run.dependOn(blk: {
+        const run = b.addRunArtifact(git_review);
+        if (b.args) |args| run.addArgs(args);
+        break :blk &run.step;
+    });
+    steps.install.dependOn(
+        &b.addInstallArtifact(git_review, .{}).step,
+    );
 }
 
 /// Steps which unconditionally fails with a message.

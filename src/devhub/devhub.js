@@ -3,15 +3,15 @@
 // At the moment, it isn't clear what's the right style for this kind of non-Zig developer facing
 // code, so the following is somewhat arbitrary:
 //
-// - camelCase naming
+// - snake_case naming
 // - `deno fmt` for style
 // - no TypeScript, no build step
 
 window.onload = () =>
   Promise.all([
-    mainReleaseRotation(),
-    mainSeeds(),
-    mainMetrics(),
+    main_release_rotation(),
+    main_seeds(),
+    main_metrics(),
   ]);
 
 function assert(condition) {
@@ -21,20 +21,21 @@ function assert(condition) {
   }
 }
 
-function mainReleaseRotation() {
-  const releaseManager = getReleaseManager();
+function main_release_rotation() {
+  const release_manager = get_release_manager();
   for (const week of ["previous", "current", "next"]) {
     document.querySelector(`#release-${week}`).textContent =
-      releaseManager[week];
+      release_manager[week];
   }
 
-  function getReleaseManager() {
-    const week = getWeek(new Date());
+  function get_release_manager() {
+    const week = get_week(new Date());
     const candidates = [
       "batiati",
       "cb22",
       "chaitanyabhandari",
       "fabioarnold",
+      "lewisdaly",
       "matklad",
       "sentientwaffle",
     ];
@@ -48,30 +49,32 @@ function mainReleaseRotation() {
   }
 }
 
-async function mainSeeds() {
-  const dataUrl =
+async function main_seeds() {
+  const data_url =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
-  const issuesURL =
+  const issues_url =
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
   const [records, issues] = await Promise.all([
-    (async () => await (await fetch(dataUrl)).json())(),
-    (async () => await (await fetch(issuesURL)).json())(),
+    (async () => await (await fetch(data_url)).json())(),
+    (async () => await (await fetch(issues_url)).json())(),
   ]);
 
   const pulls = issues.filter((issue) => issue.pull_request);
-  const pullsByURL = new Map(
+  const pulls_by_url = new Map(
     pulls.map((pull) => [pull.pull_request.html_url, pull]),
   );
-  const openPullRequests = new Set(pulls.map((it) => it.number));
-  const untriagedIssues = issues.filter((issue) =>
+  const open_pull_requests = new Set(pulls.map((it) => it.number));
+  const untriaged_issues = issues.filter((issue) =>
     !issue.pull_request &&
     !issue.labels.map((label) => label.name).includes("triaged")
   );
   document.querySelector("#untriaged-issues-count").innerText =
-    untriagedIssues.length;
-  if (untriagedIssues.length) {
-    document.querySelector("#untriaged-issues-count").classList.add("untriaged");
+    untriaged_issues.length;
+  if (untriaged_issues.length) {
+    document.querySelector("#untriaged-issues-count").classList.add(
+      "untriaged",
+    );
   }
 
   // Filtering:
@@ -83,11 +86,11 @@ async function mainSeeds() {
   const query_fuzzer = query.get("fuzzer");
   const query_commit = query.get("commit");
   const query_all = query.get("all") !== null;
-  const fuzzersWithFailures = new Set();
+  const fuzzers_with_failures = new Set();
 
-  const tableDom = document.querySelector("#seeds>tbody");
+  const table_dom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
-  let seedFailCount = 0;
+  let seed_fail_count = 0;
 
   for (const record of records) {
     let include = undefined;
@@ -97,110 +100,126 @@ async function mainSeeds() {
       include = (!query_fuzzer || record.fuzzer == query_fuzzer) &&
         (!query_commit || record.commit_sha == query_commit);
     } else if (
-      pullRequestNumber(record) &&
-      !openPullRequests.has(pullRequestNumber(record))
+      pull_request_number(record) &&
+      !open_pull_requests.has(pull_request_number(record))
     ) {
       include = false;
     } else {
-      include = (!record.ok || pullRequestNumber(record) !== undefined) &&
-        !fuzzersWithFailures.has(record.branch + record.fuzzer);
-      if (include) fuzzersWithFailures.add(record.branch + record.fuzzer);
+      include = (!record.ok || pull_request_number(record) !== undefined) &&
+        !fuzzers_with_failures.has(record.branch + record.fuzzer);
+      if (include) fuzzers_with_failures.add(record.branch + record.fuzzer);
     }
 
     if (!include) continue;
 
-    const seedDuration = formatDuration(
-      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000,
-    );
-    const seedFreshness = formatDuration(
-      Date.now() - (record.seed_timestamp_start * 1000),
-    );
-    const rowDom = document.createElement("tr");
+    const seed_duration_ms =
+      (record.seed_timestamp_end - record.seed_timestamp_start) * 1000;
+    const seed_freshness_ms = Date.now() - (record.seed_timestamp_start * 1000);
+    const staleness_threshold_ms = 2 * 60 * 60 * 1000;
+    const canery_is_stale = record.fuzzer === "canary" &&
+      !pull_request_number(record) &&
+      seed_freshness_ms > staleness_threshold_ms;
 
-    const seedSuccess = record.fuzzer === "canary" ? !record.ok : record.ok;
-    if (seedSuccess) {
-      rowDom.classList.add("success");
+    const row_dom = document.createElement("tr");
+
+    let seed_success = record.fuzzer === "canary" ? !record.ok : record.ok;
+    if (canery_is_stale) seed_success = false;
+    if (seed_success) {
+      row_dom.classList.add("success");
     } else {
-      seedFailCount++;
+      seed_fail_count++;
     }
     if (record.commit_sha != commit_previous) {
       commit_previous = record.commit_sha;
-      rowDom.classList.add("group-start");
+      row_dom.classList.add("group-start");
     }
 
-    const pull = pullsByURL.get(record.branch);
-    const prLink = pullRequestNumber(record)
-      ? `<a href="${record.branch}">#${pullRequestNumber(record)}</a>`
+    const pull = pulls_by_url.get(record.branch);
+    const pr_link = pull_request_number(record)
+      ? `<a href="${record.branch}">#${pull_request_number(record)}</a>`
       : "";
-    rowDom.innerHTML = `
+    row_dom.innerHTML = `
           <td>
-            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${record.commit_sha.substring(0, 7)}</code></a>
-            ${prLink}
+            <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
+      record.commit_sha.substring(0, 7)
+    }</code></a>
+            ${pr_link}
           </td>
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code>${record.command}</code></td>
-          <td><time>${seedDuration}</time></td>
-          <td><time>${seedFreshness} ago</time></td>
-          <td>${record.count.toLocaleString('en-US').replace(/,/g, '&nbsp;')}</td>
+          <td><time>${format_duration(seed_duration_ms)}</time></td>
+          <td><time>${format_duration(seed_freshness_ms)} ago</time></td>
+          <td>${
+      record.count.toLocaleString("en-US").replace(/,/g, "&nbsp;")
+    }</td>
       `;
-    tableDom.appendChild(rowDom);
+    if (canery_is_stale) {
+      // Wrap table cell content in blinking spans. We don't want to let the cell border blink.
+      row_dom.querySelectorAll("td").forEach((td) => {
+        const span = document.createElement("span");
+        span.classList.add("blink");
+        span.innerHTML = td.innerHTML;
+        td.replaceChildren(span);
+      });
+    }
+    table_dom.appendChild(row_dom);
   }
 
-  let mainBranchFail = 0;
-  let mainBranchOk = 0;
-  let mainBranchCanary = 0;
+  let main_branch_fail = 0;
+  let main_branch_ok = 0;
+  let main_branch_canary = 0;
   for (const record of records) {
     if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
       if (record.fuzzer === "canary") {
-        mainBranchCanary += record.count;
+        main_branch_canary += record.count;
       } else if (record.ok) {
-        mainBranchOk += record.count;
+        main_branch_ok += record.count;
       } else {
-        mainBranchFail += record.count;
+        main_branch_fail += record.count;
       }
     }
   }
-  if (mainBranchFail > 0 && !query_commit && !query_fuzzer) {
+  if (main_branch_fail > 0 && !query_commit && !query_fuzzer) {
     // When there are failures on main and we don't query for a specific commit/fuzzer,
     // there should be failing seeds in our table.
-    assert(seedFailCount > 0);
+    assert(seed_fail_count > 0);
   }
 }
 
-async function mainMetrics() {
-  const dataUrl =
+async function main_metrics() {
+  const data_url =
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/devhub/data.json";
-  const data = await (await fetch(dataUrl)).text();
-  const maxBatches = 200;
+  const data = await (await fetch(data_url)).text();
+  const max_batches = 200;
   const batches = data.split("\n")
     .filter((it) => it.length > 0)
     .map((it) => JSON.parse(it))
-    .slice(-1 * maxBatches)
+    .slice(-1 * max_batches)
     .reverse();
 
-  const series = batchesToSeries(batches);
-  plotSeries(series, document.querySelector("#charts"), batches.length);
+  const series = batches_to_series(batches);
+  plot_series(series, document.querySelector("#charts"), batches.length);
 }
 
-function pullRequestNumber(record) {
+function pull_request_number(record) {
   const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
   if (record.branch.startsWith(prPrefix)) {
-    const prNumber = record.branch.substring(
+    const pr_number = record.branch.substring(
       prPrefix.length,
       record.branch.length,
     );
-    return parseInt(prNumber, 10);
+    return parseInt(pr_number, 10);
   }
   return undefined;
 }
 
-function formatDuration(durationInMilliseconds) {
-  const milliseconds = durationInMilliseconds % 1000;
-  const seconds = Math.floor((durationInMilliseconds / 1000) % 60);
-  const minutes = Math.floor((durationInMilliseconds / (1000 * 60)) % 60);
-  const hours = Math.floor((durationInMilliseconds / (1000 * 60 * 60)) % 24);
-  const days = Math.floor(durationInMilliseconds / (1000 * 60 * 60 * 24));
+function format_duration(duration_ms) {
+  const milliseconds = duration_ms % 1000;
+  const seconds = Math.floor((duration_ms / 1000) % 60);
+  const minutes = Math.floor((duration_ms / (1000 * 60)) % 60);
+  const hours = Math.floor((duration_ms / (1000 * 60 * 60)) % 24);
+  const days = Math.floor(duration_ms / (1000 * 60 * 60 * 24));
   const parts = [];
 
   if (days > 0) {
@@ -229,7 +248,7 @@ function formatDuration(durationInMilliseconds) {
 // Returns the ISO week of the date.
 //
 // Source: https://weeknumber.com/how-to/javascript
-function getWeek(date) {
+function get_week(date) {
   date = new Date(date.getTime());
   date.setHours(0, 0, 0, 0);
   // Thursday in current week decides the year.
@@ -250,7 +269,7 @@ function getWeek(date) {
 // form a single array which is what we want to plot.
 //
 // This doesn't depend on particular plotting library though.
-function batchesToSeries(batches) {
+function batches_to_series(batches) {
   const results = new Map();
   for (const [index, batch] of batches.entries()) {
     for (const metric of batch.metrics) {
@@ -286,8 +305,8 @@ function batchesToSeries(batches) {
 }
 
 // Plot time series using <https://apexcharts.com>.
-function plotSeries(seriesList, rootNode, batchCount) {
-  for (const series of seriesList.values()) {
+function plot_series(series_list, root_node, batch_count) {
+  for (const series of series_list.values()) {
     let options = {
       title: {
         text: series.name,
@@ -318,11 +337,11 @@ function plotSeries(seriesList, rootNode, batchCount) {
         categories: Array(series.value[series.value.length - 1][0]).fill("")
           .concat(
             series.timestamp.map((timestamp) =>
-              formatDateDay(new Date(timestamp * 1000))
+              format_date_day(new Date(timestamp * 1000))
             ).reverse(),
           ),
         min: 0,
-        max: batchCount,
+        max: batch_count,
         tickAmount: 15,
         axisTicks: {
           show: false,
@@ -337,7 +356,7 @@ function plotSeries(seriesList, rootNode, batchCount) {
         intersect: true,
         x: {
           formatter: function (val, { dataPointIndex }) {
-            const formattedDate = formatDateDayTime(
+            const formattedDate = format_date_day_time(
               new Date(series.timestamp[dataPointIndex] * 1000),
             );
             return `<div>${
@@ -351,7 +370,7 @@ function plotSeries(seriesList, rootNode, batchCount) {
     if (series.unit === "bytes") {
       options.yaxis = {
         labels: {
-          formatter: formatBytes,
+          formatter: format_bytes,
         },
       };
     }
@@ -359,19 +378,19 @@ function plotSeries(seriesList, rootNode, batchCount) {
     if (series.unit === "ms") {
       options.yaxis = {
         labels: {
-          formatter: formatDuration,
+          formatter: format_duration,
         },
       };
     }
 
     const div = document.createElement("div");
-    rootNode.append(div);
+    root_node.append(div);
     const chart = new ApexCharts(div, options);
     chart.render();
   }
 }
 
-function formatBytes(bytes) {
+function format_bytes(bytes) {
   if (bytes === 0) return "0 Bytes";
 
   const k = 1024;
@@ -395,15 +414,15 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
 }
 
-function formatDateDay(date) {
-  return formatDate(date, false);
+function format_date_day(date) {
+  return format_date(date, false);
 }
 
-function formatDateDayTime(date) {
-  return formatDate(date, true);
+function format_date_day_time(date) {
+  return format_date(date, true);
 }
 
-function formatDate(date, include_time) {
+function format_date(date, include_time) {
   assert(date instanceof Date);
 
   const pad = (number) => String(number).padStart(2, "0");

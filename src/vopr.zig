@@ -1083,8 +1083,8 @@ pub const Simulator = struct {
 
             const storage = &simulator.cluster.storages[replica.replica];
 
-            var fault_iterator = replica.grid.read_global_queue.peek();
-            while (fault_iterator) |faulty_read| : (fault_iterator = faulty_read.next) {
+            var fault_iterator = replica.grid.read_global_queue.iterate();
+            while (fault_iterator.next()) |faulty_read| {
                 const v = try blocks_missing.getOrPut(.{
                     .address = faulty_read.address,
                     .checksum = faulty_read.checksum,

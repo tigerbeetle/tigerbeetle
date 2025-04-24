@@ -200,64 +200,48 @@ pub const Snap = struct {
 };
 
 fn equal_excluding_ignored(got: []const u8, snapshot: []const u8) bool {
-    var got_rest = got;
-    var snapshot_rest = snapshot;
-
     // Don't allow ignoring suffixes and prefixes, as that makes it easy to miss trailing or leading
     // data.
     assert(!std.mem.startsWith(u8, snapshot, "<snap:ignore>"));
     assert(!std.mem.endsWith(u8, snapshot, "<snap:ignore>"));
 
+    var got_rest = got;
+    var snapshot_rest = snapshot;
     for (0..10) |_| {
         // Cut the part before the first ignore, it should be equal between two strings...
-        const snapshot_cut = stdx.cut(snapshot_rest, "<snap:ignore>") orelse break;
-        const got_cut = stdx.cut(got_rest, snapshot_cut.prefix) orelse return false;
-        if (got_cut.prefix.len != 0) return false;
-        got_rest = got_cut.suffix;
-        snapshot_rest = snapshot_cut.suffix;
+        const common_prefix, snapshot_rest = stdx.cut(snapshot_rest, "<snap:ignore>") orelse break;
+        got_rest = stdx.cut_prefix(got_rest, common_prefix) orelse return false;
 
         // ...then find the next part that should match, and cut up to that.
-        const next_match = if (stdx.cut(snapshot_rest, "<snap:ignore>")) |snapshot_cut_next|
-            snapshot_cut_next.prefix
-        else
-            snapshot_rest;
-        assert(next_match.len > 0);
-        snapshot_rest = stdx.cut(snapshot_rest, next_match).?.suffix;
+        const common_middle, _ =
+            stdx.cut(snapshot_rest, "<snap:ignore>") orelse .{ snapshot_rest, "" };
+        assert(common_middle.len > 0);
+        snapshot_rest = stdx.cut_prefix(snapshot_rest, common_middle).?;
 
-        const got_cut_next = stdx.cut(got_rest, next_match) orelse return false;
-        const ignored = got_cut_next.prefix;
+        const ignored, got_rest = stdx.cut(got_rest, common_middle) orelse return false;
         // If <snap:ignore> matched an empty string, or several lines, report it as an error.
         if (ignored.len == 0) return false;
         if (std.mem.indexOfScalar(u8, ignored, '\n') != null) return false;
-        got_rest = got_cut_next.suffix;
     } else @panic("more than 10 ignores");
 
     return std.mem.eql(u8, got_rest, snapshot_rest);
 }
 
 test equal_excluding_ignored {
-    const TestCase = struct { got: []const u8, snapshot: []const u8 };
+    try equal_excluding_ignored_case("ABA", "ABA", true);
+    try equal_excluding_ignored_case("ABBA", "A<snap:ignore>A", true);
+    try equal_excluding_ignored_case("ABBACABA", "AB<snap:ignore>CA<snap:ignore>A", true);
 
-    const cases_ok: []const TestCase = &.{
-        .{ .got = "ABA", .snapshot = "ABA" },
-        .{ .got = "ABBA", .snapshot = "A<snap:ignore>A" },
-        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>CA<snap:ignore>A" },
-    };
-    for (cases_ok) |case| {
-        try std.testing.expect(equal_excluding_ignored(case.got, case.snapshot));
-    }
+    try equal_excluding_ignored_case("ABA", "ACA", false);
+    try equal_excluding_ignored_case("ABBA", "A<snap:ignore>C", false);
+    try equal_excluding_ignored_case("ABBACABA", "AB<snap:ignore>DA<snap:ignore>BA", false);
+    try equal_excluding_ignored_case("ABBACABA", "AB<snap:ignore>BA<snap:ignore>DA", false);
+    try equal_excluding_ignored_case("ABA", "AB<snap:ignore>A", false);
+    try equal_excluding_ignored_case("A\nB\nA", "A<snap:ignore>A", false);
+}
 
-    const cases_err: []const TestCase = &.{
-        .{ .got = "ABA", .snapshot = "ACA" },
-        .{ .got = "ABBA", .snapshot = "A<snap:ignore>C" },
-        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>DA<snap:ignore>BA" },
-        .{ .got = "ABBACABA", .snapshot = "AB<snap:ignore>BA<snap:ignore>DA" },
-        .{ .got = "ABA", .snapshot = "AB<snap:ignore>A" },
-        .{ .got = "A\nB\nA", .snapshot = "A<snap:ignore>A" },
-    };
-    for (cases_err) |case| {
-        try std.testing.expect(!equal_excluding_ignored(case.got, case.snapshot));
-    }
+fn equal_excluding_ignored_case(got: []const u8, snapshot: []const u8, ok: bool) !void {
+    try std.testing.expectEqual(equal_excluding_ignored(got, snapshot), ok);
 }
 
 const Range = struct { start: usize, end: usize };

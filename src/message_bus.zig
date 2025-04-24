@@ -366,7 +366,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             if (bus.process.clients.get(client_id)) |connection| {
                 connection.send_message(bus, message);
             } else {
-                log.debug("{}: send_mesage_to_client: no connection to={}", .{ bus.id, client_id });
+                log.debug(
+                    "{}: send_message_to_client: no connection to={}",
+                    .{ bus.id, client_id },
+                );
             }
         }
 

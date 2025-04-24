@@ -255,32 +255,27 @@ test bytes_as_slice {
     );
 }
 
-const Cut = struct {
-    prefix: []const u8,
-    suffix: []const u8,
-
-    pub fn unpack(self: Cut) struct { []const u8, []const u8 } {
-        return .{ self.prefix, self.suffix };
-    }
-};
-
 /// Splits the `haystack` around the first occurrence of `needle`, returning parts before and after.
 ///
 /// This is a Zig version of Go's `string.Cut` / Rust's `str::split_once`. Cut turns out to be a
 /// surprisingly versatile primitive for ad-hoc string processing. Often `std.mem.indexOf` and
 /// `std.mem.split` can be replaced with a shorter and clearer code using  `cut`.
-pub fn cut(haystack: []const u8, needle: []const u8) ?Cut {
+pub fn cut(haystack: []const u8, needle: []const u8) ?struct { []const u8, []const u8 } {
     const index = std.mem.indexOf(u8, haystack, needle) orelse return null;
 
-    return Cut{
-        .prefix = haystack[0..index],
-        .suffix = haystack[index + needle.len ..],
-    };
+    return .{ haystack[0..index], haystack[index + needle.len ..] };
 }
 
 pub fn cut_prefix(haystack: []const u8, needle: []const u8) ?[]const u8 {
     if (std.mem.startsWith(u8, haystack, needle)) {
         return haystack[needle.len..];
+    }
+    return null;
+}
+
+pub fn cut_suffix(haystack: []const u8, needle: []const u8) ?[]const u8 {
+    if (std.mem.endsWith(u8, haystack, needle)) {
+        return haystack[haystack.len - needle.len ..];
     }
     return null;
 }

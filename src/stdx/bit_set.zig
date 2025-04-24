@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 /// Use dynamic bitset for larger sizes.
 pub fn BitSetType(comptime with_capacity: u8) type {
     return struct {
-        // While mathematicaly 0 and 1 are symmetric, we intentionally bias the API to use zeros
+        // While mathematically 0 and 1 are symmetric, we intentionally bias the API to use zeros
         // default, as zero-initialization reduces binary size.
         bits: Word = 0,
 

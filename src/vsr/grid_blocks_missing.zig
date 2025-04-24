@@ -69,8 +69,8 @@ pub const GridBlocksMissing = struct {
         /// When non-null, the table is awaiting data blocks.
         /// This count includes the index block.
         table_blocks_total: ?u32 = null,
-        /// "next" belongs to the `faulty_tables`/`faulty_tables_free` FIFOs.
-        next: ?*RepairTable = null,
+        /// For `faulty_tables`/`faulty_tables_free` queues.
+        link: QueueType(RepairTable).Link = .{},
     };
 
     pub const Options = struct {
@@ -100,8 +100,12 @@ pub const GridBlocksMissing = struct {
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
-    faulty_tables: QueueType(RepairTable) = .{ .name = "grid_missing_blocks_tables" },
-    faulty_tables_free: QueueType(RepairTable) = .{ .name = "grid_missing_blocks_tables_free" },
+    faulty_tables: QueueType(RepairTable) = QueueType(RepairTable).init(.{
+        .name = "grid_missing_blocks_tables",
+    }),
+    faulty_tables_free: QueueType(RepairTable) = QueueType(RepairTable).init(.{
+        .name = "grid_missing_blocks_tables_free",
+    }),
 
     checkpoint_durable: ?struct {
         /// The number of faulty_blocks with state=aborting.
@@ -186,7 +190,7 @@ pub const GridBlocksMissing = struct {
 
     /// Count the number of *non-table* block repairs available.
     pub fn enqueue_blocks_available(queue: *const GridBlocksMissing) usize {
-        assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_tables.count() <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(queue.enqueued_blocks_table <=
@@ -202,7 +206,7 @@ pub const GridBlocksMissing = struct {
     /// Queue a faulty block to request from the cluster and repair.
     pub fn enqueue_block(queue: *GridBlocksMissing, address: u64, checksum: u128) void {
         assert(queue.enqueue_blocks_available() > 0);
-        assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_tables.count() <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
@@ -217,14 +221,14 @@ pub const GridBlocksMissing = struct {
         address: u64,
         checksum: u128,
     ) enum { insert, duplicate } {
-        assert(queue.faulty_tables.count < queue.options.tables_max);
+        assert(queue.faulty_tables.count() < queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(table_bitset.capacity() == constants.lsm_table_data_blocks_max);
         assert(table_bitset.count() == 0);
 
-        var tables = queue.faulty_tables.peek();
-        while (tables) |queue_table| : (tables = queue_table.next) {
+        var tables = queue.faulty_tables.iterate();
+        while (tables.next()) |queue_table| {
             assert(queue_table != table);
             assert(queue_table.data_blocks_received != table_bitset);
 
@@ -261,7 +265,7 @@ pub const GridBlocksMissing = struct {
         replace: *FaultyBlock,
         duplicate,
     } {
-        assert(queue.faulty_tables.count <= queue.options.tables_max);
+        assert(queue.faulty_tables.count() <= queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
 
@@ -482,7 +486,9 @@ pub const GridBlocksMissing = struct {
             }
         }
 
-        var tables: QueueType(RepairTable) = .{ .name = queue.faulty_tables.name };
+        var tables: QueueType(RepairTable) = QueueType(RepairTable).init(.{
+            .name = queue.faulty_tables.any.name,
+        });
         while (queue.faulty_tables.pop()) |table| {
             assert(!free_set.is_free(table.index_address));
 

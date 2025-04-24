@@ -82,9 +82,9 @@ pub const Time = struct {
                     std.Random.init(&self.prng, stdx.PRNG.fill).floatNorm(f64) * 10);
                 const unscaled = std.math.sin(phase);
                 const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
-                const offest: i64 = -@as(i64, @intCast(self.offset_coefficient_C)) +
+                const offset_random: i64 = -@as(i64, @intCast(self.offset_coefficient_C)) +
                     @as(i64, @intCast(self.prng.int_inclusive(u64, 2 * self.offset_coefficient_C)));
-                return @as(i64, @intFromFloat(std.math.floor(scaled))) + offest;
+                return @as(i64, @intFromFloat(std.math.floor(scaled))) + offset_random;
             },
         }
     }

@@ -17,8 +17,8 @@ pub const IO = struct {
     iocp: os.windows.HANDLE,
     timer: Time = .{},
     io_pending: usize = 0,
-    timeouts: QueueType(Completion) = .{ .name = "io_timeouts" },
-    completed: QueueType(Completion) = .{ .name = "io_completed" },
+    timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
+    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
@@ -78,21 +78,21 @@ pub const IO = struct {
     fn flush(self: *IO, mode: FlushMode) !void {
         if (self.completed.empty()) {
             // Compute how long to poll by flushing timeout completions.
-            // NOTE: this may push to completed queue
+            // NOTE: this may push to completed queue.
             var timeout_ms: ?os.windows.DWORD = null;
             if (self.flush_timeouts()) |expires_ns| {
-                // 0ns expires should have been completed not returned
+                // 0ns expires should have been completed not returned.
                 assert(expires_ns != 0);
-                // Round up sub-millisecond expire times to the next millisecond
+                // Round up sub-millisecond expire times to the next millisecond.
                 const expires_ms = (expires_ns + (std.time.ns_per_ms / 2)) / std.time.ns_per_ms;
-                // Saturating cast to DWORD milliseconds
+                // Saturating cast to DWORD milliseconds.
                 const expires = std.math.cast(os.windows.DWORD, expires_ms) orelse
                     std.math.maxInt(os.windows.DWORD);
-                // max DWORD is reserved for INFINITE so cap the cast at max - 1
+                // Max DWORD is reserved for INFINITE so cap the cast at max - 1.
                 timeout_ms = if (expires == os.windows.INFINITE) expires - 1 else expires;
             }
 
-            // Poll for IO iff there's IO pending and flush_timeouts() found no ready completions
+            // Poll for IO iff there's IO pending and flush_timeouts() found no ready completions.
             if (self.io_pending > 0 and self.completed.empty()) {
                 // In blocking mode, we're always waiting at least until the timeout by run_for_ns.
                 // In non-blocking mode, we shouldn't wait at all.
@@ -106,7 +106,7 @@ pub const IO = struct {
                     self.iocp,
                     &events,
                     io_timeout,
-                    false, // non-alertable wait
+                    false, // Non-alertable wait.
                 ) catch |err| switch (err) {
                     error.Timeout => 0,
                     error.Aborted => unreachable,
@@ -123,7 +123,7 @@ pub const IO = struct {
                         raw_overlapped,
                     );
                     const completion = overlapped.completion;
-                    completion.next = null;
+                    completion.link = .{};
                     self.completed.push(completion);
                 }
             }
@@ -145,24 +145,22 @@ pub const IO = struct {
     fn flush_timeouts(self: *IO) ?u64 {
         var min_expires: ?u64 = null;
         var current_time: ?u64 = null;
-        var timeouts: ?*Completion = self.timeouts.peek();
 
-        // iterate through the timeouts, returning min_expires at the end
-        while (timeouts) |completion| {
-            timeouts = completion.next;
-
-            // lazily get the current time
+        // Iterate through the timeouts, returning min_expires at the end.
+        var timeouts_iterator = self.timeouts.iterate();
+        while (timeouts_iterator.next()) |completion| {
+            // Lazily get the current time.
             const now = current_time orelse self.timer.monotonic();
             current_time = now;
 
-            // move the completion to completed if it expired
+            // Move the completion to completed if it expired.
             if (now >= completion.operation.timeout.deadline) {
                 self.timeouts.remove(completion);
                 self.completed.push(completion);
                 continue;
             }
 
-            // if it's still waiting, update min_timeout
+            // If it's still waiting, update min_timeout.
             const expires = completion.operation.timeout.deadline - now;
             if (min_expires) |current_min_expires| {
                 min_expires = @min(expires, current_min_expires);
@@ -174,9 +172,9 @@ pub const IO = struct {
         return min_expires;
     }
 
-    /// This struct holds the data needed for a single IO operation
+    /// This struct holds the data needed for a single IO operation.
     pub const Completion = struct {
-        next: ?*Completion,
+        link: QueueType(Completion).Link,
         context: ?*anyopaque,
         callback: *const fn (Context) void,
         operation: Operation,
@@ -253,7 +251,7 @@ pub const IO = struct {
     ) void {
         const Callback = struct {
             fn onComplete(ctx: Completion.Context) void {
-                // Perform the operation and get the result
+                // Perform the operation and get the result.
                 const data = &@field(ctx.completion.operation, @tagName(op_tag));
                 const result = OperationImpl.do_operation(ctx, data);
 
@@ -271,7 +269,7 @@ pub const IO = struct {
                     else => {},
                 }
 
-                // The completion is finally ready to invoke the callback
+                // The completion is finally ready to invoke the callback.
                 callback(
                     @ptrCast(@alignCast(ctx.completion.context)),
                     ctx.completion,
@@ -280,15 +278,15 @@ pub const IO = struct {
             }
         };
 
-        // Setup the completion with the callback wrapper above
+        // Setup the completion with the callback wrapper above.
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = @ptrCast(context),
             .callback = Callback.onComplete,
             .operation = @unionInit(Completion.Operation, @tagName(op_tag), op_data),
         };
 
-        // Submit the completion onto the right queue
+        // Submit the completion onto the right queue.
         switch (op_tag) {
             .timeout => self.timeouts.push(completion),
             else => self.completed.push(completion),
@@ -364,19 +362,19 @@ pub const IO = struct {
                                 &op.overlapped.raw,
                             );
                         },
-                        // Called after accept was started, so get the result
+                        // Called after accept was started, so get the result.
                         else => os.windows.ws2_32.WSAGetOverlappedResult(
                             op.listen_socket,
                             &op.overlapped.raw,
                             &transferred,
-                            os.windows.FALSE, // dont wait
+                            os.windows.FALSE, // Don't wait.
                             &flags,
                         ),
                     };
 
-                    // return the socket if we succeed in accepting.
+                    // Return the socket if we succeed in accepting.
                     if (rc != os.windows.FALSE) {
-                        // enables getsockopt, setsockopt, getsockname, getpeername
+                        // Enables getsockopt, setsockopt, getsockname, getpeername.
                         _ = os.windows.ws2_32.setsockopt(
                             op.client_socket,
                             os.windows.ws2_32.SOL.SOCKET,
@@ -388,7 +386,7 @@ pub const IO = struct {
                         return op.client_socket;
                     }
 
-                    // destroy the client_socket we created if we get a non WouldBlock error
+                    // Destroy the client_socket we created if we get a non WouldBlock error.
                     errdefer |err| switch (err) {
                         error.WouldBlock => {},
                         else => {
@@ -399,16 +397,16 @@ pub const IO = struct {
 
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
-                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called
-                        .WSAENETDOWN => unreachable, // WinSock error
+                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called.
+                        .WSAENETDOWN => unreachable, // WinSock error.
                         .WSAENOTSOCK => error.FileDescriptorNotASocket,
                         .WSAEOPNOTSUPP => error.OperationNotSupported,
-                        .WSA_INVALID_HANDLE => unreachable, // we dont use hEvent in OVERLAPPED
-                        .WSAEFAULT, .WSA_INVALID_PARAMETER => unreachable, // params should be ok
+                        .WSA_INVALID_HANDLE => unreachable, // We don't use hEvent in OVERLAPPED.
+                        .WSAEFAULT, .WSA_INVALID_PARAMETER => unreachable, // Params should be ok.
                         .WSAECONNRESET => error.ConnectionAborted,
-                        .WSAEMFILE => unreachable, // we create our own descriptor so its available
+                        .WSAEMFILE => unreachable, // We create our own descriptor so its available.
                         .WSAENOBUFS => error.SystemResources,
-                        .WSAEINTR, .WSAEINPROGRESS => unreachable, // no blocking calls
+                        .WSAEINTR, .WSAEINPROGRESS => unreachable, // No blocking calls.
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
                 }
@@ -461,12 +459,12 @@ pub const IO = struct {
                                 op.socket,
                                 &op.overlapped.raw,
                                 &transferred,
-                                os.windows.FALSE, // dont wait
+                                os.windows.FALSE, // Don't wait.
                                 &flags,
                             );
                         }
 
-                        // ConnectEx requires the socket to be initially bound (INADDR_ANY)
+                        // ConnectEx requires the socket to be initially bound (INADDR_ANY).
                         const inaddr_any = std.mem.zeroes([4]u8);
                         const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
                         posix.bind(
@@ -496,7 +494,7 @@ pub const IO = struct {
 
                         // Find the ConnectEx function by dynamically looking it up on the socket.
                         // TODO: use `os.windows.loadWinsockExtensionFunction` once the function
-                        //       pointer is no longer required to be comptime.
+                        // pointer is no longer required to be comptime.
                         var connect_ex: LPFN_CONNECTEX = undefined;
                         var num_bytes: os.windows.DWORD = undefined;
                         const guid = os.windows.ws2_32.WSAID_CONNECTEX;
@@ -538,9 +536,9 @@ pub const IO = struct {
                         );
                     };
 
-                    // return if we succeeded in connecting
+                    // Return if we succeeded in connecting.
                     if (rc != os.windows.FALSE) {
-                        // enables getsockopt, setsockopt, getsockname, getpeername
+                        // Enables getsockopt, setsockopt, getsockname, getpeername.
                         _ = os.windows.ws2_32.setsockopt(
                             op.socket,
                             os.windows.ws2_32.SOL.SOCKET,
@@ -555,18 +553,18 @@ pub const IO = struct {
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
                         .WSAEALREADY => error.WouldBlock,
-                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called
-                        .WSAENETDOWN => unreachable, // network subsystem is down
+                        .WSANOTINITIALISED => unreachable, // WSAStartup() was called.
+                        .WSAENETDOWN => unreachable, // Network subsystem is down.
                         .WSAEADDRNOTAVAIL => error.AddressNotAvailable,
                         .WSAEAFNOSUPPORT => error.AddressFamilyNotSupported,
                         .WSAECONNREFUSED => error.ConnectionRefused,
-                        .WSAEFAULT => unreachable, // all addresses should be valid
-                        .WSAEINVAL => unreachable, // invalid socket type
+                        .WSAEFAULT => unreachable, // All addresses should be valid.
+                        .WSAEINVAL => unreachable, // Invalid socket type.
                         .WSAEHOSTUNREACH, .WSAENETUNREACH => error.NetworkUnreachable,
                         .WSAENOBUFS => error.SystemResources,
-                        .WSAENOTSOCK => unreachable, // socket is not bound or is listening
+                        .WSAENOTSOCK => unreachable, // Socket is not bound or is listening.
                         .WSAETIMEDOUT => error.ConnectionTimedOut,
-                        .WSA_INVALID_HANDLE => unreachable, // we dont use hEvent in OVERLAPPED
+                        .WSA_INVALID_HANDLE => unreachable, // We don't use hEvent in OVERLAPPED.
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
                 }
@@ -648,7 +646,7 @@ pub const IO = struct {
                                 op.socket,
                                 &op.overlapped.raw,
                                 &transferred,
-                                os.windows.FALSE, // dont wait
+                                os.windows.FALSE, // Don't wait.
                                 &flags,
                             );
                         }
@@ -663,9 +661,9 @@ pub const IO = struct {
                         break :blk switch (os.windows.ws2_32.WSASend(
                             op.socket,
                             @ptrCast(&op.buf),
-                            1, // one buffer
+                            1, // One buffer.
                             &transferred,
-                            0, // no flags
+                            0, // No flags.
                             &op.overlapped.raw,
                             null,
                         )) {
@@ -685,22 +683,22 @@ pub const IO = struct {
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
                         .WSANOTINITIALISED => unreachable, // WSAStartup() was called
-                        .WSA_INVALID_HANDLE => unreachable, // we dont use OVERLAPPED.hEvent
-                        .WSA_INVALID_PARAMETER => unreachable, // parameters are fine
+                        .WSA_INVALID_HANDLE => unreachable, // We don't use OVERLAPPED.hEvent
+                        .WSA_INVALID_PARAMETER => unreachable, // Parameters are fine.
                         .WSAECONNABORTED => error.ConnectionResetByPeer,
                         .WSAECONNRESET => error.ConnectionResetByPeer,
-                        .WSAEFAULT => unreachable, // invalid buffer
-                        .WSAEINTR => unreachable, // this is non blocking
-                        .WSAEINPROGRESS => unreachable, // this is non blocking
-                        .WSAEINVAL => unreachable, // invalid socket type
+                        .WSAEFAULT => unreachable, // Invalid buffer.
+                        .WSAEINTR => unreachable, // This is non blocking.
+                        .WSAEINPROGRESS => unreachable, // This is non blocking.
+                        .WSAEINVAL => unreachable, // Invalid socket type.
                         .WSAEMSGSIZE => error.MessageTooBig,
                         .WSAENETDOWN => error.NetworkSubsystemFailed,
                         .WSAENETRESET => error.ConnectionResetByPeer,
                         .WSAENOBUFS => error.SystemResources,
                         .WSAENOTCONN => error.FileDescriptorNotASocket,
-                        .WSAEOPNOTSUPP => unreachable, // we dont use MSG_OOB or MSG_PARTIAL
+                        .WSAEOPNOTSUPP => unreachable, // We don't use MSG_OOB or MSG_PARTIAL.
                         .WSAESHUTDOWN => error.BrokenPipe,
-                        .WSA_OPERATION_ABORTED => unreachable, // operation was cancelled
+                        .WSA_OPERATION_ABORTED => unreachable, // Operation was cancelled.
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
                 }
@@ -745,7 +743,7 @@ pub const IO = struct {
             transfer,
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) RecvError!usize {
-                    var flags: os.windows.DWORD = 0; // used both as input and output
+                    var flags: os.windows.DWORD = 0; // Used both as input and output.
                     var transferred: os.windows.DWORD = undefined;
 
                     const rc = blk: {
@@ -755,7 +753,7 @@ pub const IO = struct {
                                 op.socket,
                                 &op.overlapped.raw,
                                 &transferred,
-                                os.windows.FALSE, // dont wait
+                                os.windows.FALSE, // Don't wait.
                                 &flags,
                             );
                         }
@@ -792,23 +790,23 @@ pub const IO = struct {
                     return switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
                         .WSANOTINITIALISED => unreachable, // WSAStartup() was called
-                        .WSA_INVALID_HANDLE => unreachable, // we dont use OVERLAPPED.hEvent
-                        .WSA_INVALID_PARAMETER => unreachable, // parameters are fine
+                        .WSA_INVALID_HANDLE => unreachable, // We don't use OVERLAPPED.hEvent.
+                        .WSA_INVALID_PARAMETER => unreachable, // Parameters are fine.
                         .WSAECONNABORTED => error.ConnectionRefused,
                         .WSAECONNRESET => error.ConnectionResetByPeer,
-                        .WSAEDISCON => unreachable, // we only stream sockets
-                        .WSAEFAULT => unreachable, // invalid buffer
-                        .WSAEINTR => unreachable, // this is non blocking
-                        .WSAEINPROGRESS => unreachable, // this is non blocking
-                        .WSAEINVAL => unreachable, // invalid socket type
+                        .WSAEDISCON => unreachable, // We only stream sockets.
+                        .WSAEFAULT => unreachable, // Invalid buffer.
+                        .WSAEINTR => unreachable, // This is non blocking.
+                        .WSAEINPROGRESS => unreachable, // This is non blocking.
+                        .WSAEINVAL => unreachable, // Invalid socket type
                         .WSAEMSGSIZE => error.MessageTooBig,
                         .WSAENETDOWN => error.NetworkSubsystemFailed,
                         .WSAENETRESET => error.ConnectionResetByPeer,
                         .WSAENOTCONN => error.SocketNotConnected,
-                        .WSAEOPNOTSUPP => unreachable, // we dont use MSG_OOB or MSG_PARTIAL
+                        .WSAEOPNOTSUPP => unreachable, // We don't use MSG_OOB or MSG_PARTIAL.
                         .WSAESHUTDOWN => error.SocketNotConnected,
                         .WSAETIMEDOUT => error.ConnectionRefused,
-                        .WSA_OPERATION_ABORTED => unreachable, // operation was cancelled
+                        .WSA_OPERATION_ABORTED => unreachable, // Operation was cancelled.
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
                 }
@@ -1000,7 +998,7 @@ pub const IO = struct {
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
             completion.* = .{
-                .next = null,
+                .link = .{},
                 .context = @ptrCast(context),
                 .operation = undefined,
                 .callback = struct {
@@ -1051,7 +1049,7 @@ pub const IO = struct {
     ) void {
         assert(event != INVALID_EVENT);
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = null,
             .operation = .{
                 .event = .{
@@ -1392,9 +1390,9 @@ pub const IO = struct {
         const locked = kernel32.lock_file_ex(
             handle,
             lock_flags,
-            0, // reserved param is always zero
-            @as(u32, @truncate(size)), // low bits of size
-            @as(u32, @truncate(size >> 32)), // high bits of size
+            0, // Reserved param is always zero.
+            @as(u32, @truncate(size)), // Low bits of size.
+            @as(u32, @truncate(size >> 32)), // High bits of size.
             &lock_overlapped,
         );
 
@@ -1410,11 +1408,11 @@ pub const IO = struct {
         // TODO: Look into using SetFileValidData() instead
         // NOTE: Requires SE_MANAGE_VOLUME_NAME privilege
 
-        // Move the file pointer to the start + size
+        // Move the file pointer to the start + size.
         const seeked = os.windows.kernel32.SetFilePointerEx(
             handle,
             @intCast(size),
-            null, // no reference to new file pointer
+            null, // No reference to new file pointer.
             os.windows.FILE_BEGIN,
         );
 
@@ -1444,7 +1442,7 @@ pub const IO = struct {
     }
 };
 
-// TODO: use posix.getsockoptError when fixed for windows in stdlib
+// TODO: use posix.getsockoptError when fixed for windows in stdlib.
 fn getsockoptError(socket: posix.socket_t) IO.ConnectError!void {
     var err_code: u32 = undefined;
     var size: i32 = @sizeOf(u32);
@@ -1459,13 +1457,13 @@ fn getsockoptError(socket: posix.socket_t) IO.ConnectError!void {
     if (rc != 0) {
         switch (os.windows.ws2_32.WSAGetLastError()) {
             .WSAENETDOWN => return error.NetworkUnreachable,
-            .WSANOTINITIALISED => unreachable, // WSAStartup() was never called
+            .WSANOTINITIALISED => unreachable, // WSAStartup() was never called.
 
             // The address pointed to by optval or optlen is not in a valid part of the process
             // address space.
             .WSAEFAULT => unreachable,
 
-            .WSAEINVAL => unreachable, // The level parameter is unknown or invalid
+            .WSAEINVAL => unreachable, // The level parameter is unknown or invalid.
             .WSAENOPROTOOPT => unreachable, // The option is unknown at the level indicated.
             .WSAENOTSOCK => return error.FileDescriptorNotASocket,
             else => |err| return os.windows.unexpectedWSAError(err),
@@ -1556,8 +1554,8 @@ pub fn windows_open_file(
             .OBJECT_NAME_INVALID => unreachable,
             .OBJECT_NAME_NOT_FOUND => return error.FileNotFound,
             .OBJECT_PATH_NOT_FOUND => return error.FileNotFound,
-            .BAD_NETWORK_PATH => return error.NetworkNotFound, // \\server was not found
-            // \\server was found but \\server\share wasn't
+            .BAD_NETWORK_PATH => return error.NetworkNotFound, // \\server was not found.
+            // \\server was found but \\server\share wasn't.
             .BAD_NETWORK_NAME => return error.NetworkNotFound,
             .NO_MEDIA_IN_DEVICE => return error.NoDevice,
             .INVALID_PARAMETER => unreachable,
