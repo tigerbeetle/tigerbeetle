@@ -30,11 +30,13 @@ pub const IO = struct {
         larger_than_logical_sector_read_fault_probability: Ratio = ratio(0, 100),
     };
 
+    const Queue = QueueType(Completion);
+
     files: []const File,
     options: Options,
     prng: stdx.PRNG,
 
-    completed: QueueType(Completion) = .{ .name = "io_completed" },
+    completed: Queue = Queue.init(.{ .name = "io_completed" }),
 
     pub fn init(files: []const File, options: Options) IO {
         return .{
@@ -53,7 +55,7 @@ pub const IO = struct {
 
     /// This struct holds the data needed for a single IO operation.
     pub const Completion = struct {
-        next: ?*Completion,
+        link: Queue.Link,
         context: ?*anyopaque,
         callback: *const fn (*IO, *Completion) void,
         operation: Operation,
@@ -99,7 +101,7 @@ pub const IO = struct {
         }.on_complete;
 
         completion.* = .{
-            .next = null,
+            .link = .{},
             .context = context,
             .callback = on_complete_fn,
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),

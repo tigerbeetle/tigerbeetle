@@ -15,7 +15,6 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 
 const IO = vsr.io.IO;
-const QueueType = vsr.queue.QueueType;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
@@ -176,8 +175,8 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
-        submitted: QueueType(Packet),
-        pending: QueueType(Packet),
+        submitted: Packet.Queue,
+        pending: Packet.Queue,
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
@@ -271,14 +270,14 @@ pub fn ContextType(
                 .deinit_fn = &vtable_deinit_fn,
             });
             context.interface = client_out;
-            context.submitted = .{
+            context.submitted = Packet.Queue.init(.{
                 .name = null,
                 .verify_push = builtin.is_test,
-            };
-            context.pending = .{
+            });
+            context.pending = Packet.Queue.init(.{
                 .name = null,
                 .verify_push = builtin.is_test,
-            };
+            });
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
@@ -363,7 +362,7 @@ pub fn ContextType(
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
-            assert(packet_list.next == null);
+            assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
 
@@ -457,7 +456,7 @@ pub fn ContextType(
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
-                assert(self.pending.count == 0);
+                assert(self.pending.count() == 0);
                 packet.phase = .pending;
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
@@ -466,10 +465,9 @@ pub fn ContextType(
                 return;
             }
 
-            var it = self.pending.peek();
-            while (it) |root| {
+            var it = self.pending.iterate();
+            while (it.next()) |root| {
                 root.assert_phase(.pending);
-                it = root.next;
 
                 if (root.operation != packet.operation) continue;
 
@@ -625,7 +623,7 @@ pub fn ContextType(
 
             // Prevents IO thread starvation under heavy client load.
             // Process only the minimal number of packets for the next pending request.
-            const enqueued_count = self.pending.count;
+            const enqueued_count = self.pending.count();
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
             for (0..safety_limit) |_| {
                 const packet: *Packet = pop: {
@@ -640,7 +638,7 @@ pub fn ContextType(
                 // - If there's no in-flight request, the packet is sent immediately without
                 //   using the pending queue.
                 // - If the packet can be batched with another previously enqueued packet.
-                if (self.pending.count > enqueued_count) break;
+                if (self.pending.count() > enqueued_count) break;
             }
 
             // Defer this work to later,
@@ -805,7 +803,7 @@ pub fn ContextType(
                 .data = packet_extern.data,
                 .user_tag = packet_extern.user_tag,
                 .status = .ok,
-                .next = null,
+                .link = .{},
                 .multi_batch_next = null,
                 .multi_batch_tail = null,
                 .multi_batch_count = 0,

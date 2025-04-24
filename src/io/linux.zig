@@ -26,10 +26,10 @@ pub const IO = struct {
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
-    unqueued: QueueType(Completion) = .{ .name = "io_unqueued" },
+    unqueued: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_unqueued" }),
 
     /// Completions that are ready to have their callbacks run.
-    completed: QueueType(Completion) = .{ .name = "io_completed" },
+    completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
     // TODO Track these as metrics:
     ios_queued: u32 = 0,
@@ -382,7 +382,7 @@ pub const IO = struct {
     pub const Completion = struct {
         io: *IO,
         result: i32 = undefined,
-        next: ?*Completion = null,
+        link: QueueType(Completion).Link = .{},
         operation: Operation,
         context: ?*anyopaque,
         callback: *const fn (

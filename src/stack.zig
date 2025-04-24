@@ -9,7 +9,7 @@ pub const StackLink = extern struct {
 };
 
 /// An intrusive last in/first out linked list (LIFO).
-/// The element type T must have a field called "next" of type ?*T.
+/// The element type T must have a field called "next" of type StackType(T).Link.
 pub fn StackType(comptime T: type) type {
     return struct {
         any: StackAny,
@@ -64,6 +64,7 @@ pub fn StackType(comptime T: type) type {
     };
 }
 
+// Non-generic implementation for smaller binary and faster compile times.
 const StackAny = struct {
     head: ?*StackLink = null,
 

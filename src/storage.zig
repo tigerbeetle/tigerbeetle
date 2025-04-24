@@ -80,7 +80,7 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         };
 
         pub const NextTick = struct {
-            next: ?*NextTick = null,
+            link: QueueType(NextTick).Link = .{},
             source: NextTickSource,
             callback: *const fn (next_tick: *NextTick) void,
         };
@@ -92,7 +92,9 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         io: *IO,
         fd: IO.fd_t,
 
-        next_tick_queue: QueueType(NextTick) = .{ .name = "storage_next_tick" },
+        next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
+            .name = "storage_next_tick",
+        }),
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
