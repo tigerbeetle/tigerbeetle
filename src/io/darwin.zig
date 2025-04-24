@@ -89,7 +89,7 @@ pub const IO = struct {
 
         // Only call kevent() if we need to submit io events or if we need to wait for completions.
         if (change_events > 0 or self.completed.empty()) {
-            // Zero timeouts for kevent() implies a non-blocking poll
+            // Zero timeouts for kevent() implies a non-blocking poll.
             var ts = std.mem.zeroes(posix.timespec);
 
             // We need to wait (not poll) on kevent if there's nothing to submit or complete.
@@ -113,7 +113,7 @@ pub const IO = struct {
                 &ts,
             );
 
-            // Mark the io events submitted only after kevent() successfully processed them
+            // Mark the io events submitted only after kevent() successfully processed them.
             self.io_inflight += change_events;
             self.io_inflight -= new_events;
 
@@ -185,7 +185,7 @@ pub const IO = struct {
         return min_timeout;
     }
 
-    /// This struct holds the data needed for a single IO operation
+    /// This struct holds the data needed for a single IO operation.
     pub const Completion = struct {
         next: ?*Completion,
         context: ?*anyopaque,
@@ -244,13 +244,13 @@ pub const IO = struct {
         operation_data: std.meta.TagPayload(Operation, operation_tag),
         comptime OperationImpl: type,
     ) void {
-        const onCompleteFn = struct {
-            fn onComplete(io: *IO, _completion: *Completion) void {
+        const on_complete_fn = struct {
+            fn on_complete(io: *IO, _completion: *Completion) void {
                 // Perform the actual operation
                 const op_data = &@field(_completion.operation, @tagName(operation_tag));
                 const result = OperationImpl.do_operation(op_data);
 
-                // Requeue onto io_pending if error.WouldBlock
+                // Requeue onto io_pending if error.WouldBlock.
                 switch (operation_tag) {
                     .accept, .connect, .read, .write, .send, .recv => {
                         _ = result catch |err| switch (err) {
@@ -265,20 +265,19 @@ pub const IO = struct {
                     else => {},
                 }
 
-                // Complete the Completion
-
+                // Complete the Completion.
                 return callback(
                     @ptrCast(@alignCast(_completion.context)),
                     _completion,
                     result,
                 );
             }
-        }.onComplete;
+        }.on_complete;
 
         completion.* = .{
             .next = null,
             .context = context,
-            .callback = onCompleteFn,
+            .callback = on_complete_fn,
             .operation = @unionInit(Operation, @tagName(operation_tag), operation_data),
         };
 
@@ -378,7 +377,7 @@ pub const IO = struct {
                     return switch (posix.errno(posix.system.close(op.fd))) {
                         .SUCCESS => {},
                         .BADF => error.FileDescriptorInvalid,
-                        .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425
+                        .INTR => {}, // A success, see https://github.com/ziglang/zig/issues/2425.
                         .IO => error.InputOutput,
                         else => |errno| stdx.unexpected_errno("close", errno),
                     };
@@ -647,7 +646,7 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(_: anytype) TimeoutError!void {
-                    return; // timeouts don't have errors for now
+                    return; // Timeouts don't have errors for now.
                 }
             },
         );
@@ -1008,7 +1007,7 @@ pub const IO = struct {
             .OVERFLOW => return error.FileTooBig,
             .SRCH => unreachable, // F_SETOWN
 
-            // not reported but need same error union
+            // Not reported but need same error union.
             .OPNOTSUPP => return error.OperationNotSupported,
             else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
         }

@@ -441,7 +441,7 @@ test "submission queue full" {
 }
 
 test "tick to wait" {
-    // Use only IO.run() to see if pending IO is actually processed
+    // Use only IO.run() to see if pending IO is actually processed.
 
     try struct {
         const Context = @This();
@@ -477,11 +477,11 @@ test "tick to wait" {
             const client = try self.io.open_socket_tcp(client_address.any.family, tcp_options);
             defer self.io.close_socket(client);
 
-            // Start the accept
+            // Start the accept.
             var server_completion: IO.Completion = undefined;
             self.io.accept(*Context, &self, accept_callback, &server_completion, server);
 
-            // Start the connect
+            // Start the connect.
             var client_completion: IO.Completion = undefined;
             self.io.connect(
                 *Context,
@@ -492,7 +492,7 @@ test "tick to wait" {
                 client_address,
             );
 
-            // Tick the IO to drain the accept & connect completions
+            // Tick the IO to drain the accept & connect completions.
             assert(!self.connected);
             assert(self.accepted == IO.INVALID_SOCKET);
 
@@ -503,7 +503,7 @@ test "tick to wait" {
             assert(self.accepted != IO.INVALID_SOCKET);
             defer self.io.close_socket(self.accepted);
 
-            // Start receiving on the client
+            // Start receiving on the client.
             var recv_completion: IO.Completion = undefined;
             var recv_buffer: [64]u8 = undefined;
             @memset(&recv_buffer, 0xaa);
@@ -516,14 +516,14 @@ test "tick to wait" {
                 &recv_buffer,
             );
 
-            // Drain out the recv completion from any internal IO queues
+            // Drain out the recv completion from any internal IO queues.
             try self.io.run();
             try self.io.run();
             try self.io.run();
 
             // Complete the recv() *outside* of the IO instance.
             // Other tests already check .tick() with IO based completions.
-            // This simulates IO being completed by an external system
+            // This simulates IO being completed by an external system.
             var send_buf = std.mem.zeroes([64]u8);
             const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
@@ -535,7 +535,7 @@ test "tick to wait" {
                 try self.io.run();
             }
 
-            // Make sure the receive actually happened
+            // Make sure the receive actually happened.
             assert(self.received);
             try testing.expect(std.mem.eql(u8, &recv_buffer, &send_buf));
         }
@@ -575,7 +575,7 @@ test "tick to wait" {
             self.received = true;
         }
 
-        // TODO: use posix.send() instead when it gets fixed for windows
+        // TODO: use posix.send() instead when it gets fixed for windows.
         fn os_send(sock: posix.socket_t, buf: []const u8, flags: u32) !usize {
             if (builtin.target.os.tag != .windows) {
                 return posix.send(sock, buf, flags);

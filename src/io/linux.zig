@@ -39,7 +39,7 @@ pub const IO = struct {
     /// - in the submission queue, or
     /// - in the kernel, or
     /// - in the completion queue, or
-    /// - in the `completed` list (excluding zero-duration timeouts)
+    /// - in the `completed` list (excluding zero-duration timeouts).
     awaiting: CompletionList = .{},
 
     // This is the completion that performs the cancellation.
@@ -378,7 +378,7 @@ pub const IO = struct {
         };
     }
 
-    /// This struct holds the data needed for a single io_uring operation
+    /// This struct holds the data needed for a single io_uring operation.
     pub const Completion = struct {
         io: *IO,
         result: i32 = undefined,
@@ -519,7 +519,7 @@ pub const IO = struct {
                     const result: CloseError!void = blk: {
                         if (completion.result < 0) {
                             const err = switch (@as(posix.E, @enumFromInt(-completion.result))) {
-                                // A success, see https://github.com/ziglang/zig/issues/2425
+                                // A success, see https://github.com/ziglang/zig/issues/2425.
                                 .INTR => {},
                                 .BADF => error.FileDescriptorInvalid,
                                 .DQUOT => error.DiskQuota,
@@ -1230,7 +1230,7 @@ pub const IO = struct {
         self.enqueue(completion);
     }
 
-    /// Best effort to synchroneously transfer bytes to the kernel.
+    /// Best effort to synchronously transfer bytes to the kernel.
     pub fn send_now(self: *IO, socket: socket_t, buffer: []const u8) ?usize {
         _ = self;
         return posix.send(socket, buffer, posix.MSG.DONTWAIT) catch |err| switch (err) {
@@ -1606,8 +1606,7 @@ pub const IO = struct {
 
                 // Special case. tmpfs doesn't support Direct I/O. Normally we would panic
                 // here (see below) but being able to benchmark production workloads
-                // on tmpfs is very useful for removing
-                // disk speed from the equation.
+                // on tmpfs is very useful for removing disk speed from the equation.
                 if (direct_io != .direct_io_disabled and !dir_on_tmpfs) {
                     direct_io_supported = try fs_supports_direct_io(dir_fd);
                     if (direct_io_supported) {
