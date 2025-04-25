@@ -1242,19 +1242,30 @@ test "Cluster: sync: checkpoint from a newer view" {
         t.replica(.R_).drop(.R_, .incoming, .prepare);
         t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
         t.replica(.R_).drop(.R_, .incoming, .start_view_change);
+        //? dj: Maybe move this line down to immediately before the filter, to make it clear that we
+        //? aren't allowing all incoming prepares.
         b1.pass(.A0, .incoming, .prepare);
+
+        // Force b1 to sync, rather than repair, by making op=checkpoint_1 - 1 unavailable.
+        b1.stop();
+        b1.corrupt(.{ .wal_prepare = (checkpoint_1 - 1) % slot_count });
+        try b1.open();
+        //? dj: I just realized that "filter" is probably not the best name for this function
+        //? because conventionally a filter callback would return true when it wants to keep a
+        //? message, not drop a message.
         b1.filter(.A0, .incoming, struct {
-            // Force b1 to sync, rather than repair.
             fn drop_message(message: *const Message) bool {
                 const header = message.header.into(.prepare) orelse return false;
-                return header.op == checkpoint_1;
+                return header.op == checkpoint_1 - 1;
             }
         }.drop_message);
+
         try c.request(checkpoint_1 + 1, checkpoint_1 - 1);
+
         try expectEqual(a0.op_head(), checkpoint_1 + 1);
         try expectEqual(b1.op_head(), checkpoint_1 + 1);
         try expectEqual(a0.commit(), checkpoint_1 - 1);
-        try expectEqual(b1.commit(), checkpoint_1 - 1);
+        try expectEqual(b1.commit(), checkpoint_1 - 2);
     }
 
     {
