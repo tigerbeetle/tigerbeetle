@@ -308,12 +308,12 @@ const Review = struct {
             }
         }
         if (review.unresolved_count > 0) {
-            try writer.print("\n{d} resolved {d} unresolved", .{
+            try writer.print("\n{d} resolved {d} unresolved\n", .{
                 review.resolved_count,
                 review.unresolved_count,
             });
         } else {
-            try writer.print("{d} resolved", .{review.resolved_count});
+            try writer.print("{d} resolved\n", .{review.resolved_count});
         }
     }
 };
@@ -350,6 +350,7 @@ test Review {
         \\src/vsr/message_header.zig:432:  dj: What do you think of referring to this as a replica_position,
         \\
         \\1 resolved 1 unresolved
+        \\
     ));
 }
 
