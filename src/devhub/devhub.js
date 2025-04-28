@@ -56,9 +56,8 @@ async function main_seeds() {
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
   const [records, issues] = await Promise.all([
-    (async () => await (await fetch(data_url, { cache: "no-cache" })).json())(),
-    (async () =>
-      await (await fetch(issues_url, { cache: "no-cache" })).json())(),
+    fetch_json(data_url),
+    fetch_json(issues_url),
   ]);
 
   const pulls = issues.filter((issue) => issue.pull_request);
@@ -434,6 +433,11 @@ function format_date(date, include_time) {
   return include_time
     ? `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
     : `${year}-${month}-${day}`;
+}
+
+async function fetch_json(url) {
+  const response = await fetch(url, { cache: "no-cache" });
+  return await response.json();
 }
 
 function copy_to_clipboard(element) {
