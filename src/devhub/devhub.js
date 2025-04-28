@@ -151,7 +151,7 @@ async function main_seeds() {
           </td>
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
-          <td><code>${record.command}</code></td>
+          <td><code onclick="copy_to_clipboard(this)">${record.command}</code></td>
           <td><time>${format_duration(seed_duration_ms)}</time></td>
           <td>
             <time>${format_duration(seed_freshness_ms)} ago</time>
@@ -434,4 +434,12 @@ function format_date(date, include_time) {
   return include_time
     ? `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
     : `${year}-${month}-${day}`;
+}
+
+function copy_to_clipboard(element) {
+  navigator.clipboard.writeText(element.innerText).then(() => {
+    const before = element.innerHTML;
+    element.innerText = "Copied!";
+    setTimeout(() => element.innerHTML = before, 1000);
+  });
 }
