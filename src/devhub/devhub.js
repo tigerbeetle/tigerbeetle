@@ -56,8 +56,8 @@ async function main_seeds() {
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
   const [records, issues] = await Promise.all([
-    (async () => await (await fetch(data_url)).json())(),
-    (async () => await (await fetch(issues_url)).json())(),
+    fetch_json(data_url),
+    fetch_json(issues_url),
   ]);
 
   const pulls = issues.filter((issue) => issue.pull_request);
@@ -115,10 +115,13 @@ async function main_seeds() {
     const seed_duration_ms =
       (record.seed_timestamp_end - record.seed_timestamp_start) * 1000;
     const seed_freshness_ms = Date.now() - (record.seed_timestamp_start * 1000);
-    const staleness_threshold_ms = 2 * 60 * 60 * 1000;
+    const staleness_threshold_ms = 3 * 60 * 60 * 1000;
     const canery_is_stale = record.fuzzer === "canary" &&
       !pull_request_number(record) &&
       seed_freshness_ms > staleness_threshold_ms;
+    const staleness_warning = canery_is_stale
+      ? '<span title="Canary check is older than 3 hours.">⚠️</span>'
+      : "";
 
     const row_dom = document.createElement("tr");
 
@@ -147,22 +150,16 @@ async function main_seeds() {
           </td>
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
-          <td><code>${record.command}</code></td>
+          <td><code onclick="copy_to_clipboard(this)">${record.command}</code></td>
           <td><time>${format_duration(seed_duration_ms)}</time></td>
-          <td><time>${format_duration(seed_freshness_ms)} ago</time></td>
-          <td>${
-      record.count.toLocaleString("en-US").replace(/,/g, "&nbsp;")
-    }</td>
+          <td>
+            <time>${format_duration(seed_freshness_ms)} ago</time>
+            ${staleness_warning}
+          </td>
+          <td>
+            ${record.count.toLocaleString("en-US").replace(/,/g, "&nbsp;")}
+          </td>
       `;
-    if (canery_is_stale) {
-      // Wrap table cell content in blinking spans. We don't want to let the cell border blink.
-      row_dom.querySelectorAll("td").forEach((td) => {
-        const span = document.createElement("span");
-        span.classList.add("blink");
-        span.innerHTML = td.innerHTML;
-        td.replaceChildren(span);
-      });
-    }
     table_dom.appendChild(row_dom);
   }
 
@@ -436,4 +433,17 @@ function format_date(date, include_time) {
   return include_time
     ? `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
     : `${year}-${month}-${day}`;
+}
+
+async function fetch_json(url) {
+  const response = await fetch(url, { cache: "no-cache" });
+  return await response.json();
+}
+
+function copy_to_clipboard(element) {
+  navigator.clipboard.writeText(element.innerText).then(() => {
+    const before = element.innerHTML;
+    element.innerText = "Copied!";
+    setTimeout(() => element.innerHTML = before, 1000);
+  });
 }
