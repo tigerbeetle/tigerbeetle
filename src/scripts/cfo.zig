@@ -25,10 +25,9 @@
 //!
 //! Note that the budget/refresh timers do not count time spent cloning or compiling code.
 //!
-//! It is important that the caller (systemd typically) arranges for CFO to be a process group
-//! leader. It is not possible to reliably wait for (grand) children with POSIX, so its on the
-//! call-site to cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to
-//! arrange that.
+//! It is important that the caller arranges for CFO's descendants to be reaped when CFO exits.
+//! It is not possible to reliably wait for (grand) children with POSIX, so its on the call-site to
+//! cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to arrange that.
 //!
 //! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
