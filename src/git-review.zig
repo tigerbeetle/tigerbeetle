@@ -54,6 +54,7 @@ fn log_fn(
 const CLIArgs = union(enum) {
     new,
     status,
+    split,
     lgtm,
     pub const help =
         \\Usage:
@@ -65,6 +66,9 @@ const CLIArgs = union(enum) {
         \\
         \\  git review status
         \\        Check validity of the current review.
+        \\
+        \\  git review split
+        \\        Splits mixed review commit into code changes and review proper.
         \\
         \\  git review lgtm
         \\        Assert that all comments are resolved, revert the review commit, push to remote.
@@ -92,6 +96,7 @@ pub fn main() !void {
     switch (cli_args) {
         .status => _ = try review_status(shell),
         .new => try review_new(shell),
+        .split => try review_split(shell),
         .lgtm => try review_lgtm(shell),
     }
 }
@@ -192,6 +197,74 @@ fn review_lgtm(shell: *Shell) !void {
     try shell.exec("git revert --no-commit {commit}", .{ .commit = commit });
     try shell.exec("git commit --message {message}", .{ .message = "review revert" });
     try shell.exec("git push --force-with-lease", .{});
+}
+
+fn review_split(shell: *Shell) !void {
+    if (!try has_review(shell)) {
+        log.err("no review in progress", .{});
+        return error.NoReview;
+    }
+    const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
+    const changed_files = try shell.exec_stdout("git diff --name-only HEAD~ HEAD", .{});
+
+    shell.exec("git diff --quiet --cached", .{}) catch {
+        log.err("git index is dirty", .{});
+        return error.DirtyIndex;
+    };
+
+    var it = std.mem.tokenizeScalar(u8, changed_files, '\n');
+    while (it.next()) |file| {
+        shell.exec("git diff --quiet {file}", .{ .file = file }) catch {
+            log.err("working tree is dirty: {s}", .{file});
+            return error.DirtyWorkingTree;
+        };
+    }
+
+    log.info("splitting commit {s}", .{commit});
+
+    try shell.exec("git reset HEAD~", .{});
+    it.reset();
+    while (it.next()) |file| {
+        if (std.mem.eql(u8, file, "REVIEW.md")) continue;
+        const text_before = try shell.cwd.readFileAlloc(
+            shell.arena.allocator(),
+            file,
+            1 * 1024 * 1024,
+        );
+
+        const fd = try shell.cwd.createFile(file, .{ .truncate = true });
+        defer fd.close();
+
+        var fbs = std.io.fixedBufferStream(text_before);
+        try remove_review_comments(fbs.reader().any(), fd.writer().any());
+        try shell.exec("git add {file}", .{ .file = file });
+    }
+    try shell.exec("git commit -m {message}", .{ .message = "review changes" });
+
+    it.reset();
+    while (it.next()) |file| {
+        try shell.exec("git restore {file} --source {commit}", .{
+            .file = file,
+            .commit = commit,
+        });
+        try shell.exec("git add {file}", .{ .file = file });
+    }
+    try shell.exec("git commit -m review", .{});
+    log.info("done", .{});
+}
+
+fn remove_review_comments(reader: std.io.AnyReader, writer: std.io.AnyWriter) !void {
+    while (true) {
+        var line_buffer: [4096]u8 = undefined;
+        const line = try reader.readUntilDelimiterOrEof(&line_buffer, '\n') orelse return;
+        const line_no_indent = std.mem.trimLeft(u8, line, " ");
+        if (std.mem.startsWith(u8, line_no_indent, "//?")) {
+            // Skip this line.
+        } else {
+            try writer.writeAll(line);
+            try writer.writeAll("\n");
+        }
+    }
 }
 
 const Review = struct {
