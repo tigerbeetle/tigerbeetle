@@ -3,6 +3,66 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.38
+
+Released: 2025-04-28
+
+### Safety And Performance
+
+- [#2664](https://github.com/tigerbeetle/tigerbeetle/pull/2664)
+
+  Switch to using gpa as backing allocator for clients.
+
+- [#2902](https://github.com/tigerbeetle/tigerbeetle/pull/2902)
+
+  Set socket options for peer connections.
+
+- [#2665](https://github.com/tigerbeetle/tigerbeetle/pull/2665)
+
+  Add `tb_client_init_parameters` and implement for Python client.
+
+### Features
+
+- [#2921](https://github.com/tigerbeetle/tigerbeetle/pull/2921)
+
+  Fix `tigerbeetle inspect grid` for data files with no used blocks.
+
+### Internals
+
+- [#2914](https://github.com/tigerbeetle/tigerbeetle/pull/2914),
+  [#2913](https://github.com/tigerbeetle/tigerbeetle/pull/2913)
+
+  CI improvements.
+
+- [#2918](https://github.com/tigerbeetle/tigerbeetle/pull/2918)
+
+  De-genericify `Queue`.
+
+- [#2912](https://github.com/tigerbeetle/tigerbeetle/pull/2912)
+
+  Modernize `stdx.cut` API
+
+- [#2732](https://github.com/tigerbeetle/tigerbeetle/pull/2732),
+  [#2915](https://github.com/tigerbeetle/tigerbeetle/pull/2915),
+  [#2920](https://github.com/tigerbeetle/tigerbeetle/pull/2920)
+
+  Trial a git-native + offline-first code review interface.
+
+- [#2924](https://github.com/tigerbeetle/tigerbeetle/pull/2924),
+  [#2911](https://github.com/tigerbeetle/tigerbeetle/pull/2911),
+  [#2910](https://github.com/tigerbeetle/tigerbeetle/pull/2910),
+  [#2909](https://github.com/tigerbeetle/tigerbeetle/pull/2909)
+
+  Devhub improvements. In particular, ensure that a failing canary fuzzer is obvious.
+
+- [#2905](https://github.com/tigerbeetle/tigerbeetle/pull/2905)
+
+  Compile scripts for `zig build ci`.
+
+### TigerTracks 🎧
+
+- [Eventide](https://www.youtube.com/watch?v=uMedRcXMDz0)
+
 ## TigerBeetle 0.16.37
 
 Released: 2025-04-21
