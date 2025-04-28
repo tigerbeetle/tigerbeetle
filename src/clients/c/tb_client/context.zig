@@ -22,6 +22,13 @@ const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
 
+pub const InitParameters = extern struct {
+    cluster_id: u128,
+    client_id: u128,
+    addresses_ptr: [*]const u8,
+    addresses_len: u64,
+};
+
 /// Thread-safe client interface allocated by the user.
 /// Contains the `VTable` with function pointers to the StateMachine-specific implementation
 /// and the synchronization status.
@@ -32,6 +39,7 @@ pub const ClientInterface = extern struct {
         submit_fn: *const fn (*anyopaque, *Packet.Extern) void,
         completion_context_fn: *const fn (*anyopaque) usize,
         deinit_fn: *const fn (*anyopaque) void,
+        init_parameters_fn: *const fn (*anyopaque, *InitParameters) void,
     };
 
     /// Magic number used as a tag, preventing the use of uninitialized pointers.
@@ -99,6 +107,16 @@ pub const ClientInterface = extern struct {
         client.vtable.ptr.deinit_fn(context);
     }
 
+    pub fn init_parameters(client: *ClientInterface, out_parameters: *InitParameters) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
+        client.locker.lock();
+        defer client.locker.unlock();
+        const context = client.context.ptr orelse return Error.ClientInvalid;
+        return client.vtable.ptr.init_parameters_fn(context, out_parameters);
+    }
+
     comptime {
         assert(@sizeOf(ClientInterface) == 32);
         assert(@alignOf(ClientInterface) == 8);
@@ -164,6 +182,8 @@ pub fn ContextType(
 
         allocator: std.mem.Allocator,
         client_id: u128,
+        cluster_id: u128,
+        addresses_copy: []const u8,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
@@ -195,6 +215,9 @@ pub fn ContextType(
 
             context.allocator = allocator;
             context.client_id = stdx.unique_u128();
+            context.cluster_id = cluster_id;
+            context.addresses_copy = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(context.addresses_copy);
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};
@@ -268,6 +291,7 @@ pub fn ContextType(
                 .submit_fn = &vtable_submit_fn,
                 .completion_context_fn = &vtable_completion_context_fn,
                 .deinit_fn = &vtable_deinit_fn,
+                .init_parameters_fn = &vtable_init_parameters_fn,
             });
             context.interface = client_out;
             context.submitted = Packet.Queue.init(.{
@@ -839,7 +863,18 @@ pub fn ContextType(
             self.message_pool.deinit(self.allocator);
             self.io.deinit();
 
+            self.allocator.free(self.addresses_copy);
             self.allocator.destroy(self);
+        }
+
+        fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
+
+            out_parameters.cluster_id = self.cluster_id;
+            out_parameters.client_id = self.client_id;
+            out_parameters.addresses_ptr = self.addresses_copy.ptr;
+            out_parameters.addresses_len = self.addresses_copy.len;
         }
 
         fn operation_from_int(op: u8) ?StateMachine.Operation {

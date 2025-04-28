@@ -36,6 +36,7 @@ const type_mappings = .{
     .{ exports.tb_client_status, "TB_CLIENT_STATUS" },
     .{ exports.tb_register_log_callback_status, "TB_REGISTER_LOG_CALLBACK_STATUS" },
     .{ exports.tb_log_level, "TB_LOG_LEVEL" },
+    .{ exports.tb_init_parameters, "tb_init_parameters_t" },
 };
 
 fn resolve_c_type(comptime Type: type) []const u8 {
@@ -240,6 +241,14 @@ pub fn main() !void {
         \\    uint32_t address_len,
         \\    uintptr_t completion_ctx,
         \\    void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+        \\);
+        \\
+        \\// Retrieve the parameters initially passed to `tb_client_init` or `tb_client_init_echo`.
+        \\// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+        \\// not initialized or has already been closed.
+        \\TB_CLIENT_STATUS tb_client_init_parameters(
+        \\    tb_client_t* client,
+        \\    tb_init_parameters_t* init_parameters_out
         \\);
         \\
         \\// Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.
