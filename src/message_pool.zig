@@ -208,6 +208,7 @@ pub const MessagePool = struct {
                     .buffer = buffer[0..constants.message_size_max],
                     .link = .{},
                 };
+
                 pool.free_list.push(message);
             }
         }

@@ -148,6 +148,9 @@ pub fn ContextType(
 ) type {
     return struct {
         const Context = @This();
+        const GPA = std.heap.GeneralPurposeAllocator(.{
+            .thread_safe = true,
+        });
 
         const StateMachine = Client.StateMachine;
         const allowed_operations = [_]StateMachine.Operation{
@@ -180,6 +183,7 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
+        gpa: GPA,
         allocator: std.mem.Allocator,
         client_id: u128,
         cluster_id: u128,
@@ -203,17 +207,37 @@ pub fn ContextType(
         thread: std.Thread,
 
         pub fn init(
-            allocator: std.mem.Allocator,
+            root_allocator: std.mem.Allocator,
             client_out: *ClientInterface,
             cluster_id: u128,
             addresses: []const u8,
             completion_ctx: usize,
             completion_callback: CompletionCallback,
         ) InitError!void {
-            var context = try allocator.create(Context);
-            errdefer allocator.destroy(context);
+            var context: *Context = context: {
+                // Wrap the root allocator - usually heap.c_allocator when built as a library - in
+                // a GPA to keep maximum compatibility while gaining the extra safety. As a library,
+                // libtbclient is running inside another process's address space.
+                var gpa = GPA{
+                    .backing_allocator = root_allocator,
+                };
+                errdefer assert(gpa.deinit() == .ok);
 
-            context.allocator = allocator;
+                const context = try gpa.allocator().create(Context);
+
+                // Moving the GPA is safe, since we don't have any live reference to `allocator`.
+                context.gpa = gpa;
+
+                break :context context;
+            };
+
+            errdefer {
+                var gpa: GPA = context.gpa;
+                gpa.allocator().destroy(context);
+                assert(gpa.deinit() == .ok);
+            }
+
+            const allocator = context.gpa.allocator();
             context.client_id = stdx.unique_u128();
             context.cluster_id = cluster_id;
             context.addresses_copy = try allocator.dupe(u8, addresses);
@@ -253,7 +277,7 @@ pub fn ContextType(
 
             log.debug("{}: init: initializing MessagePool", .{context.client_id});
             context.message_pool = try MessagePool.init(allocator, .client);
-            errdefer context.message_pool.deinit(context.allocator);
+            errdefer context.message_pool.deinit(allocator);
 
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
@@ -285,7 +309,7 @@ pub fn ContextType(
                     else => unreachable,
                 };
             };
-            errdefer context.client.deinit(context.allocator);
+            errdefer context.client.deinit(allocator);
 
             ClientInterface.init(client_out, context, comptime &.{
                 .submit_fn = &vtable_submit_fn,
@@ -859,12 +883,16 @@ pub fn ContextType(
             self.io.cancel_all();
 
             self.signal.deinit();
-            self.client.deinit(self.allocator);
-            self.message_pool.deinit(self.allocator);
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
             self.io.deinit();
 
-            self.allocator.free(self.addresses_copy);
-            self.allocator.destroy(self);
+            self.gpa.allocator().free(self.addresses_copy);
+
+            // NB: Copy the allocator back out before trying to destroy `self` with it!
+            var gpa: GPA = self.gpa;
+            gpa.allocator().destroy(self);
+            assert(gpa.deinit() == .ok);
         }
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
