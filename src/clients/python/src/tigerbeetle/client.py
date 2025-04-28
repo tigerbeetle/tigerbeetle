@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import bindings
-from .lib import tb_assert, c_uint128
+from .lib import tb_assert, c_uint128, decode, encode, id
 
 logger = logging.getLogger("tigerbeetle")
 
@@ -43,32 +43,10 @@ class InflightPacket:
     packet: bindings.CPacket
     response: Any
     operation: bindings.Operation
-    c_event_type: Any
-    c_result_type: Any
+    result_type: Any
     on_completion: Callable | None
     on_completion_context: CompletionContextSync | CompletionContextAsync | None
-
-
-
-def id() -> int:
-    """
-    Generates a Universally Unique and Sortable Identifier as a 128-bit integer. Based on ULIDs.
-    """
-    time_ms = time.time_ns() // (1000 * 1000)
-
-    # Ensure time_ms monotonically increases.
-    time_ms_last = getattr(id, "_time_ms_last", 0)
-    if time_ms <= time_ms_last:
-        time_ms = time_ms_last
-    else:
-        id._time_ms_last = time_ms
-
-    randomness = os.urandom(10)
-
-    return int.from_bytes(
-        time_ms.to_bytes(6, "big") + randomness,
-        "big",
-    )
+    buffer: bytes
 
 
 amount_max = (2 ** 128) - 1
@@ -114,7 +92,7 @@ class Client:
 
 
     def _acquire_packet(self, operation: bindings.Operation, operations: Any,
-                        c_event_type: Any, c_result_type: Any) -> InflightPacket:
+                        result_type: Any) -> InflightPacket:
         packet = bindings.CPacket()
         packet.next = None
         packet.user_data = Client._counter.increment()
@@ -122,11 +100,9 @@ class Client:
         packet.operation = operation
         packet.status = bindings.PacketStatus.OK
 
-        operations_array_type = c_event_type * len(operations)
-        operations_array = operations_array_type(*map(c_event_type.from_param, operations))
-
-        packet.data_size = ctypes.sizeof(operations_array)
-        packet.data = ctypes.cast(operations_array, ctypes.c_void_p)
+        buffer = encode(operation, operations)
+        packet.data_size = len(buffer)
+        packet.data = ctypes.cast(buffer, ctypes.c_void_p)
 
         return InflightPacket(
             packet=packet,
@@ -134,8 +110,8 @@ class Client:
             on_completion=None,
             on_completion_context=None,
             operation=operation,
-            c_event_type=c_event_type,
-            c_result_type=c_result_type)
+            result_type=result_type,
+            buffer=buffer)
 
     def close(self):
         bindings.tb_client_deinit(ctypes.byref(self._client))
@@ -160,19 +136,12 @@ class Client:
             inflight_packet.on_completion(inflight_packet)
             return
 
-        c_result_type = inflight_packet.c_result_type
-        tb_assert(len_ % ctypes.sizeof(c_result_type) == 0)
+        result_type = inflight_packet.result_type
 
-        # The memory referenced in bytes_ptr is only valid for the duration of this callback. Copy
-        # it to a fresh, Python owned buffer and do the conversion from the raw C type to the Python
-        # dataclass.
-        results_slice = ctypes.cast(
-            bytes_ptr,
-            ctypes.POINTER(c_result_type)
-        )[0:(len_ // ctypes.sizeof(c_result_type))]
-        results = [result.to_python() for result in results_slice]
-
-        inflight_packet.response = results
+        # The memory referenced in bytes_ptr is only valid for the duration of this callback.
+        # decode() copies this and returns a Python managed list.
+        results_slice = ctypes.string_at(bytes_ptr, len_)
+        inflight_packet.response = decode(inflight_packet.operation, result_type, results_slice)
 
         tb_assert(inflight_packet.on_completion is not None)
         inflight_packet.on_completion(inflight_packet)
@@ -189,8 +158,8 @@ class ClientSync(Client, bindings.StateMachineMixin):
         inflight_packet.on_completion_context.event.set()
 
     def _submit(self, operation: bindings.Operation, operations: list[Any],
-                c_event_type: Any, c_result_type: Any):
-        inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
+                result_type: Any):
+        inflight_packet = self._acquire_packet(operation, operations, result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
         inflight_packet.on_completion = self._on_completion
@@ -227,8 +196,8 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         inflight_packet.on_completion_context.event.set()
 
     async def _submit(self, operation: bindings.Operation, operations: Any,
-                      c_event_type: Any, c_result_type: Any):
-        inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
+                      result_type: Any):
+        inflight_packet = self._acquire_packet(operation, operations, result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
         inflight_packet.on_completion = self._on_completion

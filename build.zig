@@ -711,7 +711,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                     return fetch(b, .{
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-x86_64-linux.zip",
-                        .file_name = "llvm-objcopy",
+                        .path = .{ .file = "llvm-objcopy" },
                         .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e09" ++
                             "13f33504b03a",
                     });
@@ -720,7 +720,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                     return fetch(b, .{
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-aarch64-linux.zip",
-                        .file_name = "llvm-objcopy",
+                        .path = .{ .file = "llvm-objcopy" },
                         .hash = "122006fbe2af4f6cdbd7236b951b4d128de95b7688828a6999b4fe71" ++
                             "50e4bb3142ee",
                     });
@@ -733,7 +733,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
             return fetch(b, .{
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-x86_64-windows.zip",
-                .file_name = "llvm-objcopy.exe",
+                .path = .{ .file = "llvm-objcopy.exe" },
                 .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
             });
         },
@@ -743,7 +743,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
             return fetch(b, .{
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-aarch64-macos.zip",
-                .file_name = "llvm-objcopy",
+                .path = .{ .file = "llvm-objcopy" },
                 .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
             });
         },
@@ -1422,6 +1422,44 @@ fn build_python_client(
         .path = "./src/clients/python/src/tigerbeetle/bindings.py",
     });
 
+    const python_include = fetch(b, .{
+        .url = "https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz",
+        .path = .{ .dir = "Include" },
+        .hash = "12201bdb59a6e33819c55f54b5d29f1232a536cee6c5ac391a43c86302d82b8de29b",
+    });
+
+    // The includes for Python are pulled above, but it needs a (very) basic pyconfig.h to keep the
+    // other headers happy.
+    const python_include_pyconfig =
+        \\#define SIZEOF_WCHAR_T 4
+        \\#define SIZEOF_LONG 8
+    ;
+    const write_files = b.addWriteFiles();
+    const python_include_pyconfig_path = write_files.add("pyconfig.h", python_include_pyconfig);
+
+    // For windows, compile a set of all symbols that could be exported by Python and write it to a
+    // `.def` file for `zig dlltool` to generate a `.lib` file from.
+    const def_tool_build = b.addExecutable(.{
+        .name = "python_def",
+        .root_source_file = b.path("src/clients/python/python_def.zig"),
+        .target = b.graph.host,
+    });
+    def_tool_build.linkLibC();
+    def_tool_build.root_module.addIncludePath(python_include);
+    def_tool_build.root_module.addIncludePath(python_include_pyconfig_path.dirname());
+
+    const def_tool = b.addRunArtifact(def_tool_build);
+
+    var run_dll_tool = b.addSystemCommand(&.{
+        b.graph.zig_exe, "dlltool",
+        "-m",            "i386:x86-64",
+        "-D",            "python.exe",
+        "-l",            "python.lib",
+        "-d",
+    });
+    run_dll_tool.addFileArg(def_tool.captureStdOut());
+    run_dll_tool.cwd = b.path("./src/clients/python");
+
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
             .arch_os_abi = platform[0],
@@ -1430,8 +1468,8 @@ fn build_python_client(
         const resolved_target = b.resolveTargetQuery(cross_target);
 
         const shared_lib = b.addSharedLibrary(.{
-            .name = "tb_client",
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .name = "tb_pythonclient",
+            .root_source_file = b.path("src/clients/python/python.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
@@ -1440,17 +1478,36 @@ fn build_python_client(
         if (resolved_target.result.os.tag == .windows) {
             shared_lib.linkSystemLibrary("ws2_32");
             shared_lib.linkSystemLibrary("advapi32");
+
+            shared_lib.step.dependOn(&run_dll_tool.step);
+            shared_lib.addLibraryPath(b.path("src/clients/python"));
+            shared_lib.linkSystemLibrary("python");
         }
 
         shared_lib.root_module.addImport("vsr", options.vsr_module);
         shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
+        shared_lib.root_module.addIncludePath(python_include);
+        shared_lib.root_module.addIncludePath(python_include_pyconfig_path.dirname());
+
+        // FIX2ME: Handle Windows with def file.
+        shared_lib.linker_allow_shlib_undefined = true;
+
+        // Python uses strange extensions. .so on macOS and Linux, and .pyd on Windows.
+        const extension = if (resolved_target.result.os.tag == .windows) "pyd" else "so";
+
+        var library_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
+        const library_path = std.fmt.bufPrint(
+            &library_path_buffer,
+            "libtb_pythonclient.abi3.{s}",
+            .{extension},
+        ) catch unreachable;
 
         step_clients_python.dependOn(&b.addInstallFile(
             shared_lib.getEmittedBin(),
             b.pathJoin(&.{
                 "../src/clients/python/src/tigerbeetle/lib/",
                 platform[0],
-                shared_lib.out_filename,
+                library_path,
             }),
         ).step);
     }
@@ -1931,7 +1988,9 @@ fn download_release(
 
     return fetch(b, .{
         .url = url,
-        .file_name = if (target.result.os.tag == .windows) "tigerbeetle.exe" else "tigerbeetle",
+        .path = .{
+            .file = if (target.result.os.tag == .windows) "tigerbeetle.exe" else "tigerbeetle",
+        },
         .hash = null,
     });
 }
@@ -1939,7 +1998,7 @@ fn download_release(
 // Use 'zig fetch' to download and unpack the specified URL, optionally verifying the checksum.
 fn fetch(b: *std.Build, options: struct {
     url: []const u8,
-    file_name: []const u8,
+    path: union(enum) { file: []const u8, dir: []const u8 },
     hash: ?[]const u8,
 }) std.Build.LazyPath {
     const copy_from_cache = b.addRunArtifact(b.addExecutable(.{
@@ -1953,28 +2012,50 @@ fn fetch(b: *std.Build, options: struct {
             \\    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
             \\    const allocator = arena.allocator();
             \\    const args = try std.process.argsAlloc(allocator);
-            \\    assert(args.len == 5 or args.len == 6);
+            \\    assert(args.len == 6 or args.len == 7);
             \\
             \\    const hash_and_newline = try std.fs.cwd().readFileAlloc(allocator, args[2], 128);
             \\    assert(hash_and_newline[hash_and_newline.len - 1] == '\n');
             \\    const hash = hash_and_newline[0 .. hash_and_newline.len - 1];
-            \\    if (args.len == 6 and !std.mem.eql(u8, args[5], hash)) {
+            \\    if (args.len == 7 and !std.mem.eql(u8, args[6], hash)) {
             \\        std.debug.panic(
             \\            \\bad hash
             \\            \\specified:  {s}
             \\            \\downloaded: {s}
             \\            \\
-            \\        , .{ args[5], hash });
+            \\        , .{ args[6], hash });
             \\    }
             \\
-            \\    const source_path = try std.fs.path.join(allocator, &.{ args[1], hash, args[3] });
-            \\    try std.fs.cwd().copyFile(
-            \\        source_path,
-            \\        std.fs.cwd(),
-            \\        args[4],
-            \\        // TODO(Zig): https://github.com/ziglang/zig/pull/21555
-            \\        .{ .override_mode = if (builtin.target.os.tag == .macos) 0o777 else null },
-            \\    );
+            \\    const source_path = try std.fs.path.join(allocator, &.{ args[1], hash, args[4] });
+            \\    if (std.mem.eql(u8, args[3], "file")) {
+            \\        try std.fs.cwd().copyFile(
+            \\            source_path,
+            \\            std.fs.cwd(),
+            \\            args[5],
+            \\            // TODO(Zig): https://github.com/ziglang/zig/pull/21555
+            \\            .{ .override_mode = if (builtin.target.os.tag == .macos) 0o777 else null },
+            \\        );
+            \\    } else {
+            \\        var source_path_dir = try std.fs.cwd().openDir(source_path, .{ .iterate = true });
+            \\        defer source_path_dir.close();
+            \\
+            \\        var target_path_dir = try std.fs.cwd().makeOpenPath(args[5], .{});
+            \\        defer target_path_dir.close();
+            \\
+            \\        var walker = try source_path_dir.walk(allocator);
+            \\        defer walker.deinit();
+            \\        while (try walker.next()) |entry| {
+            \\            switch (entry.kind) {
+            \\                .file => {
+            \\                    try entry.dir.copyFile(entry.basename, target_path_dir, entry.path, .{});
+            \\                },
+            \\                .directory => {
+            \\                    try target_path_dir.makeDir(entry.path);
+            \\                },
+            \\                else => return error.UnexpectedEntryKind,
+            \\            }
+            \\        }
+            \\    }
             \\}
         ),
         .target = b.graph.host,
@@ -1985,8 +2066,18 @@ fn fetch(b: *std.Build, options: struct {
     copy_from_cache.addFileArg(
         b.addSystemCommand(&.{ b.graph.zig_exe, "fetch", options.url }).captureStdOut(),
     );
-    copy_from_cache.addArg(options.file_name);
-    const result = copy_from_cache.addOutputFileArg(options.file_name);
+    const result = switch (options.path) {
+        .file => |path| blk: {
+            copy_from_cache.addArg("file");
+            copy_from_cache.addArg(path);
+            break :blk copy_from_cache.addOutputFileArg(path);
+        },
+        .dir => |path| blk: {
+            copy_from_cache.addArg("dir");
+            copy_from_cache.addArg(path);
+            break :blk copy_from_cache.addOutputDirectoryArg(path);
+        },
+    };
     if (options.hash) |hash| {
         copy_from_cache.addArg(hash);
     }

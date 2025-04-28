@@ -514,6 +514,7 @@ fn tidy_generic_functions(
 
         // Skipping naming convention that requires upper-case functions.
         if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
+        if (std.mem.startsWith(u8, function_name, "PyInit_")) continue;
 
         if (std.ascii.isUpper(function_name[0])) {
             if (!std.mem.endsWith(u8, function_name, "Type")) {
@@ -650,6 +651,7 @@ const DeadFilesDetector = struct {
             "unit_tests.zig",
             "vopr.zig",
             "vortex.zig",
+            "python.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;

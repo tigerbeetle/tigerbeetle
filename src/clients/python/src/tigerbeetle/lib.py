@@ -1,22 +1,24 @@
 import ctypes
 import dataclasses
 import platform
+import sys
+
 from pathlib import Path
 
 
 class NativeError(Exception):
     pass
 
+
 class IntegerOverflowError(ValueError):
     pass
 
 
-def _load_tbclient():
+def _python_tbclient_prefix():
     prefix = ""
     arch = ""
     system = ""
     linux_libc = ""
-    suffix = ""
 
     platform_machine = platform.machine().lower()
 
@@ -30,7 +32,6 @@ def _load_tbclient():
     if platform.system() == "Linux":
         prefix = "lib"
         system = "linux"
-        suffix = ".so"
         libc = platform.libc_ver()[0]
         if libc == "glibc":
             linux_libc = "-gnu.2.27"
@@ -41,17 +42,20 @@ def _load_tbclient():
     elif platform.system() == "Darwin":
         prefix = "lib"
         system = "macos"
-        suffix = ".dylib"
     elif platform.system() == "Windows":
         system = "windows"
-        suffix = ".dll"
     else:
         raise NativeError("Unsupported system: " + platform.system())
 
     source_path = Path(__file__)
     source_dir = source_path.parent
-    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"{prefix}tb_client{suffix}"
-    return ctypes.CDLL(str(library_path))
+    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}"
+
+    return str(library_path)
+
+
+class IntegerOverflowError(ValueError):
+    pass
 
 
 def validate_uint(*, bits: int, name: str, number: int):
@@ -85,4 +89,18 @@ def tb_assert(value):
     if not value:
         raise AssertionError()
 
-tbclient = _load_tbclient()
+sys.path.insert(0, _python_tbclient_prefix())
+
+try:
+    import libtb_pythonclient
+finally:
+    sys.path.pop(0)
+
+
+# This is a little bit unorthodox: the same shared library is used both as a CPython extension,
+# imported directly, _and_ via ctypes.
+tbclient = ctypes.CDLL(libtb_pythonclient.__file__)
+
+encode = libtb_pythonclient.encode
+decode = libtb_pythonclient.decode
+id = libtb_pythonclient.id

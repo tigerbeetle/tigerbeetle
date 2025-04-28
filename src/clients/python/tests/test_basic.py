@@ -50,7 +50,7 @@ def test_range_check_code_on_account_to_be_u16(client):
 
     try:
         code_error = client.create_accounts([account])
-    except tb.IntegerOverflowError:
+    except ValueError:
         pass
 
     accounts = client.lookup_accounts([account.id])

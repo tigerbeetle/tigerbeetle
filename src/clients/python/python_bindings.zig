@@ -324,14 +324,6 @@ fn emit_struct_dataclass(
     buffer.print("\n\n", .{});
 }
 
-fn ctype_type_name(comptime Type: type) []const u8 {
-    if (Type == u128) {
-        return "c_uint128";
-    }
-
-    return comptime "C" ++ mapping_name_from_type(mappings_all, Type).?;
-}
-
 fn emit_method(
     buffer: *Buffer,
     comptime operation: StateMachine.Operation,
@@ -357,8 +349,7 @@ fn emit_method(
         \\        return {[prefix_call]s}self._submit(
         \\            Operation.{[uppercase_name]s},
         \\            {[event_name_or_list]s},
-        \\            {[event_type_c]s},
-        \\            {[result_type_c]s},
+        \\            {[result_type_single]s},
         \\        )
         \\
         \\
@@ -372,8 +363,7 @@ fn emit_method(
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
             .uppercase_name = to_uppercase(@tagName(operation)),
-            .event_type_c = ctype_type_name(StateMachine.EventType(operation)),
-            .result_type_c = ctype_type_name(StateMachine.ResultType(operation)),
+            .result_type_single = zig_to_python(StateMachine.ResultType(operation)),
         },
     );
 }
