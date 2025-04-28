@@ -766,10 +766,22 @@ const Inspector = struct {
         );
         defer free_set.deinit(inspector.allocator);
 
+        const SliceOfAlignedWordSlice = []const []align(@alignOf(vsr.FreeSet.Word)) const u8;
+        const encoded_free_set_blocks_acquired: SliceOfAlignedWordSlice =
+            if (free_set_blocks_acquired_buffer.len != 0)
+            &.{free_set_blocks_acquired_buffer}
+        else
+            &.{};
+        const encoded_free_set_blocks_released: SliceOfAlignedWordSlice =
+            if (free_set_blocks_released_buffer.len != 0)
+            &.{free_set_blocks_released_buffer}
+        else
+            &.{};
+
         free_set.open(.{
             .encoded = .{
-                .blocks_acquired = &.{free_set_blocks_acquired_buffer},
-                .blocks_released = &.{free_set_blocks_released_buffer},
+                .blocks_acquired = encoded_free_set_blocks_acquired,
+                .blocks_released = encoded_free_set_blocks_released,
             },
             .free_set_block_addresses = .{
                 .blocks_acquired = free_set_blocks_acquired_addresses.items,
