@@ -549,30 +549,62 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
     tasks.soft_remove_all();
     defer tasks.verify();
 
-    { // Main branch fuzzing.
+    for ([2]SeedRecord.Template.Branch{ .main, .release }) |branch| {
+        if (branch == .release and gh_token == null) continue;
+
+        const working_directory = if (gh_token == null)
+            "."
+        else
+            try shell.fmt("./working/{s}", .{@tagName(branch)});
         const commit = if (gh_token == null)
             // Fuzz in-place when no token is specified, as a convenient shortcut for local
             // debugging.
             try run_fuzzers_commit_info(shell)
         else commit: {
-            try shell.cwd.makePath("./working/main");
-            try shell.pushd("./working/main");
+            try shell.cwd.makePath(working_directory);
+            try shell.pushd(working_directory);
             defer shell.popd();
 
             // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
             // different branches (to fuzz PRs and releases).
-            break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
+            break :commit try run_fuzzers_prepare_repository(shell, .{
+                .branch = @tagName(branch),
+            });
         };
 
+        const branch_cfo = try shell.cwd.readFileAlloc(
+            shell.arena.allocator(),
+            try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
+            1 * 1024 * 1024,
+        );
+
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            const working_directory = if (gh_token == null) "." else "./working/main";
-            _ = try tasks.put(working_directory, .{
-                .commit_timestamp = commit.timestamp,
-                .commit_sha = commit.sha,
-                .fuzzer = fuzzer,
-                .branch = .main,
-                .branch_url = "https://github.com/tigerbeetle/tigerbeetle",
-            });
+            const fuzzer_present_on_branch = switch (fuzzer) {
+                // Always fuzz vopr.
+                .vopr, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
+                // For other fuzzers, only run them if branch's CFO is aware about them as well.
+                else => std.mem.indexOf(
+                    u8,
+                    branch_cfo,
+                    try shell.fmt("    {s},", .{@tagName(fuzzer)}),
+                ) != null,
+            };
+            assert(fuzzer_present_on_branch);
+            if (fuzzer == .canary) assert(fuzzer_present_on_branch);
+
+            if (fuzzer_present_on_branch) {
+                try tasks.put(working_directory, .{
+                    .commit_timestamp = commit.timestamp,
+                    .commit_sha = commit.sha,
+                    .fuzzer = fuzzer,
+                    .branch = branch,
+                    .branch_url = switch (branch) {
+                        .main => "https://github.com/tigerbeetle/tigerbeetle",
+                        .relase => "https://github.com/tigerbeetle/tigerbeetle/tree/release",
+                        else => unreachable,
+                    },
+                });
+            }
         }
     }
 
@@ -655,18 +687,19 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         break :counts .{ task_main_count, task_pull_count };
     };
 
-    // Split time 50:50 between fuzzing main and fuzzing labeled PRs.
+    // Split time 40:40:20 between fuzzing main, labeled PRs, and the release branch.
     var weight_main_total: u32 = 0;
     var weight_pull_total: u32 = 0;
     for (tasks.list.items) |*task| {
         if (task.generation == tasks.generation) {
             switch (task.seed_template.branch) {
                 .main => {
-                    task.weight = @max(task_pull_count, 1);
+                    task.weight = 2 * @max(task_pull_count, 1);
                     weight_main_total += task.weight;
                 },
+                .release => task.weight = @max(task_pull_count, 1),
                 .pull => {
-                    task.weight = @max(task_main_count, 1);
+                    task.weight = 2 * @max(task_main_count, 1);
                     weight_pull_total += task.weight;
                 },
             }
@@ -691,7 +724,7 @@ const Commit = struct {
 // Clones the specified branch or pull request, builds the code and returns the commit that the
 // branch/PR resolves to.
 fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
-    main_branch,
+    branch: []const u8,
     pull_request: u32,
 }) !Commit {
     // When possible, reuse checkouts so that we can also reuse the zig cache.
@@ -700,7 +733,7 @@ fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
     }
 
     switch (target) {
-        .main_branch => try shell.exec("git fetch origin main", .{}),
+        .branch => |branch| try shell.exec("git fetch origin {branch}", .{ .branch = branch }),
         .pull_request => |pr| try shell.exec("git fetch origin refs/pull/{pr}/head", .{ .pr = pr }),
     }
     try shell.exec("git switch --detach FETCH_HEAD", .{});
@@ -877,11 +910,13 @@ const SeedRecord = struct {
     branch: []const u8,
 
     const Template = struct {
-        branch: union(enum) { main, pull: u32 },
+        branch: Branch,
         branch_url: []const u8,
         commit_timestamp: u64,
         commit_sha: [40]u8,
         fuzzer: Fuzzer,
+
+        const Branch = union(enum) { main, release, pull: u32 };
     };
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
