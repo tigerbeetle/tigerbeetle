@@ -56,8 +56,9 @@ async function main_seeds() {
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
 
   const [records, issues] = await Promise.all([
-    (async () => await (await fetch(data_url)).json())(),
-    (async () => await (await fetch(issues_url)).json())(),
+    (async () => await (await fetch(data_url, { cache: "no-cache" })).json())(),
+    (async () =>
+      await (await fetch(issues_url, { cache: "no-cache" })).json())(),
   ]);
 
   const pulls = issues.filter((issue) => issue.pull_request);
