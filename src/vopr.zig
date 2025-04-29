@@ -731,7 +731,7 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent - simulator.requests_cancelled() ==
+        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled ==
             simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (
@@ -1293,7 +1293,7 @@ pub const Simulator = struct {
         }
 
         if (simulator.requests_idle) return;
-        if (simulator.requests_sent - simulator.requests_cancelled() ==
+        if (simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled ==
             simulator.options.requests_max) return;
         if (!simulator.prng.chance(simulator.options.request_probability)) return;
 
@@ -1321,12 +1321,17 @@ pub const Simulator = struct {
         // Messages aren't added to the ReplySequence until a reply arrives.
         // Before sending a new message, make sure there will definitely be room for it.
         var reserved: usize = 0;
-        for (simulator.cluster.clients) |*c| {
-            // Count the number of clients that are still waiting for a `register` to complete,
-            // since they may start one at any time.
-            reserved += @intFromBool(c.session == 0);
-            // Count the number of non-register requests queued.
-            reserved += @intFromBool(c.request_inflight != null);
+        for (
+            simulator.cluster.clients,
+            simulator.cluster.client_eviction_reasons,
+        ) |*c, reason| {
+            if (reason == null) {
+                // Count the number of clients that are still waiting for a `register` to complete,
+                // since they may start one at any time.
+                reserved += @intFromBool(c.session == 0);
+                // Count the number of non-register requests queued.
+                reserved += @intFromBool(c.request_inflight != null);
+            }
         }
         // +1 for the potential request — is there room in the sequencer's queue?
         if (reserved + 1 > simulator.reply_sequence.free()) return;
@@ -1356,7 +1361,7 @@ pub const Simulator = struct {
             request_metadata.operation);
 
         simulator.requests_sent += 1;
-        assert(simulator.requests_sent - simulator.requests_cancelled() <=
+        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled <=
             simulator.options.requests_max);
     }
 
@@ -1540,19 +1545,6 @@ pub const Simulator = struct {
                 stability.* = simulator.options.replica_unpause_stability;
             }
         }
-    }
-
-    fn requests_cancelled(simulator: *const Simulator) u32 {
-        var count: u32 = 0;
-        for (
-            simulator.cluster.clients,
-            simulator.cluster.client_eviction_reasons,
-        ) |*client, reason| {
-            count += @intFromBool(reason != null and
-                client.request_inflight != null and
-                client.request_inflight.?.message.header.operation != .register);
-        }
-        return count;
     }
 };
 
