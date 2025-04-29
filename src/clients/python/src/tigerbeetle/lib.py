@@ -15,7 +15,6 @@ class IntegerOverflowError(ValueError):
 
 
 def _python_tbclient_prefix():
-    prefix = ""
     arch = ""
     system = ""
     linux_libc = ""
@@ -30,7 +29,6 @@ def _python_tbclient_prefix():
         raise NativeError("Unsupported machine: " + platform.machine())
 
     if platform.system() == "Linux":
-        prefix = "lib"
         system = "linux"
         libc = platform.libc_ver()[0]
         if libc == "glibc":
@@ -40,7 +38,6 @@ def _python_tbclient_prefix():
         else:
             raise NativeError("Unsupported libc: " + libc)
     elif platform.system() == "Darwin":
-        prefix = "lib"
         system = "macos"
     elif platform.system() == "Windows":
         system = "windows"

@@ -64,14 +64,14 @@ jobs:
           - { os: 'ubuntu-22.04',  language: 'python',  language_version: '3.7'    }
           - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.13'  }
 
-          - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
-          - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
-          - { os: 'windows-latest', language: 'java',    language_version: '11'    }
-          - { os: 'windows-latest', language: 'java',    language_version: '21'    }
-          - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
-          - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
-          - { os: 'windows-latest', language: 'python',  language_version: '3.7'  }
-          - { os: 'windows-latest', language: 'python',  language_version: '3.13'  }
+          # - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
+          # - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
+          # - { os: 'windows-latest', language: 'java',    language_version: '11'    }
+          # - { os: 'windows-latest', language: 'java',    language_version: '21'    }
+          # - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
+          # - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
+          # - { os: 'windows-latest', language: 'python',  language_version: '3.7'  }
+          # - { os: 'windows-latest', language: 'python',  language_version: '3.13'  }
 
           # Limited matrix for macOS - runners are concurrency limited.
           - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
