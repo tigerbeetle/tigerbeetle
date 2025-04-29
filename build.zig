@@ -1481,7 +1481,7 @@ fn build_python_client(
 
             shared_lib.step.dependOn(&run_dll_tool.step);
             shared_lib.addLibraryPath(b.path("src/clients/python"));
-            shared_lib.linkSystemLibrary("python");
+            shared_lib.linkSystemLibrary("python3");
         }
 
         shared_lib.root_module.addImport("vsr", options.vsr_module);
