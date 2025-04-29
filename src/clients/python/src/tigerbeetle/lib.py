@@ -15,10 +15,11 @@ class IntegerOverflowError(ValueError):
     pass
 
 
-def _python_tbclient_prefix():
+def _python_tbclient_path():
     arch = ""
     system = ""
     linux_libc = ""
+    extension = "so"
 
     platform_machine = platform.machine().lower()
 
@@ -42,17 +43,15 @@ def _python_tbclient_prefix():
         system = "macos"
     elif platform.system() == "Windows":
         system = "windows"
+        extension = "pyd"
     else:
         raise NativeError("Unsupported system: " + platform.system())
 
     source_path = Path(__file__)
     source_dir = source_path.parent
-    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}"
+    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"libtb_pythonclient.abi3.{extension}"
 
-    print("Importing from:", library_path)
-    print(os.listdir(library_path))
-
-    return str(library_path)
+    return library_path
 
 
 class IntegerOverflowError(ValueError):
@@ -90,26 +89,16 @@ def tb_assert(value):
     if not value:
         raise AssertionError()
 
-sys.path.insert(0, _python_tbclient_prefix())
-
-if platform.system() == "Windows":
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("libtb_pythonclient", Path(_python_tbclient_prefix()) / "libtb_pythonclient.abi3.pyd")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-
-try:
-    print("trying import from")
-    print(sys.path)
-    import libtb_pythonclient
-finally:
-    sys.path.pop(0)
-
+import importlib.util
+_spec = importlib.util.spec_from_file_location("libtb_pythonclient", _python_tbclient_path())
+libtb_pythonclient = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(libtb_pythonclient)
 
 # This is a little bit unorthodox: the same shared library is used both as a CPython extension,
 # imported directly, _and_ via ctypes.
-tbclient = ctypes.CDLL(libtb_pythonclient.__file__)
+tbclient = ctypes.CDLL(_python_tbclient_path())
 
 encode = libtb_pythonclient.encode
 decode = libtb_pythonclient.decode
 id = libtb_pythonclient.id
+
