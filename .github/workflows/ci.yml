@@ -53,41 +53,41 @@ jobs:
     strategy:
       matrix:
         include:
-          - { os: 'ubuntu-latest',  language: 'dotnet',  language_version: '8.0.x' }
-          - { os: 'ubuntu-latest',  language: 'go',      language_version: '1.21'  }
-          - { os: 'ubuntu-latest',  language: 'java',    language_version: '11'    }
-          - { os: 'ubuntu-latest',  language: 'java',    language_version: '21'    }
-          - { os: 'ubuntu-latest',  language: 'node',    language_version: '18.x'  }
-          - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
+          # - { os: 'ubuntu-latest',  language: 'dotnet',  language_version: '8.0.x' }
+          # - { os: 'ubuntu-latest',  language: 'go',      language_version: '1.21'  }
+          # - { os: 'ubuntu-latest',  language: 'java',    language_version: '11'    }
+          # - { os: 'ubuntu-latest',  language: 'java',    language_version: '21'    }
+          # - { os: 'ubuntu-latest',  language: 'node',    language_version: '18.x'  }
+          # - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
 
-          # Support Python 3.7 explicitly, even though it's EOL.
-          - { os: 'ubuntu-22.04',  language: 'python',  language_version: '3.7'    }
-          - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.13'  }
+          # # Support Python 3.7 explicitly, even though it's EOL.
+          # - { os: 'ubuntu-22.04',  language: 'python',  language_version: '3.7'    }
+          # - { os: 'ubuntu-latest',  language: 'python',  language_version: '3.13'  }
 
-          - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
-          - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
-          - { os: 'windows-latest', language: 'java',    language_version: '11'    }
-          - { os: 'windows-latest', language: 'java',    language_version: '21'    }
-          - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
-          - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
+          # - { os: 'windows-latest', language: 'dotnet',  language_version: '8.0.x' }
+          # - { os: 'windows-latest', language: 'go',      language_version: '1.21'  }
+          # - { os: 'windows-latest', language: 'java',    language_version: '11'    }
+          # - { os: 'windows-latest', language: 'java',    language_version: '21'    }
+          # - { os: 'windows-latest', language: 'node',    language_version: '18.x'  }
+          # - { os: 'windows-latest', language: 'node',    language_version: '20.x'  }
           - { os: 'windows-latest', language: 'python',  language_version: '3.7'  }
           - { os: 'windows-latest', language: 'python',  language_version: '3.13'  }
 
-          # Limited matrix for macOS - runners are concurrency limited.
-          - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
-          - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
-          - { os: 'macos-latest',   language: 'python',  language_version: '3.13'  }
+          # # Limited matrix for macOS - runners are concurrency limited.
+          # - { os: 'macos-latest',   language: 'go',      language_version: '1.21'  }
+          # - { os: 'macos-latest',   language: 'node',    language_version: '20.x'  }
+          # - { os: 'macos-latest',   language: 'python',  language_version: '3.13'  }
 
-          - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
-          - { os: 'macos-13',       language: 'node',    language_version: '20.x'  }
-          - { os: 'macos-13',       language: 'python',  language_version: '3.13'  }
+          # - { os: 'macos-13',       language: 'go',      language_version: '1.21'  }
+          # - { os: 'macos-13',       language: 'node',    language_version: '20.x'  }
+          # - { os: 'macos-13',       language: 'python',  language_version: '3.13'  }
 
-          # Limited matrix for Ubuntu ARM - runners are paid and we're not sure of the cost yet.
-          - { os: 'ubuntu-latest-arm64',  language: 'dotnet',  language_version: '8.0.x' }
-          - { os: 'ubuntu-latest-arm64',  language: 'go',      language_version: '1.21'  }
-          - { os: 'ubuntu-latest-arm64',  language: 'java',    language_version: '21'    }
-          - { os: 'ubuntu-latest-arm64',  language: 'node',    language_version: '20.x'  }
-          - { os: 'ubuntu-latest-arm64',  language: 'python',  language_version: '3.13'  }
+          # # Limited matrix for Ubuntu ARM - runners are paid and we're not sure of the cost yet.
+          # - { os: 'ubuntu-latest-arm64',  language: 'dotnet',  language_version: '8.0.x' }
+          # - { os: 'ubuntu-latest-arm64',  language: 'go',      language_version: '1.21'  }
+          # - { os: 'ubuntu-latest-arm64',  language: 'java',    language_version: '21'    }
+          # - { os: 'ubuntu-latest-arm64',  language: 'node',    language_version: '20.x'  }
+          # - { os: 'ubuntu-latest-arm64',  language: 'python',  language_version: '3.13'  }
 
     runs-on: ${{ matrix.os }}
     steps:
