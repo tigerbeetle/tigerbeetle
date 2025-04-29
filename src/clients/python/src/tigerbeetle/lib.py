@@ -2,7 +2,6 @@ import ctypes
 import dataclasses
 import platform
 import sys
-import os
 
 from pathlib import Path
 
@@ -49,9 +48,6 @@ def _python_tbclient_prefix():
     source_dir = source_path.parent
     library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}"
 
-    print("Importing from:", library_path)
-    print(os.listdir(library_path))
-
     return str(library_path)
 
 
@@ -92,14 +88,7 @@ def tb_assert(value):
 
 sys.path.insert(0, _python_tbclient_prefix())
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("libtb_pythonclient", Path(_python_tbclient_prefix()) / "libtb_pythonclient.abi3.pyd")
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
-
 try:
-    print("trying import from")
-    print(sys.path)
     import libtb_pythonclient
 finally:
     sys.path.pop(0)
