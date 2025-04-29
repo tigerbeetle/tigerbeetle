@@ -15,7 +15,11 @@ const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 
-const py = @import("python_def.zig").py;
+pub const py = @cImport({
+    @cDefine("PY_SSIZE_T_CLEAN", {});
+    @cDefine("Py_LIMITED_API", "0x03070000"); // Require Python 3.7 and up.
+    @cInclude("Python.h");
+});
 
 const PyObject = py.PyObject;
 

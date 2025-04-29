@@ -1327,7 +1327,7 @@ fn build_node_client(
     var npm_install = b.addSystemCommand(&.{ "npm", "install" });
     npm_install.cwd = b.path("./src/clients/node");
 
-    // For windows, compile a set of all symbols that could be exported by node and write it to a
+    // For Windows, compile a set of all symbols that could be exported by node and write it to a
     // `.def` file for `zig dlltool` to generate a `.lib` file from.
     var write_def_file = b.addSystemCommand(&.{
         "node", "--eval",
@@ -1437,8 +1437,17 @@ fn build_python_client(
     const write_files = b.addWriteFiles();
     const python_include_pyconfig_path = write_files.add("pyconfig.h", python_include_pyconfig);
 
-    // For windows, compile a set of all symbols that could be exported by Python and write it to a
+    // For Windows, compile a set of all symbols that could be exported by Python and write it to a
     // `.def` file for `zig dlltool` to generate a `.lib` file from.
+    //
+    // This is based off the `python3.def` file included in the Python source, that's normally used
+    // for generating the python3.dll which forwards to the explicitly versioned
+    // python3<version>.dll.
+    const python_def = fetch(b, .{
+        .url = "https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz",
+        .path = .{ .file = "PC/python3.def" },
+        .hash = "12201bdb59a6e33819c55f54b5d29f1232a536cee6c5ac391a43c86302d82b8de29b",
+    });
     const def_tool_build = b.addExecutable(.{
         .name = "python_def",
         .root_source_file = b.path("src/clients/python/python_def.zig"),
@@ -1449,6 +1458,7 @@ fn build_python_client(
     def_tool_build.root_module.addIncludePath(python_include_pyconfig_path.dirname());
 
     const def_tool = b.addRunArtifact(def_tool_build);
+    def_tool.addFileArg(python_def);
 
     var run_dll_tool = b.addSystemCommand(&.{
         b.graph.zig_exe, "dlltool",
