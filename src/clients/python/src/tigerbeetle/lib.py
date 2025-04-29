@@ -92,10 +92,11 @@ def tb_assert(value):
 
 sys.path.insert(0, _python_tbclient_prefix())
 
-import importlib.util
-spec = importlib.util.spec_from_file_location("libtb_pythonclient", Path(_python_tbclient_prefix()) / "libtb_pythonclient.abi3.pyd")
-mod = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(mod)
+if platform.system() == "Windows":
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("libtb_pythonclient", Path(_python_tbclient_prefix()) / "libtb_pythonclient.abi3.pyd")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
 
 try:
     print("trying import from")

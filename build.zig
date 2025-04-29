@@ -1464,7 +1464,7 @@ fn build_python_client(
         b.graph.zig_exe, "dlltool",
         "-m",            "i386:x86-64",
         "-D",            "python3.dll",
-        "-l",            "python3.lib",
+        "-l",            "python3-zig.lib",
         "-d",
     });
     run_dll_tool.addFileArg(def_tool.captureStdOut());
@@ -1492,7 +1492,9 @@ fn build_python_client(
             shared_lib.step.dependOn(&run_dll_tool.step);
             shared_lib.addLibraryPath(b.path("src/clients/python"));
 
-            shared_lib.linkSystemLibrary("python3");
+            // Specifically call it something other than python3, so it doesn't try to clash with
+            // the real python3.dll that might exist.
+            shared_lib.linkSystemLibrary("python3-zig");
         }
 
         shared_lib.root_module.addImport("vsr", options.vsr_module);
