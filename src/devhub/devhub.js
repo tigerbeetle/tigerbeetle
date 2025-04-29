@@ -138,15 +138,22 @@ async function main_seeds() {
     }
 
     const pull = pulls_by_url.get(record.branch);
-    const pr_link = pull_request_number(record)
-      ? `<a href="${record.branch}">#${pull_request_number(record)}</a>`
-      : "";
+    let commit_extra = "(unknown)";
+    if (pull_request_number(record)) {
+      commit_extra = `<a href="${record.branch}">#${
+        pull_request_number(record)
+      }</a>`;
+    } else if (is_main(record)) {
+      commit_extra = "(main)";
+    } else if (is_release(record)) {
+      commit_extra = "(release)";
+    }
     row_dom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
       record.commit_sha.substring(0, 7)
     }</code></a>
-            ${pr_link}
+            ${commit_extra}
           </td>
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
@@ -167,7 +174,7 @@ async function main_seeds() {
   let main_branch_ok = 0;
   let main_branch_canary = 0;
   for (const record of records) {
-    if (record.branch == "https://github.com/tigerbeetle/tigerbeetle") {
+    if (is_main(record)) {
       if (record.fuzzer === "canary") {
         main_branch_canary += record.count;
       } else if (record.ok) {
@@ -199,11 +206,20 @@ async function main_metrics() {
   plot_series(series, document.querySelector("#charts"), batches.length);
 }
 
+function is_main(record) {
+  return record.branch === "https://github.com/tigerbeetle/tigerbeetle";
+}
+
+function is_release(record) {
+  return record.branch ===
+    "https://github.com/tigerbeetle/tigerbeetle/tree/release";
+}
+
 function pull_request_number(record) {
-  const prPrefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
-  if (record.branch.startsWith(prPrefix)) {
+  const pr_prefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
+  if (record.branch.startsWith(pr_prefix)) {
     const pr_number = record.branch.substring(
-      prPrefix.length,
+      pr_prefix.length,
       record.branch.length,
     );
     return parseInt(pr_number, 10);
