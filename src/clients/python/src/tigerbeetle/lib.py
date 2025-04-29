@@ -48,6 +48,8 @@ def _python_tbclient_prefix():
     source_dir = source_path.parent
     library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}"
 
+    print("Importing from:", library_path)
+
     return str(library_path)
 
 
@@ -89,6 +91,8 @@ def tb_assert(value):
 sys.path.insert(0, _python_tbclient_prefix())
 
 try:
+    print("trying import from")
+    print(sys.path)
     import libtb_pythonclient
 finally:
     sys.path.pop(0)
