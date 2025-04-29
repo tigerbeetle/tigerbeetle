@@ -572,6 +572,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
             });
         };
 
+        // Only add fuzzers that also exist on the branch we are fuzzing.
         const branch_cfo = try shell.cwd.readFileAlloc(
             shell.arena.allocator(),
             try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
@@ -580,16 +581,13 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             const fuzzer_present_on_branch = switch (fuzzer) {
-                // Always fuzz vopr.
                 .vopr, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
-                // For other fuzzers, only run them if branch's CFO is aware about them as well.
                 else => std.mem.indexOf(
                     u8,
                     branch_cfo,
-                    try shell.fmt("    {s},", .{@tagName(fuzzer)}),
+                    try shell.fmt("    {s},", .{@tagName(fuzzer)}), // A field in const Fuzzer enum.
                 ) != null,
             };
-            assert(fuzzer_present_on_branch);
             if (fuzzer == .canary) assert(fuzzer_present_on_branch);
 
             if (fuzzer_present_on_branch) {
@@ -600,7 +598,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
                     .branch = branch,
                     .branch_url = switch (branch) {
                         .main => "https://github.com/tigerbeetle/tigerbeetle",
-                        .relase => "https://github.com/tigerbeetle/tigerbeetle/tree/release",
+                        .release => "https://github.com/tigerbeetle/tigerbeetle/tree/release",
                         else => unreachable,
                     },
                 });
@@ -675,43 +673,34 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         }
     }
 
-    const task_main_count, const task_pull_count = counts: {
-        var task_main_count: u32 = 0;
-        var task_pull_count: u32 = 0;
+    {
+        // Assign task weights:
+        // - Start by splitting the budget 40:40:20 between main, pull requests, and release.
+        // - Then, bump relative priority of more important fuzzers like VOPR.
+        var task_count_main: u32 = 0;
+        var task_count_pull: u32 = 0;
+        var task_count_release: u32 = 0;
         for (tasks.list.items) |*task| {
             if (task.generation == tasks.generation) {
-                task_main_count += @intFromBool(task.seed_template.branch == .main);
-                task_pull_count += @intFromBool(task.seed_template.branch == .pull);
+                task_count_main += @intFromBool(task.seed_template.branch == .main);
+                task_count_pull += @intFromBool(task.seed_template.branch == .pull);
+                task_count_release += @intFromBool(task.seed_template.branch == .release);
             }
         }
-        break :counts .{ task_main_count, task_pull_count };
-    };
 
-    // Split time 40:40:20 between fuzzing main, labeled PRs, and the release branch.
-    var weight_main_total: u32 = 0;
-    var weight_pull_total: u32 = 0;
-    for (tasks.list.items) |*task| {
-        if (task.generation == tasks.generation) {
-            switch (task.seed_template.branch) {
-                .main => {
-                    task.weight = 2 * @max(task_pull_count, 1);
-                    weight_main_total += task.weight;
-                },
-                .release => task.weight = @max(task_pull_count, 1),
-                .pull => {
-                    task.weight = 2 * @max(task_main_count, 1);
-                    weight_pull_total += task.weight;
-                },
+        const weight_main = 1_000_000;
+        const weight_pull = 1_000_000;
+        const weight_release = 500_000;
+
+        for (tasks.list.items) |*task| {
+            if (task.generation == tasks.generation) {
+                const multiplier = Fuzzer.weights.get(task.seed_template.fuzzer);
+                task.weight = switch (task.seed_template.branch) {
+                    .main => @divFloor(weight_main, task_count_main),
+                    .pull => @divFloor(weight_pull, task_count_pull),
+                    .release => @divFloor(weight_release, task_count_release),
+                } * multiplier;
             }
-        }
-    }
-    if (weight_main_total > 0 and weight_pull_total > 0) {
-        assert(weight_main_total == weight_pull_total);
-    }
-
-    for (tasks.list.items) |*task| {
-        if (task.generation == tasks.generation) {
-            task.weight *= Fuzzer.weights.get(task.seed_template.fuzzer);
         }
     }
 }
