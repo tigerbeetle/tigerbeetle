@@ -1,3 +1,6 @@
+//! Given a path to python3.def (eg, https://github.com/python/cpython/blob/v3.7.17/PC/python3.def)
+//! convert it to a def file suitable for feeding in to dlltool to generate the needed .lib file
+//! so that the Windows Python extension can be linked.
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -7,7 +10,6 @@ pub fn main() !void {
     const args = try std.process.argsAlloc(allocator);
     assert(args.len == 2);
 
-    std.log.info("WTF: {s}", .{args[1]});
     const python3_def = try std.fs.cwd().readFileAlloc(allocator, args[1], 1024 * 1024);
     const stdout = std.io.getStdOut().writer();
 
