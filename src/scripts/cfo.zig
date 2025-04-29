@@ -51,6 +51,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -895,7 +896,7 @@ const SeedRecord = struct {
     seed: u64 = 0,
     // The following fields are excluded from comparison:
     command: []const u8 = "",
-    // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
+    // Branch is a GitHub URL. It affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
 
     const Template = struct {
@@ -907,6 +908,14 @@ const SeedRecord = struct {
 
         const Branch = union(enum) { main, release, pull: u32 };
     };
+
+    fn is_release(record: SeedRecord) bool {
+        return std.mem.eql(
+            u8,
+            record.branch,
+            "https://github.com/tigerbeetle/tigerbeetle/tree/release",
+        );
+    }
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
@@ -921,13 +930,13 @@ const SeedRecord = struct {
             .eq;
     }
 
-    fn order_by_field(lhs: anytype, rhs: @TypeOf(lhs)) ?std.math.Order {
-        const full_order = switch (@TypeOf(lhs)) {
-            []const u8 => std.mem.order(u8, lhs, rhs),
-            [40]u8 => std.mem.order(u8, &lhs, &rhs),
-            bool => std.math.order(@intFromBool(lhs), @intFromBool(rhs)),
-            Fuzzer => std.math.order(@intFromEnum(lhs), @intFromEnum(rhs)),
-            else => std.math.order(lhs, rhs),
+    fn order_by_field(a: anytype, b: @TypeOf(a)) ?std.math.Order {
+        const full_order = switch (@TypeOf(a)) {
+            []const u8 => std.mem.order(u8, a, b),
+            [40]u8 => std.mem.order(u8, &a, &b),
+            bool => std.math.order(@intFromBool(a), @intFromBool(b)),
+            Fuzzer => std.math.order(@intFromEnum(a), @intFromEnum(b)),
+            else => std.math.order(a, b),
         };
         return if (full_order == .eq) null else full_order;
     }
@@ -953,7 +962,15 @@ const SeedRecord = struct {
         }
     }
 
-    fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
+    // Normally, records are sorted by commit timestamp, such that inactive or merged pull requests
+    // sink down naturally. However, we want to "pin" the latest release commit even if it is old,
+    // so we rig comparison function here.
+    fn less_than(release_latest: u64, a: SeedRecord, b: SeedRecord) bool {
+        maybe(release_latest == 0);
+        const a_latest_release = a.commit_timestamp == release_latest and a.is_release();
+        const b_latest_release = b.commit_timestamp == release_latest and b.is_release();
+        if (a_latest_release and !b_latest_release) return true;
+        if (!a_latest_release and b_latest_release) return false;
         return a.order(b) == .lt;
     }
 
@@ -982,7 +999,14 @@ const SeedRecord = struct {
         new: []const SeedRecord,
     ) ![]const SeedRecord {
         const current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
-        std.mem.sort(SeedRecord, current_and_new, {}, SeedRecord.less_than);
+
+        var release_latest: u64 = 0;
+        for (current_and_new) |record| {
+            if (record.is_release() and record.commit_timestamp > release_latest) {
+                release_latest = record.commit_timestamp;
+            }
+        }
+        std.mem.sort(SeedRecord, current_and_new, release_latest, SeedRecord.less_than);
 
         var result = try std.ArrayList(SeedRecord).initCapacity(arena, current.len);
 
