@@ -96,7 +96,7 @@ _spec.loader.exec_module(libtb_pythonclient)
 
 # This is a little bit unorthodox: the same shared library is used both as a CPython extension,
 # imported directly, _and_ via ctypes.
-tbclient = ctypes.CDLL(_python_tbclient_path())
+tbclient = ctypes.CDLL(str(_python_tbclient_path()))
 
 encode = libtb_pythonclient.encode
 decode = libtb_pythonclient.decode
