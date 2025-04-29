@@ -25,10 +25,9 @@
 //!
 //! Note that the budget/refresh timers do not count time spent cloning or compiling code.
 //!
-//! It is important that the caller (systemd typically) arranges for CFO to be a process group
-//! leader. It is not possible to reliably wait for (grand) children with POSIX, so its on the
-//! call-site to cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to
-//! arrange that.
+//! It is important that the caller arranges for CFO's descendants to be reaped when CFO exits.
+//! It is not possible to reliably wait for (grand) children with POSIX, so its on the call-site to
+//! cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to arrange that.
 //!
 //! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
@@ -52,6 +51,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
 const Shell = @import("../shell.zig");
@@ -550,30 +550,60 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
     tasks.soft_remove_all();
     defer tasks.verify();
 
-    { // Main branch fuzzing.
+    for ([2]SeedRecord.Template.Branch{ .main, .release }) |branch| {
+        if (branch == .release and gh_token == null) continue;
+
+        const working_directory = if (gh_token == null)
+            "."
+        else
+            try shell.fmt("./working/{s}", .{@tagName(branch)});
         const commit = if (gh_token == null)
             // Fuzz in-place when no token is specified, as a convenient shortcut for local
             // debugging.
             try run_fuzzers_commit_info(shell)
         else commit: {
-            try shell.cwd.makePath("./working/main");
-            try shell.pushd("./working/main");
+            try shell.cwd.makePath(working_directory);
+            try shell.pushd(working_directory);
             defer shell.popd();
 
             // Fuzz an independent clone of the repository, so that CFO and the fuzzer could be on
             // different branches (to fuzz PRs and releases).
-            break :commit try run_fuzzers_prepare_repository(shell, .main_branch);
+            break :commit try run_fuzzers_prepare_repository(shell, .{
+                .branch = @tagName(branch),
+            });
         };
 
+        // Only add fuzzers that also exist on the branch we are fuzzing.
+        const branch_cfo = try shell.cwd.readFileAlloc(
+            shell.arena.allocator(),
+            try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
+            1 * 1024 * 1024,
+        );
+
         for (std.enums.values(Fuzzer)) |fuzzer| {
-            const working_directory = if (gh_token == null) "." else "./working/main";
-            _ = try tasks.put(working_directory, .{
-                .commit_timestamp = commit.timestamp,
-                .commit_sha = commit.sha,
-                .fuzzer = fuzzer,
-                .branch = .main,
-                .branch_url = "https://github.com/tigerbeetle/tigerbeetle",
-            });
+            const fuzzer_present_on_branch = switch (fuzzer) {
+                .vopr, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
+                else => std.mem.indexOf(
+                    u8,
+                    branch_cfo,
+                    try shell.fmt("    {s},", .{@tagName(fuzzer)}), // A field in const Fuzzer enum.
+                ) != null,
+            };
+            if (fuzzer == .canary) assert(fuzzer_present_on_branch);
+
+            if (fuzzer_present_on_branch) {
+                try tasks.put(working_directory, .{
+                    .commit_timestamp = commit.timestamp,
+                    .commit_sha = commit.sha,
+                    .fuzzer = fuzzer,
+                    .branch = branch,
+                    .branch_url = switch (branch) {
+                        .main => "https://github.com/tigerbeetle/tigerbeetle",
+                        .release => "https://github.com/tigerbeetle/tigerbeetle/tree/release",
+                        else => unreachable,
+                    },
+                });
+            }
         }
     }
 
@@ -644,42 +674,34 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         }
     }
 
-    const task_main_count, const task_pull_count = counts: {
-        var task_main_count: u32 = 0;
-        var task_pull_count: u32 = 0;
+    {
+        // Assign task weights:
+        // - Start by splitting the budget 40:40:20 between main, pull requests, and release.
+        // - Then, bump relative priority of more important fuzzers like VOPR.
+        var task_count_main: u32 = 0;
+        var task_count_pull: u32 = 0;
+        var task_count_release: u32 = 0;
         for (tasks.list.items) |*task| {
             if (task.generation == tasks.generation) {
-                task_main_count += @intFromBool(task.seed_template.branch == .main);
-                task_pull_count += @intFromBool(task.seed_template.branch == .pull);
+                task_count_main += @intFromBool(task.seed_template.branch == .main);
+                task_count_pull += @intFromBool(task.seed_template.branch == .pull);
+                task_count_release += @intFromBool(task.seed_template.branch == .release);
             }
         }
-        break :counts .{ task_main_count, task_pull_count };
-    };
 
-    // Split time 50:50 between fuzzing main and fuzzing labeled PRs.
-    var weight_main_total: u32 = 0;
-    var weight_pull_total: u32 = 0;
-    for (tasks.list.items) |*task| {
-        if (task.generation == tasks.generation) {
-            switch (task.seed_template.branch) {
-                .main => {
-                    task.weight = @max(task_pull_count, 1);
-                    weight_main_total += task.weight;
-                },
-                .pull => {
-                    task.weight = @max(task_main_count, 1);
-                    weight_pull_total += task.weight;
-                },
+        const weight_main = 1_000_000;
+        const weight_pull = 1_000_000;
+        const weight_release = 500_000;
+
+        for (tasks.list.items) |*task| {
+            if (task.generation == tasks.generation) {
+                const multiplier = Fuzzer.weights.get(task.seed_template.fuzzer);
+                task.weight = switch (task.seed_template.branch) {
+                    .main => @divFloor(weight_main, task_count_main),
+                    .pull => @divFloor(weight_pull, task_count_pull),
+                    .release => @divFloor(weight_release, task_count_release),
+                } * multiplier;
             }
-        }
-    }
-    if (weight_main_total > 0 and weight_pull_total > 0) {
-        assert(weight_main_total == weight_pull_total);
-    }
-
-    for (tasks.list.items) |*task| {
-        if (task.generation == tasks.generation) {
-            task.weight *= Fuzzer.weights.get(task.seed_template.fuzzer);
         }
     }
 }
@@ -692,7 +714,7 @@ const Commit = struct {
 // Clones the specified branch or pull request, builds the code and returns the commit that the
 // branch/PR resolves to.
 fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
-    main_branch,
+    branch: []const u8,
     pull_request: u32,
 }) !Commit {
     // When possible, reuse checkouts so that we can also reuse the zig cache.
@@ -701,7 +723,7 @@ fn run_fuzzers_prepare_repository(shell: *Shell, target: union(enum) {
     }
 
     switch (target) {
-        .main_branch => try shell.exec("git fetch origin main", .{}),
+        .branch => |branch| try shell.exec("git fetch origin {branch}", .{ .branch = branch }),
         .pull_request => |pr| try shell.exec("git fetch origin refs/pull/{pr}/head", .{ .pr = pr }),
     }
     try shell.exec("git switch --detach FETCH_HEAD", .{});
@@ -874,16 +896,26 @@ const SeedRecord = struct {
     seed: u64 = 0,
     // The following fields are excluded from comparison:
     command: []const u8 = "",
-    // Branch is an GitHub URL. It only affects the UI, where the seeds are grouped by the branch.
+    // Branch is a GitHub URL. It affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
 
     const Template = struct {
-        branch: union(enum) { main, pull: u32 },
+        branch: Branch,
         branch_url: []const u8,
         commit_timestamp: u64,
         commit_sha: [40]u8,
         fuzzer: Fuzzer,
+
+        const Branch = union(enum) { main, release, pull: u32 };
     };
+
+    fn is_release(record: SeedRecord) bool {
+        return std.mem.eql(
+            u8,
+            record.branch,
+            "https://github.com/tigerbeetle/tigerbeetle/tree/release",
+        );
+    }
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
         return order_by_field(b.commit_timestamp, a.commit_timestamp) orelse // NB: reverse order.
@@ -898,13 +930,13 @@ const SeedRecord = struct {
             .eq;
     }
 
-    fn order_by_field(lhs: anytype, rhs: @TypeOf(lhs)) ?std.math.Order {
-        const full_order = switch (@TypeOf(lhs)) {
-            []const u8 => std.mem.order(u8, lhs, rhs),
-            [40]u8 => std.mem.order(u8, &lhs, &rhs),
-            bool => std.math.order(@intFromBool(lhs), @intFromBool(rhs)),
-            Fuzzer => std.math.order(@intFromEnum(lhs), @intFromEnum(rhs)),
-            else => std.math.order(lhs, rhs),
+    fn order_by_field(a: anytype, b: @TypeOf(a)) ?std.math.Order {
+        const full_order = switch (@TypeOf(a)) {
+            []const u8 => std.mem.order(u8, a, b),
+            [40]u8 => std.mem.order(u8, &a, &b),
+            bool => std.math.order(@intFromBool(a), @intFromBool(b)),
+            Fuzzer => std.math.order(@intFromEnum(a), @intFromEnum(b)),
+            else => std.math.order(a, b),
         };
         return if (full_order == .eq) null else full_order;
     }
@@ -930,7 +962,15 @@ const SeedRecord = struct {
         }
     }
 
-    fn less_than(_: void, a: SeedRecord, b: SeedRecord) bool {
+    // Normally, records are sorted by commit timestamp, such that inactive or merged pull requests
+    // sink down naturally. However, we want to "pin" the latest release commit even if it is old,
+    // so we rig comparison function here.
+    fn less_than(release_latest: u64, a: SeedRecord, b: SeedRecord) bool {
+        maybe(release_latest == 0);
+        const a_latest_release = a.commit_timestamp == release_latest and a.is_release();
+        const b_latest_release = b.commit_timestamp == release_latest and b.is_release();
+        if (a_latest_release and !b_latest_release) return true;
+        if (!a_latest_release and b_latest_release) return false;
         return a.order(b) == .lt;
     }
 
@@ -959,7 +999,14 @@ const SeedRecord = struct {
         new: []const SeedRecord,
     ) ![]const SeedRecord {
         const current_and_new = try std.mem.concat(arena, SeedRecord, &.{ current, new });
-        std.mem.sort(SeedRecord, current_and_new, {}, SeedRecord.less_than);
+
+        var release_latest: u64 = 0;
+        for (current_and_new) |record| {
+            if (record.is_release() and record.commit_timestamp > release_latest) {
+                release_latest = record.commit_timestamp;
+            }
+        }
+        std.mem.sort(SeedRecord, current_and_new, release_latest, SeedRecord.less_than);
 
         var result = try std.ArrayList(SeedRecord).initCapacity(arena, current.len);
 
