@@ -731,6 +731,10 @@ pub fn ContextType(
             // Now that the client is evicted, no more requests can be submitted to it and we can
             // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
             // client before it exits (see `io_thread`).
+            //? batiati: Could we assign `reason` before calling `stop()`?
+            //? There's no practical reason, as the signal doesn't trigger the event
+            //? synchronously. However, making `stop()` the final action reads better.
+            //? resolved.
             self.eviction_reason = eviction.header.reason;
             self.signal.stop();
         }
@@ -886,6 +890,10 @@ pub fn ContextType(
 
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
+            //? batiati: I think we could move the message_pool and IO deinit together
+            //? with the client deinit.
+            //? chaitanyabhandari: Ah yes, makes sense!
+            //? resolved.
 
             self.gpa.allocator().free(self.addresses_copy);
 
