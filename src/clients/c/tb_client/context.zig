@@ -377,10 +377,7 @@ pub fn ContextType(
                 };
             }
 
-            // If evicted, the inflight request was already canceled during eviction.
-            if (self.eviction_reason == null) {
-                self.cancel_request_inflight();
-            }
+            self.cancel_request_inflight();
 
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
@@ -393,6 +390,12 @@ pub fn ContextType(
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
             }
+
+            self.io.cancel_all();
+            self.signal.deinit();
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
+            self.io.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
@@ -725,12 +728,11 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
+            // Now that the client is evicted, no more requests can be submitted to it and we can
+            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
+            // client before it exits (see `io_thread`).
             self.eviction_reason = eviction.header.reason;
-
-            self.cancel_request_inflight();
-            while (self.pending.pop()) |packet| {
-                self.packet_cancel(packet);
-            }
+            self.signal.stop();
         }
 
         fn client_result_callback(
@@ -838,7 +840,6 @@ pub fn ContextType(
 
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
             const self: *Context = @ptrCast(@alignCast(context));
-            assert(self.signal.status() == .running);
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
             // memory management. However, some of Packet's fields are essentially private.
@@ -860,9 +861,16 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            // Enqueue the packet and notify the IO thread to process it asynchronously.
-            self.submitted.push(packet);
-            self.signal.notify();
+            if (self.eviction_reason == null) {
+                // Enqueue the packet and notify the IO thread to process it asynchronously.
+                assert(self.signal.status() == .running);
+                self.submitted.push(packet);
+                self.signal.notify();
+            } else {
+                // Cancel the packet since we stop the IO thread during eviction.
+                assert(self.signal.status() != .running);
+                self.packet_cancel(packet);
+            }
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
@@ -872,20 +880,12 @@ pub fn ContextType(
 
         fn vtable_deinit_fn(context: *anyopaque) void {
             const self: *Context = @ptrCast(@alignCast(context));
-            assert(self.signal.status() == .running);
 
             self.signal.stop();
             self.thread.join();
 
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
-
-            self.io.cancel_all();
-
-            self.signal.deinit();
-            self.client.deinit(self.gpa.allocator());
-            self.message_pool.deinit(self.gpa.allocator());
-            self.io.deinit();
 
             self.gpa.allocator().free(self.addresses_copy);
 
