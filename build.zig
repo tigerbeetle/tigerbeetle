@@ -1453,8 +1453,8 @@ fn build_python_client(
     var run_dll_tool = b.addSystemCommand(&.{
         b.graph.zig_exe, "dlltool",
         "-m",            "i386:x86-64",
-        "-D",            "python.exe",
-        "-l",            "python.lib",
+        "-D",            "python3.dll",
+        "-l",            "python3.lib",
         "-d",
     });
     run_dll_tool.addFileArg(def_tool.captureStdOut());
