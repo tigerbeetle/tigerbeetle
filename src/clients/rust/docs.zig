@@ -17,12 +17,12 @@ pub const RustDocs = Docs{
     ,
 
     .prerequisites =
-    \\* todo.
+    \\* t o d o
     ,
 
     .project_file_name = "Cargo.toml",
     .project_file =
-    \\ todo
+    \\ t o d o
     ,
 
     .test_file_name = "main",

@@ -9,7 +9,7 @@ The TigerBeetle client for Rust.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* todo.
+* t o d o
 
 ## Setup
 
@@ -18,7 +18,7 @@ First, create a directory for your project and `cd` into the directory.
 Then create `Cargo.toml` and copy this into it:
 
 ```toml
- todo
+ t o d o
 ```
 
 Then, install the TigerBeetle client:
