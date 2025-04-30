@@ -1422,20 +1422,26 @@ fn build_python_client(
         .path = "./src/clients/python/src/tigerbeetle/bindings.py",
     });
 
-    const python_include = fetch(b, .{
+    const python_includes = fetch(b, .{
         .url = "https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz",
         .path = .{ .dir = "Include" },
         .hash = "12201bdb59a6e33819c55f54b5d29f1232a536cee6c5ac391a43c86302d82b8de29b",
     });
 
+    const python_windows_def = fetch(b, .{
+        .url = "https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz",
+        .path = .{ .file = "PC/python3.def" },
+        .hash = "12201bdb59a6e33819c55f54b5d29f1232a536cee6c5ac391a43c86302d82b8de29b",
+    });
+
     // The includes for Python are pulled above, but it needs a (very) basic pyconfig.h to keep the
     // other headers happy.
-    const python_include_pyconfig =
+    const python_pyconfig =
         \\#define SIZEOF_WCHAR_T 4
         \\#define SIZEOF_LONG 8
     ;
     const write_files = b.addWriteFiles();
-    const python_include_pyconfig_path = write_files.add("pyconfig.h", python_include_pyconfig);
+    const python_pyconfig_path = write_files.add("pyconfig.h", python_pyconfig);
 
     // For Windows, compile a set of all symbols that could be exported by Python and write it to a
     // `.def` file for `zig dlltool` to generate a `.lib` file from.
@@ -1443,22 +1449,17 @@ fn build_python_client(
     // This is based off the `python3.def` file included in the Python source, that's normally used
     // for generating the python3.dll which forwards to the explicitly versioned
     // python3<version>.dll.
-    const python_def = fetch(b, .{
-        .url = "https://www.python.org/ftp/python/3.7.0/Python-3.7.0.tgz",
-        .path = .{ .file = "PC/python3.def" },
-        .hash = "12201bdb59a6e33819c55f54b5d29f1232a536cee6c5ac391a43c86302d82b8de29b",
-    });
-    const def_tool_build = b.addExecutable(.{
+    const def_generator = b.addExecutable(.{
         .name = "python_def",
         .root_source_file = b.path("src/clients/python/python_def.zig"),
         .target = b.graph.host,
     });
-    def_tool_build.linkLibC();
-    def_tool_build.root_module.addIncludePath(python_include);
-    def_tool_build.root_module.addIncludePath(python_include_pyconfig_path.dirname());
+    def_generator.linkLibC();
+    def_generator.root_module.addIncludePath(python_includes);
+    def_generator.root_module.addIncludePath(python_pyconfig_path.dirname());
 
-    const def_tool = b.addRunArtifact(def_tool_build);
-    def_tool.addFileArg(python_def);
+    const def_tool = b.addRunArtifact(def_generator);
+    def_tool.addFileArg(python_windows_def);
 
     var run_dll_tool = b.addSystemCommand(&.{
         b.graph.zig_exe, "dlltool",
@@ -1469,6 +1470,12 @@ fn build_python_client(
     });
     run_dll_tool.addFileArg(def_tool.captureStdOut());
     run_dll_tool.cwd = b.path("./src/clients/python");
+
+    const libtb_client_module = b.createModule(.{
+        .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+    });
+    libtb_client_module.addOptions("vsr_options", options.vsr_options);
+    libtb_client_module.addImport("vsr", options.vsr_module);
 
     inline for (platforms) |platform| {
         const cross_target = CrossTarget.parse(.{
@@ -1499,10 +1506,10 @@ fn build_python_client(
 
         shared_lib.root_module.addImport("vsr", options.vsr_module);
         shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
-        shared_lib.root_module.addIncludePath(python_include);
-        shared_lib.root_module.addIncludePath(python_include_pyconfig_path.dirname());
+        shared_lib.root_module.addImport("libtb_client", libtb_client_module);
+        shared_lib.root_module.addIncludePath(python_includes);
+        shared_lib.root_module.addIncludePath(python_pyconfig_path.dirname());
 
-        // FIX2ME: Handle Windows with def file.
         shared_lib.linker_allow_shlib_undefined = true;
 
         // Python uses strange extensions. .so on macOS and Linux, and .pyd on Windows.

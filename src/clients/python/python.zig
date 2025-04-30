@@ -1,6 +1,3 @@
-//! Entry point for exporting the `tb_client` library.
-//! Used by language clients that rely on the shared or static library exposed by `tb_client.h`.
-//! For an idiomatic Zig API, use `vsr.tb_client` directly instead.
 const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
@@ -15,7 +12,11 @@ const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 
-pub const py = @cImport({
+// libtb_client.zig exports the client symbols.
+const libtb_client = @import("libtb_client");
+pub const std_options = libtb_client.std_options;
+
+const py = @cImport({
     @cDefine("PY_SSIZE_T_CLEAN", {});
     @cDefine("Py_LIMITED_API", "0x03070000"); // Require Python 3.7 and up.
     @cInclude("Python.h");
@@ -23,40 +24,15 @@ pub const py = @cImport({
 
 const PyObject = py.PyObject;
 
-pub const std_options: std.Options = .{
-    .log_level = .debug,
-    .logFn = exports.Logging.application_logger,
-};
-
-comptime {
-    if (!builtin.link_libc) {
-        @compileError("Must be built with libc to export tb_client symbols.");
-    }
-
-    @export(exports.init, .{ .name = "tb_client_init", .linkage = .strong });
-    @export(exports.init_echo, .{ .name = "tb_client_init_echo", .linkage = .strong });
-    @export(exports.submit, .{ .name = "tb_client_submit", .linkage = .strong });
-    @export(exports.deinit, .{ .name = "tb_client_deinit", .linkage = .strong });
-    @export(
-        exports.completion_context,
-        .{ .name = "tb_client_completion_context", .linkage = .strong },
-    );
-    @export(
-        exports.register_log_callback,
-        .{ .name = "tb_client_register_log_callback", .linkage = .strong },
-    );
-    @export(
-        exports.init_parameters,
-        .{ .name = "tb_client_init_parameters", .linkage = .strong },
-    );
-}
-
-var time_ms_last: i64 = 0;
+var time_ms_last: u128 = 0;
 fn id(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*]PyObject {
+    const gil_state = py.PyGILState_Ensure();
+    defer py.PyGILState_Release(gil_state);
+
     _ = self;
     _ = args;
     const time_ms = blk: {
-        const time_ms_candiate = std.time.milliTimestamp();
+        const time_ms_candiate: u128 = @intCast(std.time.milliTimestamp());
 
         if (time_ms_candiate > time_ms_last) {
             time_ms_last = time_ms_candiate;
@@ -65,12 +41,12 @@ fn id(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*]PyObject {
             break :blk time_ms_last;
         }
     };
-    _ = time_ms;
 
-    const random = std.crypto.random.int(u80);
+    const random: u128 = std.crypto.random.int(u80) << 48;
+    const output: u128 = random | time_ms;
 
-    // FIX2ME: Use time_ms and do proper shifts.
-    return translate.u128_to_object(random);
+    std.log.info("output: {}, time_ms: {} random: {}", .{ output, time_ms, random });
+    return translate.u128_to_object(output);
 }
 
 fn encode(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*c]PyObject {
@@ -100,9 +76,8 @@ fn encode(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*c]PyObject {
     // PySequence_Fast_* isn't part of the stable API, despite what the docs say!
     const sequence_length: u32 = @intCast(py.PySequence_Size(operation_list));
 
-    // FIX2ME: Just return
-    const buffer = switch (operation) {
-        inline else => |operation_comptime| blk: {
+    switch (operation) {
+        inline else => |operation_comptime| {
             const Event = StateMachine.EventType(operation_comptime);
 
             // Avoid allocating memory for requests that are known to be too large.
@@ -116,7 +91,7 @@ fn encode(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*c]PyObject {
             // Why is this needed on arm?
             if (sequence_length == 0) {
                 const buffer = py.PyBytes_FromStringAndSize(null, 0);
-                break :blk buffer;
+                return buffer;
             }
 
             // FIX2ME: Alignment?
@@ -131,12 +106,10 @@ fn encode(self: [*c]PyObject, args: [*c]PyObject) callconv(.C) [*c]PyObject {
                 return null;
             };
 
-            break :blk buffer;
+            return buffer;
         },
         .pulse, .get_events => unreachable,
-    };
-
-    return buffer;
+    }
 }
 
 fn python_sequence_to_events(comptime Event: type, list: [*c]PyObject, events: []Event) !void {
