@@ -17,6 +17,7 @@ pub const Language = std.meta.FieldEnum(@TypeOf(LanguageCI));
 const LanguageCI = .{
     .dotnet = @import("../clients/dotnet/ci.zig"),
     .go = @import("../clients/go/ci.zig"),
+    .rust = @import("../clients/rust/ci.zig"),
     .java = @import("../clients/java/ci.zig"),
     .node = @import("../clients/node/ci.zig"),
     .python = @import("../clients/python/ci.zig"),

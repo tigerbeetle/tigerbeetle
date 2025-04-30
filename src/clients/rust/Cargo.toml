@@ -1,0 +1,16 @@
+[package]
+name = "tigerbeetle"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "2.6.0"
+futures-channel = "0.3.31"
+
+[build-dependencies]
+anyhow = "1.0.93"
+ignore = "0.4.23"
+
+[dev-dependencies]
+anyhow = "1.0.93"
+futures = "0.3.31"
