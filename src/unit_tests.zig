@@ -9,6 +9,11 @@ comptime {
     _ = @import("io.zig");
     _ = @import("list.zig");
     _ = @import("shell.zig");
+    _ = @import("storage.zig");
+    _ = @import("tidy.zig");
+    _ = @import("time.zig");
+    _ = @import("git-review.zig");
+
     _ = @import("stdx.zig");
     _ = @import("stdx/aegis.zig");
     _ = @import("stdx/bit_set.zig");
@@ -17,9 +22,7 @@ comptime {
     _ = @import("stdx/ring_buffer.zig");
     _ = @import("stdx/sort_test.zig");
     _ = @import("stdx/zipfian.zig");
-    _ = @import("storage.zig");
-    _ = @import("tidy.zig");
-    _ = @import("time.zig");
+
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
     _ = @import("trace/statsd.zig");

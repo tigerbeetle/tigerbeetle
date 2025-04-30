@@ -1,4 +1,5 @@
 name: "Release (validate)"
+permissions: {}
 
 on:
   workflow_dispatch: # Manual triggering for debugging

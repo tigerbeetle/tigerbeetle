@@ -297,6 +297,13 @@ typedef enum TB_LOG_LEVEL {
     TB_LOG_DEBUG = 3,
 } TB_LOG_LEVEL;
 
+typedef struct tb_init_parameters_t {
+    tb_uint128_t cluster_id;
+    tb_uint128_t client_id;
+    uint8_t* addresses_ptr;
+    uint64_t addresses_len;
+} tb_init_parameters_t;
+
 // Initialize a new TigerBeetle client which connects to the addresses provided and
 // completes submitted packets by invoking the callback with the given context.
 TB_INIT_STATUS tb_client_init(
@@ -318,6 +325,14 @@ TB_INIT_STATUS tb_client_init_echo(
     uint32_t address_len,
     uintptr_t completion_ctx,
     void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+);
+
+// Retrieve the parameters initially passed to `tb_client_init` or `tb_client_init_echo`.
+// Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+// not initialized or has already been closed.
+TB_CLIENT_STATUS tb_client_init_parameters(
+    tb_client_t* client,
+    tb_init_parameters_t* init_parameters_out
 );
 
 // Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.

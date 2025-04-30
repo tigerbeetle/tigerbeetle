@@ -131,11 +131,11 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
     }
 
     if (std.mem.indexOf(u8, source, "std.time." ++ "Duration") != null) {
-        return "use stdx.Duration instead of std veresion";
+        return "use stdx.Duration instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "std.time." ++ "Instant") != null) {
-        return "use stdx.Instant instead of std veresion";
+        return "use stdx.Instant instead of std version";
     }
 
     if (std.mem.indexOf(u8, source, "trait." ++ "hasUniqueRepresentation") != null) {
@@ -512,7 +512,7 @@ fn tidy_generic_functions(
             continue;
         };
 
-        // Skipping naming convetions that requires upper-case functions.
+        // Skipping naming convention that requires upper-case functions.
         if (std.mem.startsWith(u8, function_name, "JNI_")) continue;
 
         if (std.ascii.isUpper(function_name[0])) {
@@ -585,11 +585,10 @@ const DeadFilesDetector = struct {
     fn visit(detector: *DeadFilesDetector, file: SourceFile) !void {
         (try detector.file_state(file.path)).definition_count += 1;
 
-        var text: []const u8 = file.text;
+        var rest: []const u8 = file.text;
         for (0..1024) |_| {
-            const cut = stdx.cut(text, "@import(\"") orelse break;
-            text = cut.suffix;
-            const import_path = stdx.cut(text, "\")").?.prefix;
+            _, rest = stdx.cut(rest, "@import(\"") orelse break;
+            const import_path, rest = stdx.cut(rest, "\")").?;
             if (std.mem.endsWith(u8, import_path, ".zig")) {
                 (try detector.file_state(import_path)).import_count += 1;
             }
@@ -627,30 +626,31 @@ const DeadFilesDetector = struct {
 
     fn is_entry_point(file: FileName) bool {
         const entry_points: []const []const u8 = &.{
-            "fuzz_tests.zig",
-            "integration_tests.zig",
-            "jni_tests.zig",
-            "main.zig",
-            "node.zig",
-            "vopr.zig",
-            "tb_client_header.zig",
-            "libtb_client.zig",
-            "unit_tests.zig",
-            "scripts.zig",
-            "dotnet_bindings.zig",
-            "go_bindings.zig",
-            "node_bindings.zig",
-            "java_bindings.zig",
-            "python_bindings.zig",
-            "build.zig",
             "build_multiversion.zig",
-            "vortex.zig",
+            "build.zig",
+            "dotnet_bindings.zig",
             "file_checker.zig",
+            "fuzz_tests.zig",
+            "git-review.zig",
+            "go_bindings.zig",
+            "integration_tests.zig",
+            "java_bindings.zig",
+            "jni_tests.zig",
+            "libtb_client.zig",
+            "main.zig",
+            "node_bindings.zig",
+            "node.zig",
             "page_writer.zig",
-            "single_page_writer.zig",
+            "python_bindings.zig",
+            "scripts.zig",
             "search_index_writer.zig",
             "service_worker_writer.zig",
             "rust_bindings.zig",
+            "single_page_writer.zig",
+            "tb_client_header.zig",
+            "unit_tests.zig",
+            "vopr.zig",
+            "vortex.zig",
         };
         for (entry_points) |entry_point| {
             if (std.mem.startsWith(u8, &file, entry_point)) return true;
@@ -712,9 +712,8 @@ test "tidy no large blobs" {
         //     blob 1032 client/package.json
         const blob = stdx.cut_prefix(line, "blob ") orelse continue;
 
-        const cut = stdx.cut(blob, " ").?;
-        const size = try std.fmt.parseInt(u64, cut.prefix, 10);
-        const path = cut.suffix;
+        const size_string, const path = stdx.cut(blob, " ").?;
+        const size = try std.fmt.parseInt(u64, size_string, 10);
 
         if (std.mem.eql(u8, path, "src/vsr/replica.zig")) continue; // :-)
         if (std.mem.eql(u8, path, "src/state_machine.zig")) continue; // :-|
@@ -804,9 +803,9 @@ fn has_link(line: []const u8) bool {
 
 /// If a line is a `\\` string literal, extract its value.
 fn parse_multiline_string(line: []const u8) ?[]const u8 {
-    const cut = stdx.cut(line, "\\\\") orelse return null;
-    for (cut.prefix) |c| if (c != ' ') return null;
-    return cut.suffix;
+    const indentation, const value = stdx.cut(line, "\\\\") orelse return null;
+    for (indentation) |c| if (c != ' ') return null;
+    return value;
 }
 
 /// Lists all files in the repository.

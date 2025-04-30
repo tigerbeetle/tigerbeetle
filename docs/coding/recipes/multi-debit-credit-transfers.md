@@ -59,14 +59,14 @@ It uses the following accounts:
 - A control account `LIMIT`, with [`flags.debits_must_not_exceed_credits`](../../reference/account.md#flagsdebits_must_not_exceed_credits).
 - A control account `SETUP`, for setting up the `LIMIT` account.
 
-| Id | Ledger | Debit Account | Credit Account | Amount | Flags |
-| -: | -----: | ------------: | -------------: | -----: | :------------- |
-|  1 |    USD |       `SETUP` |        `LIMIT` |    100 | [`linked`](../../reference/transfer.md#flagslinked) |
-|  2 |    USD |           `A` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
-|  3 |    USD |           `B` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
-|  4 |    USD |           `C` |        `SETUP` |    100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
-|  5 |    USD |       `SETUP` |            `X` |    100 | [`linked`](../../reference/transfer.md#flagslinked) |
-|  6 |    USD |       `LIMIT` |        `SETUP` |     -0 | [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+| Id | Ledger | Debit Account | Credit Account |       Amount | Flags |
+| -: | -----: | ------------: | -------------: | -----------: | :------------- |
+|  1 |    USD |       `SETUP` |        `LIMIT` |          100 | [`linked`](../../reference/transfer.md#flagslinked) |
+|  2 |    USD |           `A` |        `SETUP` |          100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  3 |    USD |           `B` |        `SETUP` |          100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  4 |    USD |           `C` |        `SETUP` |          100 | [`linked`](../../reference/transfer.md#flagslinked), [`balancing_debit`](../../reference/transfer.md#flagsbalancing_debit), [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
+|  5 |    USD |       `SETUP` |            `X` |          100 | [`linked`](../../reference/transfer.md#flagslinked) |
+|  6 |    USD |       `LIMIT` |        `SETUP` | `AMOUNT_MAX` | [`balancing_credit`](../../reference/transfer.md#flagsbalancing_credit) |
 
 If the cumulative [credit balance](../data-modeling.md#credit-balances) of `A + B + C` is less than
 `100`, the chain will fail (transfer `6` will return `exceeds_credits`).

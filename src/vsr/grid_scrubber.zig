@@ -78,8 +78,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
             /// Whether the read is ready to be released.
             done: bool,
 
-            /// "next" belongs to the FIFOs.
-            next: ?*Read = null,
+            /// For `reads_busy`/`reads_done` queues.
+            link: QueueType(Read).Link = .{},
         };
 
         superblock: *SuperBlock,
@@ -89,9 +89,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
         reads: IOPSType(Read, constants.grid_scrubber_reads_max) = .{},
 
         /// A list of reads that are in progress.
-        reads_busy: QueueType(Read) = .{ .name = "grid_scrubber_reads_busy" },
+        reads_busy: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_scrubber_reads_busy" }),
         /// A list of reads that are ready to be released.
-        reads_done: QueueType(Read) = .{ .name = "grid_scrubber_reads_done" },
+        reads_done: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_scrubber_reads_done" }),
 
         /// Track the progress through the grid.
         ///
@@ -209,8 +209,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
         pub fn cancel(scrubber: *GridScrubber) void {
             for ([_]QueueType(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
-                var reads_iterator = reads_fifo.peek();
-                while (reads_iterator) |read| : (reads_iterator = read.next) {
+                var reads_iterator = reads_fifo.iterate();
+                while (reads_iterator.next()) |read| {
                     read.status = .canceled;
                 }
             }
@@ -230,8 +230,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
             assert(scrubber.forest.grid.callback == .none);
 
             for ([_]QueueType(Read){ scrubber.reads_busy, scrubber.reads_done }) |reads_fifo| {
-                var reads_iterator = reads_fifo.peek();
-                while (reads_iterator) |read| : (reads_iterator = read.next) {
+                var reads_iterator = reads_fifo.iterate();
+                while (reads_iterator.next()) |read| {
                     if (read.status == .repair) {
                         assert(!scrubber.forest.grid.free_set.is_free(read.read.address));
                         // Use `to_be_freed_at_checkpoint_durability` instead of `is_released`;
@@ -264,9 +264,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
         pub fn read_next(scrubber: *GridScrubber) bool {
             assert(scrubber.superblock.opened);
             assert(scrubber.forest.grid.callback != .cancel);
-            assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+            assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
-            defer assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+            defer assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
 
             if (scrubber.reads.available() == 0) return false;
@@ -360,9 +360,9 @@ pub fn GridScrubberType(comptime Forest: type) type {
         }
 
         pub fn read_fault(scrubber: *GridScrubber) ?BlockId {
-            assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+            assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
-            defer assert(scrubber.reads_busy.count + scrubber.reads_done.count ==
+            defer assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
 
             while (scrubber.reads_done.pop()) |read| {
@@ -671,7 +671,7 @@ fn ManifestBlockIteratorType(comptime ManifestLog: type) type {
 // - There are only 3 (quorum_replication) copies of each sector.
 // - Scrub randomization is ignored.
 // - The simulated fault rate is much greater than a real disk's. (See `sector_faults_per_year`).
-// - Reads, writes, and repairs due to other workloads (besides the scrubber) are not modelled.
+// - Reads, writes, and repairs due to other workloads (besides the scrubber) are not modeled.
 // - All blocks are always full (512KiB).
 //
 // ¹: To mitigate the risk of correlated errors in production, replicas could use different SSD
@@ -683,7 +683,7 @@ fn ManifestBlockIteratorType(comptime ManifestLog: type) type {
 //   (https://www.usenix.org/system/files/fast21-han.pdf)
 // - "Flash Reliability in Production: The Expected and the Unexpected"
 //   (https://www.usenix.org/system/files/conference/fast16/fast16-papers-schroeder.pdf)
-// That being said, for the purposes of modelling scrubbing, it is a decent approximation because
+// That being said, for the purposes of modeling scrubbing, it is a decent approximation because
 // blocks are large relative to sectors. (Additionally, blocks that are written together are often
 // scrubbed together).
 test "GridScrubber cycle interval" {

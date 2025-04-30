@@ -129,7 +129,7 @@ pub const Storage = struct {
     };
 
     pub const NextTick = struct {
-        next: ?*NextTick = null,
+        link: QueueType(NextTick).Link = .{},
         source: NextTickSource,
         callback: *const fn (next_tick: *NextTick) void,
     };
@@ -194,7 +194,9 @@ pub const Storage = struct {
     writes: ReadyQueueType(*Storage.Write),
 
     ticks: u64 = 0,
-    next_tick_queue: QueueType(NextTick) = .{ .name = "storage_next_tick" },
+    next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
+        .name = "storage_next_tick",
+    }),
 
     pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
         assert(size <= constants.storage_size_limit_max);
@@ -253,7 +255,7 @@ pub const Storage = struct {
         log.debug("Reset: {} pending reads, {} pending writes, {} pending next_ticks", .{
             storage.reads.count(),
             storage.writes.count(),
-            storage.next_tick_queue.count,
+            storage.next_tick_queue.count(),
         });
         for (storage.writes.slice()) |write| {
             if (!storage.prng.chance(storage.options.crash_fault_probability)) continue;

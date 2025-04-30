@@ -76,7 +76,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         "gh release --repo tigerbeetle/tigerbeetle list --limit 1",
         .{},
     );
-    const tag = stdx.cut(release_info, "\t").?.prefix;
+    const tag, _ = stdx.cut(release_info, "\t").?;
     log.info("validating release {s}", .{tag});
 
     try shell.exec(

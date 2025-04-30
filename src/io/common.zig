@@ -1,4 +1,4 @@
-//! Code shared across several IO implementations, because, eg, it is expressible via POSIX layer.
+//! Code shared across several IO implementations, because, e.g., it is expressible via POSIX layer.
 const builtin = @import("builtin");
 const std = @import("std");
 const posix = std.posix;

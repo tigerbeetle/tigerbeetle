@@ -12,6 +12,7 @@ const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const StateMachine = StateMachineType(Storage, constants.state_machine_config);
 
 pub const InitError = @import("tb_client/context.zig").InitError;
+pub const InitParameters = @import("tb_client/context.zig").InitParameters;
 pub const ClientInterface = @import("tb_client/context.zig").ClientInterface;
 pub const CompletionCallback = @import("tb_client/context.zig").CompletionCallback;
 pub const Packet = @import("tb_client/packet.zig").Packet.Extern;

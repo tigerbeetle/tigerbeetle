@@ -151,7 +151,7 @@ fn build_image(
 
 fn docker_build_cwd(shell: *Shell, comptime image: Image, tag: []const u8) !void {
     // We use the current commit's timestamp rather than the default (Unix epoch),
-    // which gives us a meaningful timestamp while still being determinstic in CI.
+    // which gives us a meaningful timestamp while still being deterministic in CI.
     // This prevents the false positive in Antithesis saying that versions are too old.
     const timestamp = try shell.exec_stdout("git log -1 --pretty=%ct", .{});
     // See: https://docs.docker.com/build/ci/github-actions/reproducible-builds/

@@ -15,13 +15,19 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 
 const IO = vsr.io.IO;
-const QueueType = vsr.queue.QueueType;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 const Packet = @import("packet.zig").Packet;
 const Signal = @import("signal.zig").Signal;
+
+pub const InitParameters = extern struct {
+    cluster_id: u128,
+    client_id: u128,
+    addresses_ptr: [*]const u8,
+    addresses_len: u64,
+};
 
 /// Thread-safe client interface allocated by the user.
 /// Contains the `VTable` with function pointers to the StateMachine-specific implementation
@@ -33,6 +39,7 @@ pub const ClientInterface = extern struct {
         submit_fn: *const fn (*anyopaque, *Packet.Extern) void,
         completion_context_fn: *const fn (*anyopaque) usize,
         deinit_fn: *const fn (*anyopaque) void,
+        init_parameters_fn: *const fn (*anyopaque, *InitParameters) void,
     };
 
     /// Magic number used as a tag, preventing the use of uninitialized pointers.
@@ -100,6 +107,16 @@ pub const ClientInterface = extern struct {
         client.vtable.ptr.deinit_fn(context);
     }
 
+    pub fn init_parameters(client: *ClientInterface, out_parameters: *InitParameters) Error!void {
+        if (client.magic_number != beetle) return Error.ClientInvalid;
+        assert(client.reserved == 0);
+
+        client.locker.lock();
+        defer client.locker.unlock();
+        const context = client.context.ptr orelse return Error.ClientInvalid;
+        return client.vtable.ptr.init_parameters_fn(context, out_parameters);
+    }
+
     comptime {
         assert(@sizeOf(ClientInterface) == 32);
         assert(@alignOf(ClientInterface) == 8);
@@ -131,6 +148,9 @@ pub fn ContextType(
 ) type {
     return struct {
         const Context = @This();
+        const GPA = std.heap.GeneralPurposeAllocator(.{
+            .thread_safe = true,
+        });
 
         const StateMachine = Client.StateMachine;
         const allowed_operations = [_]StateMachine.Operation{
@@ -163,8 +183,11 @@ pub fn ContextType(
             InvalidDataSize,
         };
 
+        gpa: GPA,
         allocator: std.mem.Allocator,
         client_id: u128,
+        cluster_id: u128,
+        addresses_copy: []const u8,
 
         addresses: stdx.BoundedArrayType(std.net.Address, constants.replicas_max),
         io: IO,
@@ -176,26 +199,49 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
-        submitted: QueueType(Packet),
-        pending: QueueType(Packet),
+        submitted: Packet.Queue,
+        pending: Packet.Queue,
 
         signal: Signal,
         eviction_reason: ?vsr.Header.Eviction.Reason,
         thread: std.Thread,
 
         pub fn init(
-            allocator: std.mem.Allocator,
+            root_allocator: std.mem.Allocator,
             client_out: *ClientInterface,
             cluster_id: u128,
             addresses: []const u8,
             completion_ctx: usize,
             completion_callback: CompletionCallback,
         ) InitError!void {
-            var context = try allocator.create(Context);
-            errdefer allocator.destroy(context);
+            var context: *Context = context: {
+                // Wrap the root allocator - usually heap.c_allocator when built as a library - in
+                // a GPA to keep maximum compatibility while gaining the extra safety. As a library,
+                // libtbclient is running inside another process's address space.
+                var gpa = GPA{
+                    .backing_allocator = root_allocator,
+                };
+                errdefer assert(gpa.deinit() == .ok);
 
-            context.allocator = allocator;
+                const context = try gpa.allocator().create(Context);
+
+                // Moving the GPA is safe, since we don't have any live reference to `allocator`.
+                context.gpa = gpa;
+
+                break :context context;
+            };
+
+            errdefer {
+                var gpa: GPA = context.gpa;
+                gpa.allocator().destroy(context);
+                assert(gpa.deinit() == .ok);
+            }
+
+            const allocator = context.gpa.allocator();
             context.client_id = stdx.unique_u128();
+            context.cluster_id = cluster_id;
+            context.addresses_copy = try allocator.dupe(u8, addresses);
+            errdefer allocator.free(context.addresses_copy);
 
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};
@@ -231,7 +277,7 @@ pub fn ContextType(
 
             log.debug("{}: init: initializing MessagePool", .{context.client_id});
             context.message_pool = try MessagePool.init(allocator, .client);
-            errdefer context.message_pool.deinit(context.allocator);
+            errdefer context.message_pool.deinit(allocator);
 
             log.debug("{}: init: initializing client (cluster_id={x:0>32}, addresses={any})", .{
                 context.client_id,
@@ -263,22 +309,23 @@ pub fn ContextType(
                     else => unreachable,
                 };
             };
-            errdefer context.client.deinit(context.allocator);
+            errdefer context.client.deinit(allocator);
 
             ClientInterface.init(client_out, context, comptime &.{
                 .submit_fn = &vtable_submit_fn,
                 .completion_context_fn = &vtable_completion_context_fn,
                 .deinit_fn = &vtable_deinit_fn,
+                .init_parameters_fn = &vtable_init_parameters_fn,
             });
             context.interface = client_out;
-            context.submitted = .{
+            context.submitted = Packet.Queue.init(.{
                 .name = null,
                 .verify_push = builtin.is_test,
-            };
-            context.pending = .{
+            });
+            context.pending = Packet.Queue.init(.{
                 .name = null,
                 .verify_push = builtin.is_test,
-            };
+            });
             context.completion_context = completion_ctx;
             context.completion_callback = completion_callback;
             context.eviction_reason = null;
@@ -330,10 +377,7 @@ pub fn ContextType(
                 };
             }
 
-            // If evicted, the inflight request was already canceled during eviction.
-            if (self.eviction_reason == null) {
-                self.cancel_request_inflight();
-            }
+            self.cancel_request_inflight();
 
             while (self.pending.pop()) |packet| {
                 packet.assert_phase(.pending);
@@ -346,6 +390,12 @@ pub fn ContextType(
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
             }
+
+            self.io.cancel_all();
+            self.signal.deinit();
+            self.client.deinit(self.gpa.allocator());
+            self.message_pool.deinit(self.gpa.allocator());
+            self.io.deinit();
         }
 
         /// Cancel the current inflight request (and the entire batched linked list of packets),
@@ -363,7 +413,7 @@ pub fn ContextType(
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
-            assert(packet_list.next == null);
+            assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
 
@@ -457,7 +507,7 @@ pub fn ContextType(
 
             // Nothing inflight means the packet should be submitted right now.
             if (self.client.request_inflight == null) {
-                assert(self.pending.count == 0);
+                assert(self.pending.count() == 0);
                 packet.phase = .pending;
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
@@ -466,10 +516,9 @@ pub fn ContextType(
                 return;
             }
 
-            var it = self.pending.peek();
-            while (it) |root| {
+            var it = self.pending.iterate();
+            while (it.next()) |root| {
                 root.assert_phase(.pending);
-                it = root.next;
 
                 if (root.operation != packet.operation) continue;
 
@@ -625,7 +674,7 @@ pub fn ContextType(
 
             // Prevents IO thread starvation under heavy client load.
             // Process only the minimal number of packets for the next pending request.
-            const enqueued_count = self.pending.count;
+            const enqueued_count = self.pending.count();
             const safety_limit = 8 * 1024; // Avoid unbounded loop in case of invalid packets.
             for (0..safety_limit) |_| {
                 const packet: *Packet = pop: {
@@ -640,7 +689,7 @@ pub fn ContextType(
                 // - If there's no in-flight request, the packet is sent immediately without
                 //   using the pending queue.
                 // - If the packet can be batched with another previously enqueued packet.
-                if (self.pending.count > enqueued_count) break;
+                if (self.pending.count() > enqueued_count) break;
             }
 
             // Defer this work to later,
@@ -679,12 +728,11 @@ pub fn ContextType(
                 @intFromEnum(eviction.header.reason),
             });
 
+            // Now that the client is evicted, no more requests can be submitted to it and we can
+            // safely deinitialize it. First, we stop the IO thread, which then deinitializes the
+            // client before it exits (see `io_thread`).
             self.eviction_reason = eviction.header.reason;
-
-            self.cancel_request_inflight();
-            while (self.pending.pop()) |packet| {
-                self.packet_cancel(packet);
-            }
+            self.signal.stop();
         }
 
         fn client_result_callback(
@@ -792,7 +840,6 @@ pub fn ContextType(
 
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
             const self: *Context = @ptrCast(@alignCast(context));
-            assert(self.signal.status() == .running);
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
             // memory management. However, some of Packet's fields are essentially private.
@@ -805,7 +852,7 @@ pub fn ContextType(
                 .data = packet_extern.data,
                 .user_tag = packet_extern.user_tag,
                 .status = .ok,
-                .next = null,
+                .link = .{},
                 .multi_batch_next = null,
                 .multi_batch_tail = null,
                 .multi_batch_count = 0,
@@ -814,9 +861,16 @@ pub fn ContextType(
                 .phase = .submitted,
             };
 
-            // Enqueue the packet and notify the IO thread to process it asynchronously.
-            self.submitted.push(packet);
-            self.signal.notify();
+            if (self.eviction_reason == null) {
+                // Enqueue the packet and notify the IO thread to process it asynchronously.
+                assert(self.signal.status() == .running);
+                self.submitted.push(packet);
+                self.signal.notify();
+            } else {
+                // Cancel the packet since we stop the IO thread during eviction.
+                assert(self.signal.status() != .running);
+                self.packet_cancel(packet);
+            }
         }
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
@@ -826,7 +880,6 @@ pub fn ContextType(
 
         fn vtable_deinit_fn(context: *anyopaque) void {
             const self: *Context = @ptrCast(@alignCast(context));
-            assert(self.signal.status() == .running);
 
             self.signal.stop();
             self.thread.join();
@@ -834,14 +887,22 @@ pub fn ContextType(
             assert(self.submitted.pop() == null);
             assert(self.pending.pop() == null);
 
-            self.io.cancel_all();
+            self.gpa.allocator().free(self.addresses_copy);
 
-            self.signal.deinit();
-            self.client.deinit(self.allocator);
-            self.message_pool.deinit(self.allocator);
-            self.io.deinit();
+            // NB: Copy the allocator back out before trying to destroy `self` with it!
+            var gpa: GPA = self.gpa;
+            gpa.allocator().destroy(self);
+            assert(gpa.deinit() == .ok);
+        }
 
-            self.allocator.destroy(self);
+        fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
+            const self: *Context = @ptrCast(@alignCast(context));
+            assert(self.signal.status() == .running);
+
+            out_parameters.cluster_id = self.cluster_id;
+            out_parameters.client_id = self.client_id;
+            out_parameters.addresses_ptr = self.addresses_copy.ptr;
+            out_parameters.addresses_len = self.addresses_copy.len;
         }
 
         fn operation_from_int(op: u8) ?StateMachine.Operation {

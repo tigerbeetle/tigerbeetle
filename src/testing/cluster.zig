@@ -127,6 +127,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// Updated when the *client* is informed of the eviction.
         /// (Which may be some time after the client is actually evicted by the cluster.)
         client_eviction_reasons: []?vsr.Header.Eviction.Reason,
+        client_eviction_requests_cancelled: u32 = 0,
+
         client_id_permutation: IdPermutation,
 
         state_checker: StateChecker,
@@ -411,7 +413,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.storage_checker.deinit(cluster.allocator);
             cluster.state_checker.deinit();
             cluster.network.deinit();
-            for (cluster.clients) |*client| client.deinit(cluster.allocator);
+
+            for (cluster.clients, cluster.client_eviction_reasons) |*client, reason| {
+                if (reason == null) {
+                    client.deinit(cluster.allocator);
+                }
+            }
+
             for (cluster.client_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.replicas, 0..) |*replica, i| {
                 switch (cluster.replica_health[i]) {
@@ -795,6 +803,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.client_eviction_reasons[client_index] = eviction.header.reason;
             cluster.network.process_disable(.{ .client = client.id });
+
+            cluster.client_eviction_requests_cancelled +=
+                @intFromBool(client.request_inflight != null and
+                client.request_inflight.?.message.header.operation != .register);
+
+            client.deinit(cluster.allocator);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
@@ -965,7 +979,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         replica.grid.free_set.count_acquired()
                     else
                         null,
-                    .grid_blocks_global = replica.grid.read_global_queue.count,
+                    .grid_blocks_global = replica.grid.read_global_queue.count(),
                     .grid_blocks_repair = replica.grid.blocks_missing.faulty_blocks.count(),
                 }) catch unreachable;
 

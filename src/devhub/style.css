@@ -59,6 +59,19 @@ h3 {
     border-bottom: 1px solid var(--gray-4);
 }
 
+.blink {
+    animation: blink 0.25s step-start infinite;
+}
+
+@keyframes blink {
+    0%, 49% {
+        visibility: visible;
+    }
+    50%, 100% {
+        visibility: hidden;
+    }
+}
+
 .badge {
     background-color: var(--indigo-10);
     border-radius: 50px;
@@ -161,7 +174,6 @@ section#fuzz-runs {
                 color: var(--red-10);
             }
         }
-
     }
 }
 
