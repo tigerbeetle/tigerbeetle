@@ -405,6 +405,7 @@ fn build_ci(
         clients, // Tests for all language clients below.
         dotnet,
         go,
+        rust,
         java,
         node,
         python,
@@ -462,7 +463,7 @@ fn build_ci(
         build_ci_check_status(aof);
         step_ci.dependOn(&aof.step);
     }
-    inline for (&.{ CIMode.dotnet, .go, .java, .node, .python }) |language| {
+    inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
         if (default or mode == .clients or mode == language) {
             build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)});
         }
