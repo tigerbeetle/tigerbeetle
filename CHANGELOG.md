@@ -3,6 +3,43 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.39
+
+Released: 2025-05-02
+
+Heads up, we are changing our release process! From this point on, a TigerBeetle release is tagged
+on Friday, spends a weekend on the
+[CFO fleet](https://github.com/tigerbeetle/tigerbeetle/blob/main/src/scripts/cfo.zig), and is
+published on Monday. In other words, you'll still be getting a new release every Monday, but the
+date of the release will be set to Friday. This setup allows extra time for fuzzers to find problems
+in the specific commit we are trying to release.
+
+### Safety And Performance
+
+- [#2928](https://github.com/tigerbeetle/tigerbeetle/pull/2928)
+
+  Continuously fuzz the release branch, in addition to the main branch and the pull requests.
+
+- [#2923](https://github.com/tigerbeetle/tigerbeetle/pull/2923)
+
+  Eagerly deinitialize clients upon eviction, to proactively sever TCP connections to replicas.
+
+### Features
+
+- [#2679](https://github.com/tigerbeetle/tigerbeetle/pull/2679)
+
+  Add an initial Rust client. Note that it is not published to crates.io yet.
+
+### Internals
+
+- [#2906](https://github.com/tigerbeetle/tigerbeetle/pull/2906)
+
+  Reduce verbosity when running full CI suite locally.
+
+### TigerTracks 🎧
+
+- [Тёплые Коты](https://open.spotify.com/track/4UWBuck7q0VeKYiHrwoqnU?si=0fb7145bc0094ba7)
+
 ## TigerBeetle 0.16.38
 
 Released: 2025-04-28
