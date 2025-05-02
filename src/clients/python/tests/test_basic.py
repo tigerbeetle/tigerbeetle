@@ -45,16 +45,35 @@ account_b = tb.Account(
     timestamp=0
 )
 
+def test_range_check_id_on_account_to_be_u128(client):
+    account = tb.Account(**{ **asdict(account_a), "id": 2 ** 128 })
+    thrown_create = False
+    thrown_lookup = False
+
+    try:
+        id_error = client.create_accounts([account])
+    except OverflowError:
+        thrown_create = True;
+
+    try:
+        client.lookup_accounts([account.id])
+    except OverflowError:
+        thrown_lookup = True;
+
+    assert thrown_create and thrown_lookup
+
 def test_range_check_code_on_account_to_be_u16(client):
     account = tb.Account(**{ **asdict(account_a), "id": 0, "code": 65535 + 1 })
+    thrown = False
 
     try:
         code_error = client.create_accounts([account])
-    except ValueError:
-        pass
+    except OverflowError:
+        thrown = True
 
     accounts = client.lookup_accounts([account.id])
     assert accounts == []
+    assert thrown
 
 def test_create_accounts(client):
     errors = client.create_accounts([account_a])

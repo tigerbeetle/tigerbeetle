@@ -3,7 +3,6 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 pub const vsr = @import("vsr");
-const exports = vsr.tb_client.exports;
 const tb = vsr.tigerbeetle;
 const constants = vsr.constants;
 
@@ -12,7 +11,7 @@ const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 
-// libtb_client.zig exports the client symbols.
+// libtb_client.zig exports the client symbols: importing it wil in turn export them here.
 const libtb_client = @import("libtb_client");
 pub const std_options = libtb_client.std_options;
 
@@ -349,7 +348,7 @@ const translate = struct {
         const high_obj = py.PyNumber_Rshift(value_python, python_64);
         defer py.Py_DecRef(high_obj);
 
-        const high: u64 = py.PyLong_AsUnsignedLongLongMask(high_obj);
+        const high: u64 = py.PyLong_AsUnsignedLongLong(high_obj);
         if (py.PyErr_Occurred() != 0) {
             return error.RaiseException;
         }
@@ -373,7 +372,7 @@ const translate = struct {
         }
 
         if (low > std.math.maxInt(u32)) {
-            py.PyErr_SetString(py.PyExc_ValueError, "Integer overflow");
+            py.PyErr_SetString(py.PyExc_OverflowError, "Integer overflow");
             return error.RaiseException;
         }
 
@@ -387,7 +386,7 @@ const translate = struct {
         }
 
         if (low > std.math.maxInt(u16)) {
-            py.PyErr_SetString(py.PyExc_ValueError, "Integer overflow");
+            py.PyErr_SetString(py.PyExc_OverflowError, "Integer overflow");
             return error.RaiseException;
         }
 
