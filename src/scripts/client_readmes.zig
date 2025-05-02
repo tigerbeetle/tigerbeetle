@@ -24,6 +24,7 @@ const LanguageDocs = .{
     .java = @import("../clients/java/docs.zig").JavaDocs,
     .dotnet = @import("../clients/dotnet/docs.zig").DotnetDocs,
     .python = @import("../clients/python/docs.zig").PythonDocs,
+    .ruby = @import("../clients/ruby/docs.zig").RubyDocs,
 };
 
 pub fn test_freshness(

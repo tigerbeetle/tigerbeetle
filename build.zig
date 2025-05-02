@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) !void {
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
+        .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -306,6 +307,12 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
     build_python_client(b, build_steps.clients_python, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header.path,
+        .mode = mode,
+    });
+    build_ruby_client(b, build_steps.clients_ruby, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .tb_client_header = tb_client_header.path,
@@ -1466,6 +1473,66 @@ fn build_node_client(
             strip_glibc_version(platform[0]),
             "/client.node",
         })).step);
+    }
+}
+
+fn build_ruby_client(
+    b: *std.Build,
+    step_clients_ruby: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: std.Build.LazyPath,
+        mode: Mode,
+    },
+) void {
+    inline for (platforms) |platform| {
+        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
+            continue;
+        }
+
+        const cross_target = CrossTarget.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
+        const resolved_target = b.resolveTargetQuery(cross_target);
+
+        const shared_lib = b.addSharedLibrary(.{
+            .name = "rb_tigerbeetle",
+            .root_source_file = b.path("src/clients/ruby/ruby_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+
+        // TODO: Remove hardcoding link to Ruby library
+        shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0" });
+        shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0/x86_64-linux" });
+        shared_lib.addLibraryPath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/lib" });
+        shared_lib.linkSystemLibrary("ruby");
+
+        shared_lib.linkLibC();
+
+        if (resolved_target.result.os.tag == .windows) {
+            shared_lib.linkSystemLibrary("ws2_32");
+            shared_lib.linkSystemLibrary("advapi32");
+        }
+
+        shared_lib.root_module.addImport("vsr", options.vsr_module);
+        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
+
+        // First, make sure the shared library compiles successfully
+        // Install the shared library (platform-specific path)
+        const lib_install = b.addInstallFile(
+            shared_lib.getEmittedBin(),
+            b.pathJoin(&.{
+                "../src/clients/ruby/ext/rb_tigerbeetle/",
+                platform[0],
+                shared_lib.out_filename,
+            }),
+        );
+
+        lib_install.step.dependOn(&shared_lib.step);
+        step_clients_ruby.dependOn(&lib_install.step);
     }
 }
 
