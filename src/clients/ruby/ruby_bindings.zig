@@ -218,9 +218,12 @@ pub fn main() !void {
         \\##########################################################
         \\
         \\require "ffi"
+        \\require "tb_client/shared_lib"
         \\
         \\module TBClient
         \\  extend FFI::Library
+        \\
+        \\  ffi_lib SharedLib.path
         \\
         \\  class UINT128 < FFI::Struct
         \\    layout(low: :uint64, high: :uint64)
