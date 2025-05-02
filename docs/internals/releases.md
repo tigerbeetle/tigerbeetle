@@ -8,7 +8,7 @@ The motivation for specific steps follows after.
 
 ## Release Manager Algorithm
 
-1. Open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
+1. On Friday, open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
    - you are the release manager for the week
    - that the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
@@ -57,16 +57,24 @@ The motivation for specific steps follows after.
    - if there are any big features in the release, write about them in the lead paragraph.
    - pick the tiger track!
 
-4. Commit the changelog and submit a pull request for review
+4. Commit the changelog and submit a pull request for review.
 
 5. After the PR is merged, push to the `release` branch:
 
    ```console
    $ git fetch origin && git push origin origin/main:release
    ```
-6. Ask someone else to approve the GitHub workflow.
 
-7. Ping release manager for the next week in Slack.
+7. From this point on, the CFO will be fuzzing the release branch over the weekend.
+
+8. On Monday (different release manager!) check that there are no VOPR failures on the release
+   branch.
+
+9. Trigger the release workflow via GitHub web interface.
+
+10. Ask someone else to approve the GitHub workflow.
+
+11. Ping release manager for the next week in Slack.
 
 ### Error Handling
 
