@@ -300,6 +300,7 @@ fn run_fuzzers(
                 const task = tasks.get(
                     std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
                     fuzzer.seed.commit_sha,
+                    fuzzer.seed.branch,
                 ).?;
                 task.runtime_ticks += 1;
                 // Us a large (arbitrary) constant as the numerator to avoid rounding errors.
@@ -397,7 +398,11 @@ fn run_fuzzers(
 
 const Tasks = struct {
     /// Map values index into `list`.
-    const Map = std.AutoHashMap(struct { fuzzer: Fuzzer, commit: [40]u8 }, usize);
+    const Map = std.AutoHashMap(struct {
+        fuzzer: Fuzzer,
+        commit: [40]u8,
+        branch: SeedRecord.Template.Branch,
+    }, usize);
     const List = std.ArrayList(Task);
 
     const Task = struct {
@@ -485,10 +490,17 @@ const Tasks = struct {
         return task_best.?;
     }
 
-    pub fn get(tasks: *const Tasks, fuzzer: Fuzzer, commit: [40]u8) ?*Task {
+    pub fn get(
+        tasks: *const Tasks,
+        fuzzer: Fuzzer,
+        commit: [40]u8,
+        branch_url: []const u8,
+    ) ?*Task {
+        const branch = SeedRecord.Template.Branch.parse(branch_url) catch unreachable;
         const task_index = tasks.map.get(.{
             .fuzzer = fuzzer,
             .commit = commit,
+            .branch = branch,
         }) orelse return null;
         return &tasks.list.items[task_index];
     }
@@ -501,9 +513,11 @@ const Tasks = struct {
         working_directory: []const u8,
         seed_template: SeedRecord.Template,
     ) !void {
+        const branch = SeedRecord.Template.Branch.parse(seed_template.branch_url) catch unreachable;
         if (tasks.map.get(.{
             .fuzzer = seed_template.fuzzer,
             .commit = seed_template.commit_sha,
+            .branch = branch,
         })) |task_existing_index| {
             const task_existing = &tasks.list.items[task_existing_index];
             assert(task_existing.generation < tasks.generation);
@@ -536,6 +550,7 @@ const Tasks = struct {
             try tasks.map.putNoClobber(.{
                 .fuzzer = seed_template.fuzzer,
                 .commit = seed_template.commit_sha,
+                .branch = branch,
             }, tasks.list.items.len - 1);
         }
     }
@@ -906,15 +921,28 @@ const SeedRecord = struct {
         commit_sha: [40]u8,
         fuzzer: Fuzzer,
 
-        const Branch = union(enum) { main, release, pull: u32 };
+        const Branch = union(enum) {
+            main,
+            release,
+            pull: u32,
+
+            const main_url = "https://github.com/tigerbeetle/tigerbeetle";
+            const release_url = "https://github.com/tigerbeetle/tigerbeetle/tree/release";
+            const pull_url_prefix = "https://github.com/tigerbeetle/tigerbeetle/pull/";
+
+            pub fn parse(string: []const u8) !@This() {
+                if (std.mem.eql(u8, string, main_url)) return .main;
+                if (std.mem.eql(u8, string, release_url)) return .release;
+                assert(std.mem.startsWith(u8, string, pull_url_prefix));
+                const pull_number_string = string[pull_url_prefix.len..];
+                const pull_number = std.fmt.parseInt(u32, pull_number_string, 10) catch unreachable;
+                return .{ .pull = pull_number };
+            }
+        };
     };
 
     fn is_release(record: SeedRecord) bool {
-        return std.mem.eql(
-            u8,
-            record.branch,
-            "https://github.com/tigerbeetle/tigerbeetle/tree/release",
-        );
+        return std.mem.eql(u8, record.branch, Template.Branch.release_url);
     }
 
     fn order(a: SeedRecord, b: SeedRecord) std.math.Order {
