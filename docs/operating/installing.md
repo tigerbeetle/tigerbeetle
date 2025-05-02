@@ -47,7 +47,7 @@ TigerBeetle can be upgraded without downtime, this is documented in [Upgrading](
 
 Building from source is easy, but is not recommended for production deployments, as extra care is
 needed to ensure compatibility with clients and upgradability. Refer to the
-[internal documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internal) for
+[internal documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internals) for
 compilation instructions.
 
 ## Client Libraries
