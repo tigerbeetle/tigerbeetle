@@ -26,9 +26,6 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     const merges = try shell.exec_stdout(
         \\git log --merges --first-parent origin/release..origin/main
     , .{});
-    try shell.project_root.makePath("./.zig-cache");
-    try shell.project_root.writeFile(.{ .sub_path = "./.zig-cache/merges.txt", .data = merges });
-    log.info("merged PRs: ./.zig-cache/merges.txt", .{});
 
     const changelog_current = try shell.project_root.readFileAlloc(
         shell.arena.allocator(),
