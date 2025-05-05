@@ -51,11 +51,19 @@ fn log_fn(
     std.debug.print(prefix ++ format ++ "\n", args);
 }
 
+const EmailOptions = struct {
+    server: []const u8,
+    auth: []const u8,
+    sender: []const u8,
+    recepient: []const u8,
+};
+
 const CLIArgs = union(enum) {
     new,
     status,
     split,
     lgtm,
+    email: EmailOptions,
     pub const help =
         \\Usage:
         \\
@@ -72,6 +80,9 @@ const CLIArgs = union(enum) {
         \\
         \\  git review lgtm
         \\        Assert that all comments are resolved, revert the review commit, push to remote.
+        \\
+        \\  git review email --server=<smtp-url> --auth=<user:password> --sender=<email> --recepiet=<email>
+        \\        Email new review comments to the specified address.
         \\
     ;
 };
@@ -98,6 +109,7 @@ pub fn main() !void {
         .new => try review_new(shell),
         .split => try review_split(shell),
         .lgtm => try review_lgtm(shell),
+        .email => |options| try review_email(shell, options),
     }
 }
 
@@ -267,6 +279,20 @@ fn remove_review_comments(reader: std.io.AnyReader, writer: std.io.AnyWriter) !v
     }
 }
 
+fn review_email(shell: *Shell, options: EmailOptions) !void {
+    const diff_review = try shell.exec_stdout("git diff --unified=0 HEAD~ HEAD", .{});
+    const review = try Review.parse(shell.arena.allocator(), diff_review);
+
+    var email_buffer = std.ArrayList(u8).init(shell.arena.allocator());
+    try Review.format_email(review.comments, email_buffer.writer().any());
+    try send_email(
+        shell,
+        "New review comments",
+        email_buffer.items,
+        options,
+    );
+}
+
 const Review = struct {
     comments: []const Comment,
     resolved_count: u32,
@@ -275,6 +301,7 @@ const Review = struct {
     const Comment = struct {
         location: Location,
         snippet: []const u8,
+        text: []const u8,
         resolved: bool,
     };
 
@@ -302,8 +329,17 @@ const Review = struct {
         var file_name: []const u8 = "";
         var hunk_line: ?u32 = null;
         var line_iterator = std.mem.tokenizeScalar(u8, diff, '\n');
-        var in_comment = false;
+        var comment_index_start: ?usize = null;
         while (line_iterator.next()) |line| {
+            const line_index_start = line_iterator.index - line.len;
+
+            if (comment_index_start != null and !std.mem.startsWith(u8, line, "+")) {
+                const comment_index_end = line_index_start;
+                comments.items[comments.items.len - 1].text =
+                    diff[comment_index_start.?..comment_index_end];
+                comment_index_start = null;
+            }
+
             if (stdx.cut_prefix(line, "diff --git a/")) |suffix| {
                 _, file_name = stdx.cut(suffix, " b/").?;
                 hunk_line = null;
@@ -317,7 +353,7 @@ const Review = struct {
                 // Extract '380' from
                 // @@ -379,0 +380,2 @@
                 _, const added = stdx.cut(line, " +").?;
-                const hunk_line_str, _ = stdx.cut(added, ",").?;
+                const hunk_line_str, _ = stdx.cut(added, ",") orelse stdx.cut(added, " ").?;
                 hunk_line = std.fmt.parseInt(u32, hunk_line_str, 10) catch unreachable;
             }
 
@@ -334,14 +370,15 @@ const Review = struct {
                     return error.InvalidDiff;
                 }
 
-                if (!in_comment) {
-                    in_comment = true;
+                if (comment_index_start == null) {
+                    comment_index_start = line_index_start;
                     try comments.append(arena, .{
                         .location = .{
                             .file = file_name,
                             .line = hunk_line.?,
                         },
                         .snippet = stdx.cut_prefix(comment, "//?").?,
+                        .text = "",
                         .resolved = false,
                     });
                     unresolved_count += 1;
@@ -350,14 +387,17 @@ const Review = struct {
                         assert(comments.items.len > 0);
                         assert(!comments.items[comments.items.len - 1].resolved);
                         comments.items[comments.items.len - 1].resolved = true;
-                        in_comment = false;
                         unresolved_count -= 1;
                         resolved_count += 1;
                     }
                 }
-            } else {
-                in_comment = false;
             }
+        }
+
+        if (comment_index_start != null) {
+            const comment_index_end = diff.len;
+            comments.items[comments.items.len - 1].text =
+                diff[comment_index_start.?..comment_index_end];
         }
 
         return .{
@@ -377,7 +417,7 @@ const Review = struct {
         _ = options;
         for (review.comments) |comment| {
             if (!comment.resolved) {
-                try writer.print("{s}: {s}\n", .{ comment.location, comment.snippet });
+                try writer.print("{}: {s}\n", .{ comment.location, comment.snippet });
             }
         }
         if (review.unresolved_count > 0) {
@@ -389,7 +429,45 @@ const Review = struct {
             try writer.print("{d} resolved\n", .{review.resolved_count});
         }
     }
+
+    pub fn format_email(
+        comments: []const Comment,
+        writer: std.io.AnyWriter,
+    ) !void {
+        try writer.writeAll("New review comments:\n");
+
+        var delimiter: []const u8 = "";
+        for (comments) |comment| {
+            try writer.writeAll(delimiter);
+            delimiter = "\n";
+            try writer.print("{}:\n", .{comment.location});
+            try writer.writeAll(comment.text);
+        }
+    }
 };
+
+// Every program expands until it can send email...
+fn send_email(shell: *Shell, subject: []const u8, body: []const u8, options: EmailOptions) !void {
+    assert(stdx.cut(subject, "\n") == null);
+    const email = try shell.fmt(
+        \\From: "Git Review" <{s}>
+        \\To: <{s}>
+        \\Subject: {s}
+        \\
+        \\{s}
+    , .{ options.sender, options.recepient, subject, body });
+
+    try shell.exec_options(.{ .stdin_slice = email },
+        \\curl --ssl-reqd {server} --user {auth}
+        \\  --mail-from {sender} --mail-rcpt {recepient}
+        \\  --upload-file -
+    , .{
+        .server = options.server,
+        .auth = options.auth,
+        .sender = options.sender,
+        .recepient = options.recepient,
+    });
+}
 
 const Snap = @import("./testing/snaptest.zig").Snap;
 const snap = Snap.snap;
@@ -405,6 +483,12 @@ test Review {
         \\+# Review Summary
         \\+
         \\+(Work in progress review so far.)
+        \\diff --git a/src/git-review.zig b/src/git-review.zig
+        \\index a4031a5f3..5bed08ace 100644
+        \\--- a/src/git-review.zig
+        \\+++ b/src/git-review.zig
+        \\@@ -178,0 +179 @@ fn review_new(shell: *Shell) !void {
+        \\+        //? (Added a trailing newline for the generated file.)
         \\diff --git a/src/vsr/message_header.zig b/src/vsr/message_header.zig
         \\index b2b176e5f..fd7d420c1 100644
         \\--- a/src/vsr/message_header.zig
@@ -420,9 +504,28 @@ test Review {
         \\
     ;
     try test_review_case(diff, snap(@src(),
+        \\status:
+        \\src/git-review.zig:179:  (Added a trailing newline for the generated file.)
         \\src/vsr/message_header.zig:432:  dj: What do you think of referring to this as a replica_position,
         \\
-        \\1 resolved 1 unresolved
+        \\1 resolved 2 unresolved
+        \\---
+        \\
+        \\email:
+        \\New review comments:
+        \\src/git-review.zig:179:
+        \\+        //? (Added a trailing newline for the generated file.)
+        \\
+        \\src/vsr/message_header.zig:380:
+        \\+        //? dj: Positioning the field here is nice for alignment, but makes the upgrade
+        \\+        //? more complicated than if we just appended the field after release_count.
+        \\+        //? matklad: I want to fix this in a follow up!
+        \\+        //? resolved.
+        \\
+        \\src/vsr/message_header.zig:432:
+        \\+        //? dj: What do you think of referring to this as a replica_position,
+        \\+        //? since replica_index is also what `routing.replica` is.
+        \\---
         \\
     ));
 }
@@ -434,5 +537,11 @@ fn test_review_case(diff: []const u8, want: Snap) !void {
     const arena = arena_instance.allocator();
 
     const review = try Review.parse(arena, diff);
-    try want.diff_fmt("{}", .{review});
+
+    var email_buffer: [1024]u8 = undefined;
+    var email_fbs = std.io.fixedBufferStream(&email_buffer);
+    try Review.format_email(review.comments, email_fbs.writer().any());
+    const email = email_fbs.getWritten();
+
+    try want.diff_fmt("status:\n{}---\n\nemail:\n{s}---\n", .{ review, email });
 }
