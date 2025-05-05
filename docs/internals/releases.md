@@ -70,7 +70,10 @@ The motivation for specific steps follows after.
 8. On Monday (different release manager!) check that there are no VOPR failures on the release
    branch.
 
-9. Trigger the release workflow via GitHub web interface.
+9. Trigger the release workflow via
+   [GitHub web interface](https://github.com/tigerbeetle/tigerbeetle/actions/workflows/release.yml).
+   Be sure to trigger workflow from the `release` branch, otherwise the release will fail due to
+   permissions.
 
 10. Ask someone else to approve the GitHub workflow.
 
