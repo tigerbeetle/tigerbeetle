@@ -354,7 +354,15 @@ fn run_fuzzers(
                         var seed_record = fuzzer.seed;
                         seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
                         seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
+                        if (!seed_record.ok) {
+                            seed_record.debug = try shell.fmt("{}", .{term});
+                        }
                         try seeds.append(seed_record);
+                    }
+
+                    if (std.meta.eql(term, .{ .Signal = std.posix.SIG.ABRT })) {
+                        // Sanity-check that we definitely record all assertion failures.
+                        assert(!seeds.getLast().ok);
                     }
 
                     fuzzer_or_null.* = null;
@@ -913,6 +921,8 @@ const SeedRecord = struct {
     command: []const u8 = "",
     // Branch is a GitHub URL. It affects the UI, where the seeds are grouped by the branch.
     branch: []const u8,
+    // Arbitrary string output for debugging, e.g., process exit status.
+    debug: ?[]const u8 = null,
 
     const Template = struct {
         branch: Branch,
@@ -1012,6 +1022,7 @@ const SeedRecord = struct {
 
     fn to_json(arena: std.mem.Allocator, records: []const SeedRecord) ![]const u8 {
         return try std.json.stringifyAlloc(arena, records, .{
+            .emit_null_optional_fields = false, // Omit `"debug: ""`.
             .whitespace = .indent_2,
         });
     }
@@ -1156,8 +1167,9 @@ test "cfo: SeedRecord.merge" {
                 .commit_count_max = 2,
                 .seed_count_max = 2,
             };
-            const got = try SeedRecord.merge(arena.allocator(), options, current, new);
-            try want.diff_json(got, .{ .whitespace = .indent_2 });
+            const merged = try SeedRecord.merge(arena.allocator(), options, current, new);
+            const got = try SeedRecord.to_json(arena.allocator(), merged);
+            try want.diff(got);
         }
     };
 
