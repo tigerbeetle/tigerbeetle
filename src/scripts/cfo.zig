@@ -1156,8 +1156,9 @@ test "cfo: SeedRecord.merge" {
                 .commit_count_max = 2,
                 .seed_count_max = 2,
             };
-            const got = try SeedRecord.merge(arena.allocator(), options, current, new);
-            try want.diff_json(got, .{ .whitespace = .indent_2 });
+            const merged = try SeedRecord.merge(arena.allocator(), options, current, new);
+            const got = try SeedRecord.to_json(arena.allocator(), merged);
+            try want.diff(got);
         }
     };
 
