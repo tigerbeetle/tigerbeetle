@@ -1826,7 +1826,7 @@ pub fn ReplicaType(
                 if (prepare.ok_quorum_received)
                     self.quorum_replication
                 else
-                    self.replica_count
+                    @max(self.quorum_replication, self.replica_count - 1)
             else
                 self.quorum_replication;
 
