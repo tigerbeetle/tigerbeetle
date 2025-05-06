@@ -176,6 +176,8 @@ pub const MessagePool = struct {
     free_list: StackType(Message),
 
     messages_max: usize,
+    messages: []Message,
+    buffers: []align(constants.sector_size) [constants.message_size_max]u8,
 
     pub fn init(
         allocator: mem.Allocator,
@@ -188,45 +190,43 @@ pub const MessagePool = struct {
         allocator: mem.Allocator,
         messages_max: u32,
     ) error{OutOfMemory}!MessagePool {
-        var pool: MessagePool = .{
-            .free_list = FreeList.init(.{
-                .capacity = messages_max,
-                .verify_push = false,
-            }),
-            .messages_max = messages_max,
-        };
-        {
-            for (0..messages_max) |_| {
-                const buffer = try allocator.alignedAlloc(
-                    u8,
-                    constants.sector_size,
-                    constants.message_size_max,
-                );
-                const message = try allocator.create(Message);
-                message.* = .{
-                    .header = undefined,
-                    .buffer = buffer[0..constants.message_size_max],
-                    .link = .{},
-                };
+        const buffers = try allocator.alignedAlloc(
+            [constants.message_size_max]u8,
+            constants.sector_size,
+            messages_max,
+        );
+        errdefer allocator.free(buffers);
 
-                pool.free_list.push(message);
-            }
+        const messages = try allocator.alloc(Message, messages_max);
+        errdefer allocator.free(messages);
+
+        var free_list = FreeList.init(.{
+            .capacity = messages_max,
+            .verify_push = false,
+        });
+        for (messages, buffers) |*message, *buffer| {
+            message.* = .{ .header = undefined, .buffer = buffer, .link = .{} };
+            free_list.push(message);
         }
 
-        return pool;
+        return .{
+            .free_list = free_list,
+            .messages_max = messages_max,
+            .messages = messages,
+            .buffers = buffers,
+        };
     }
 
     /// Frees all messages that were unused or returned to the pool via unref().
     pub fn deinit(pool: *MessagePool, allocator: mem.Allocator) void {
-        var free_count: u32 = 0;
-        while (pool.free_list.pop()) |message| {
-            allocator.free(message.buffer);
-            allocator.destroy(message);
-            free_count += 1;
-        }
         // If the MessagePool is being deinitialized, all messages should have already been
         // released to the pool.
-        assert(free_count == pool.messages_max);
+        assert(pool.free_list.count() == pool.messages_max);
+        assert(pool.messages.len == pool.messages_max);
+        assert(pool.buffers.len == pool.messages_max);
+        allocator.free(pool.messages);
+        allocator.free(pool.buffers);
+        pool.* = undefined;
     }
 
     pub fn GetMessageType(comptime command: ?vsr.Command) type {
