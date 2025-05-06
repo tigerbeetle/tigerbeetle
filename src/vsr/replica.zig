@@ -1710,9 +1710,13 @@ pub fn ReplicaType(
 
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
-                log.warn("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
+                log.warn("{}: on_prepare: ignoring prepare.op={} " ++
+                    "(too far ahead, commit_min={} op={} commit_max={} prepare_max={})", .{
                     self.replica,
                     message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
                     self.op_prepare_max(),
                 });
                 // When we are the primary, `on_request` enforces this invariant.
