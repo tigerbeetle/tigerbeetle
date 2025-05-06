@@ -1884,7 +1884,7 @@ const TestContext = struct {
                 .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
                 .one_way_delay_min = prng.int_inclusive(u16, 2),
 
-                .path_maximum_capacity = 128,
+                .path_maximum_capacity = 10,
                 .path_clog_duration_mean = 0,
                 .path_clog_probability = ratio(0, 100),
                 .recorded_count_max = 16,
