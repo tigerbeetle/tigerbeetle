@@ -248,11 +248,11 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
         }
 
-        fn process_count(self: PacketSimulator) usize {
+        fn process_count(self: *const PacketSimulator) usize {
             return self.options.node_count + self.options.client_count;
         }
 
-        fn path_index(self: PacketSimulator, path: Path) usize {
+        fn path_index(self: *const PacketSimulator, path: Path) usize {
             assert(path.source < self.process_count());
             assert(path.target < self.process_count());
 
