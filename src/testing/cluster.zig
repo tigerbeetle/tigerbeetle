@@ -7,6 +7,7 @@ const log = std.log.scoped(.cluster);
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
+const ratio = stdx.PRNG.ratio;
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
 
@@ -105,6 +106,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         };
 
         allocator: mem.Allocator,
+        prng: stdx.PRNG,
         options: Options,
         callbacks: Callbacks,
 
@@ -355,6 +357,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.* = Cluster{
                 .allocator = allocator,
+                .prng = prng,
                 .options = options.cluster,
                 .callbacks = options.callbacks,
                 .network = network,
@@ -486,8 +489,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replicas,
                 cluster.replica_times,
                 cluster.replica_health,
-                0..,
-            ) |*storage, *replica, *time, *health, i| {
+            ) |*storage, *replica, *time, *health| {
                 if (health.* == .up and health.*.up.paused) {
                     // Tick the time even in a paused state, to simulate VM migration.
                     time.tick();
@@ -499,7 +501,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                             replica.tick();
 
                             // For performance, don't run every tick.
-                            if (i % 100 == 0) JournalChecker.check(replica);
+                            if (cluster.prng.chance(ratio(1, 100))) {
+                                JournalChecker.check(replica);
+                            }
 
                             cluster.state_checker.check_state(replica.replica) catch |err| {
                                 fatal(.correctness, "state checker error: {}", .{err});
