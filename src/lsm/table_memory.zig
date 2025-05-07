@@ -21,6 +21,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             sorted: bool = true,
         };
 
+        const SortAlgorithm = union(enum) {
+            radix: []Value,
+            std,
+        };
+
         const Mutability = union(enum) {
             mutable: struct {
                 /// The offset (within `values`) of the unsorted suffix.
@@ -41,6 +46,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
+        tmp_buffer: []Value,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -65,12 +71,16 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .name = name,
 
                 .values = undefined,
+                .tmp_buffer = undefined,
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            table.tmp_buffer = try allocator.alloc(Value, Table.value_count_max);
+            errdefer allocator.free(table.tmp_buffer);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -85,6 +95,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .tmp_buffer = table.tmp_buffer,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
@@ -151,6 +162,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .tmp_buffer = table.tmp_buffer,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
                 .name = table.name,
@@ -185,7 +197,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
             table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
+                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0, .std);
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -200,7 +212,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
 
             if (!table.value_context.sorted) {
-                table.mutable_sort_suffix_from_offset(0);
+                table.mutable_sort_suffix_from_offset(0, .std);
                 table.value_context.sorted = true;
             }
         }
@@ -209,27 +221,142 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
 
-            table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset, .{ .radix = table.tmp_buffer });
+            //table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset, .std);
 
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
 
-        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) void {
+        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32, sort_algorithm: SortAlgorithm) void {
             assert(table.mutability == .mutable);
             assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
             assert(offset <= table.count());
 
-            const target_count = sort_suffix_from_offset(table.values_used(), offset);
+            const target_count = sort_suffix_from_offset(table.values_used(), offset, sort_algorithm);
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
         }
 
+        pub fn count_frequency(
+            input: []const Value,
+            histogram: anytype,
+        ) void {
+            const RADIX_BITS = 8;
+            const RADIX_SIZE = 1 << RADIX_BITS;
+            const RADIX_LEVELS = ((@bitSizeOf(Key) - 1) / RADIX_BITS) + 1;
+            const RADIX_MASK = RADIX_SIZE - 1;
+
+            // make copy of value
+            for (input) |*value| {
+                var key = key_from_value(value);
+                for (0..RADIX_LEVELS) |pass| {
+                    const partition: usize = @intCast(key & RADIX_MASK);
+                    histogram[pass][partition] += 1;
+                    key >>= RADIX_BITS;
+                }
+            }
+            for (0..RADIX_LEVELS) |pass| {
+                var sum: usize = 0;
+                for (histogram[pass]) |value| {
+                    sum += value;
+                }
+                assert(sum == input.len);
+            }
+        }
+
+        pub fn is_trivial(radix_frequencies: []usize, number_elements: usize) bool {
+            for (radix_frequencies) |freq| {
+                if (freq != 0) { // remove branch?
+                    return freq == number_elements;
+                }
+            }
+            assert(number_elements == 0);
+            return true;
+        }
+
+        fn determine_shift_type(comptime bits: u16) type {
+            return std.meta.Int(
+                .unsigned,
+                bits,
+            );
+        }
+
+        pub inline fn radix_sort_unrolled(
+            input: []Value,
+            scratch_buffer: []Value,
+        ) void {
+            assert(input.len == scratch_buffer.len);
+
+            if (input.len == 0) return;
+
+            const RADIX_BITS = 8;
+            const RADIX_SIZE = 1 << RADIX_BITS;
+            const RADIX_LEVELS = ((@bitSizeOf(Key) - 1) / RADIX_BITS) + 1; // this is the max. iterations we need to do.
+            const RADIX_MASK = RADIX_SIZE - 1;
+
+            assert(std.math.isPowerOfTwo(RADIX_LEVELS));
+
+            const bits = std.math.log2(@bitSizeOf(Key));
+            const shift_type = determine_shift_type(bits);
+
+            var histogram: [RADIX_LEVELS][RADIX_SIZE]usize = .{.{0} ** RADIX_SIZE} ** RADIX_LEVELS;
+            count_frequency(input, &histogram);
+
+            var source = &input;
+            var target = &scratch_buffer;
+            var queue_offsets: [RADIX_SIZE]usize = [_]usize{0} ** RADIX_SIZE;
+            var trivial_passes: u32 = 0;
+
+            inline for (0..RADIX_LEVELS) |pass| {
+                const elements = if (is_trivial(&histogram[pass], source.len)) 0 else source.len;
+                trivial_passes += if (elements == 0) 1 else 0;
+                const target_offset = if (elements == 0) 0 else queue_offsets.len;
+                const shift: shift_type = @intCast(pass * RADIX_BITS);
+
+                var next_offset: usize = 0;
+                for (0..target_offset) |i| {
+                    queue_offsets[i] = next_offset;
+                    next_offset += histogram[pass][i]; // build prefix sum
+                }
+
+                // todo try batch wise
+                for (0..elements) |i_i| {
+                    const value = &source.*[i_i];
+                    const key: Key = key_from_value(value);
+                    const index: usize = @intCast((key >> shift) & RADIX_MASK);
+                    target.*[queue_offsets[index]] = value.*; // this copies it at the right location
+                    queue_offsets[index] += 1;
+                }
+
+                // UGLY SWAP
+                // swap the input pointer and output pointer
+                if (elements == 0) {} else {
+                    const tmp_ref = source;
+                    source = target;
+                    target = tmp_ref;
+                }
+            }
+            if (trivial_passes % 2 != 0) {
+                std.mem.copyForwards(Value, input, scratch_buffer);
+            }
+        }
+
         /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
         /// returned count may be less than or equal to the original `values.len`.)
-        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
+        fn sort_suffix_from_offset(values: []Value, offset: u32, sort_algorithm: SortAlgorithm) u32 {
             assert(offset <= values.len);
 
-            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+            switch (sort_algorithm) {
+                .std => std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order),
+                .radix => |scratch_buffer| {
+                    const slice_length: usize = values[offset..].len;
+                    const tmp = scratch_buffer[0..slice_length];
+                    assert(tmp.len == slice_length);
+                    radix_sort_unrolled(values[offset..], tmp);
+                    assert(std.sort.isSorted(Value, values[offset..], {}, sort_values_by_key_in_ascending_order));
+                },
+            }
+            //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
 
             // Merge values with identical keys (last one wins) and collapse tombstones for
             // secondary indexes.
