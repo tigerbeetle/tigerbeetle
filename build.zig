@@ -1473,7 +1473,7 @@ fn build_ruby_client(
     ruby_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
     const bindings = Generated.file(b, .{
         .generator = ruby_bindings_generator,
-        .path = "./src/clients/ruby/lib/tb_client.rb",
+        .path = "./src/clients/ruby/lib/tigerbeetle/bindings.rb",
     });
 
     inline for (platforms) |platform| {

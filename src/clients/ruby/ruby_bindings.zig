@@ -87,7 +87,7 @@ fn zig_to_ruby(comptime Type: type) []const u8 {
                 16 => ":uint16",
                 32 => ":uint32",
                 64 => ":uint64",
-                128 => "UINT128",
+                128 => ":uint128",
                 else => @compileError("invalid int type"),
             };
         },
@@ -121,7 +121,6 @@ fn ruby_ffi_enum_type(comptime Type: type) []const u8 {
         16 => "FFI::Type::UINT16",
         32 => "FFI::Type::UINT32",
         64 => "FFI::Type::UINT64",
-        128 => "TBClient::UINT128",
         else => @compileError("invalid int type"),
     };
 }
@@ -134,12 +133,12 @@ fn emit_enum(
     comptime skip_fields: []const []const u8,
 ) !void {
     if (@typeInfo(Type) == .Enum) {
-        buffer.print("  {s} = enum({s}, [\n", .{ ruby_name, comptime ruby_ffi_enum_type(Type) });
+        buffer.print("    {s} = enum({s}, [\n", .{ ruby_name, comptime ruby_ffi_enum_type(Type) });
     } else {
         // Packed structs.
         assert(@typeInfo(Type) == .Struct and @typeInfo(Type).Struct.layout == .@"packed");
 
-        buffer.print("  {s} = bitmask({s}, [\n", .{ ruby_name, comptime ruby_ffi_enum_type(Type) });
+        buffer.print("    {s} = bitmask({s}, [\n", .{ ruby_name, comptime ruby_ffi_enum_type(Type) });
     }
 
     inline for (type_info.fields, 0..) |field, i| {
@@ -152,13 +151,13 @@ fn emit_enum(
         if (!skip) {
             const field_name = to_uppercase(field.name);
             if (@typeInfo(Type) == .Enum) {
-                buffer.print("    :{s}, {d},\n", .{
+                buffer.print("      :{s}, {d},\n", .{
                     @as([]const u8, &field_name),
                     @intFromEnum(@field(Type, field.name)),
                 });
             } else {
                 // Packed structs.
-                buffer.print("    :{s}, 1 << {d},\n", .{
+                buffer.print("      :{s}, 1 << {d},\n", .{
                     @as([]const u8, &field_name),
                     i,
                 });
@@ -166,7 +165,7 @@ fn emit_enum(
         }
     }
 
-    buffer.print("  ])\n\n", .{});
+    buffer.print("    ])\n\n", .{});
 }
 
 fn emit_ruby_ffi_struct(
@@ -175,20 +174,22 @@ fn emit_ruby_ffi_struct(
     comptime c_name: []const u8,
 ) !void {
     buffer.print(
-        \\  class {s} < FFI::Struct
-        \\    layout(
+        \\    class {s} < FFI::Struct
+        \\      include TigerBeetle::StructConverter
+        \\
+        \\      layout(
         \\
     , .{c_name});
 
     inline for (type_info.fields) |field| {
         const ruby_name_map = comptime mapping_name_from_type(mappings_all, field.type);
         if (ruby_name_map) |ruby_name| {
-            buffer.print("      {s}: {s},\n", .{
+            buffer.print("        {s}: {s},\n", .{
                 field.name,
                 ruby_name,
             });
         } else {
-            buffer.print("      {s}: {s},\n", .{
+            buffer.print("        {s}: {s},\n", .{
                 field.name,
                 zig_to_ruby(field.type),
             });
@@ -196,8 +197,8 @@ fn emit_ruby_ffi_struct(
     }
 
     buffer.print(
-        \\    )
-        \\  end
+        \\      )
+        \\    end
         \\
         \\
     , .{});
@@ -218,16 +219,19 @@ pub fn main() !void {
         \\##########################################################
         \\
         \\require "ffi"
-        \\require "tb_client/shared_lib"
         \\
-        \\module TBClient
-        \\  extend FFI::Library
+        \\require_relative "shared_lib"
+        \\require_relative "struct_converter"
+        \\require_relative "types"
+        \\require_relative "version"
         \\
-        \\  ffi_lib SharedLib.path
+        \\module TigerBeetle
+        \\  module Bindings
+        \\    extend FFI::Library
         \\
-        \\  class UINT128 < FFI::Struct
-        \\    layout(low: :uint64, high: :uint64)
-        \\  end
+        \\    typedef TigerBeetle::Types::UINT128, :uint128
+        \\
+        \\    ffi_lib SharedLib.path
         \\
         \\
     , .{});
@@ -276,17 +280,16 @@ pub fn main() !void {
     }
 
     buffer.print(
-        \\  callback :init_completion, [:uint, Packet.by_ref, :uint64, :pointer, :uint32], :void
-        \\  callback :init_echo_completion, [:uint, Packet.by_ref, :uint64, :pointer, :uint32], :void
-        \\  callback :log_handler, [LogLevel, :pointer, :uint32], :void
+        \\    callback :init_completion, [:uint, Packet.by_ref, :uint64, :pointer, :uint32], :void
+        \\    callback :log_handler, [LogLevel, :pointer, :uint32], :void
         \\
-        \\  attach_function :tb_client_init, [Client.by_ref, :pointer, :string, :uint32, :uint, :init_completion], InitStatus
-        \\  attach_function :tb_client_init_echo, [Client.by_ref, :pointer, :string, :uint32, :uint, :init_echo_completion], InitStatus
-        \\  attach_function :tb_client_completion_context, [Client.by_ref, :pointer], ClientStatus
-        \\  attach_function :tb_client_submit, [Client.by_ref, Packet.by_ref], ClientStatus
-        \\  attach_function :tb_client_deinit, [Client.by_ref], ClientStatus
-        \\  attach_function :tb_client_register_log_callback, [:log_handler, :bool], RegisterLogCallbackStatus
-        \\
+        \\    attach_function :tb_client_init, [Client.by_ref, :pointer, :string, :uint32, :uint, :init_completion], InitStatus
+        \\    attach_function :tb_client_init_echo, [Client.by_ref, :pointer, :string, :uint32, :uint, :init_completion], InitStatus
+        \\    attach_function :tb_client_completion_context, [Client.by_ref, :pointer], ClientStatus
+        \\    attach_function :tb_client_submit, [Client.by_ref, Packet.by_ref], ClientStatus
+        \\    attach_function :tb_client_deinit, [Client.by_ref], ClientStatus
+        \\    attach_function :tb_client_register_log_callback, [:log_handler, :bool], RegisterLogCallbackStatus
+        \\  end
         \\end
         \\
     , .{});
