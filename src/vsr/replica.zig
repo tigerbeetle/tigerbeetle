@@ -4246,6 +4246,16 @@ pub fn ReplicaType(
 
                 assert(self.commit_min == self.commit_max);
 
+                if (vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint())) |trigger| {
+                    // Checkpoint is guaranteed to be durable on a commit quorum when a replica is
+                    // committing the (pipeline + 1)ᵗʰ prepare after checkpoint trigger. Send SV
+                    // message so lagging backups can proactively sync to this durable checkpoint.
+                    if (self.commit_max == trigger + constants.pipeline_prepare_queue_max + 1) {
+                        assert(vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max));
+                        self.primary_send_start_view();
+                    }
+                }
+
                 if (self.pipeline.queue.prepare_queue.head_ptr()) |next| {
                     assert(next.message.header.op == self.commit_min + 1);
                     assert(next.message.header.op == self.commit_prepare.?.header.op + 1);
