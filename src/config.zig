@@ -110,7 +110,7 @@ const ConfigProcess = struct {
     tcp_nodelay: bool = true,
     direct_io: bool,
     journal_iops_read_max: usize = 8,
-    journal_iops_write_max: usize = 8,
+    journal_iops_write_max: usize = 16,
     client_replies_iops_read_max: usize = 1,
     client_replies_iops_write_max: usize = 2,
     client_request_completion_warn_ms: u64 = 200,
