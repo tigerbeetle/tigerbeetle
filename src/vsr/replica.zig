@@ -4395,6 +4395,9 @@ pub fn ReplicaType(
             if (self.grid.free_set.checkpoint_durable) return .ready;
             if (!vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_min)) return .ready;
 
+            // Send SV message so lagging replicas can proactively sync to this durable checkpoint.
+            if (self.status == .normal and self.primary()) self.primary_send_start_view();
+
             // Checkpoint is guaranteed to be durable on a commit quorum when a replica is
             // committing the (pipeline + 1)ᵗʰ prepare after checkpoint trigger. It might already be
             // durable before this point (some part of the cluster may be lagging while a commit
