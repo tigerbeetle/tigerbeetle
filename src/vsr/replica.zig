@@ -4571,6 +4571,9 @@ pub fn ReplicaType(
             // Send prepare_oks that may have been wittheld by virtue of `op_prepare_ok_max`.
             self.send_prepare_oks_after_checkpoint();
 
+            // Send SV message so lagging replicas can proactively sync to this durable checkpoint.
+            if (self.status == .normal and self.primary()) self.primary_send_start_view();
+
             if (self.event_callback) |hook| hook(self, .checkpoint_completed);
             return self.commit_dispatch_resume();
         }
