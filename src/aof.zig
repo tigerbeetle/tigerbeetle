@@ -265,7 +265,12 @@ pub const AOF = struct {
     /// loses power, the op is guaranteed to still be in the WAL.
     pub fn write(self: *AOF, message: *const Message.Prepare) !void {
         assert(self.state == .writing);
-        assert(self.state.writing.unflushed < constants.journal_slot_count);
+        if (self.state.writing.unflushed >= constants.journal_slot_count) {
+            log.warn("unflushed: {}, journal_slot_count: {} - only expected during state sync", .{
+                self.state.writing.unflushed,
+                constants.journal_slot_count,
+            });
+        }
 
         var entry: AOFEntry align(constants.sector_size) = undefined;
         entry.from_message(
@@ -283,7 +288,12 @@ pub const AOF = struct {
 
     pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
         assert(self.state == .writing);
-        assert(self.state.writing.unflushed < constants.journal_slot_count);
+        if (self.state.writing.unflushed >= constants.journal_slot_count) {
+            log.warn("unflushed: {}, journal_slot_count: {} - only expected during state sync", .{
+                self.state.writing.unflushed,
+                constants.journal_slot_count,
+            });
+        }
 
         self.state = .{
             .checkpoint = .{
