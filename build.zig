@@ -263,7 +263,6 @@ pub fn build(b: *std.Build) !void {
     const scripts = build_scripts(b, build_steps.scripts, .{
         .vsr_options = vsr_options,
         .target = target,
-        .mode = mode,
     });
 
     // zig build vortex
@@ -1065,14 +1064,13 @@ fn build_scripts(
     options: struct {
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
-        mode: std.builtin.OptimizeMode,
     },
 ) *std.Build.Step.Compile {
     const scripts = b.addExecutable(.{
         .name = "scripts",
         .root_source_file = b.path("src/scripts.zig"),
         .target = options.target,
-        .optimize = options.mode,
+        .optimize = .Debug,
     });
     scripts.root_module.addOptions("vsr_options", options.vsr_options);
     const scripts_run = b.addRunArtifact(scripts);

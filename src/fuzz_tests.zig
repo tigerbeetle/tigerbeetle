@@ -86,18 +86,18 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             .lsm_manifest_log => 2_000,
             .lsm_scan => 100,
             .lsm_tree => 400,
-            .vsr_free_set => 10_000,
-            .vsr_superblock => 3,
             .state_machine => 10_000,
+            .storage => 1_000,
+            .vsr_free_set => 10_000,
+            .vsr_multi_batch => 128,
+            .vsr_superblock => 3,
 
             inline .ewah,
             .lsm_segmented_array,
             .lsm_manifest_level,
             .vsr_journal_format,
             .vsr_superblock_quorums,
-            .storage,
             .signal,
-            .vsr_multi_batch,
             => null,
         };
 
@@ -107,7 +107,7 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             .events_max = events_max,
         });
         const fuzz_duration = timer_single.lap();
-        if (fuzz_duration > 60 * std.time.ns_per_s) {
+        if (fuzz_duration > 10 * std.time.ns_per_s) {
             log.err("fuzzer too slow for the smoke mode: " ++ @tagName(fuzzer) ++ " {}", .{
                 std.fmt.fmtDuration(fuzz_duration),
             });
