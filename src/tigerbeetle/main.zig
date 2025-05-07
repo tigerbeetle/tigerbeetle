@@ -515,7 +515,10 @@ const Command = struct {
         while (true) {
             replica.tick();
             if (multiversion != null) multiversion.?.tick();
-            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try command.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+            while (try command.io.run_for_ns()) {
+                replica.idle();
+            }
         }
     }
 

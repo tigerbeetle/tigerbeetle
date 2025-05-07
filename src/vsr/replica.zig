@@ -1365,6 +1365,12 @@ pub fn ReplicaType(
             assert(self.journal.header_with_op(self.op) != null);
         }
 
+        pub fn idle(self: *Replica) void {
+            if (self.message_bus.receive()) |message| {
+                self.on_message(message);
+            }
+        }
+
         /// Time is measured in logical ticks that are incremented on every call to tick().
         /// This eliminates a dependency on the system time and enables deterministic testing.
         pub fn tick(self: *Replica) void {

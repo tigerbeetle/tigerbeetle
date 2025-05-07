@@ -10,6 +10,7 @@ const Header = vsr.Header;
 
 const stdx = @import("stdx.zig");
 const RingBufferType = stdx.RingBufferType;
+const QueueType = @import("queue.zig").QueueType;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -65,13 +66,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         /// Prefix for log messages.
         id: u128,
 
-        /// The callback to be called when a message is received.
-        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
-
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.peer != .none).
         connections_used: usize = 0,
+        connections_ready_queue: QueueType(Connection) = QueueType(Connection).init(.{
+            .name = null,
+            .verify_push = true,
+        }),
 
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
@@ -97,7 +99,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             cluster: u128,
             process_id: ProcessID,
             message_pool: *MessagePool,
-            on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
             options: Options,
         ) !MessageBus {
             assert(@as(vsr.ProcessType, process_id) == process_type);
@@ -160,7 +161,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .replica => |index| @as(u128, index),
                     .client => |id| id,
                 },
-                .on_message_callback = on_message_callback,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -373,6 +373,25 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
         }
 
+        pub fn receive(bus: *MessageBus) ?Message {
+            if (bus.connections_ready_queue.pop()) |connection| {
+                assert(connection.recv_message_count > 0);
+                const message = connection.receive().?;
+                defer bus.unref(message);
+
+                if (connection.recv_message_count > 0) {
+                    // Fairness, round-robin ready connections.
+                    bus.connections_ready_queue.push(connection);
+                } else {
+                    assert(!connection.recv_submitted);
+                    connection.recv(bus);
+                }
+
+                return message;
+            }
+            return null;
+        }
+
         /// Used to send/receive messages to/from a client or fellow replica.
         const Connection = struct {
             const Peer = union(enum) {
@@ -426,6 +445,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// True if we have already checked the header checksum of the message we
             /// are currently receiving/parsing.
             recv_checked_header: bool = false,
+            /// How many full messages are there in `recv_message` buffer?
+            recv_message_count: u32 = 0,
 
             /// This completion is used for all send operations.
             send_completion: IO.Completion = undefined,
