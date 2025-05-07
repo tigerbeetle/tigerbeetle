@@ -1779,6 +1779,17 @@ pub fn ReplicaType(
             }
             defer if (self.backup()) self.commit_journal();
 
+            if (message.header.op > self.commit_min + 2 * constants.pipeline_prepare_queue_max) {
+                log.warn("{}: on_prepare: lagging behind the cluster prepare.op={} " ++
+                    "(commit_min={} op={} commit_max={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
+                });
+            }
+
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
                 log.warn("{}: on_prepare: ignoring prepare.op={} " ++
