@@ -64,7 +64,7 @@ module TigerBeetle
 
       status = Bindings.tb_client_submit(@client, packet)
 
-      raise "Failed to submit packet: #{status}" unless status == Bindings::ClientStatus[:OK]
+      raise "Failed to submit packet: #{status}" unless status == :OK
 
       queue.pop unless result_block
     end
