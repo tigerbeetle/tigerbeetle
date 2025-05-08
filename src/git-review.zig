@@ -353,7 +353,7 @@ const Review = struct {
                 // Extract '380' from
                 // @@ -379,0 +380,2 @@
                 _, const added = stdx.cut(line, " +").?;
-                const hunk_line_str, _ = stdx.cut(added, ",") orelse stdx.cut(added, " ").?;
+                const hunk_line_str, _ = stdx.cut(added, ",") orelse stdx.cut(added, " @@").?;
                 hunk_line = std.fmt.parseInt(u32, hunk_line_str, 10) catch unreachable;
             }
 
