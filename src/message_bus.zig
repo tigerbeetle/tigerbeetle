@@ -825,15 +825,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     assert(connection.recv_parsed <= connection.recv_progress);
                 }
 
-                if (message.header.command == .request or
-                    message.header.command == .prepare or
-                    message.header.command == .block)
-                {
-                    const sector_ceil = vsr.sector_ceil(message.header.size);
-                    if (message.header.size != sector_ceil) {
-                        assert(message.header.size < sector_ceil);
-                        assert(message.buffer.len == constants.message_size_max);
-                        @memset(message.buffer[message.header.size..sector_ceil], 0);
+                if (process_type == .replica) {
+                    // These messages are written to disk (.request converted to .prepare first) at
+                    // a sector granularity, and so should be padded with zeros for determinism.
+                    if (message.header.command == .request or
+                        message.header.command == .prepare or
+                        message.header.command == .block or
+                        message.header.command == .reply)
+                    {
+                        const sector_ceil = vsr.sector_ceil(message.header.size);
+                        if (message.header.size != sector_ceil) {
+                            assert(message.header.size < sector_ceil);
+                            assert(message.buffer.len == constants.message_size_max);
+                            @memset(message.buffer[message.header.size..sector_ceil], 0);
+                        }
                     }
                 }
 

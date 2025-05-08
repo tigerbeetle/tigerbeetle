@@ -311,13 +311,19 @@ pub const StorageChecker = struct {
                 // Empty slot.
             } else {
                 assert(client_session.header.command == .reply);
+                const reply_size = client_session.header.size;
 
-                if (client_session.header.size == @sizeOf(vsr.Header)) {
+                if (reply_size == @sizeOf(vsr.Header)) {
                     // ClientReplies won't store this entry.
                 } else {
-                    checksum.add(superblock.storage.area_memory(
-                        .{ .client_replies = .{ .slot = slot } },
-                    )[0..vsr.sector_ceil(client_session.header.size)]);
+                    const reply = superblock.storage.area_memory(.{
+                        .client_replies = .{ .slot = slot },
+                    });
+
+                    const padding = reply[reply_size..vsr.sector_ceil(reply_size)];
+                    assert(stdx.zeroed(padding));
+
+                    checksum.add(reply[0..reply_size]);
                 }
             }
         }
@@ -436,12 +442,13 @@ pub const StorageChecker = struct {
                 const block_header = schema.header_from_block(block);
                 assert(block_header.address == block_address);
 
+                // Grid block sector padding is zeroed:
+                const padding = block[block_header.size..vsr.sector_ceil(block_header.size)];
+                assert(stdx.zeroed(padding));
+
                 stream.add(block[0..block_header.size]);
                 // Extra guard against identical blocks:
                 stream.add(std.mem.asBytes(&block_address));
-
-                // Grid block sector padding is zeroed:
-                assert(stdx.zeroed(block[block_header.size..vsr.sector_ceil(block_header.size)]));
             }
         }
         assert(blocks_missing == 0);
