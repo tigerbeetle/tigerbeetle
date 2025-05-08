@@ -36,11 +36,13 @@ pub const Runner = struct {
     const constants = struct {
         const tick_ms = vsr.constants.tick_ms;
         const idle_interval_ns: u63 = 1 * std.time.ns_per_s;
-        const amqp_reply_timeout_ms = 30 * std.time.ms_per_s;
-        const amqp_app_id = "tigerbeetle";
-        const amqp_progress_tracker_queue = "tigerbeetle.internal.progress";
-        const amqp_locker_queue = "tigerbeetle.internal.locker";
-
+        const reply_timeout_ticks = @divExact(
+            30 * std.time.ms_per_s,
+            constants.tick_ms,
+        );
+        const app_id = "tigerbeetle";
+        const progress_tracker_queue = "tigerbeetle.internal.progress";
+        const locker_queue = "tigerbeetle.internal.locker";
         const event_count_max: u32 = Client.StateMachine.operation_result_max(
             .get_events,
             vsr.constants.message_body_size_max,
@@ -57,10 +59,10 @@ pub const Runner = struct {
     buffer: DualBuffer,
 
     amqp_client: amqp.Client,
-    amqp_publish_exchange: []const u8,
-    amqp_publish_routing_key: []const u8,
-    amqp_progress_tracker_queue: []const u8,
-    amqp_locker_queue: []const u8,
+    publish_exchange: []const u8,
+    publish_routing_key: []const u8,
+    progress_tracker_queue: []const u8,
+    locker_queue: []const u8,
 
     connected: struct {
         /// VSR client registered.
@@ -98,7 +100,7 @@ pub const Runner = struct {
                 declare_progress_queue,
                 get_progress_message,
                 nack_progress_message: struct {
-                    amqp_delivery_tag: u64,
+                    delivery_tag: u64,
                 },
             },
         },
@@ -114,21 +116,24 @@ pub const Runner = struct {
         self: *Runner,
         allocator: std.mem.Allocator,
         options: struct {
-            tb_cluster_id: u128,
-            tb_addresses: []const std.net.Address,
-            amqp_address: std.net.Address,
+            /// TigerBeetle cluster ID.
+            cluster_id: u128,
+            /// TigerBeetle cluster addresses.
+            addresses: []const std.net.Address,
+            /// AMQP host address.
+            host: std.net.Address,
             /// AMQP User name for PLAIN authentication.
-            amqp_user: []const u8,
+            user: []const u8,
             /// AMQP Password for PLAIN authentication.
-            amqp_password: []const u8,
+            password: []const u8,
             /// AMQP vhost.
-            amqp_vhost: []const u8,
+            vhost: []const u8,
             /// AMQP exchange name for publishing messages.
-            amqp_publish_exchange: ?[]const u8,
+            publish_exchange: ?[]const u8,
             /// AMQP routing key for publishing messages.
-            amqp_publish_routing_key: ?[]const u8,
+            publish_routing_key: ?[]const u8,
             /// Overrides the AMQP queue name declared by the client as progress tracker.
-            amqp_progress_tracker_queue: ?[]const u8,
+            progress_tracker_queue: ?[]const u8,
             /// Overrides the number max of events produced/consumed each time.
             event_count_max: ?u32,
             /// Overrides the number of milliseconds to query again if there's no new events to
@@ -140,58 +145,38 @@ pub const Runner = struct {
             recovery_mode: StateRecoveryMode,
         },
     ) !void {
-        assert(options.tb_addresses.len > 0);
+        assert(options.addresses.len > 0);
 
-        const idle_interval_ns: u63 = interval: {
-            if (options.idle_interval_ms) |value| {
-                assert(value > 0);
-                break :interval @intCast(@as(u64, value) * std.time.ns_per_ms);
-            }
-            break :interval constants.idle_interval_ns;
-        };
+        const idle_interval_ns: u63 = if (options.idle_interval_ms) |value|
+            @intCast(@as(u64, value) * std.time.ns_per_ms)
+        else
+            constants.idle_interval_ns;
+        assert(idle_interval_ns > 0);
 
-        const event_count_max: u32 = count: {
-            if (options.event_count_max) |event_count_max| {
-                assert(event_count_max > 0);
-                break :count @min(event_count_max, constants.event_count_max);
-            }
-            break :count constants.event_count_max;
-        };
+        const event_count_max: u32 = if (options.event_count_max) |event_count_max|
+            @min(event_count_max, constants.event_count_max)
+        else
+            constants.event_count_max;
+        assert(event_count_max > 0);
 
-        const amqp_publish_exchange: []const u8 = name: {
-            if (options.amqp_publish_exchange) |exchange_name| {
-                assert(exchange_name.len > 0);
-                break :name exchange_name;
-            }
-            break :name "";
-        };
+        const publish_exchange: []const u8 = options.publish_exchange orelse "";
+        const publish_routing_key: []const u8 = options.publish_routing_key orelse "";
+        assert(publish_exchange.len > 0 or publish_routing_key.len > 0);
 
-        const amqp_publish_routing_key: []const u8 = key: {
-            if (options.amqp_publish_routing_key) |routing_key| {
-                assert(routing_key.len > 0);
-                break :key routing_key;
-            }
-            break :key "";
-        };
+        const progress_tracker_queue: []const u8 = options.progress_tracker_queue orelse
+            constants.progress_tracker_queue;
+        assert(progress_tracker_queue.len > 0);
 
-        const amqp_progress_tracker_queue: []const u8 = name: {
-            if (options.amqp_progress_tracker_queue) |queue_name| {
-                assert(queue_name.len > 0);
-                break :name queue_name;
-            }
-            break :name constants.amqp_progress_tracker_queue;
-        };
-
-        const amqp_locker_queue_owned: []const u8 = try std.fmt.allocPrint(
+        const locker_queue_owned: []const u8 = try std.fmt.allocPrint(
             allocator,
             "{s}.{s}.{s}",
             .{
-                constants.amqp_locker_queue,
-                options.amqp_publish_exchange orelse "default",
-                options.amqp_publish_routing_key orelse "default",
+                constants.locker_queue,
+                options.publish_exchange orelse "default",
+                options.publish_routing_key orelse "default",
             },
         );
-        errdefer allocator.free(amqp_locker_queue_owned);
+        errdefer allocator.free(locker_queue_owned);
 
         const dual_buffer = try DualBuffer.init(allocator, event_count_max);
         errdefer self.buffer.deinit(allocator);
@@ -199,10 +184,10 @@ pub const Runner = struct {
         self.* = .{
             .idle_interval_ns = idle_interval_ns,
             .event_count_max = event_count_max,
-            .amqp_publish_exchange = amqp_publish_exchange,
-            .amqp_publish_routing_key = amqp_publish_routing_key,
-            .amqp_progress_tracker_queue = amqp_progress_tracker_queue,
-            .amqp_locker_queue = amqp_locker_queue_owned,
+            .publish_exchange = publish_exchange,
+            .publish_routing_key = publish_routing_key,
+            .progress_tracker_queue = progress_tracker_queue,
+            .locker_queue = locker_queue_owned,
             .connected = .{},
             .io = undefined,
             .producer = .idle,
@@ -234,11 +219,11 @@ pub const Runner = struct {
 
         self.vsr_client = try Client.init(allocator, .{
             .id = stdx.unique_u128(),
-            .cluster = options.tb_cluster_id,
-            .replica_count = @intCast(options.tb_addresses.len),
+            .cluster = options.cluster_id,
+            .replica_count = @intCast(options.addresses.len),
             .time = .{},
             .message_pool = &self.message_pool,
-            .message_bus_options = .{ .configuration = options.tb_addresses, .io = &self.io },
+            .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
         });
         errdefer self.vsr_client.deinit(allocator);
 
@@ -246,10 +231,7 @@ pub const Runner = struct {
             .io = &self.io,
             .message_count_max = self.event_count_max,
             .message_body_size_max = Message.json_string_size_max,
-            .reply_timeout_ticks = @divExact(
-                constants.amqp_reply_timeout_ms,
-                constants.tick_ms,
-            ),
+            .reply_timeout_ticks = constants.reply_timeout_ticks,
         });
         errdefer self.amqp_client.deinit(allocator);
 
@@ -267,10 +249,10 @@ pub const Runner = struct {
                 }
             }.callback,
             .{
-                .address = options.amqp_address,
-                .user_name = options.amqp_user,
-                .password = options.amqp_password,
-                .vhost = options.amqp_vhost,
+                .host = options.host,
+                .user_name = options.user,
+                .password = options.password,
+                .vhost = options.vhost,
             },
         );
 
@@ -298,7 +280,7 @@ pub const Runner = struct {
         self.message_pool.deinit(allocator);
         self.amqp_client.deinit(allocator);
         self.buffer.deinit(allocator);
-        allocator.free(self.amqp_locker_queue);
+        allocator.free(self.locker_queue);
     }
 
     fn start(self: *Runner) void {
@@ -339,7 +321,7 @@ pub const Runner = struct {
                     .override => |timestamp| timestamp,
                 };
 
-                const is_default_exchange = self.amqp_publish_exchange.len == 0;
+                const is_default_exchange = self.publish_exchange.len == 0;
                 if (is_default_exchange) {
                     // No need to validate the default exchange, skipping `validate_exchange`.
                     self.state = .{
@@ -369,7 +351,7 @@ pub const Runner = struct {
             // Check whether the exchange exists.
             // Declaring the exchange with `passive==true` only asserts if it already exists.
             .validate_exchange => {
-                assert(self.amqp_publish_exchange.len > 0);
+                assert(self.publish_exchange.len > 0);
                 maybe(self.state.recovering.timestamp_last == null);
 
                 self.amqp_client.exchange_declare(
@@ -392,7 +374,7 @@ pub const Runner = struct {
                         }
                     }.callback,
                     .{
-                        .exchange = self.amqp_publish_exchange,
+                        .exchange = self.publish_exchange,
                         .type = "",
                         .passive = true,
                         .durable = false,
@@ -430,7 +412,7 @@ pub const Runner = struct {
                         }
                     }.callback,
                     .{
-                        .queue = self.amqp_locker_queue,
+                        .queue = self.locker_queue,
                         .passive = false,
                         .durable = false,
                         .exclusive = true,
@@ -480,7 +462,7 @@ pub const Runner = struct {
                         }
                     }.callback,
                     .{
-                        .queue = self.amqp_progress_tracker_queue,
+                        .queue = self.progress_tracker_queue,
                         .passive = false,
                         .durable = true,
                         .exclusive = false,
@@ -532,7 +514,7 @@ pub const Runner = struct {
                                         recovering.timestamp_last = progress_tracker.timestamp;
                                         recovering.phase = .{
                                             .nack_progress_message = .{
-                                                .amqp_delivery_tag = result.delivery_tag,
+                                                .delivery_tag = result.delivery_tag,
                                             },
                                         };
 
@@ -553,7 +535,7 @@ pub const Runner = struct {
                         }
                     }.callback,
                     .{
-                        .queue = self.amqp_progress_tracker_queue,
+                        .queue = self.progress_tracker_queue,
                         .no_ack = false,
                     },
                 );
@@ -563,7 +545,7 @@ pub const Runner = struct {
             .nack_progress_message => |message| {
                 assert(self.state.recovering.timestamp_last != null);
                 assert(TimestampRange.valid(self.state.recovering.timestamp_last.?));
-                assert(message.amqp_delivery_tag > 0);
+                assert(message.delivery_tag > 0);
 
                 self.amqp_client.nack(&struct {
                     fn callback(context: *amqp.Client) void {
@@ -578,7 +560,7 @@ pub const Runner = struct {
                                 assert(TimestampRange.valid(recovering.timestamp_last.?));
 
                                 const nack = recovering.phase.nack_progress_message;
-                                assert(nack.amqp_delivery_tag > 0);
+                                assert(nack.delivery_tag > 0);
 
                                 runner.state = .{ .last = .{
                                     .consumer_timestamp = recovering.timestamp_last.?,
@@ -590,7 +572,7 @@ pub const Runner = struct {
                         }
                     }
                 }.callback, .{
-                    .delivery_tag = message.amqp_delivery_tag,
+                    .delivery_tag = message.delivery_tag,
                     .requeue = true,
                     .multiple = false,
                 });
@@ -784,14 +766,14 @@ pub const Runner = struct {
                 for (events) |*event| {
                     const message = Message.init(event);
                     self.amqp_client.publish_enqueue(.{
-                        .exchange = self.amqp_publish_exchange,
-                        .routing_key = self.amqp_publish_routing_key,
+                        .exchange = self.publish_exchange,
+                        .routing_key = self.publish_routing_key,
                         .mandatory = true,
                         .immediate = false,
                         .properties = .{
                             .content_type = Message.content_type,
                             .delivery_mode = .persistent,
-                            .app_id = constants.amqp_app_id,
+                            .app_id = constants.app_id,
                             // AMQP timestamp in seconds.
                             .timestamp = @divTrunc(event.timestamp, std.time.ns_per_s),
                             .headers = message.header(),
@@ -840,7 +822,7 @@ pub const Runner = struct {
                 };
                 self.amqp_client.publish_enqueue(.{
                     .exchange = "", // No exchange sends directly to this queue.
-                    .routing_key = self.amqp_progress_tracker_queue,
+                    .routing_key = self.progress_tracker_queue,
                     .mandatory = true,
                     .immediate = false,
                     .properties = .{
@@ -933,22 +915,33 @@ const Metrics = struct {
     }
 
     fn log_and_reset(metrics: *Metrics) void {
-        const fields = .{ .producer, .consumer };
-        inline for (fields) |field| {
+        const Fields = enum { producer, consumer };
+        const runner: *const Runner = @alignCast(@fieldParentPtr("metrics", metrics));
+        inline for (comptime std.enums.values(Fields)) |field| {
             const summary: *TimingSummary = &@field(metrics, @tagName(field));
             if (summary.count > 0) {
+                assert(runner.state == .last);
+                const timestamp_last = switch (field) {
+                    .consumer => runner.state.last.consumer_timestamp,
+                    .producer => runner.state.last.producer_timestamp,
+                };
                 const event_rate = @divTrunc(
                     summary.event_count * std.time.ms_per_s,
                     summary.duration_sum_ms,
                 );
                 log.info("{s}: p0={?}ms mean={}ms p100={?}ms " ++
-                    "event_count={} throughput={} op/s", .{
+                    "event_count={} throughput={} op/s " ++
+                    "last timestamp={} ({})", .{
                     @tagName(field),
                     summary.duration_min_ms,
                     @divFloor(summary.duration_sum_ms, summary.count),
                     summary.duration_max_ms,
                     summary.event_count,
                     event_rate,
+                    timestamp_last,
+                    stdx.DateTimeUTC.from_timestamp_ms(
+                        timestamp_last / std.time.ns_per_ms,
+                    ),
                 });
             }
             summary.* = .{

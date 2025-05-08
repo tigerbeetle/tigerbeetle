@@ -39,7 +39,6 @@ pub const frame_min_size = spec.FRAME_MIN_SIZE;
 /// - Implements only the methods required by TigerBeetle.
 /// - No error handling: **CAN PANIC**.
 pub const Client = struct {
-
     pub const Callback = *const fn (self: *Client) void;
     pub const GetMessagePropertiesCallback = *const fn (
         self: *Client,
@@ -174,7 +173,7 @@ pub const Client = struct {
         } };
 
         self.fd = try self.io.open_socket_tcp(
-            options.address.any.family,
+            options.host.any.family,
             .{
                 // Keeping the default value.
                 // Large buffers can cause latency issues.
@@ -213,7 +212,7 @@ pub const Client = struct {
             }.continuation,
             &self.receive_completion,
             self.fd,
-            options.address,
+            options.host,
         );
     }
 
@@ -266,7 +265,7 @@ pub const Client = struct {
                 const method_tune_ok: spec.ServerMethod = .{ .connection_tune_ok = .{
                     .channel_max = 1,
                     .frame_max = @max(frame_min_size, self.frame_size_max),
-                    .heartbeat = connection_options.heartbeat orelse args.heartbeat,
+                    .heartbeat = connection_options.heartbeat_seconds orelse args.heartbeat,
                 } };
                 method_tune_ok.encode(.global, encoder);
 
@@ -1147,4 +1146,3 @@ test "amqp: ReceiveBuffer" {
         try testing.expectEqualSlices(u8, buffer[decoded_remain..], receive_slice_next);
     }
 }
-

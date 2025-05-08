@@ -6,12 +6,12 @@ const Encoder = protocol.Encoder;
 const Decoder = protocol.Decoder;
 
 pub const ConnectOptions = struct {
-    address: std.net.Address,
+    host: std.net.Address,
     user_name: []const u8,
     password: []const u8,
     vhost: []const u8,
     locale: ?[]const u8 = null,
-    heartbeat: ?u16 = null,
+    heartbeat_seconds: ?u16 = null,
     properties: ConnectionProperties = ConnectionProperties.default,
 };
 
