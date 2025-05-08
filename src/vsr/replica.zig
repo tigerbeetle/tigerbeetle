@@ -10207,6 +10207,7 @@ pub fn ReplicaType(
             assert(requests.len > 0);
 
             const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
+            assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
 
             for (requests[0..requests_count]) |*request| {
