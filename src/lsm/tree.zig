@@ -6,6 +6,7 @@ const mem = std.mem;
 const maybe = stdx.maybe;
 
 const stdx = @import("../stdx.zig");
+const perf_event = @import("./perf_event.zig");
 const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 
@@ -15,6 +16,11 @@ const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 pub const ScopeCloseMode = enum { persist, discard };
 
+const BenchmarkParams = struct {
+    name: []const u8 = "",
+    key_size: usize,
+    elements: usize,
+};
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
 /// Since we ensure and assert that a query snapshot never exactly matches
@@ -531,16 +537,29 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 // In addition, the immutable table is conceptually an output table of this
                 // compaction bar, and now its snapshot_min matches the snapshot_min of the
                 // Compactions' output tables.
-                tree.table_mutable.make_immutable(snapshot_min);
-                tree.table_immutable.make_mutable();
-                std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
+
+                var benchmark_params = BenchmarkParams{
+                    .name = tree_name(),
+                    .key_size = @sizeOf(Key),
+                    .elements = tree.table_mutable.count(),
+                };
+                var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
+                perf.set_scale(tree.table_mutable.count());
+                tree.table_immutable.merge_from(&tree.table_mutable, snapshot_min);
+                perf.deinit();
+                //tree.table_mutable.make_immutable(snapshot_min);
+                //tree.table_immutable.make_mutable();
+                //std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
             } else {
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
 
+                var timer = std.time.Timer.start() catch unreachable;
                 // The immutable table wasn't flushed because there is enough room left over for the
                 // mutable table's values, allowing us to skip some compaction work.
                 tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
+                const duration = timer.lap();
+                std.debug.print("absorb {} \n", .{duration / std.time.ns_per_ms});
 
                 assert(tree.table_mutable.value_context.count == 0);
             }

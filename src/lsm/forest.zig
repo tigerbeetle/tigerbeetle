@@ -520,6 +520,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {
+                var timer = std.time.Timer.start() catch unreachable;
                 inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
 
@@ -531,6 +532,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     // Ensure tables haven't overflowed.
                     tree.manifest.assert_level_table_counts();
                 }
+                const duration = timer.lap();
+                std.debug.print("duration {} \n", .{duration / std.time.ns_per_ms});
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.

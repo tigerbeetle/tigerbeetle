@@ -4,8 +4,16 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
+const loser_tree = @import("./loser_tree.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
+
+const SortedRun = loser_tree.SortedRun;
+// `sort_suffix` breaks the `values` array into “sorted runs” (sorted sub‑arrays).
+// Each SortedRun captures the start (min) and end (max) indices of one sorted run.
+// We can exploit this knowledge to check if the full array is sorted in O(k) and avoid
+// the final sort, which reduces tail latency.
+// The number of calls to `sort_suffix` are determined by `constants.lsm_compaction_ops`.
 
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
@@ -13,6 +21,12 @@ pub fn TableMemoryType(comptime Table: type) type {
     const key_from_value = Table.key_from_value;
 
     return struct {
+        const TreeOfLosers = loser_tree.LooserTreeType(
+            Key,
+            Value,
+            constants.lsm_compaction_ops,
+            key_from_value,
+        );
         const TableMemory = @This();
 
         pub const ValueContext = struct {
@@ -45,6 +59,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             },
         };
 
+        const sorted_runs_max = constants.lsm_compaction_ops;
+        sorted_runs: [sorted_runs_max]SortedRun,
+        sorted_runs_count: u16,
+
         values: []Value,
         tmp_buffer: []Value,
         value_context: ValueContext,
@@ -68,6 +86,12 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .mutable => .{ .mutable = .{} },
                     .immutable => .{ .immutable = .{} },
                 },
+
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .name = name,
 
                 .values = undefined,
@@ -85,6 +109,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
             allocator.free(table.values);
+            allocator.free(table.tmp_buffer);
         }
 
         pub fn reset(table: *TableMemory) void {
@@ -94,6 +119,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             };
 
             table.* = .{
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .values = table.values,
                 .tmp_buffer = table.tmp_buffer,
                 .value_context = .{},
@@ -140,6 +170,127 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
         }
 
+        /// Merge and sort the immutable/mutable tables (favoring values in the latter) into the
+        /// immutable table. Then reset the mutable table.
+        pub fn merge_from(
+            table_immutable: *TableMemory,
+            table_mutable: *TableMemory,
+            snapshot_min: u64,
+        ) void {
+            assert(table_immutable.mutability == .immutable);
+            maybe(table_immutable.mutability.immutable.absorbed);
+            assert(table_mutable.mutability == .mutable);
+            maybe(table_mutable.value_context.sorted);
+
+            assert((table_mutable.sorted_runs_count == 0) == (table_mutable.count() == 0));
+            defer assert(table_immutable.value_context.sorted);
+
+            if (table_mutable.value_context.sorted or table_mutable.sorted_runs_count == 1) {
+                // sorted and no duplicates
+                stdx.copy_disjoint(
+                    .inexact,
+                    Value,
+                    table_immutable.values[0..],
+                    table_mutable.values[0..table_mutable.count()],
+                );
+                table_immutable.value_context.count = table_mutable.count();
+                table_immutable.value_context.sorted = true;
+            } else {
+                const sorted_runs_count = table_mutable.sorted_runs_count;
+                assert(table_mutable.count() > 0);
+                assert(sorted_runs_count > 0);
+                assert(table_mutable.sorted_runs[sorted_runs_count - 1].max == table_mutable.count());
+                assert(table_mutable.sorted_runs[0].min == 0);
+
+                if (sorted_runs_count > 1) {
+                    for (
+                        table_mutable.sorted_runs[0 .. sorted_runs_count - 1],
+                        table_mutable.sorted_runs[1..sorted_runs_count],
+                    ) |sr_a, sr_b| {
+                        assert(sr_a.max == sr_b.min);
+                    }
+                }
+
+                TreeOfLosers.merge(
+                    table_mutable.values_used(),
+                    table_mutable.sorted_runs[0..],
+                    table_immutable.values[0..table_mutable.count()],
+                );
+
+                // ----- Deduplicate
+                // Merge values with identical keys (last one wins) and collapse tombstones for
+                // secondary indexes.
+                const source_count: u32 = @intCast(table_mutable.count());
+                const values = table_immutable.values;
+                var source_index: u32 = 0;
+                var target_index: u32 = 0;
+                while (source_index < source_count) {
+                    if (source_index != target_index) {
+                        values[target_index] = values[source_index];
+                    }
+
+                    // If we're at the end of the source, there is no next value, so the next value
+                    // can't be equal.
+                    const value_next_equal = source_index + 1 < source_count and
+                        key_from_value(&values[source_index]) ==
+                        key_from_value(&values[source_index + 1]);
+
+                    if (value_next_equal) {
+                        if (Table.usage == .secondary_index) {
+                            // Secondary index optimization --- cancel out put and remove.
+                            // NB: while this prevents redundant tombstones from getting to disk, we
+                            // still spend some extra CPU work to sort the entries in memory. Ideally,
+                            // we annihilate tombstones immediately, before sorting, but that's tricky
+                            // to do with scopes.
+                            assert(Table.tombstone(&values[source_index]) !=
+                                Table.tombstone(&values[source_index + 1]));
+                            source_index += 2;
+                            target_index += 0;
+                        } else {
+                            // The last value in a run of duplicates needs to be the one that ends up in
+                            // target.
+                            source_index += 1;
+                            target_index += 0;
+                        }
+                    } else {
+                        source_index += 1;
+                        target_index += 1;
+                    }
+                }
+
+                // At this point, source_index and target_index are actually counts.
+                // source_index will always be incremented after the final iteration as part of the
+                // continue expression.
+                // target_index will always be incremented, since either source_index runs out first
+                // so value_next_equal is false, or a new value is hit, which will increment it.
+                const target_count = target_index;
+                assert(target_count <= source_count);
+                assert(source_count == source_index);
+                table_immutable.value_context.count = target_count;
+                table_immutable.value_context.sorted = true;
+            }
+
+            if (constants.verify) {
+                const target_count = table_immutable.count();
+                if (0 < table_immutable.count()) {
+                    const values = table_immutable.values_used();
+                    for (
+                        values[0 .. target_count - 1],
+                        values[1..target_count],
+                    ) |*value, *value_next| {
+                        assert(key_from_value(value) < key_from_value(value_next));
+                    }
+                }
+            }
+
+            table_mutable.reset();
+            table_immutable.mutability = .{ .immutable = .{
+                .flushed = table_immutable.value_context.count == 0,
+                .absorbed = false,
+                .snapshot_min = snapshot_min,
+            } };
+        }
+
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= table.values.len);
@@ -161,6 +312,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.sorted);
 
             table.* = .{
+                .sorted_runs = .{.{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                }} ** sorted_runs_max,
+                .sorted_runs_count = 0,
                 .values = table.values,
                 .tmp_buffer = table.tmp_buffer,
                 .value_context = .{},
@@ -197,7 +353,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
             table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0, .std);
+                sort_suffix_from_offset(
+                table_immutable.values[0..tables_combined_count],
+                0,
+                .{ .radix = table_immutable.tmp_buffer },
+            );
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -212,8 +372,25 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
 
             if (!table.value_context.sorted) {
+                //assert((table.sorted_runs_count == 0) == (table.count() == 0));
                 table.mutable_sort_suffix_from_offset(0, .std);
                 table.value_context.sorted = true;
+
+                if (table.sorted_runs_count == 0) {
+                    table.mutability.mutable.suffix_offset = 0;
+                } else {
+                    // BUG: reset this here since we are simply going over k since we do not obey sorted_runs_count
+                    // TODO: give our sorted runs from the outside in the tree and build own inside.
+                    table.sorted_runs = .{.{
+                        .min = std.math.maxInt(u32),
+                        .max = std.math.maxInt(u32),
+                    }} ** sorted_runs_max;
+                    table.sorted_runs_count = 1;
+                    table.sorted_runs[0] = .{
+                        .min = 0,
+                        .max = table.count(),
+                    };
+                }
             }
         }
 
@@ -221,9 +398,19 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
 
-            table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset, .{ .radix = table.tmp_buffer });
-            //table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset, .std);
+            const run_min = table.mutability.mutable.suffix_offset;
+            table.mutable_sort_suffix_from_offset(
+                table.mutability.mutable.suffix_offset,
+                .{ .radix = table.tmp_buffer },
+            );
+            const run_max = table.mutability.mutable.suffix_offset;
+            assert(run_min <= run_max);
 
+            if (run_min < run_max) {
+                table.sorted_runs[table.sorted_runs_count] = .{ .min = run_min, .max = run_max };
+                table.sorted_runs_count += 1;
+            }
+            table.value_context.sorted = (table.count() == 0);
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
 
