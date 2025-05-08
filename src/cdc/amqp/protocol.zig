@@ -143,6 +143,8 @@ pub const ErrorCodes = enum(u16) {
 };
 
 pub const FieldValueTag = enum(u8) {
+    //? dj: Instead of long/short why not call these u32/16/etc?
+    //? batiati: following the name the AMQP spec uses.
     boolean = 't',
     short_short_uint = 'B',
     short_uint = 'u',
@@ -211,6 +213,9 @@ pub const Decoder = struct {
             }
         };
 
+        //? dj: Why split these apart instead of just keeping it as a slice?
+        //? batiati: primarily to not be confused with strings, but also to
+        //? to represent how the AMQP type is encoded.
         length: u32,
         pointer: [*]const u8,
 
@@ -278,6 +283,14 @@ pub const Decoder = struct {
 
     pub fn read_short_string(self: *Decoder) Error![]const u8 {
         const length: u8 = try self.read_int(u8);
+        //? dj: This pattern is used quite often. Maybe extract it into a "read_bytes" function?
+        //? i.e.:
+        //?     fn read_bytes(self: *Decoder, length: u32) Error![]const u8 {
+        //?         assert(self.index <= self.buffer.len);
+        //?         if (self.index + length > self.buffer.len) return error.BufferExhausted;
+        //?         defer self.index += length;
+        //?         return self.buffer[self.index..][0..length];
+        //?     }
         if (self.index + length > self.buffer.len) return error.BufferExhausted;
         const value = self.buffer[self.index..][0..length];
         self.index += length;
@@ -385,6 +398,8 @@ pub const Decoder = struct {
 pub const Encoder = struct {
     pub const FrameHeader = struct {
         /// Total size in bytes including the `size` field.
+        //? dj: Maybe instead call this size_total or size_max? We don't usually use all caps for
+        //? constants.
         pub const SIZE = @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .type)) +
             @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .channel)) +
             @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .size));
@@ -576,6 +591,8 @@ pub const Encoder = struct {
         self.write_int(u8, @intFromEnum(FrameEnd.value));
     }
 
+    //? dj: As a safety check could we add an enum to the encoder, to verify that the state
+    //? transitions from begin->finish->etc for frames/headers?
     pub fn begin_frame(self: *Encoder, frame_header: FrameHeader) FrameHeaderReference {
         assert(self.index + FrameHeader.SIZE <= self.buffer.len);
         // Reserve the frame header bytes to be updated by `finish_frame()`.
@@ -639,6 +656,8 @@ pub const Encoder = struct {
 fn FieldValueType(comptime target: enum { encode, decode }) type {
     return union(FieldValueTag) {
         boolean: bool,
+        //? dj: Instead of long/short why not call these u32/16/etc?
+        //? batiati: following the AMQP names.
         short_short_uint: u8,
         short_uint: u16,
         long_uint: u32,

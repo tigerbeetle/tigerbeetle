@@ -520,6 +520,7 @@ pub fn GrooveType(
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);
 
+        //? dj: Given how this is used, would LookupType be a better name?
         const KeyType = enum {
             /// Either `id` or `timestamp` for objects without the id field.
             /// This is the same key used by the object cache map.
