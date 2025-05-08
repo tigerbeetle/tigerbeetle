@@ -7,7 +7,6 @@ PATH
 GEM
   remote: https://rubygems.org/
   specs:
-    date (3.4.1)
     ffi (1.17.2)
     ffi (1.17.2-aarch64-linux-gnu)
     ffi (1.17.2-aarch64-linux-musl)
@@ -19,24 +18,6 @@ GEM
     ffi (1.17.2-x86_64-darwin)
     ffi (1.17.2-x86_64-linux-gnu)
     ffi (1.17.2-x86_64-linux-musl)
-    io-console (0.8.0)
-    irb (1.15.2)
-      pp (>= 0.6.0)
-      rdoc (>= 4.0.0)
-      reline (>= 0.4.2)
-    minitest (5.25.5)
-    pp (0.6.2)
-      prettyprint
-    prettyprint (0.2.0)
-    psych (5.2.4)
-      date
-      stringio
-    rake (13.2.1)
-    rdoc (6.13.1)
-      psych (>= 4.0.0)
-    reline (0.6.1)
-      io-console (~> 0.5)
-    stringio (3.1.7)
 
 PLATFORMS
   aarch64-linux-gnu
@@ -52,9 +33,6 @@ PLATFORMS
   x86_64-linux-musl
 
 DEPENDENCIES
-  irb
-  minitest (~> 5.16)
-  rake (~> 13.0)
   tigerbeetle!
 
 BUNDLED WITH

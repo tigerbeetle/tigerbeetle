@@ -2,12 +2,15 @@ require "ffi"
 
 require_relative "bindings"
 require_relative "request"
+require_relative "types"
 
 module TigerBeetle
   class Client
     def initialize(addresses:, cluster_id:, client_id: 1)
+      raise ArgumentError, "cluster_id must be a string or int" unless cluster_id.is_a?(String) || cluster_id.is_a?(Integer)
+
       @addresses = addresses.to_s
-      @cluster_id = cluster_id
+      @cluster_id = Types::UINT128.to_native(cluster_id, nil)
       @client_id = client_id
       @inflight_requests = {}
       @on_completion = Proc.new { |*args| callback(*args) }
@@ -33,7 +36,7 @@ module TigerBeetle
         @addresses,
         @addresses.length,
         @client_id,
-        @on_completion
+        &@on_completion
       )
     end
 

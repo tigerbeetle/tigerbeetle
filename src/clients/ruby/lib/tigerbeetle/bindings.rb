@@ -14,7 +14,7 @@ module TigerBeetle
   module Bindings
     extend FFI::Library
 
-    typedef TigerBeetle::Types::UINT128, :uint128
+    typedef Types::UINT128, :uint128
 
     ffi_lib SharedLib.path
 
