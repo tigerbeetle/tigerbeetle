@@ -25,9 +25,9 @@
 ///! │ class_id │ weight │ body_size  │ property_flags │   properties    │
 ///! │   u16    │  u16   │   u64      │     u16        │  variable size  │
 ///! └──────────┴────────┴────────────┴────────────────┴─────────────────┘
-///! Certain methods carry a content header. For example, in the `Basic.Publish` method, the
-///! content header contains metadata about the message. The frame with `type == header` always
-///! follows its corresponding `type == method` frame.
+///! Certain "method" frames are followed by a "header" frame. For example, in the `basic-publish`
+///! method, the content header contains metadata about the message being published. The frame with
+///! `type == header` always follows its corresponding `type == method` frame.
 ///! See `BasicProperties` for parsing the `property_flags` and `properties`.
 ///!
 ///! # Body payload:
@@ -36,7 +36,8 @@
 ///! │ variable size │
 ///! └───────────────┘
 ///! The body frame contains the application-specific content of the message.
-///! The body can be split across multiple frames if `body_size` exceeds the frame size.
+///! The body can be split across multiple frames if `body_size` exceeds the frame size, however we
+///! only support single-frame bodies.
 ///!
 ///! # Endianness:
 ///! Integers are encoded in network byte order (big endian).

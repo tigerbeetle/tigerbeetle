@@ -787,22 +787,19 @@ pub const Client = struct {
         header: Decoder.Header,
     ) Decoder.Error!void {
         assert(frame_header.type == .header);
-        switch (self.awaiter) {
-            .await_content_header => |awaiter| {
-                // We don't support reading the message body.
-                if (frame_header.channel == awaiter.channel and header.body_size == 0) {
-                    self.awaiter = .none;
-                    return try awaiter.callback(
-                        self,
-                        awaiter.delivery_tag,
-                        awaiter.message_count,
-                        header,
-                    );
-                }
-            },
-            else => {},
+        if (self.awaiter == .await_content_header) {
+            const awaiter = self.awaiter.await_content_header;
+            // We don't support reading the message body.
+            if (frame_header.channel == awaiter.channel and header.body_size == 0) {
+                self.awaiter = .none;
+                return try awaiter.callback(
+                    self,
+                    awaiter.delivery_tag,
+                    awaiter.message_count,
+                    header,
+                );
+            }
         }
-
         fatal(
             "Unexpected message header: channel={} class={} body_size={}",
             .{
@@ -942,26 +939,23 @@ const ReceiveBuffer = struct {
 
     fn end_decode(self: *ReceiveBuffer, processed_last_index: usize) []u8 {
         maybe(processed_last_index == 0);
-        switch (self.state) {
-            .idle, .receiving => unreachable,
-            .decoding => |decoding_state| {
-                if (processed_last_index == decoding_state.size) {
-                    self.state = .{
-                        .receiving = .{ .non_consumed = 0 },
-                    };
-                    return self.buffer;
-                }
-
-                assert(processed_last_index < decoding_state.size);
-                const remaining = self.buffer[processed_last_index..decoding_state.size];
-                assert(remaining.len < self.buffer.len);
-                stdx.copy_left(.inexact, u8, self.buffer, remaining);
-                self.state = .{
-                    .receiving = .{ .non_consumed = remaining.len },
-                };
-                return self.buffer[remaining.len..];
-            },
+        assert(self.state == .decoding);
+        const decoding_state = self.state.decoding;
+        if (processed_last_index == decoding_state.size) {
+            self.state = .{
+                .receiving = .{ .non_consumed = 0 },
+            };
+            return self.buffer;
         }
+
+        assert(processed_last_index < decoding_state.size);
+        const remaining = self.buffer[processed_last_index..decoding_state.size];
+        assert(remaining.len < self.buffer.len);
+        stdx.copy_left(.inexact, u8, self.buffer, remaining);
+        self.state = .{
+            .receiving = .{ .non_consumed = remaining.len },
+        };
+        return self.buffer[remaining.len..];
     }
 };
 

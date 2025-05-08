@@ -314,34 +314,25 @@ pub const Runner = struct {
     ///   The queue name is generated to be unique based on the `exchange` and `routing_key`.
     fn recover(self: *Runner) void {
         assert(self.connected.amqp);
-        switch (self.state) {
-            .unknown => |recovery_mode| {
-                const timestamp_override: ?u64 = switch (recovery_mode) {
-                    .recover => null,
-                    .override => |timestamp| timestamp,
-                };
+        assert(self.state == .unknown);
+        const recovery_mode = self.state.unknown;
+        const timestamp_override: ?u64 = switch (recovery_mode) {
+            .recover => null,
+            .override => |timestamp| timestamp,
+        };
 
-                const is_default_exchange = self.publish_exchange.len == 0;
-                if (is_default_exchange) {
+        const is_default_exchange = self.publish_exchange.len == 0;
+        self.state = .{
+            .recovering = .{
+                .timestamp_last = timestamp_override,
+                .phase = if (is_default_exchange)
                     // No need to validate the default exchange, skipping `validate_exchange`.
-                    self.state = .{
-                        .recovering = .{
-                            .timestamp_last = timestamp_override,
-                            .phase = .declare_locker_queue,
-                        },
-                    };
-                } else {
-                    self.state = .{
-                        .recovering = .{
-                            .timestamp_last = timestamp_override,
-                            .phase = .validate_exchange,
-                        },
-                    };
-                }
-                self.recover_dispatch();
+                    .declare_locker_queue
+                else
+                    .validate_exchange,
             },
-            else => unreachable,
-        }
+        };
+        self.recover_dispatch();
     }
 
     fn recover_dispatch(self: *Runner) void {
@@ -361,16 +352,13 @@ pub const Runner = struct {
                                 "amqp_client",
                                 context,
                             ));
-                            switch (runner.state) {
-                                .recovering => |*recovering| {
-                                    assert(recovering.phase == .validate_exchange);
-                                    maybe(recovering.timestamp_last == null);
+                            assert(runner.state == .recovering);
+                            const recovering = &runner.state.recovering;
+                            assert(recovering.phase == .validate_exchange);
+                            maybe(recovering.timestamp_last == null);
 
-                                    recovering.phase = .declare_locker_queue;
-                                    runner.recover_dispatch();
-                                },
-                                else => unreachable,
-                            }
+                            recovering.phase = .declare_locker_queue;
+                            runner.recover_dispatch();
                         }
                     }.callback,
                     .{
@@ -677,7 +665,7 @@ pub const Runner = struct {
         const target: []tb.Event = runner.buffer.get_producer_buffer();
         assert(source.len <= target.len);
 
-        stdx.copy_left(
+        stdx.copy_disjoint(
             .inexact,
             tb.Event,
             target,
@@ -863,9 +851,8 @@ pub const Runner = struct {
     }
 
     pub fn tick(self: *Runner) void {
-        if (!self.vsr_client.evicted) {
-            self.vsr_client.tick();
-        }
+        assert(!self.vsr_client.evicted);
+        self.vsr_client.tick();
         self.amqp_client.tick();
         self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
 
@@ -1068,8 +1055,8 @@ const DualBuffer = struct {
             self.buffer_2.state == .free;
     }
 
-    inline fn buffers(self: *DualBuffer) *const [2]*Buffer {
-        return &.{ &self.buffer_1, &self.buffer_2 };
+    fn buffers(self: *DualBuffer) [2]*Buffer {
+        return .{ &self.buffer_1, &self.buffer_2 };
     }
 
     fn assert_state(self: *const DualBuffer) void {
@@ -1119,7 +1106,7 @@ const ProgressTrackerMessage = struct {
             }
         }
         fatal(
-            \\ Invalid progress tracker message.
+            \\Invalid progress tracker message.
             \\Use `--timestamp-last` to restore a valid initial timestamp.
         , .{});
     }
