@@ -2480,7 +2480,7 @@ pub fn ReplicaType(
 
             // Otherwise, cancel in progress commit and prepare to sync.
             log.mark.debug(
-                \\{}: on_start_view_set_checkpoint: sync started view={} op_checkpoint={} op_checkpoint_new={}
+                \\{}: on_start_view_set_checkpoint: sync started view={} checkpoint={}..{}
             , .{
                 self.replica,
                 self.log_view,
@@ -4437,12 +4437,15 @@ pub fn ReplicaType(
             assert(op <= self.op);
             assert((op + 1) % constants.lsm_compaction_ops == 0);
             log.info("{}: commit_checkpoint_data: checkpoint_data start " ++
-                "(op={} current_checkpoint={} next_checkpoint={} " ++
+                "(checkpoint={}..{} commit_min={} op={} commit_max={} op_prepare_max={} " ++
                 "free_set.acquired={} free_set.released={})", .{
                 self.replica,
-                self.op,
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
+                self.commit_min,
+                self.op,
+                self.commit_max,
+                self.op_prepare_max(),
                 self.grid.free_set.count_acquired(),
                 self.grid.free_set.count_released(),
             });
