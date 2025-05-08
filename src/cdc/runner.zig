@@ -131,7 +131,8 @@ pub const Runner = struct {
             amqp_progress_tracker_queue: ?[]const u8,
             /// Overrides the number max of events produced/consumed each time.
             event_count_max: ?u32,
-            /// Overrides the number of seconds to query again if there's no new events to process.
+            /// Overrides the number of milliseconds to query again if there's no new events to
+            /// process.
             /// Must be greater than zero.
             idle_interval_ms: ?u32,
             /// Indicates whether to recover the last timestamp published on the state
@@ -139,6 +140,8 @@ pub const Runner = struct {
             recovery_mode: StateRecoveryMode,
         },
     ) !void {
+        assert(options.tb_addresses.len > 0);
+
         const idle_interval_ns: u63 = interval: {
             if (options.idle_interval_ms) |value| {
                 assert(value > 0);
@@ -598,7 +601,8 @@ pub const Runner = struct {
     /// The "Producer" fetches events from TigerBeetle (`get_events` operation) into a buffer
     /// to be consumed by the "Consumer".
     fn produce(self: *Runner) void {
-        assert(self.connected.vsr and self.connected.amqp);
+        assert(self.connected.vsr);
+        assert(self.connected.amqp);
         assert(self.state == .last);
         assert(TimestampRange.valid(self.state.last.producer_timestamp));
         assert(self.state.last.consumer_timestamp == 0 or
@@ -621,7 +625,8 @@ pub const Runner = struct {
     }
 
     fn produce_dispatch(self: *Runner) void {
-        assert(self.connected.vsr and self.connected.amqp);
+        assert(self.connected.vsr);
+        assert(self.connected.amqp);
         assert(self.state == .last);
         assert(TimestampRange.valid(self.state.last.producer_timestamp));
         assert(self.state.last.consumer_timestamp == 0 or
@@ -639,7 +644,7 @@ pub const Runner = struct {
 
                 self.vsr_client.request(
                     &produce_request_callback,
-                    @as(u128, @intFromPtr(self)),
+                    @intFromPtr(self),
                     .get_events,
                     std.mem.asBytes(&filter),
                 );
@@ -660,6 +665,7 @@ pub const Runner = struct {
                             _ = completion;
                             assert(runner.buffer.all_free());
                             assert(runner.consumer == .idle);
+                            assert(runner.producer == .waiting);
 
                             const producer_begin = runner.buffer.producer_begin();
                             assert(producer_begin);
@@ -683,6 +689,8 @@ pub const Runner = struct {
         assert(operation == .get_events);
         assert(timestamp != 0);
         const runner: *Runner = @ptrFromInt(@as(usize, @intCast(context)));
+        assert(runner.producer == .request);
+
         const source: []const tb.Event = stdx.bytes_as_slice(.exact, tb.Event, result);
         const target: []tb.Event = runner.buffer.get_producer_buffer();
         assert(source.len <= target.len);
@@ -724,7 +732,8 @@ pub const Runner = struct {
     /// The "Consumer" reads from the buffer populated by the "Producer"
     /// and publishes the events to the AMQP server.
     fn consume(self: *Runner) void {
-        assert(self.connected.vsr and self.connected.amqp);
+        assert(self.connected.vsr);
+        assert(self.connected.amqp);
         assert(self.state == .last);
         assert(TimestampRange.valid(self.state.last.producer_timestamp));
         assert(self.state.last.consumer_timestamp == 0 or
@@ -735,7 +744,7 @@ pub const Runner = struct {
                 if (!self.buffer.consumer_begin()) {
                     // No buffers ready.
                     // The running producer will resume the consumer once it finishes.
-                    assert(self.producer != .idle);
+                    assert(self.buffer.all_free() or self.producer != .idle);
                     return;
                 }
                 self.consumer = .begin_transaction;
@@ -747,7 +756,8 @@ pub const Runner = struct {
     }
 
     fn consume_dispatch(self: *Runner) void {
-        assert(self.connected.vsr and self.connected.amqp);
+        assert(self.connected.vsr);
+        assert(self.connected.amqp);
         assert(self.state == .last);
         assert(TimestampRange.valid(self.state.last.producer_timestamp));
         assert(self.state.last.consumer_timestamp == 0 or
@@ -899,14 +909,9 @@ const Metrics = struct {
         ) void {
             const duration_ms: u64 = @divFloor(metrics.timer.read(), std.time.ns_per_ms);
 
-            metrics.duration_min_ms = if (metrics.duration_min_ms) |duration_min_ms|
-                @min(duration_min_ms, duration_ms)
-            else
-                duration_ms;
-            metrics.duration_max_ms = if (metrics.duration_max_ms) |duration_max_ms|
-                @max(duration_max_ms, duration_ms)
-            else
-                duration_ms;
+            metrics.duration_min_ms =
+                @min(duration_ms, metrics.duration_min_ms orelse std.math.maxInt(u64));
+            metrics.duration_max_ms = @max(duration_ms, metrics.duration_max_ms orelse 0);
             metrics.duration_sum_ms += duration_ms;
             metrics.count += 1;
             metrics.event_count += event_count;
@@ -919,8 +924,9 @@ const Metrics = struct {
     flush_timeout_ticks: u64,
 
     fn tick(self: *Metrics) void {
+        assert(self.flush_ticks < self.flush_timeout_ticks);
         self.flush_ticks += 1;
-        if (self.flush_ticks > self.flush_timeout_ticks) {
+        if (self.flush_ticks == self.flush_timeout_ticks) {
             self.flush_ticks = 0;
             self.log_and_reset();
         }
@@ -991,8 +997,8 @@ const DualBuffer = struct {
     }
 
     pub fn deinit(self: *DualBuffer, allocator: std.mem.Allocator) void {
-        allocator.free(self.buffer_1.buffer);
         allocator.free(self.buffer_2.buffer);
+        allocator.free(self.buffer_1.buffer);
     }
 
     pub fn producer_begin(self: *DualBuffer) bool {
@@ -1133,7 +1139,7 @@ const Message = struct {
     pub const json_string_size_max = size: {
         var counting_writer = std.io.countingWriter(std.io.null_writer);
         std.json.stringify(
-            wrost_case(Message),
+            worse_case(Message),
             stringify_options,
             counting_writer.writer(),
         ) catch unreachable;
@@ -1271,7 +1277,7 @@ const Message = struct {
     }
 
     /// Fill all fields for the largest string representation.
-    fn wrost_case(comptime T: type) T {
+    fn worse_case(comptime T: type) T {
         var value: T = undefined;
         for (std.meta.fields(T)) |field| {
             @field(value, field.name) = switch (@typeInfo(field.type)) {
@@ -1285,7 +1291,7 @@ const Message = struct {
                     }
                     break :max @field(field.type, name);
                 },
-                .Struct => wrost_case(field.type),
+                .Struct => worse_case(field.type),
                 else => unreachable,
             };
         }
@@ -1412,7 +1418,7 @@ test "amqp: JSON message" {
     }
 
     {
-        const message = comptime Message.wrost_case(Message);
+        const message = comptime Message.worse_case(Message);
         const size = message.body().write(buffer);
         try testing.expectEqual(@as(usize, 1425), size);
         try testing.expectEqual(size, buffer.len);

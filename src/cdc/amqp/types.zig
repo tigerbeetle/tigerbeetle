@@ -116,6 +116,7 @@ pub const ClientCapabilities = struct {
     }
 };
 
+/// "SASL" means "Simple Authentication and Security Layer"
 pub const SASLPlainAuth = struct {
     pub const mechanism = "PLAIN";
 
@@ -129,7 +130,7 @@ pub const SASLPlainAuth = struct {
                 fn write(context: *const anyopaque, buffer: []u8) usize {
                     const auth: *const SASLPlainAuth = @ptrCast(@alignCast(context));
                     var fbs = std.io.fixedBufferStream(buffer);
-                    std.fmt.format(fbs.writer(), "\x00{s}\x00{s}", .{
+                    fbs.writer().print("\x00{s}\x00{s}", .{
                         auth.user_name,
                         auth.password,
                     }) catch unreachable;

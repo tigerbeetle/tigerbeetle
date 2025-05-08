@@ -15,15 +15,14 @@ const types = @import("./amqp/types.zig");
 const fatal = protocol.fatal;
 
 const ErrorCodes = protocol.ErrorCodes;
+const Channel = protocol.Channel;
 
 pub const Decoder = protocol.Decoder;
 pub const Encoder = protocol.Encoder;
 
 pub const ConnectOptions = types.ConnectOptions;
-pub const ConnectionProperties = types.ConnectionProperties;
 pub const ExchangeDeclareOptions = types.ExchangeDeclareOptions;
 pub const QueueDeclareOptions = types.QueueDeclareOptions;
-pub const QueueDeclareArguments = types.QueueDeclareArguments;
 pub const BasicPublishOptions = types.BasicPublishOptions;
 pub const GetMessagePropertiesResult = types.GetMessagePropertiesResult;
 pub const GetMessageOptions = types.GetMessageOptions;
@@ -40,13 +39,6 @@ pub const frame_min_size = spec.FRAME_MIN_SIZE;
 /// - Implements only the methods required by TigerBeetle.
 /// - No error handling: **CAN PANIC**.
 pub const Client = struct {
-    /// The channel number is 0 for all frames which are global to the connection.
-    const channel_global = 0;
-
-    // Id of the current channel.
-    // For TigerBeetle, supporting multiple channels is unnecessary,
-    // as messages are submitted in batches through io_uring without concurrency.
-    const channel_current = 1;
 
     pub const Callback = *const fn (self: *Client) void;
     pub const GetMessagePropertiesCallback = *const fn (
@@ -95,7 +87,7 @@ pub const Client = struct {
         /// AMQP method is received.
         /// Invariant: the send buffer must be ready to be flushed.
         send_and_await_reply: struct {
-            channel: u16,
+            channel: Channel,
             state: union(enum) {
                 sending,
                 awaiting: struct {
@@ -108,7 +100,7 @@ pub const Client = struct {
         /// about the incoming message.
         /// Invariant: the send buffer must be empty.
         await_content_header: struct {
-            channel: u16,
+            channel: Channel,
             duration_ticks: u64 = 0,
             delivery_tag: u64,
             message_count: u32,
@@ -132,6 +124,7 @@ pub const Client = struct {
     ) !Client {
         assert(options.message_count_max > 0);
         assert(options.message_body_size_max > 0);
+        assert(options.reply_timeout_ticks > 0);
 
         // The worst-case size required to write a frame containing the message body.
         const body_frame_size = Encoder.FrameHeader.SIZE +
@@ -166,8 +159,8 @@ pub const Client = struct {
         self: *Client,
         allocator: std.mem.Allocator,
     ) void {
-        allocator.free(self.receive_buffer.buffer);
         allocator.free(self.send_buffer.buffer);
+        allocator.free(self.receive_buffer.buffer);
     }
 
     pub fn connect(self: *Client, callback: Callback, options: ConnectOptions) !void {
@@ -215,7 +208,7 @@ pub const Client = struct {
 
                     const encoder = context.send_buffer.encoder();
                     encoder.write_bytes(&protocol.protocol_header);
-                    context.send_and_await_reply(channel_global, &connect_dispatch);
+                    context.send_and_await_reply(.global, &connect_dispatch);
                 }
             }.continuation,
             &self.receive_completion,
@@ -253,8 +246,8 @@ pub const Client = struct {
                 } };
 
                 const encoder = self.send_buffer.encoder();
-                method.encode(channel_global, encoder);
-                self.send_and_await_reply(channel_global, &connect_dispatch);
+                method.encode(.global, encoder);
+                self.send_and_await_reply(.global, &connect_dispatch);
             },
             .connection_secure => fatal(
                 "Connection secure not supported.",
@@ -275,18 +268,18 @@ pub const Client = struct {
                     .frame_max = @max(frame_min_size, self.frame_size_max),
                     .heartbeat = connection_options.heartbeat orelse args.heartbeat,
                 } };
-                method_tune_ok.encode(channel_global, encoder);
+                method_tune_ok.encode(.global, encoder);
 
                 const method_open: spec.ServerMethod = .{ .connection_open = .{
                     .virtual_host = connection_options.vhost,
                 } };
-                method_open.encode(channel_global, encoder);
-                self.send_and_await_reply(channel_global, &connect_dispatch);
+                method_open.encode(.global, encoder);
+                self.send_and_await_reply(.global, &connect_dispatch);
             },
             .connection_open_ok => {
                 const method: spec.ServerMethod = .{ .channel_open = .{} };
-                method.encode(channel_current, self.send_buffer.encoder());
-                self.send_and_await_reply(channel_current, &connect_dispatch);
+                method.encode(.current, self.send_buffer.encoder());
+                self.send_and_await_reply(.current, &connect_dispatch);
             },
             .channel_open_ok => {
                 const callback = self.action.connect.callback;
@@ -302,8 +295,8 @@ pub const Client = struct {
         self.action = .{ .tx_select = callback };
 
         const method: spec.ServerMethod = .{ .tx_select = .{} };
-        method.encode(channel_current, self.send_buffer.encoder());
-        self.send_and_await_reply(channel_current, &struct {
+        method.encode(.current, self.send_buffer.encoder());
+        self.send_and_await_reply(.current, &struct {
             fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                 assert(reply == .tx_select_ok);
                 assert(context.action == .tx_select);
@@ -319,8 +312,8 @@ pub const Client = struct {
         self.action = .{ .tx_commit = callback };
 
         const method: spec.ServerMethod = .{ .tx_commit = .{} };
-        method.encode(channel_current, self.send_buffer.encoder());
-        self.send_and_await_reply(channel_current, &struct {
+        method.encode(.current, self.send_buffer.encoder());
+        self.send_and_await_reply(.current, &struct {
             fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                 assert(reply == .tx_commit_ok);
                 assert(context.action == .tx_commit);
@@ -352,9 +345,9 @@ pub const Client = struct {
                 .arguments = null,
             },
         };
-        method.encode(channel_current, self.send_buffer.encoder());
+        method.encode(.current, self.send_buffer.encoder());
         self.send_and_await_reply(
-            channel_current,
+            .current,
             &struct {
                 fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                     assert(reply == .exchange_declare_ok);
@@ -382,9 +375,9 @@ pub const Client = struct {
                 .arguments = options.arguments.table(),
             },
         };
-        method.encode(channel_current, self.send_buffer.encoder());
+        method.encode(.current, self.send_buffer.encoder());
         self.send_and_await_reply(
-            channel_current,
+            .current,
             &struct {
                 fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
                     assert(reply == .queue_declare_ok);
@@ -398,7 +391,7 @@ pub const Client = struct {
         );
     }
 
-    /// Enqueue a message to be sent by `publish_flush()`.
+    /// Enqueue a message to be sent by `publish_send()`.
     pub fn publish_enqueue(self: *Client, options: BasicPublishOptions) void {
         assert(self.action == .none);
 
@@ -412,12 +405,12 @@ pub const Client = struct {
             .mandatory = options.mandatory,
             .immediate = options.immediate,
         } };
-        method.encode(channel_current, encoder);
+        method.encode(.current, encoder);
 
         // 2. Header frame — contains the `Basic` properties and custom headers.
         const frame_header_ref = encoder.begin_frame(.{
             .type = .header,
-            .channel = channel_current,
+            .channel = .current,
         });
         const header_ref = encoder.begin_header(.{
             .class = method.method_header().class,
@@ -426,25 +419,21 @@ pub const Client = struct {
         options.properties.encode(encoder);
         encoder.finish_frame(frame_header_ref);
 
-        // 3. Body frame (optional) — contains the message payload.
-        //    This could be split into N frames, but we only support single-frame bodies.
-        const frame_body_ref = encoder.begin_frame(.{
-            .type = .body,
-            .channel = channel_current,
-        });
-        const body_size = if (options.body) |body|
-            body.write(encoder.buffer[encoder.index..])
-        else
-            0;
-        if (body_size == 0) {
+        if (options.body) |body| {
+            // 3. Body frame (optional) — contains the message payload.
+            //    This could be split into N frames, but we only support single-frame bodies.
+            const frame_body_ref = encoder.begin_frame(.{
+                .type = .body,
+                .channel = .current,
+            });
+            const body_size = body.write(encoder.buffer[encoder.index..]);
+            encoder.index += body_size;
+            encoder.finish_header(header_ref, body_size);
+            encoder.finish_frame(frame_body_ref);
+        } else {
             // Body size zero, remove the body frame.
-            encoder.index = frame_body_ref.index;
             encoder.finish_header(header_ref, 0);
-            return;
         }
-        encoder.index += body_size;
-        encoder.finish_header(header_ref, body_size);
-        encoder.finish_frame(frame_body_ref);
     }
 
     /// Sends all messages enqueued so far by `publish_enqueue()`.
@@ -454,7 +443,7 @@ pub const Client = struct {
     ) void {
         assert(self.awaiter == .none);
         assert(self.action == .none);
-        assert(self.send_buffer.state == .writting);
+        assert(self.send_buffer.state == .writing);
         self.action = .{ .publish = callback };
         self.send_and_forget(&struct {
             fn dispatch(context: *Client) void {
@@ -482,12 +471,13 @@ pub const Client = struct {
             .queue = options.queue,
             .no_ack = options.no_ack,
         } };
-        method.encode(channel_current, self.send_buffer.encoder());
-        self.send_and_await_reply(channel_current, &get_message_dispatch);
+        method.encode(.current, self.send_buffer.encoder());
+        self.send_and_await_reply(.current, &get_message_dispatch);
     }
 
     fn get_message_dispatch(self: *Client, reply: spec.ClientMethod) Decoder.Error!void {
         assert(self.action == .get_message);
+        assert(self.awaiter == .none);
         switch (reply) {
             .basic_get_empty => {
                 const get_header_callback = self.action.get_message;
@@ -495,7 +485,7 @@ pub const Client = struct {
                 try get_header_callback(self, null);
             },
             .basic_get_ok => |get_ok| self.awaiter = .{ .await_content_header = .{
-                .channel = channel_current,
+                .channel = .current,
                 .delivery_tag = get_ok.delivery_tag,
                 .message_count = get_ok.message_count,
                 .callback = &struct {
@@ -535,7 +525,7 @@ pub const Client = struct {
             .requeue = options.requeue,
             .multiple = options.multiple,
         } };
-        method.encode(channel_current, self.send_buffer.encoder());
+        method.encode(.current, self.send_buffer.encoder());
         self.send_and_forget(&struct {
             fn dispatch(context: *Client) void {
                 assert(context.action == .nack);
@@ -548,11 +538,11 @@ pub const Client = struct {
 
     fn send_and_await_reply(
         self: *Client,
-        channel: u16,
+        channel: Channel,
         callback: *const fn (self: *Client, reply: spec.ClientMethod) Decoder.Error!void,
     ) void {
         assert(self.awaiter == .none);
-        assert(self.send_buffer.state == .writting);
+        assert(self.send_buffer.state == .writing);
         self.awaiter = .{ .send_and_await_reply = .{
             .channel = channel,
             .state = .sending,
@@ -566,7 +556,7 @@ pub const Client = struct {
         callback: *const fn (self: *Client) void,
     ) void {
         assert(self.awaiter == .none);
-        assert(self.send_buffer.state == .writting);
+        assert(self.send_buffer.state == .writing);
         self.awaiter = .{ .send_and_forget = callback };
         self.send();
     }
@@ -851,7 +841,7 @@ pub const Client = struct {
             var encoder = Encoder.init(&buffer);
             const frame_reference = encoder.begin_frame(.{
                 .type = .heartbeat,
-                .channel = channel_global,
+                .channel = .global,
             });
             encoder.finish_frame(frame_reference);
             assert(encoder.index == buffer.len);
@@ -980,7 +970,7 @@ const SendBuffer = struct {
     buffer: []u8,
     state: union(enum) {
         idle,
-        writting: Encoder,
+        writing: Encoder,
         sending: struct {
             size: usize,
             progress: usize,
@@ -998,10 +988,10 @@ const SendBuffer = struct {
     fn encoder(self: *SendBuffer) *Encoder {
         switch (self.state) {
             .idle => {
-                self.state = .{ .writting = Encoder.init(self.buffer) };
-                return &self.state.writting;
+                self.state = .{ .writing = Encoder.init(self.buffer) };
+                return &self.state.writing;
             },
-            .writting => |*current| return current,
+            .writing => |*current| return current,
             .sending => unreachable,
         }
     }
@@ -1009,7 +999,7 @@ const SendBuffer = struct {
     fn flush(self: *SendBuffer) []const u8 {
         switch (self.state) {
             .idle, .sending => unreachable,
-            .writting => |*current| {
+            .writing => |*current| {
                 assert(current.index > 0);
                 const size = current.index;
                 self.state = .{ .sending = .{
@@ -1024,7 +1014,7 @@ const SendBuffer = struct {
 
     fn remaining(self: *SendBuffer, written_bytes: usize) ?[]const u8 {
         switch (self.state) {
-            .idle, .writting => unreachable,
+            .idle, .writing => unreachable,
             .sending => |*send_state| {
                 send_state.progress += written_bytes;
                 if (send_state.progress == send_state.size) {
@@ -1080,7 +1070,7 @@ test "amqp: SendBuffer" {
         try testing.expect(send_buffer.state == .idle);
         for (0..element_count) |index| {
             var encoder = send_buffer.encoder();
-            try testing.expect(send_buffer.state == .writting);
+            try testing.expect(send_buffer.state == .writing);
             try testing.expectEqual(index * @sizeOf(Element), encoder.index);
 
             var element: Element = undefined;
@@ -1157,3 +1147,4 @@ test "amqp: ReceiveBuffer" {
         try testing.expectEqualSlices(u8, buffer[decoded_remain..], receive_slice_next);
     }
 }
+

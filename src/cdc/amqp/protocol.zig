@@ -70,6 +70,15 @@ pub const MethodHeader = packed struct(u32) {
     method: u16,
 };
 
+pub const Channel = enum(u16) {
+    /// The channel number is 0 for all frames which are global to the connection.
+    global = 0,
+    /// Id of the current channel.
+    /// Supporting multiple channels is unnecessary, as messages are submitted in batches
+    /// through io_uring without concurrency.
+    current = 1,
+};
+
 pub const ErrorCodes = enum(u16) {
     /// The client attempted to transfer content larger than the server could accept
     /// at the present time. The client may retry at a later time.
@@ -163,7 +172,7 @@ pub const Decoder = struct {
 
     pub const FrameHeader = extern struct {
         type: FrameType,
-        channel: u16,
+        channel: Channel,
         size: u32,
     };
 
@@ -224,6 +233,7 @@ pub const Decoder = struct {
     };
 
     buffer: []const u8,
+    /// Invariants: index <= buffer.len
     index: usize,
 
     pub fn init(buffer: []const u8) Decoder {
@@ -239,6 +249,7 @@ pub const Decoder = struct {
 
     pub fn read_int(self: *Decoder, comptime T: type) Error!T {
         comptime assert(@typeInfo(T) == .Int);
+        comptime assert(@typeInfo(T).Int.signedness == .unsigned);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         if (self.index + @sizeOf(T) > self.buffer.len) return error.BufferExhausted;
         const value: T = std.mem.readInt(T, self.buffer[self.index..][0..@sizeOf(T)], .big);
@@ -321,7 +332,7 @@ pub const Decoder = struct {
     pub fn read_frame_header(self: *Decoder) Error!FrameHeader {
         return .{
             .type = try self.read_enum(FrameType),
-            .channel = try self.read_int(u16),
+            .channel = try self.read_enum(Channel),
             .size = try self.read_int(u32),
         };
     }
@@ -378,7 +389,7 @@ pub const Encoder = struct {
             @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .size));
 
         type: FrameType,
-        channel: u16,
+        channel: Channel,
     };
 
     pub const FrameHeaderReference = struct {
@@ -407,7 +418,7 @@ pub const Encoder = struct {
     pub const FieldValue = FieldValueType(.encode);
 
     /// Interface for a user-defined set of values to be encoded as an AMQP table
-    /// directly into the send buffer without copying..
+    /// directly into the send buffer without copying.
     pub const Table = struct {
         pub const VTable = struct {
             write: *const fn (*const anyopaque, *TableEncoder) void,
@@ -579,7 +590,7 @@ pub const Encoder = struct {
     }
 
     pub fn finish_frame(self: *Encoder, reference: FrameHeaderReference) void {
-        assert(reference.index < self.index);
+        assert(reference.index + FrameHeader.SIZE <= self.index);
         const restore_index = self.index;
         // The frame size field in the FrameHeader must be updated.
         // It represents the payload size, excluding the FrameHeader
@@ -588,7 +599,7 @@ pub const Encoder = struct {
 
         self.index = reference.index;
         self.write_int(u8, @intFromEnum(reference.frame_header.type));
-        self.write_int(u16, reference.frame_header.channel);
+        self.write_int(u16, @intFromEnum(reference.frame_header.channel));
         self.write_int(u32, size);
 
         self.index = restore_index;
@@ -614,7 +625,7 @@ pub const Encoder = struct {
     }
 
     pub fn finish_header(self: *Encoder, reference: HeaderReference, body_size: u64) void {
-        assert(reference.index < self.index);
+        assert(reference.index + Header.SIZE <= self.index);
         const restore_index = self.index;
         self.index = reference.index;
         self.write_int(u16, reference.header.class);
