@@ -435,11 +435,7 @@ pub fn StateMachineType(
             Storage,
         );
 
-        const AccountEventsScanLookup = ScanLookupType(
-            AccountEventsGroove,
-            AccountEventsGroove.ScanBuilder.Scan,
-            Storage,
-        );
+        const AccountEventsScanLookup = AccountEventsScanLookupType(AccountEventsGroove, Storage);
 
         // Looking to make backwards incompatible changes here? Make sure to check release.zig for
         // `release_triple_client_min`.
@@ -457,7 +453,7 @@ pub fn StateMachineType(
             deprecated_query_accounts = config.vsr_operations_reserved + 7,
             deprecated_query_transfers = config.vsr_operations_reserved + 8,
 
-            get_events = config.vsr_operations_reserved + 9, // Operation not yet exported.
+            get_events = config.vsr_operations_reserved + 9,
 
             create_accounts = config.vsr_operations_reserved + 10,
             create_transfers = config.vsr_operations_reserved + 11,
@@ -2321,19 +2317,13 @@ pub fn StateMachineType(
             });
 
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_event_filter(filter)) |scan| {
+            if (self.get_scan_from_event_filter(filter)) |scan_lookup| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                 const scan_buffer = stdx.bytes_as_slice(
                     .inexact,
                     AccountEvent,
                     self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-                );
-
-                const scan_lookup = self.scan_lookup.get(.account_events);
-                scan_lookup.* = AccountEventsScanLookup.init(
-                    &self.forest.grooves.account_events,
-                    scan,
                 );
 
                 // Limiting the buffer size according to the query limit.
@@ -2381,9 +2371,15 @@ pub fn StateMachineType(
             if (results.len == 0) return self.prefetch_finish();
 
             for (results) |result| {
-                self.forest.grooves.accounts.prefetch_enqueue(result.dr_account_id);
-                self.forest.grooves.accounts.prefetch_enqueue(result.cr_account_id);
+                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
+                    result.dr_account_timestamp,
+                );
+                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
+                    result.cr_account_timestamp,
+                );
                 if (result.transfer_pending_status == .expired) {
+                    // For expiry events, the timestamp isn't associated with any transfer.
+                    // Instead, the original pending transfer is prefetched.
                     self.forest.grooves.transfers.prefetch_enqueue(result.transfer_pending_id);
                 } else {
                     self.forest.grooves.transfers.prefetch_enqueue_by_timestamp(result.timestamp);
@@ -2437,7 +2433,7 @@ pub fn StateMachineType(
         fn get_scan_from_event_filter(
             self: *StateMachine,
             filter: *const EventFilter,
-        ) ?*AccountEventsGroove.ScanBuilder.Scan {
+        ) ?*AccountEventsScanLookup {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -2450,7 +2446,6 @@ pub fn StateMachineType(
             if (!filter_valid) return null;
 
             // CDC is always in ascending order.
-            const direction: Direction = .ascending;
             const timestamp_range: TimestampRange = .{
                 .min = if (filter.timestamp_min == 0)
                     TimestampRange.timestamp_min
@@ -2464,13 +2459,15 @@ pub fn StateMachineType(
             };
             assert(timestamp_range.min <= timestamp_range.max);
 
-            const scan = self.forest.grooves.account_events.scan_builder.scan_timestamp(
+            const scan_lookup: *AccountEventsScanLookup = self.scan_lookup.get(.account_events);
+            scan_lookup.init(
+                &self.forest.grooves.account_events.objects,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
                 snapshot_latest,
                 timestamp_range,
-                direction,
             );
-            return scan;
+
+            return scan_lookup;
         }
 
         fn prefetch_expire_pending_transfers(self: *StateMachine) void {
@@ -4763,6 +4760,100 @@ fn ExpirePendingTransfersType(
         inline fn timestamp_from_value(context: *Context, value: *const Value) u64 {
             _ = context;
             return value.timestamp;
+        }
+    };
+}
+
+/// Iterates directly over the `ScanTree` since this query doesn't use secondary indexes.
+/// No additional lookups are necessary, as the `ScanTree` iteration already yields the
+/// object values.
+fn AccountEventsScanLookupType(
+    comptime AccountEventsGroove: type,
+    comptime Storage: type,
+) type {
+    const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
+
+    return struct {
+        const AccountEventsLookup = @This();
+        const AccountEvent = AccountEventsGroove.ObjectTree.Table.Value;
+        const ScanTree = ScanTreeType(
+            void,
+            AccountEventsGroove.ObjectTree,
+            Storage,
+        );
+
+        pub const Callback = *const fn (*AccountEventsLookup, []const AccountEvent) void;
+
+        scan_tree: ScanTree,
+        state: union(enum) {
+            idle,
+            scan: struct {
+                buffer: []AccountEvent,
+                callback: Callback,
+                buffer_produced_len: usize,
+            },
+            finished,
+        },
+
+        fn init(
+            self: *AccountEventsLookup,
+            tree: *AccountEventsGroove.ObjectTree,
+            scan_buffer: *const ScanBuffer,
+            snapshot: u64,
+            timestamp_range: TimestampRange,
+        ) void {
+            self.* = .{
+                .scan_tree = ScanTree.init(
+                    tree,
+                    scan_buffer,
+                    snapshot,
+                    timestamp_range.min,
+                    timestamp_range.max,
+                    .ascending,
+                ),
+                .state = .idle,
+            };
+        }
+
+        fn read(
+            self: *AccountEventsLookup,
+            buffer: []AccountEvent,
+            callback: Callback,
+        ) void {
+            assert(self.state == .idle);
+            assert(self.scan_tree.state == .idle);
+            assert(buffer.len > 0);
+
+            self.state = .{
+                .scan = .{
+                    .buffer = buffer,
+                    .callback = callback,
+                    .buffer_produced_len = 0,
+                },
+            };
+            self.scan_tree.read({}, &scan_read_callback);
+        }
+
+        fn scan_read_callback(_: void, scan_tree: *ScanTree) void {
+            const self: *AccountEventsLookup = @fieldParentPtr("scan_tree", scan_tree);
+            assert(self.state == .scan);
+
+            while (scan_tree.next() catch |err| switch (err) {
+                error.ReadAgain => {
+                    self.scan_tree.read({}, &scan_read_callback);
+                    return;
+                },
+            }) |object| {
+                assert(self.state.scan.buffer_produced_len < self.state.scan.buffer.len);
+                self.state.scan.buffer[self.state.scan.buffer_produced_len] = object;
+                self.state.scan.buffer_produced_len += 1;
+                if (self.state.scan.buffer_produced_len == self.state.scan.buffer.len) break;
+            }
+
+            const callback = self.state.scan.callback;
+            const results = self.state.scan.buffer[0..self.state.scan.buffer_produced_len];
+            self.state = .finished;
+            callback(self, results);
         }
     };
 }
