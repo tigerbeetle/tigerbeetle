@@ -830,9 +830,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // a sector granularity, and so should be padded with zeros for determinism.
                     if (message.header.command == .request or
                         message.header.command == .prepare or
-                        message.header.command == .block or
-                        message.header.command == .reply)
-                    {
+                        message.header.command == .block
+                    // or message.header.command == .reply
+                    ) {
                         const sector_ceil = vsr.sector_ceil(message.header.size);
                         if (message.header.size != sector_ceil) {
                             assert(message.header.size < sector_ceil);
