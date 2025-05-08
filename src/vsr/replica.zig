@@ -471,6 +471,16 @@ pub fn ReplicaType(
         // +1 to make it easier to decrement budget with -|.
         repair_messages_budget: u32 = constants.vsr_repair_message_budget_max + 1,
 
+        // The maximum prepare op between [commit_min + 1, op] requested during repair.
+        // Used to cycle through uncommitted prepares, to avoid resending the same missing prepares
+        // repeatedly. Reset to commit_min when repair timeout is fired.
+        repair_requested_op_max_uncommitted: u64 = 0,
+
+        // The maximum prepare op between [op_repair_min, commit_min] requested during repair.
+        // Used to cycle through committed prepares, to avoid resending the same missing prepares
+        // repeatedly. Reset to op_repair_min -| 1 when repair timeout is fired.
+        repair_requested_op_max_committed: u64 = 0,
+
         /// Whether the primary has received a quorum of do_view_change messages for the view
         /// change. Determines whether the primary may effect repairs according to the CTRL
         /// protocol.
@@ -3376,11 +3386,15 @@ pub fn ReplicaType(
         fn on_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repair_messages_budget <= constants.vsr_repair_message_budget_max + 1);
+
             self.repair_messages_budget = @min(
                 (self.repair_messages_budget + constants.vsr_repair_message_budget_refill),
                 // +1 to make it easier to decrement budget with -|.
                 constants.vsr_repair_message_budget_max + 1,
             );
+            self.repair_requested_op_max_committed = self.op_repair_min() -| 1;
+            self.repair_requested_op_max_uncommitted = self.commit_min;
+
             self.repair();
         }
 
@@ -7343,7 +7357,9 @@ pub fn ReplicaType(
 
         /// Attempt to repair prepares between [op_min, op_max], skipping over ops for which we
         /// don't have a header and disregarding hash chain breaks.
-        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) void {
+        ///
+        /// Returns maximum op for which request_prepare has been sent.
+        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) ?u64 {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(op_min <= self.op);
@@ -7355,21 +7371,23 @@ pub fn ReplicaType(
             var budget = self.journal.writes.available();
             if (budget == 0) {
                 log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
-                return;
+                return null;
             }
 
+            var requested_op_max: ?u64 = null;
             for (op_min..op_max + 1) |op| {
                 if (self.journal.slot_with_op(op)) |slot| {
                     if (self.journal.dirty.bit(slot)) {
                         // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
                         // Continue to request prepares until our budget is depleted.
                         if (self.repair_prepare(op)) {
+                            requested_op_max = op;
                             budget -= 1;
                             if (budget == 0) {
                                 log.debug("{}: repair_prepares: request budget used", .{
                                     self.replica,
                                 });
-                                return;
+                                return requested_op_max;
                             }
                         }
                     } else {
@@ -7377,6 +7395,8 @@ pub fn ReplicaType(
                     }
                 }
             }
+
+            return requested_op_max;
         }
 
         fn repair_prepares(self: *Replica) void {
@@ -7415,12 +7435,39 @@ pub fn ReplicaType(
             // - our first priority is to commit further,
             // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
-            if (self.commit_min + 1 <= self.op) {
-                self.repair_prepares_between(self.commit_min + 1, self.op);
+            const range_min_uncommitted = @max(
+                // +1 as repair_requested_op_max_uncommitted tracks op for max requested prepare.
+                self.repair_requested_op_max_uncommitted + 1,
+                self.commit_min + 1,
+            );
+            const range_max_uncommitted = self.op;
+            if (range_min_uncommitted <= range_max_uncommitted) {
+                if (self.repair_prepares_between(
+                    range_min_uncommitted,
+                    range_max_uncommitted,
+                )) |op| {
+                    assert(op >= self.commit_min + 1);
+                    assert(op <= self.op);
+                    assert(op > self.repair_requested_op_max_uncommitted);
+
+                    self.repair_requested_op_max_uncommitted = op;
+                }
             }
 
-            if (self.op_repair_min() <= self.commit_min) {
-                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
+            const range_min_committed = @max(
+                // +1 as repair_requested_op_max_committed tracks op for max requested prepare.
+                self.repair_requested_op_max_committed + 1,
+                self.op_repair_min(),
+            );
+            const range_max_committed = self.commit_min;
+            if (range_min_committed <= range_max_committed) {
+                if (self.repair_prepares_between(range_min_committed, range_max_committed)) |op| {
+                    assert(op >= self.op_repair_min());
+                    assert(op <= range_max_committed);
+                    assert(op > self.repair_requested_op_max_committed);
+
+                    self.repair_requested_op_max_committed = op;
+                }
             }
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
