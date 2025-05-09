@@ -7394,14 +7394,22 @@ pub fn ReplicaType(
                     if (self.journal.dirty.bit(slot)) {
                         // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
                         // Continue to request prepares until our budget is depleted.
+                        self.repair_messages_budget -|= 1;
+                        if (self.repair_messages_budget == 0) {
+                            log.debug("{}: repair_prepares: repair budget used", .{
+                                self.replica,
+                            });
+                            break;
+                        }
+
                         if (self.repair_prepare(op)) {
                             requested_op_max = op;
                             budget -= 1;
                             if (budget == 0) {
-                                log.debug("{}: repair_prepares: request budget used", .{
+                                log.debug("{}: repair_prepares: IO budget used", .{
                                     self.replica,
                                 });
-                                return requested_op_max;
+                                break;
                             }
                         }
                     } else {
@@ -7469,8 +7477,12 @@ pub fn ReplicaType(
             }
 
             const range_min_committed = @max(
-                // +1 as repair_requested_op_max_committed tracks op for max requested prepare.
-                self.repair_requested_op_max_committed + 1,
+                if (self.repair_requested_op_max_committed == 0)
+                    // Ensure we start from op=0 so we can repair corrupt root op.
+                    0
+                else
+                    // +1 as repair_requested_op_max_committed tracks op for max requested prepare.
+                    self.repair_requested_op_max_committed + 1,
                 self.op_repair_min(),
             );
             const range_max_committed = self.commit_min;
@@ -7478,7 +7490,7 @@ pub fn ReplicaType(
                 if (self.repair_prepares_between(range_min_committed, range_max_committed)) |op| {
                     assert(op >= self.op_repair_min());
                     assert(op <= range_max_committed);
-                    assert(op > self.repair_requested_op_max_committed);
+                    assert(op >= self.repair_requested_op_max_committed);
 
                     self.repair_requested_op_max_committed = op;
                 }
@@ -7629,13 +7641,10 @@ pub fn ReplicaType(
                     reason,
                 });
 
-                self.repair_messages_budget -|= 1;
-                if (self.repair_messages_budget > 0) {
-                    self.send_header_to_replica(
-                        self.choose_any_other_replica(),
-                        @bitCast(request_prepare),
-                    );
-                }
+                self.send_header_to_replica(
+                    self.choose_any_other_replica(),
+                    @bitCast(request_prepare),
+                );
             }
 
             return true;
