@@ -9571,6 +9571,8 @@ pub fn ReplicaType(
 
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
+
+            if (self.aof) |aof| aof.sync();
             // Faulty bits will be set in sync_content().
             while (self.client_replies.faulty.first_set()) |slot| {
                 self.client_replies.faulty.unset(slot);

@@ -135,8 +135,13 @@ pub const AOF = struct {
         log.debug("wrote {} bytes, {} used / {}", .{ size_disk, self.index, backing_size });
     }
 
+    pub fn sync(self: *AOF) void {
+        assert(self.unflushed <= constants.journal_slot_count);
+        self.unflushed = 0;
+    }
+
     pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
-        assert(self.unflushed < constants.journal_slot_count);
+        assert(self.unflushed <= constants.journal_slot_count);
         self.unflushed = 0;
         callback(replica);
     }
