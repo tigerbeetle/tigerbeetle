@@ -230,15 +230,41 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert((table_mutable.sorted_runs_count == 0) == (table_mutable.count() == 0));
             defer assert(table_immutable.value_context.sorted);
 
-            const already_sorted = std.sort.isSorted(
-                Value,
-                table_mutable.values_used(),
-                {},
-                sort_values_by_key_in_ascending_order,
-            );
+            //var timer = std.time.Timer.start() catch unreachable;
 
+            //const expensive_sorted_check = table_mutable.value_context.sorted or std.sort.isSorted(
+            //Value,
+            //table_mutable.values_used(),
+            //{},
+            //sort_values_by_key_in_ascending_order,
+            //);
+
+            //const duration = timer.lap();
+            //std.debug.print("duration of isSorted {} microseconds and we have {} sorted runs\n", .{
+            //duration / std.time.ns_per_us,
+            //table_mutable.sorted_runs_count,
+            //});
+            var already_sorted = (table_mutable.value_context.sorted) or (table_mutable.sorted_runs_count == 1);
+
+            // check if sorted
+            if (!already_sorted and table_mutable.sorted_runs_count > 1) {
+                const values = table_mutable.values_used();
+                const sorted_runs_count = table_mutable.sorted_runs_count;
+                var sorted = true;
+                for (
+                    table_mutable.sorted_runs[0 .. sorted_runs_count - 1],
+                    table_mutable.sorted_runs[1..sorted_runs_count],
+                ) |sr_a, sr_b| {
+                    sorted = sorted and
+                        (key_from_value(&values[sr_a.max - 1]) < key_from_value(&values[sr_b.min]));
+                }
+                //assert(already_sorted == sorted);
+                already_sorted = sorted;
+            }
+            //assert(expensive_sorted_check == already_sorted);
             // TODO: hack try to fix this correctly
             if (already_sorted) {
+                //std.debug.print("hit sorted\n", .{});
                 // sorted and no duplicates
                 // here we should swap the table memory
                 //stdx.copy_disjoint(
@@ -256,11 +282,28 @@ pub fn TableMemoryType(comptime Table: type) type {
                 table_immutable.value_context.count = table_mutable.count();
                 table_immutable.value_context.sorted = true;
             } else {
+                //std.debug.print("hit unsorted\n", .{});
                 const sorted_runs_count = table_mutable.sorted_runs_count;
                 assert(table_mutable.count() > 0);
                 assert(sorted_runs_count > 0);
                 assert(table_mutable.sorted_runs[sorted_runs_count - 1].max == table_mutable.count());
                 assert(table_mutable.sorted_runs[0].min == 0);
+
+                // check if partially sorted.
+                if (sorted_runs_count > 1) {
+                    const values = table_mutable.values_used();
+                    var almost_sorted = true;
+                    for (
+                        table_mutable.sorted_runs[0 .. sorted_runs_count - 1],
+                        table_mutable.sorted_runs[1..sorted_runs_count],
+                    ) |sr_a, sr_b| {
+                        almost_sorted = almost_sorted and
+                            (key_from_value(&values[sr_a.max - 1]) <= key_from_value(&values[sr_b.min]));
+                        //if (almost_sorted) {
+                        //std.debug.print("two sorted runs are almost sorted \n", .{});
+                        //}
+                    }
+                }
 
                 if (sorted_runs_count > 1) {
                     for (
@@ -419,6 +462,10 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // here we have a new count
             }
 
+            // TODO: choose here the smaller buffer.
+            //  - swap it.
+            //  - if we copy the mutable values in the mutable table we should adjust the sorted runs to be stable.
+
             // copy form immutable to mutable.
             stdx.copy_disjoint(
                 .inexact,
@@ -480,7 +527,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             const run_min = table.mutability.mutable.suffix_offset;
             table.mutable_sort_suffix_from_offset(
                 table.mutability.mutable.suffix_offset,
-                .{ .radix = table.tmp_buffer },
+                .std,
+                //.{ .radix = table.tmp_buffer },
             );
             const run_max = table.mutability.mutable.suffix_offset;
             assert(run_min <= run_max);
