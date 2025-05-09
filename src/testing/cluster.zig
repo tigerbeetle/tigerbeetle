@@ -599,6 +599,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             } else unreachable;
 
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
+            cluster.aofs[replica_index].reset();
 
             var replica = &cluster.replicas[replica_index];
             try replica.open(
