@@ -3,6 +3,74 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.40
+
+Released: 2025-05-09
+
+### Safety And Performance
+
+- [#2959](https://github.com/tigerbeetle/tigerbeetle/pull/2959)
+
+  Fix AOF `unflushed` assertion.
+
+- [#2950](https://github.com/tigerbeetle/tigerbeetle/pull/2950)
+
+  Decouple prepare repair from header breaks. This helps a replica repair faster, and prevents a
+  case where we would request a prepare only to discard it when it arrives.
+
+- [#2945](https://github.com/tigerbeetle/tigerbeetle/pull/2945),
+  [#2961](https://github.com/tigerbeetle/tigerbeetle/pull/2961)
+
+  Bump default journal write iops. Previously we were inadvertently throttling repair by not
+  allocating enough.
+
+- [#2944](https://github.com/tigerbeetle/tigerbeetle/pull/2944)
+
+  Primary now broadcasts `start_view` message on checkpoint durability.
+  This will help syncing replicas update to the latest sync target as early as possible.
+
+- [#2952](https://github.com/tigerbeetle/tigerbeetle/pull/2952)
+
+  Add assert to check return value of `next_batch_of_block_requests`.
+
+### Features
+
+- [#2943](https://github.com/tigerbeetle/tigerbeetle/pull/2943),
+  [#2949](https://github.com/tigerbeetle/tigerbeetle/pull/2949),
+  [#2951](https://github.com/tigerbeetle/tigerbeetle/pull/2951)
+
+  Improve logging, especially of lagging replicas.
+
+### Internals
+
+- [#2937](https://github.com/tigerbeetle/tigerbeetle/pull/2937)
+
+  Add subcommand to `git-review` to send review comments as a email.
+
+- [#2926](https://github.com/tigerbeetle/tigerbeetle/pull/2926)
+
+  Add subcommand to `git-review` to split suggested code changes out of a review commit.
+
+- [#2940](https://github.com/tigerbeetle/tigerbeetle/pull/2940)
+
+  Speed up fuzz smoke tests.
+
+- [#2941](https://github.com/tigerbeetle/tigerbeetle/pull/2941)
+
+  Improve memory usage of tests 10x and test runtime 10x.
+
+- [#2936](https://github.com/tigerbeetle/tigerbeetle/pull/2936)
+
+  Add arbitrary debug output to CFO seeds.
+
+- [#2931](https://github.com/tigerbeetle/tigerbeetle/pull/2931)
+
+  Fix for multiple CFO branches on same commit.
+
+### TigerTracks 🎧
+
+- [Field of Stars](https://www.youtube.com/watch?v=l1Pqy1tuVLI)
+
 ## TigerBeetle 0.16.39
 
 Released: 2025-05-02
