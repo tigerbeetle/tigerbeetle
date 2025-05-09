@@ -4198,7 +4198,11 @@ pub fn ReplicaType(
             // Even a naive state sync may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const header = self.journal.header_with_op(op) orelse return .ready;
+                const header = self.journal.header_with_op(op) orelse {
+                    // We didn't receive the prepare and header, proactively initiate repair for it.
+                    self.repair();
+                    return .ready;
+                };
 
                 // Assuming that the head op is correct, it is definitely safe to commit the next
                 // prepare if it is from the same view as the head --- the primary for that view
@@ -4248,6 +4252,12 @@ pub fn ReplicaType(
             if (prepare == null) {
                 log.debug("{}: commit_start_journal_callback: prepare == null", .{self.replica});
                 if (self.solo()) @panic("cannot recover corrupt prepare");
+
+                // We have the header but not the prepare, proactively initiate repair for it.
+                // The case where a prepare could not be accepted due to lack of write IOPs
+                // (throwing `no matching prepare`) manifests like this.
+                self.repair();
+
                 return self.commit_dispatch_resume();
             }
 
