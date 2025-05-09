@@ -2872,12 +2872,26 @@ pub fn ReplicaType(
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
+            var header_repaired = false;
             for (message_body_as_prepare_headers(message.base_const())) |*h| {
                 if (op_min == null or h.op < op_min.?) op_min = h.op;
                 if (op_max == null or h.op > op_max.?) op_max = h.op;
-                _ = self.repair_header(h);
+                if (self.repair_header(h)) {
+                    header_repaired = true;
+                }
             }
             assert(op_max.? >= op_min.?);
+
+            // Ensure we only replenish the repair budget if we use this message to repair at least
+            // one header. This guards us against double incrementing the budget in case of
+            // duplicate headers messages.
+            if (header_repaired) {
+                self.repair_messages_budget = @min(
+                    self.repair_messages_budget + 1,
+                    // +1 to make it easier to decrement budget with -|.
+                    constants.vsr_repair_message_budget_max + 1,
+                );
+            }
 
             self.repair();
         }
@@ -10233,9 +10247,16 @@ pub fn ReplicaType(
 
             switch (trigger) {
                 .append => {},
-                // If this was a repair, continue immediately to repair the next prepare:
+                // Replenish budget and continue immediately to repair the next prepare:
                 // This is an optimization to eliminate waiting until the next repair timeout.
-                .repair => self.repair(),
+                .repair => {
+                    self.repair_messages_budget = @min(
+                        self.repair_messages_budget + 1,
+                        constants.vsr_repair_message_budget_max + 1,
+                    );
+                    self.repair();
+                },
+                // Continue repairing the primary's pipeline.
                 .pipeline => self.repair(),
                 .fix => unreachable,
             }
