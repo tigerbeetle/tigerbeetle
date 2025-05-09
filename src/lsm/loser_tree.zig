@@ -50,7 +50,7 @@ pub fn LooserTreeType(
         winner: Node,
 
         // should we do slices?
-        pub fn merge(input: []Value, batches: []SortedRun, output: []Value) void {
+        pub inline fn merge(input: []Value, batches: []SortedRun, output: []Value) void {
             assert(output.len == input.len);
             // TODO: check that input slices are combined <- output.len
             // TODO: check if batches are actually sorted
@@ -59,6 +59,9 @@ pub fn LooserTreeType(
             // populate_tree or make_tree
             var tree = init(input, batches);
 
+            // TODO: can we just deduplicate here?
+            // check if the next value is equal then the last.
+            // if it is primary overwrite otherwise annihilate both
             for (output) |*out| {
                 out.* = tree.next();
             }
