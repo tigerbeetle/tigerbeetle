@@ -1779,11 +1779,26 @@ pub fn ReplicaType(
             }
             defer if (self.backup()) self.commit_journal();
 
-            // Verify that the new request will fit in the WAL.
-            if (message.header.op > self.op_prepare_max()) {
-                log.warn("{}: on_prepare: ignoring op={} (too far ahead, prepare_max={})", .{
+            if (message.header.op > self.commit_min + 2 * constants.pipeline_prepare_queue_max) {
+                log.warn("{}: on_prepare: lagging behind the cluster prepare.op={} " ++
+                    "(commit_min={} op={} commit_max={})", .{
                     self.replica,
                     message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
+                });
+            }
+
+            // Verify that the new request will fit in the WAL.
+            if (message.header.op > self.op_prepare_max()) {
+                log.warn("{}: on_prepare: ignoring prepare.op={} " ++
+                    "(too far ahead, commit_min={} op={} commit_max={} prepare_max={})", .{
+                    self.replica,
+                    message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
                     self.op_prepare_max(),
                 });
                 // When we are the primary, `on_request` enforces this invariant.
@@ -2465,7 +2480,7 @@ pub fn ReplicaType(
 
             // Otherwise, cancel in progress commit and prepare to sync.
             log.mark.debug(
-                \\{}: on_start_view_set_checkpoint: sync started view={} op_checkpoint={} op_checkpoint_new={}
+                \\{}: on_start_view_set_checkpoint: sync started view={} checkpoint={}..{}
             , .{
                 self.replica,
                 self.log_view,
@@ -4391,6 +4406,9 @@ pub fn ReplicaType(
             if (self.grid.free_set.checkpoint_durable) return .ready;
             if (!vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_min)) return .ready;
 
+            // Send SV message so lagging replicas can proactively sync to this durable checkpoint.
+            if (self.status == .normal and self.primary()) self.primary_send_start_view();
+
             // Checkpoint is guaranteed to be durable on a commit quorum when a replica is
             // committing the (pipeline + 1)ᵗʰ prepare after checkpoint trigger. It might already be
             // durable before this point (some part of the cluster may be lagging while a commit
@@ -4419,12 +4437,15 @@ pub fn ReplicaType(
             assert(op <= self.op);
             assert((op + 1) % constants.lsm_compaction_ops == 0);
             log.info("{}: commit_checkpoint_data: checkpoint_data start " ++
-                "(op={} current_checkpoint={} next_checkpoint={} " ++
+                "(checkpoint={}..{} commit_min={} op={} commit_max={} op_prepare_max={} " ++
                 "free_set.acquired={} free_set.released={})", .{
                 self.replica,
-                self.op,
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
+                self.commit_min,
+                self.op,
+                self.commit_max,
+                self.op_prepare_max(),
                 self.grid.free_set.count_acquired(),
                 self.grid.free_set.count_released(),
             });
@@ -6810,11 +6831,7 @@ pub fn ReplicaType(
 
             if (self.journal.dirty.count > 0) {
                 // Request and repair any dirty or faulty prepares.
-                const op_min = if (header_break) |range|
-                    range.op_max + 1
-                else
-                    self.op_repair_min();
-                self.repair_prepares(op_min);
+                self.repair_prepares();
             }
 
             if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
@@ -7324,16 +7341,51 @@ pub fn ReplicaType(
             }
         }
 
-        fn repair_prepares(self: *Replica, op_min: u64) void {
+        /// Attempt to repair prepares between [op_min, op_max], skipping over ops for which we
+        /// don't have a header and disregarding hash chain breaks.
+        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(self.op_repair_min() <= op_min);
+            assert(self.repairs_allowed());
             assert(op_min <= self.op);
+            assert(op_min >= self.op_repair_min());
+            assert(op_min <= op_max);
+            assert(op_max <= self.op);
+
+            // Request enough prepares to utilize our max IO depth:
+            var budget = self.journal.writes.available();
+            if (budget == 0) {
+                log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
+                return;
+            }
+
+            for (op_min..op_max + 1) |op| {
+                if (self.journal.slot_with_op(op)) |slot| {
+                    if (self.journal.dirty.bit(slot)) {
+                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                        // Continue to request prepares until our budget is depleted.
+                        if (self.repair_prepare(op)) {
+                            budget -= 1;
+                            if (budget == 0) {
+                                log.debug("{}: repair_prepares: request budget used", .{
+                                    self.replica,
+                                });
+                                return;
+                            }
+                        }
+                    } else {
+                        assert(!self.journal.faulty.bit(slot));
+                    }
+                }
+            }
+        }
+
+        fn repair_prepares(self: *Replica) void {
+            assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
-            assert(self.valid_hash_chain_between(op_min, self.op));
 
             if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
@@ -7358,52 +7410,18 @@ pub fn ReplicaType(
                 }
             }
 
-            // Request enough prepares to utilize our max IO depth:
-            var budget = self.journal.writes.available();
-            if (budget == 0) {
-                log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
-                return;
-            }
-
-            // Iterate through op_min..=self.op, but make sure to iterate commit_min+1..=self.op
-            // sub range first:
+            // Iterate through [op_repair_min, self.op], but make sure to first iterate through
+            // [commit_min+1, self.op] and then [op_repair_min, commit_min]:
             // - our first priority is to commit further,
             // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
-            const repair_ranges_exclusive: [2]struct { u64, u64 } = .{
-                .{ @max(op_min, self.commit_min + 1), self.op + 1 },
-                .{ op_min, @max(self.commit_min + 1, op_min) },
-            };
-            const range_count_a = self.op - op_min + 1;
-            const range_count_b = (repair_ranges_exclusive[0][1] - repair_ranges_exclusive[0][0]) +
-                (repair_ranges_exclusive[1][1] - repair_ranges_exclusive[1][0]);
-            assert(range_count_a == range_count_b);
-
-            var range_count_c: u64 = 0;
-            for (repair_ranges_exclusive) |repair_range_exclusive| {
-                const range_min, const range_max = repair_range_exclusive;
-                assert(range_min <= range_max);
-                for (range_min..range_max) |op| {
-                    range_count_c += 1;
-                    const slot = self.journal.slot_with_op(op).?;
-                    if (self.journal.dirty.bit(slot)) {
-                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
-                        // Continue to request prepares until our budget is depleted.
-                        if (self.repair_prepare(op)) {
-                            budget -= 1;
-                            if (budget == 0) {
-                                log.debug("{}: repair_prepares: request budget used", .{
-                                    self.replica,
-                                });
-                                return;
-                            }
-                        }
-                    } else {
-                        assert(!self.journal.faulty.bit(slot));
-                    }
-                }
+            if (self.commit_min + 1 <= self.op) {
+                self.repair_prepares_between(self.commit_min + 1, self.op);
             }
-            assert(range_count_c == range_count_a);
+
+            if (self.op_repair_min() <= self.commit_min) {
+                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
+            }
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
             const slots_repaired = vsr.SlotRange{
@@ -10189,6 +10207,7 @@ pub fn ReplicaType(
             assert(requests.len > 0);
 
             const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
+            assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
 
             for (requests[0..requests_count]) |*request| {

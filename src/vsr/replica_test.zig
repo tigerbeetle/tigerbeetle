@@ -1221,6 +1221,53 @@ test "Cluster: sync: slightly lagging replica" {
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_prepare_max + 2);
 }
 
+test "Cluster: sync: using SV from durable checkpoint" {
+    // Primary sends a SV message to backups when a checkpoint becomes durable. A lagging backup
+    // must use this SV message to state sync to the checkpoint.
+
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.clients.len);
+
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    // Run for a few ticks to ensure all replicas transition to normal status.
+    t.run();
+
+    b2.stop();
+
+    try c.request(checkpoint_1_prepare_max - 1, checkpoint_1_prepare_max - 1);
+
+    // Ensure b2 can't repair its WAL, commit & transition to checkpoint_1.
+    a0.drop(.R_, .incoming, .request_prepare);
+    b1.drop(.R_, .incoming, .request_prepare);
+
+    try b2.open();
+
+    // Ensure b2 doesn't use repair_sync_timeout to initiate state sync and instead uses a SV
+    // message that a0 sends on checkpoint durability.
+    const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
+    b2_replica.repair_sync_timeout.stop();
+
+    // b2 at first only accepts prepares up till checkpoint_1_prepare_max. When a0 and b1 commit
+    // past checkpoint_2_prepare_ok_max and checkpoint_2 is durable, a0 sends a SV message to
+    // the backups. b2 uses this SV message to state sync to checkpoint_2.
+    try c.request(checkpoint_2_prepare_ok_max + 1, checkpoint_2_prepare_ok_max + 1);
+
+    try expectEqual(a0.commit(), checkpoint_2_prepare_ok_max + 1);
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+
+    try expectEqual(b1.commit(), checkpoint_2_prepare_ok_max + 1);
+    try expectEqual(b1.op_checkpoint(), checkpoint_2);
+
+    try expectEqual(b2.op_head(), checkpoint_2_prepare_ok_max + 1);
+    try expectEqual(b2.commit(), checkpoint_2);
+    try expectEqual(b2.op_checkpoint(), checkpoint_2);
+}
+
 test "Cluster: sync: checkpoint from a newer view" {
     // B1 appends (but does not commit) prepares across a checkpoint boundary.
     // Then the cluster truncates those prepares and commits past the checkpoint trigger.
@@ -1884,7 +1931,7 @@ const TestContext = struct {
                 .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
                 .one_way_delay_min = prng.int_inclusive(u16, 2),
 
-                .path_maximum_capacity = 128,
+                .path_maximum_capacity = 10,
                 .path_clog_duration_mean = 0,
                 .path_clog_probability = ratio(0, 100),
                 .recorded_count_max = 16,
