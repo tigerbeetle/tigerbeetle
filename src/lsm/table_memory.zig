@@ -240,12 +240,19 @@ pub fn TableMemoryType(comptime Table: type) type {
             // TODO: hack try to fix this correctly
             if (already_sorted) {
                 // sorted and no duplicates
-                stdx.copy_disjoint(
-                    .inexact,
-                    Value,
-                    table_immutable.values[0..],
-                    table_mutable.values[0..table_mutable.count()],
-                );
+                // here we should swap the table memory
+                //stdx.copy_disjoint(
+                //.inexact,
+                //Value,
+                //table_immutable.values[0..],
+                //table_mutable.values[0..table_mutable.count()],
+                //);
+
+                // ugly swap
+                const tmp_ptr = table_mutable.values.ptr;
+                table_mutable.values.ptr = table_immutable.values.ptr;
+                table_immutable.values.ptr = tmp_ptr;
+
                 table_immutable.value_context.count = table_mutable.count();
                 table_immutable.value_context.sorted = true;
             } else {
