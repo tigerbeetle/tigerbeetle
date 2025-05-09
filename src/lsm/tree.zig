@@ -17,7 +17,9 @@ const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 pub const ScopeCloseMode = enum { persist, discard };
 
 const BenchmarkParams = struct {
+    version: []const u8 = "",
     name: []const u8 = "",
+    part: []const u8 = "",
     key_size: usize,
     elements: usize,
 };
@@ -532,22 +534,24 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .tree = @enumFromInt(tree.config.id),
             } });
 
+            std.debug.print("\n", .{});
             if (tree.table_immutable.mutability.immutable.flushed) {
                 // The immutable table must be visible to the next bar.
                 // In addition, the immutable table is conceptually an output table of this
                 // compaction bar, and now its snapshot_min matches the snapshot_min of the
                 // Compactions' output tables.
 
-                //var benchmark_params = BenchmarkParams{
-                //.name = tree_name(),
-                //.key_size = @sizeOf(Key),
-                //.elements = tree.table_mutable.count(),
-                //};
-                //var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
-                //perf.set_scale(tree.table_mutable.count());
-                std.debug.print("merge {s} ", .{tree.config.name});
+                var benchmark_params = BenchmarkParams{
+                    .version = "optimized",
+                    .name = tree.config.name,
+                    .part = "swap",
+                    .key_size = @sizeOf(Key),
+                    .elements = tree.table_mutable.count(),
+                };
+                var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
+                perf.set_scale(tree.table_mutable.count());
                 tree.table_immutable.merge_from(&tree.table_mutable, snapshot_min);
-                //perf.deinit();
+                perf.deinit();
                 //tree.table_mutable.make_immutable(snapshot_min);
                 //tree.table_immutable.make_mutable();
                 //std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
@@ -555,13 +559,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
 
-                std.debug.print("absorb {s} ", .{tree.config.name});
-                var timer = std.time.Timer.start() catch unreachable;
                 // The immutable table wasn't flushed because there is enough room left over for the
                 // mutable table's values, allowing us to skip some compaction work.
+                var benchmark_params = BenchmarkParams{
+                    .version = "optimized",
+                    .name = tree.config.name,
+                    .part = "absorb",
+                    .key_size = @sizeOf(Key),
+                    .elements = tree.table_mutable.count(),
+                };
+                var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
+                perf.set_scale(tree.table_mutable.count());
                 tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
-                const duration = timer.lap();
-                std.debug.print("absorb {} \n", .{duration / std.time.ns_per_ms});
+                perf.deinit();
 
                 assert(tree.table_mutable.value_context.count == 0);
             }

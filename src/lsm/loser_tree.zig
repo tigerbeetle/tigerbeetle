@@ -67,7 +67,7 @@ pub fn LooserTreeType(
             }
         }
 
-        fn init(data: []Value, batches: []SortedRun) Self {
+        pub fn init(data: []Value, batches: []SortedRun) Self {
 
             // Prepopulate the competing nodes from every valid sorted batch.
             var competitors: [K]Node = undefined;
@@ -121,7 +121,7 @@ pub fn LooserTreeType(
             };
         }
 
-        fn next(self: *Self) Value {
+        pub fn next(self: *Self) Value {
             const batch_id = self.winner.batch_id;
 
             // Increment the start position for the winning batch.

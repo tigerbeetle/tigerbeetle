@@ -15,6 +15,19 @@ const SortedRun = loser_tree.SortedRun;
 // the final sort, which reduces tail latency.
 // The number of calls to `sort_suffix` are determined by `constants.lsm_compaction_ops`.
 
+// TODO:
+// - Coalesce runs.
+// - Maintain sorted flag acrros.
+// - Tree of loosers not full K but next power two.
+// - Analyze numbers again.
+
+// 0. Outsorce file.
+// 1. Absorb, maybe expensive but not so expensive, now you say merge cheaper 5-7 ms
+// 2. Sorted flag, how much does it make.
+
+// Why isSorted does not help with AccountEvent?
+//   - boundary values?
+
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -146,7 +159,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <
-                        key_from_value(value);
+                    key_from_value(value);
             } else {
                 assert(table.value_context.count > 0);
             }
@@ -170,6 +183,38 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
         }
 
+        pub inline fn merge(input: []Value, batches: []SortedRun, output: []Value) u32 {
+            assert(output.len == input.len);
+            var tree = TreeOfLosers.init(input, batches);
+
+            var target_index: u32 = 0;
+            output[target_index] = tree.next();
+            target_index += 1;
+
+            for (1..input.len) |_| {
+                const value_next = tree.next();
+                const value_next_equal = target_index > 0 and
+                    key_from_value(&output[target_index - 1]) ==
+                    key_from_value(&value_next);
+
+                if (value_next_equal) {
+                    if (Table.usage == .secondary_index) {
+                        assert(Table.tombstone(&output[target_index - 1]) !=
+                            Table.tombstone(&value_next));
+                        // annihilate both
+                        target_index -= 1;
+                    } else {
+                        // overwrite old value - last writer wins
+                        output[target_index - 1] = value_next;
+                    }
+                } else {
+                    output[target_index] = value_next;
+                    target_index += 1;
+                }
+            }
+
+            return target_index;
+        }
         /// Merge and sort the immutable/mutable tables (favoring values in the latter) into the
         /// immutable table. Then reset the mutable table.
         pub fn merge_from(
@@ -185,7 +230,15 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert((table_mutable.sorted_runs_count == 0) == (table_mutable.count() == 0));
             defer assert(table_immutable.value_context.sorted);
 
-            if (table_mutable.value_context.sorted or table_mutable.sorted_runs_count == 1) {
+            const already_sorted = std.sort.isSorted(
+                Value,
+                table_mutable.values_used(),
+                {},
+                sort_values_by_key_in_ascending_order,
+            );
+
+            // TODO: hack try to fix this correctly
+            if (already_sorted) {
                 // sorted and no duplicates
                 stdx.copy_disjoint(
                     .inexact,
@@ -211,8 +264,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     }
                 }
 
-                var timer = std.time.Timer.start() catch unreachable;
-                TreeOfLosers.merge(
+                const target_count = merge(
                     table_mutable.values_used(),
                     table_mutable.sorted_runs[0..],
                     table_immutable.values[0..table_mutable.count()],
@@ -221,62 +273,56 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // ----- Deduplicate
                 // Merge values with identical keys (last one wins) and collapse tombstones for
                 // secondary indexes.
-                const source_count: u32 = @intCast(table_mutable.count());
-                const values = table_immutable.values;
-                var source_index: u32 = 0;
-                var target_index: u32 = 0;
-                while (source_index < source_count) {
-                    if (source_index != target_index) {
-                        values[target_index] = values[source_index];
-                    }
+                //const source_count: u32 = @intCast(table_mutable.count());
+                //const values = table_immutable.values;
+                //var source_index: u32 = 0;
+                //var target_index: u32 = 0;
+                //while (source_index < source_count) {
+                //if (source_index != target_index) {
+                //values[target_index] = values[source_index];
+                //}
 
-                    // If we're at the end of the source, there is no next value, so the next value
-                    // can't be equal.
-                    const value_next_equal = source_index + 1 < source_count and
-                        key_from_value(&values[source_index]) ==
-                            key_from_value(&values[source_index + 1]);
+                //// If we're at the end of the source, there is no next value, so the next value
+                //// can't be equal.
+                //const value_next_equal = source_index + 1 < source_count and
+                //key_from_value(&values[source_index]) ==
+                //key_from_value(&values[source_index + 1]);
 
-                    if (value_next_equal) {
-                        if (Table.usage == .secondary_index) {
-                            // Secondary index optimization --- cancel out put and remove.
-                            // NB: while this prevents redundant tombstones from getting to disk, we
-                            // still spend some extra CPU work to sort the entries in memory. Ideally,
-                            // we annihilate tombstones immediately, before sorting, but that's tricky
-                            // to do with scopes.
-                            assert(Table.tombstone(&values[source_index]) !=
-                                Table.tombstone(&values[source_index + 1]));
-                            source_index += 2;
-                            target_index += 0;
-                        } else {
-                            // The last value in a run of duplicates needs to be the one that ends up in
-                            // target.
-                            source_index += 1;
-                            target_index += 0;
-                        }
-                    } else {
-                        source_index += 1;
-                        target_index += 1;
-                    }
-                }
+                //if (value_next_equal) {
+                //if (Table.usage == .secondary_index) {
+                //// Secondary index optimization --- cancel out put and remove.
+                //// NB: while this prevents redundant tombstones from getting to disk, we
+                //// still spend some extra CPU work to sort the entries in memory. Ideally,
+                //// we annihilate tombstones immediately, before sorting, but that's tricky
+                //// to do with scopes.
+                //assert(Table.tombstone(&values[source_index]) !=
+                //Table.tombstone(&values[source_index + 1]));
+                //source_index += 2;
+                //target_index += 0;
+                //} else {
+                //// The last value in a run of duplicates needs to be the one that ends up in
+                //// target.
+                //source_index += 1;
+                //target_index += 0;
+                //}
+                //} else {
+                //source_index += 1;
+                //target_index += 1;
+                //}
+                //}
 
                 // At this point, source_index and target_index are actually counts.
                 // source_index will always be incremented after the final iteration as part of the
                 // continue expression.
                 // target_index will always be incremented, since either source_index runs out first
                 // so value_next_equal is false, or a new value is hit, which will increment it.
-                const target_count = target_index;
+                const source_count: u32 = @intCast(table_mutable.count());
                 assert(target_count <= source_count);
-                assert(source_count == source_index);
                 table_immutable.value_context.count = target_count;
                 table_immutable.value_context.sorted = true;
-                const duration = timer.lap();
-                std.debug.print("merge + dedup duration {} ms   \n", .{
-                    duration / std.time.ns_per_ms,
-                });
             }
 
             if (constants.verify) {
-                assert(false);
                 const target_count = table_immutable.count();
                 if (0 < table_immutable.count()) {
                     const values = table_immutable.values_used();
@@ -584,7 +630,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // can't be equal.
                 const value_next_equal = source_index + 1 < source_count and
                     key_from_value(&values[source_index]) ==
-                        key_from_value(&values[source_index + 1]);
+                    key_from_value(&values[source_index + 1]);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
