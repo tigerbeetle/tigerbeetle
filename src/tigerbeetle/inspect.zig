@@ -52,6 +52,7 @@ fn main_inspect(
     const data_file = switch (cli_args.*) {
         .constants => return try inspect_constants(stdout),
         .metrics => return try inspect_metrics(stdout),
+        .op => |op| return try inspect_op(stdout, op),
         .data_file => |data_file| data_file,
     };
 
@@ -272,6 +273,55 @@ fn inspect_metrics(output: std.io.AnyWriter) !void {
         "(All stats are tagged with the replica, so the cluster has 6x as many stats.)",
         .{},
     );
+}
+
+// Example output:
+// checkpoint          op                  trigger             prepare_max         checkpoint_next
+// 624894719      +20  624894739      +12  624894751      +16  624894767      +912 624895679
+fn inspect_op(output: std.io.AnyWriter, op: u64) !void {
+    const checkpoint = if (op < constants.vsr_checkpoint_ops - 1) 0 else checkpoint: {
+        // op = q * checkpoints_ops - 1 + r
+        const r = (op + 1) % constants.vsr_checkpoint_ops;
+        const q = @divExact(op + 1 - r, constants.vsr_checkpoint_ops);
+        break :checkpoint q * constants.vsr_checkpoint_ops - 1;
+    };
+    const checkpoint_next = vsr.Checkpoint.checkpoint_after(checkpoint);
+
+    const points = .{
+        .checkpoint = checkpoint,
+        .trigger = vsr.Checkpoint.trigger_for_checkpoint(checkpoint) orelse 0,
+        .prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint) orelse 0,
+        .checkpoint_next = checkpoint_next,
+        .op = op,
+    };
+    const Points = @TypeOf(points);
+
+    const Entry = struct {
+        label: []const u8,
+        op: u64,
+        fn less_than(_: void, a: @This(), b: @This()) bool {
+            return a.op < b.op;
+        }
+    };
+
+    var entries: [std.meta.fields(Points).len]Entry = undefined;
+    inline for (std.meta.fields(Points), 0..) |field, index| {
+        entries[index] = .{
+            .label = field.name,
+            .op = @field(points, field.name),
+        };
+    }
+    std.sort.insertion(Entry, &entries, {}, Entry.less_than);
+    for (entries) |entry| {
+        try output.print("{s: <20}", .{entry.label});
+    }
+    try output.print("\n", .{});
+    for (entries[0 .. entries.len - 1], entries[1..]) |entry, entry_next| {
+        try output.print("{d: <15}", .{entry.op});
+        try output.print("+{d: <4}", .{entry_next.op - entry.op});
+    }
+    try output.print("{d: <20}", .{entries[entries.len - 1].op});
+    try output.print("\n", .{});
 }
 
 fn print_header(output: std.io.AnyWriter, comptime level: u8, comptime header: []const u8) !void {
