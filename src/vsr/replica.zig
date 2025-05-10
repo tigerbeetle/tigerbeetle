@@ -471,6 +471,21 @@ pub fn ReplicaType(
         // +1 to make it easier to decrement budget with -|.
         repair_messages_budget: u32 = constants.vsr_repair_message_budget_max + 1,
 
+        // The next op between [commit_min + 1, op] to be requested during repair.
+        // Used to cycle through uncommitted prepares, to avoid resending the same missing prepares
+        // repeatedly. Reset to commit_min + 1 when repair timeout is fired.
+        repair_prepare_op_next_uncommitted: u64 = 0,
+
+        // The next op between [op_repair_min, commit_min] to be requested during repair.
+        // Used to cycle through committed prepares, to avoid resending the same missing prepares
+        // repeatedly. Reset to op_repair_min when repair timeout is fired.
+        repair_prepare_op_next_committed: u64 = 0,
+
+        // The op number which should be set as op_min for the next request_headers call.
+        // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
+        // the number of headers requested). Reset to op_repair_min when repair timeout is fired.
+        repair_header_op_next: u64 = 0,
+
         /// Whether the primary has received a quorum of do_view_change messages for the view
         /// change. Determines whether the primary may effect repairs according to the CTRL
         /// protocol.
@@ -2862,12 +2877,26 @@ pub fn ReplicaType(
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
+            var header_repaired = false;
             for (message_body_as_prepare_headers(message.base_const())) |*h| {
                 if (op_min == null or h.op < op_min.?) op_min = h.op;
                 if (op_max == null or h.op > op_max.?) op_max = h.op;
-                _ = self.repair_header(h);
+                if (self.repair_header(h)) {
+                    header_repaired = true;
+                }
             }
             assert(op_max.? >= op_min.?);
+
+            // Ensure we only replenish the repair budget if we use this message to repair at least
+            // one header. This guards us against double incrementing the budget in case of
+            // duplicate headers messages.
+            if (header_repaired) {
+                self.repair_messages_budget = @min(
+                    self.repair_messages_budget + 1,
+                    // +1 to make it easier to decrement budget with -|.
+                    constants.vsr_repair_message_budget_max + 1,
+                );
+            }
 
             self.repair();
         }
@@ -3376,11 +3405,16 @@ pub fn ReplicaType(
         fn on_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repair_messages_budget <= constants.vsr_repair_message_budget_max + 1);
+
             self.repair_messages_budget = @min(
                 (self.repair_messages_budget + constants.vsr_repair_message_budget_refill),
                 // +1 to make it easier to decrement budget with -|.
                 constants.vsr_repair_message_budget_max + 1,
             );
+            self.repair_header_op_next = self.op_repair_min();
+            self.repair_prepare_op_next_committed = self.op_repair_min();
+            self.repair_prepare_op_next_uncommitted = self.commit_min + 1;
+
             self.repair();
         }
 
@@ -4170,7 +4204,11 @@ pub fn ReplicaType(
             // Even a naive state sync may fail to correct for this.
             if (self.commit_min < self.commit_max and self.commit_min < self.op) {
                 const op = self.commit_min + 1;
-                const header = self.journal.header_with_op(op) orelse return .ready;
+                const header = self.journal.header_with_op(op) orelse {
+                    // We didn't receive the prepare and header, proactively initiate repair for it.
+                    self.repair();
+                    return .ready;
+                };
 
                 // Assuming that the head op is correct, it is definitely safe to commit the next
                 // prepare if it is from the same view as the head --- the primary for that view
@@ -4220,6 +4258,12 @@ pub fn ReplicaType(
             if (prepare == null) {
                 log.debug("{}: commit_start_journal_callback: prepare == null", .{self.replica});
                 if (self.solo()) @panic("cannot recover corrupt prepare");
+
+                // We have the header but not the prepare, proactively initiate repair for it.
+                // The case where a prepare could not be accepted due to lack of write IOPs
+                // (throwing `no matching prepare`) manifests like this.
+                self.repair();
+
                 return self.commit_dispatch_resume();
             }
 
@@ -6811,21 +6855,29 @@ pub fn ReplicaType(
                     },
                 );
 
-                self.repair_messages_budget -|= 1;
-                if (self.repair_messages_budget > 0) {
-                    self.send_header_to_replica(
-                        self.choose_any_other_replica(),
-                        @bitCast(Header.RequestHeaders{
-                            .command = .request_headers,
-                            .cluster = self.cluster,
-                            .replica = self.replica,
-                            // Pessimistically request as many headers as we might need.
-                            // Requesting/sending extra headers is inexpensive, and it may save us
-                            // extra round-trips to repair earlier breaks.
-                            .op_min = self.op_repair_min(),
-                            .op_max = range.op_max,
-                        }),
-                    );
+                if (range.op_min >= self.repair_header_op_next) {
+                    self.repair_messages_budget -|= 1;
+                    if (self.repair_messages_budget > 0) {
+                        self.send_header_to_replica(
+                            self.choose_any_other_replica(),
+                            @bitCast(Header.RequestHeaders{
+                                .command = .request_headers,
+                                .cluster = self.cluster,
+                                .replica = self.replica,
+                                // Pessimistically request as many headers as we might need.
+                                // Requesting/sending extra headers is inexpensive, and it may save us
+                                // extra round-trips to repair earlier breaks.
+                                .op_min = self.repair_header_op_next,
+                                .op_max = range.op_max,
+                            }),
+                        );
+
+                        self.repair_header_op_next = range.op_max + 1;
+                    }
+                } else {
+                    // We have already requested headers for these ops, repair_header_op_next
+                    // will be reset to op_repair_min when repair_timeout is hit, so that they
+                    // can be re-requested if required (for example, if the replica chosen is down).
                 }
             }
 
@@ -7343,7 +7395,9 @@ pub fn ReplicaType(
 
         /// Attempt to repair prepares between [op_min, op_max], skipping over ops for which we
         /// don't have a header and disregarding hash chain breaks.
-        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) void {
+        ///
+        /// Returns maximum op for which request_prepare has been sent.
+        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) ?u64 {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(op_min <= self.op);
@@ -7352,24 +7406,42 @@ pub fn ReplicaType(
             assert(op_max <= self.op);
 
             // Request enough prepares to utilize our max IO depth:
-            var budget = self.journal.writes.available();
-            if (budget == 0) {
+            var io_budget = self.journal.writes.available();
+            if (io_budget == 0) {
                 log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
-                return;
+                return null;
             }
 
+            // Don't check the repair budget for a potential primary in view change, use the full
+            // write bandwidth for repair.
+            if (self.status == .normal and self.repair_messages_budget == 0) {
+                log.debug("{}: repair_prepares: waiting for repair budget", .{self.replica});
+                return null;
+            }
+
+            var requested_op_max: ?u64 = null;
             for (op_min..op_max + 1) |op| {
                 if (self.journal.slot_with_op(op)) |slot| {
                     if (self.journal.dirty.bit(slot)) {
                         // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
                         // Continue to request prepares until our budget is depleted.
                         if (self.repair_prepare(op)) {
-                            budget -= 1;
-                            if (budget == 0) {
-                                log.debug("{}: repair_prepares: request budget used", .{
-                                    self.replica,
-                                });
-                                return;
+                            requested_op_max = op;
+
+                            io_budget -= 1;
+                            if (self.status == .normal) {
+                                self.repair_messages_budget -= 1;
+                                if (self.repair_messages_budget == 0) {
+                                    log.debug("{}: repair_prepares: repair budget used", .{
+                                        self.replica,
+                                    });
+                                    break;
+                                }
+                            }
+
+                            if (io_budget == 0) {
+                                log.debug("{}: repair_prepares: IO budget used", .{self.replica});
+                                break;
                             }
                         }
                     } else {
@@ -7377,6 +7449,8 @@ pub fn ReplicaType(
                     }
                 }
             }
+
+            return requested_op_max;
         }
 
         fn repair_prepares(self: *Replica) void {
@@ -7415,12 +7489,37 @@ pub fn ReplicaType(
             // - our first priority is to commit further,
             // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
-            if (self.commit_min + 1 <= self.op) {
-                self.repair_prepares_between(self.commit_min + 1, self.op);
+            const range_min_uncommitted = @max(
+                self.repair_prepare_op_next_uncommitted,
+                self.commit_min + 1,
+            );
+            const range_max_uncommitted = self.op;
+            if (range_min_uncommitted <= range_max_uncommitted) {
+                if (self.repair_prepares_between(
+                    range_min_uncommitted,
+                    range_max_uncommitted,
+                )) |op| {
+                    assert(op >= self.commit_min + 1);
+                    assert(op <= self.op);
+                    assert(op >= self.repair_prepare_op_next_uncommitted);
+
+                    self.repair_prepare_op_next_uncommitted = op + 1;
+                }
             }
 
-            if (self.op_repair_min() <= self.commit_min) {
-                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
+            const range_min_committed = @max(
+                self.repair_prepare_op_next_committed,
+                self.op_repair_min(),
+            );
+            const range_max_committed = self.commit_min;
+            if (range_min_committed <= range_max_committed) {
+                if (self.repair_prepares_between(range_min_committed, range_max_committed)) |op| {
+                    assert(op >= self.op_repair_min());
+                    assert(op <= range_max_committed);
+                    assert(op >= self.repair_prepare_op_next_committed);
+
+                    self.repair_prepare_op_next_committed = op + 1;
+                }
             }
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
@@ -7555,7 +7654,6 @@ pub fn ReplicaType(
                         reason,
                     },
                 );
-                // Not checking our repair budget here, as we are to be the primary.
                 self.send_header_to_other_replicas(@bitCast(request_prepare));
             } else {
                 const nature = if (op > self.commit_max) "uncommitted" else "committed";
@@ -7568,13 +7666,10 @@ pub fn ReplicaType(
                     reason,
                 });
 
-                self.repair_messages_budget -|= 1;
-                if (self.repair_messages_budget > 0) {
-                    self.send_header_to_replica(
-                        self.choose_any_other_replica(),
-                        @bitCast(request_prepare),
-                    );
-                }
+                self.send_header_to_replica(
+                    self.choose_any_other_replica(),
+                    @bitCast(request_prepare),
+                );
             }
 
             return true;
@@ -10186,9 +10281,16 @@ pub fn ReplicaType(
 
             switch (trigger) {
                 .append => {},
-                // If this was a repair, continue immediately to repair the next prepare:
+                // Replenish budget and continue immediately to repair the next prepare:
                 // This is an optimization to eliminate waiting until the next repair timeout.
-                .repair => self.repair(),
+                .repair => {
+                    self.repair_messages_budget = @min(
+                        self.repair_messages_budget + 1,
+                        constants.vsr_repair_message_budget_max + 1,
+                    );
+                    self.repair();
+                },
+                // Continue repairing the primary's pipeline.
                 .pipeline => self.repair(),
                 .fix => unreachable,
             }
