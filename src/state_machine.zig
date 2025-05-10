@@ -6358,7 +6358,7 @@ test "create_transfers: per-transfer balance invariant with pending" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
         \\ commit create_accounts
         \\
-        \\ setup A2 10 30 0 0
+        \\ setup A2 0 50 10 0
         \\
         \\ transfer T1 A1 A2 41   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ _ _ linked_event_failed
         \\ transfer T2 A2 A3  1   _  _  _  _    0 L1 C1 LNK PEN _   _ _   _ _ _ _ BDRP _ _ _ exceeds_debits
@@ -6378,7 +6378,7 @@ test "create_transfers: per-transfer balance invariant with pending" {
         \\ commit create_transfers
         \\
         \\ lookup_account A1 0  40 0  0 _
-        \\ lookup_account A2 10 30 0 40 _
+        \\ lookup_account A2 0  50 10 40 _
         \\ lookup_account A3 0   0 0  0 _
         \\ commit lookup_accounts
     );
@@ -6390,7 +6390,7 @@ test "create_transfers: per-transfer balance invariant with pending" {
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   D<C _ _ _ _ _ _ ok
         \\ commit create_accounts
         \\
-        \\ setup A1 0 0 10 30
+        \\ setup A1 10 0 0 50
         \\
         \\ transfer T1 A1 A2 41   _  _  _  _    0 L1 C1 LNK   _ _   _   _   _ _ _ _ _ _ _ _ linked_event_failed
         \\ transfer T2 A3 A1  1   _  _  _  _    0 L1 C1 LNK PEN _   _   _ _ _ _ _ _ BCRP _ _ exceeds_credits
@@ -6409,7 +6409,7 @@ test "create_transfers: per-transfer balance invariant with pending" {
         \\ transfer T6 A3 A1  0  T5  _  _  _    0 L1 C1   _   _ _ VOI   _   _ _ _ _ _ _ _ _ ok
         \\ commit create_transfers
         \\
-        \\ lookup_account A1 0 40 10 30 _
+        \\ lookup_account A1 10 40 0 50 _
         \\ lookup_account A2 0  0  0 40 _
         \\ lookup_account A3 0  0  0  0 _
         \\ commit lookup_accounts
