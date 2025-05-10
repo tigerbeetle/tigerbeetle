@@ -67,6 +67,10 @@ Released: 2025-05-09
 
   Fix for multiple CFO branches on same commit.
 
+- [#2964](https://github.com/tigerbeetle/tigerbeetle/pull/2964)
+
+  Reduce closed loop replication quorum from `n` to `n-1`.
+
 ### TigerTracks 🎧
 
 - [Field of Stars](https://www.youtube.com/watch?v=l1Pqy1tuVLI)
