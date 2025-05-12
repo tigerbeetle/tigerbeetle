@@ -2,20 +2,32 @@
 
 ## Quick Install
 
-```console
-# macOS
-curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
-```
+<details open>
+<summary>Linux</summary>
 
 ```console
-# Linux
-curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip
+./tigerbeetle version
 ```
+</details>
+
+<details>
+<summary>macOS</summary>
 
 ```console
-# Windows
-powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
+curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip
+./tigerbeetle version
 ```
+</details>
+
+<details>
+<summary>Windows</summary>
+
+```console
+powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .
+.\tigerbeetle version
+```
+</details>
 
 ## Latest Release
 
