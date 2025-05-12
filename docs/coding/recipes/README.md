@@ -1,6 +1,6 @@
 # Recipes
 
-A collection of solutions for common use-cases. What to exchange some currency? Or made a wrong
+A collection of solutions for common use-cases. Want to exchange some currency? Or made a wrong
 transfer and want to undo that? We have a recipe for that!
 
 - [Currency Exchange](./currency-exchange.md)
