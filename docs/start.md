@@ -35,7 +35,7 @@ curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip
 
 ```console
 powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .
-./tigerbeetle version
+.\tigerbeetle version
 ```
 </details>
 
