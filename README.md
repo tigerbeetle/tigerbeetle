@@ -17,7 +17,8 @@
 Run a single-replica cluster on Linux (or [other platforms](https://docs.tigerbeetle.com/start/)):
 
 ```console
-$ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+$ curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip
+$ ./tigerbeetle version
 $ ./tigerbeetle format --cluster=0 --replica=0 --replica-count=1 --development 0_0.tigerbeetle
 $ ./tigerbeetle start --addresses=3000 --development 0_0.tigerbeetle
 ```

@@ -10,22 +10,34 @@ solve in the [Concepts](./concepts/) section, but let's make some real transacti
 
 TigerBeetle is a single, small, statically linked binary.
 
-You can download a pre-built Linux binary from `tigerbeetle.com`:
+You can download a pre-built binary from `tigerbeetle.com`:
+
+<details open>
+<summary>Linux</summary>
 
 ```console
-curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip
+./tigerbeetle version
 ```
+</details>
 
-MacOS and Windows versions are also available:
+<details>
+<summary>macOS</summary>
 
 ```console
-# macOS
-curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
+curl -Lo tigerbeetle.zip https://mac.tigerbeetle.com && unzip tigerbeetle.zip
+./tigerbeetle version
 ```
+</details>
+
+<details>
+<summary>Windows</summary>
+
+```console
+powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .
+./tigerbeetle version
 ```
-# Windows
-powershell -command "curl.exe -Lo tigerbeetle.zip https://windows.tigerbeetle.com; Expand-Archive tigerbeetle.zip .; .\tigerbeetle version"
-```
+</details>
 
 Building from source is possible and easy, but is not recommended for most users. Refer to the
 [internals documentation](https://github.com/tigerbeetle/tigerbeetle/tree/main/docs/internals) for
