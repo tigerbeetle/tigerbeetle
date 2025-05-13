@@ -116,7 +116,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <
-                    key_from_value(value);
+                        key_from_value(value);
             } else {
                 assert(table.value_context.count > 0);
             }
@@ -197,7 +197,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
             table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0, .std);
+                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0, .{ .radix = table_immutable.tmp_buffer });
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -353,7 +353,14 @@ pub fn TableMemoryType(comptime Table: type) type {
                     const tmp = scratch_buffer[0..slice_length];
                     assert(tmp.len == slice_length);
                     radix_sort_unrolled(values[offset..], tmp);
-                    assert(std.sort.isSorted(Value, values[offset..], {}, sort_values_by_key_in_ascending_order));
+                    if (constants.verify) {
+                        assert(std.sort.isSorted(
+                            Value,
+                            values[offset..],
+                            {},
+                            sort_values_by_key_in_ascending_order,
+                        ));
+                    }
                 },
             }
             //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
@@ -371,7 +378,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // can't be equal.
                 const value_next_equal = source_index + 1 < source_count and
                     key_from_value(&values[source_index]) ==
-                    key_from_value(&values[source_index + 1]);
+                        key_from_value(&values[source_index + 1]);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
