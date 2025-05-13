@@ -1902,7 +1902,7 @@ pub fn ReplicaType(
             // Wait until we have a quorum of prepare_ok messages (including ourself).
             //
             // When running with replicate_options.closed_loop this is changed significantly.
-            // Instead, the primary will try and wait for all replicas to respond, within a
+            // Instead, the primary will try and wait for all replicas less 1 to respond, within a
             // `prepare_timeout`. If the timeout fires, the quorum requirement for the whole
             // pipeline is lowered to `self.quorum_replication` and checked again.
             const threshold = if (self.replicate_options.closed_loop)
@@ -1912,7 +1912,7 @@ pub fn ReplicaType(
                 if (prepare.ok_quorum_received)
                     self.quorum_replication
                 else
-                    self.replica_count
+                    @max(self.quorum_replication, self.replica_count - 1)
             else
                 self.quorum_replication;
 
@@ -9571,6 +9571,8 @@ pub fn ReplicaType(
 
             self.client_sessions_checkpoint.reset();
             self.client_sessions.reset();
+
+            if (self.aof) |aof| aof.sync();
             // Faulty bits will be set in sync_content().
             while (self.client_replies.faulty.first_set()) |slot| {
                 self.client_replies.faulty.unset(slot);

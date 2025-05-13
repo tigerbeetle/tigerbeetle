@@ -65,6 +65,8 @@ The motivation for specific steps follows after.
    $ git fetch origin && git push origin origin/main:release
    ```
 
+6. Post a tweet-able summary of the changelog and an idea for the release sketch to Slack.
+
 7. From this point on, the CFO will be fuzzing the release branch over the weekend.
 
 8. On Monday (different release manager!) check that there are no VOPR failures on the release
@@ -77,7 +79,10 @@ The motivation for specific steps follows after.
 
 10. Ask someone else to approve the GitHub workflow.
 
-11. Ping release manager for the next week in Slack.
+11. Add the new release sketch to the corresponding release page on
+    <https://github.com/tigerbeetle/tigerbeetle/releases>.
+
+12. Ping release manager for the next week in Slack.
 
 ### Error Handling
 

@@ -290,9 +290,15 @@ pub const AOF = struct {
         self.state.writing.unflushed += 1;
     }
 
+    pub fn sync(self: *AOF) void {
+        assert(self.state == .writing);
+        assert(self.state.writing.unflushed <= constants.journal_slot_count);
+        self.state.writing.unflushed = 0;
+    }
+
     pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
         assert(self.state == .writing);
-        assert(self.state.writing.unflushed < constants.journal_slot_count);
+        assert(self.state.writing.unflushed <= constants.journal_slot_count);
 
         self.state = .{
             .checkpoint = .{

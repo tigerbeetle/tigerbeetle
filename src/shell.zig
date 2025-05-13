@@ -692,7 +692,7 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 
     const arg_count = std.meta.fields(@TypeOf(cmd_args)).len;
     comptime var args_used: stdx.BitSetType(arg_count) = .{};
-    comptime assert(std.mem.indexOfScalar(u8, cmd, '\'') == null); // Quoting isn't supported yet.
+    comptime assert(std.mem.indexOfScalar(u8, cmd, '\'') == null); // Intentionally unsupported.
     comptime assert(std.mem.indexOfScalar(u8, cmd, '"') == null);
     inline while (pos < cmd.len) {
         inline while (pos < cmd.len and (cmd[pos] == ' ' or cmd[pos] == '\n')) {

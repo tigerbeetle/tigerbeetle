@@ -39,6 +39,7 @@ pub const AOF = struct {
     validation_target: *AOFEntry,
     last_checksum: ?u128 = null,
     validation_checksums: std.AutoHashMap(u128, void) = undefined,
+    unflushed: u32 = 0,
 
     pub fn init(allocator: std.mem.Allocator) !AOF {
         const memory = try allocator.alignedAlloc(u8, constants.sector_size, backing_size);
@@ -60,6 +61,10 @@ pub const AOF = struct {
         allocator.free(self.backing_store);
         allocator.destroy(self.validation_target);
         self.validation_checksums.deinit();
+    }
+
+    pub fn reset(self: *AOF) void {
+        self.unflushed = 0;
     }
 
     pub fn validate(self: *AOF, last_checksum: ?u128) !void {
@@ -108,6 +113,9 @@ pub const AOF = struct {
     }
 
     pub fn write(self: *AOF, message: *const Message.Prepare) !void {
+        assert(self.unflushed < constants.journal_slot_count);
+        self.unflushed += 1;
+
         var entry: AOFEntry align(16) = undefined;
         entry.from_message(
             message,
@@ -127,8 +135,14 @@ pub const AOF = struct {
         log.debug("wrote {} bytes, {} used / {}", .{ size_disk, self.index, backing_size });
     }
 
+    pub fn sync(self: *AOF) void {
+        assert(self.unflushed <= constants.journal_slot_count);
+        self.unflushed = 0;
+    }
+
     pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
-        _ = self;
+        assert(self.unflushed <= constants.journal_slot_count);
+        self.unflushed = 0;
         callback(replica);
     }
 
