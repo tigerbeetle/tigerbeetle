@@ -474,12 +474,17 @@ pub fn ReplicaType(
         // The next op between [commit_min + 1, op] to be requested during repair.
         // Used to cycle through uncommitted prepares, to avoid resending the same missing prepares
         // repeatedly. Reset to commit_min + 1 when repair timeout is fired.
-        repair_uncommitted_op_next: u64 = 0,
+        repair_prepare_op_next_uncommitted: u64 = 0,
 
-        // The next next op between [op_repair_min, commit_min] to be requested during repair.
+        // The next op between [op_repair_min, commit_min] to be requested during repair.
         // Used to cycle through committed prepares, to avoid resending the same missing prepares
         // repeatedly. Reset to op_repair_min when repair timeout is fired.
-        repair_committed_op_next: u64 = 0,
+        repair_prepare_op_next_committed: u64 = 0,
+
+        // The op number which should be set as op_min for the next request_headers call.
+        // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
+        // the number of headers requested).
+        repair_header_op_next: u64 = 0,
 
         /// Whether the primary has received a quorum of do_view_change messages for the view
         /// change. Determines whether the primary may effect repairs according to the CTRL
@@ -3406,8 +3411,8 @@ pub fn ReplicaType(
                 // +1 to make it easier to decrement budget with -|.
                 constants.vsr_repair_message_budget_max + 1,
             );
-            self.repair_committed_op_next = self.op_repair_min();
-            self.repair_uncommitted_op_next = self.commit_min + 1;
+            self.repair_prepare_op_next_committed = self.op_repair_min();
+            self.repair_prepare_op_next_uncommitted = self.commit_min + 1;
 
             self.repair();
         }
@@ -6838,7 +6843,6 @@ pub fn ReplicaType(
                         self.op,
                     },
                 );
-
                 self.repair_messages_budget -|= 1;
                 if (self.repair_messages_budget > 0) {
                     self.send_header_to_replica(
@@ -6847,13 +6851,15 @@ pub fn ReplicaType(
                             .command = .request_headers,
                             .cluster = self.cluster,
                             .replica = self.replica,
-                            // Pessimistically request as many headers as we might need.
-                            // Requesting/sending extra headers is inexpensive, and it may save us
-                            // extra round-trips to repair earlier breaks.
-                            .op_min = self.op_repair_min(),
+                            // Pessimistically request extra headers. Requesting/sending extra
+                            // headers is inexpensive, and it may save us extra round-trips to
+                            // repair earlier breaks.
+                            .op_min = @min(range.op_min, self.repair_header_op_next),
                             .op_max = range.op_max,
                         }),
                     );
+
+                    self.repair_header_op_next = @max(self.repair_header_op_next, range.op_max + 1);
                 }
             }
 
@@ -7466,7 +7472,7 @@ pub fn ReplicaType(
             // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
             const range_min_uncommitted = @max(
-                self.repair_uncommitted_op_next,
+                self.repair_prepare_op_next_uncommitted,
                 self.commit_min + 1,
             );
             const range_max_uncommitted = self.op;
@@ -7477,14 +7483,14 @@ pub fn ReplicaType(
                 )) |op| {
                     assert(op >= self.commit_min + 1);
                     assert(op <= self.op);
-                    assert(op >= self.repair_uncommitted_op_next);
+                    assert(op >= self.repair_prepare_op_next_uncommitted);
 
-                    self.repair_uncommitted_op_next = op + 1;
+                    self.repair_prepare_op_next_uncommitted = op + 1;
                 }
             }
 
             const range_min_committed = @max(
-                self.repair_committed_op_next,
+                self.repair_prepare_op_next_committed,
                 self.op_repair_min(),
             );
             const range_max_committed = self.commit_min;
@@ -7492,9 +7498,9 @@ pub fn ReplicaType(
                 if (self.repair_prepares_between(range_min_committed, range_max_committed)) |op| {
                     assert(op >= self.op_repair_min());
                     assert(op <= range_max_committed);
-                    assert(op >= self.repair_committed_op_next);
+                    assert(op >= self.repair_prepare_op_next_committed);
 
-                    self.repair_committed_op_next = op + 1;
+                    self.repair_prepare_op_next_committed = op + 1;
                 }
             }
 
