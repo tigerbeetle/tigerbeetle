@@ -1279,7 +1279,7 @@ pub fn ReplicaType(
                 .repair_timeout = Timeout{
                     .name = "repair_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 10,
                 },
                 .repair_sync_timeout = Timeout{
                     .name = "repair_sync_timeout",
