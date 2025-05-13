@@ -460,12 +460,22 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var advanced = false;
                 advanced = cluster.network.step() or advanced;
 
+                if (advanced) {
+                    for (
+                        cluster.clients,
+                        cluster.client_eviction_reasons,
+                    ) |*client, eviction_reason| {
+                        if (eviction_reason == null) client.idle();
+                    }
+                }
+
                 for (
                     cluster.storages,
+                    cluster.replicas,
                     cluster.replica_health,
                     cluster.replica_upgrades,
                     0..,
-                ) |*storage, *health, *upgrade, i| {
+                ) |*storage, *replica, *health, *upgrade, i| {
                     if (health.* == .up and health.*.up.paused) continue;
                     // Upgrades immediately follow storage.step(), since upgrades occur at
                     // checkpoint completion. (Downgrades are triggered separately – see
@@ -473,6 +483,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     advanced = storage.step() or advanced;
                     if (upgrade.*) |_| cluster.replica_release_execute(@intCast(i));
                     assert(upgrade.* == null);
+                    if (health.* == .up) replica.idle();
                 }
 
                 if (!advanced) break;
@@ -480,7 +491,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.network.tick();
 
-            for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
+            for (
+                cluster.clients,
+                cluster.client_eviction_reasons,
+            ) |*client, eviction_reason| {
                 if (eviction_reason == null) client.tick();
             }
 
