@@ -138,6 +138,9 @@ const CLIArgs = union(enum) {
     const Inspect = union(enum) {
         constants,
         metrics,
+        op: struct {
+            positional: struct { op: u64 },
+        },
         superblock: struct {
             positional: struct { path: []const u8 },
         },
@@ -175,6 +178,8 @@ const CLIArgs = union(enum) {
             \\
             \\  tigerbeetle inspect metrics
             \\
+            \\  tigerbeetle inspect op <op>
+            \\
             \\  tigerbeetle inspect superblock <path>
             \\
             \\  tigerbeetle inspect wal [--slot=<slot>] <path>
@@ -200,6 +205,9 @@ const CLIArgs = union(enum) {
             \\
             \\  metrics
             \\        List metrics and their cardinalities.
+            \\
+            \\  op
+            \\        Print op numbers for adjacent checkpoints and triggers.
             \\
             \\  superblock
             \\        Inspect the superblock header copies.
@@ -491,6 +499,7 @@ pub const Command = union(enum) {
     pub const Inspect = union(enum) {
         constants,
         metrics,
+        op: u64,
         data_file: DataFile,
 
         pub const DataFile = struct {
@@ -950,14 +959,17 @@ fn parse_args_inspect(inspect: CLIArgs.Inspect) Command.Inspect {
     const path = switch (inspect) {
         .constants => return .constants,
         .metrics => return .metrics,
+        .op => |args| return .{ .op = args.positional.op },
         inline else => |args| args.positional.path,
     };
 
     return .{ .data_file = .{
         .path = path,
         .query = switch (inspect) {
-            .constants => unreachable,
-            .metrics => unreachable,
+            .constants,
+            .metrics,
+            .op,
+            => unreachable,
             .superblock => .superblock,
             .wal => |args| .{ .wal = .{ .slot = args.slot } },
             .replies => |args| .{ .replies = .{
