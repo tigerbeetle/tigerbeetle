@@ -23,6 +23,9 @@ pub const IO = struct {
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
     io_pending: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_pending" }),
 
+    run_for_ns_completion: Completion = undefined,
+    run_for_ns_timed_out: bool = false,
+
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
@@ -43,39 +46,39 @@ pub const IO = struct {
         return self.flush(false);
     }
 
-    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
-    /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
-    /// in the __kernel_timespec struct.
-    pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        var timed_out = false;
-        var completion: Completion = undefined;
+    pub fn run_for_ns_setup(self: *IO, nanoseconds: u63) void {
+        assert(!self.run_for_ns_timed_out);
         const on_timeout = struct {
-            fn callback(
-                timed_out_ptr: *bool,
-                _completion: *Completion,
-                result: TimeoutError!void,
-            ) void {
-                _ = _completion;
-                _ = result catch unreachable;
-
-                timed_out_ptr.* = true;
+            fn callback(io: *IO, _: *Completion, result: TimeoutError!void) void {
+                result catch unreachable;
+                assert(!io.run_for_ns_timed_out);
+                io.run_for_ns_timed_out = true;
             }
         }.callback;
-
-        // Submit a timeout which sets the timed_out value to true to terminate the loop below.
         self.timeout(
-            *bool,
-            &timed_out,
+            *IO,
+            self,
             on_timeout,
-            &completion,
+            &self.run_for_ns_completion,
             nanoseconds,
         );
+    }
 
-        // Loop until our timeout completion is processed above, which sets timed_out to true.
-        // LLVM shouldn't be able to cache timed_out's value here since its address escapes above.
-        while (!timed_out) {
-            try self.flush(true);
+    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
+    /// Use with run_for_ns_setup:
+    ///
+    ///     io.run_for_ns_setup(timeout);
+    ///     while (try io.run_for_ns()) {
+    ///         // Can schedule extra work here.
+    ///     }
+    pub fn run_for_ns(self: *IO) !bool {
+        if (self.run_for_ns_timed_out) {
+            self.run_for_ns_completion = undefined;
+            self.run_for_ns_timed_out = false;
+            return false;
         }
+        try self.flush(true);
+        return true;
     }
 
     fn flush(self: *IO, wait_for_completions: bool) !void {
