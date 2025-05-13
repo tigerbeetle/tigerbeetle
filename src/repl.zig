@@ -738,7 +738,10 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             repl.client.register(register_callback, @intCast(@intFromPtr(repl)));
             while (!repl.event_loop_done) {
                 repl.client.tick();
-                try repl.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+                repl.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+                while (try repl.io.run_for_ns()) {
+                    repl.client.idle();
+                }
             }
             repl.event_loop_done = false;
 
@@ -808,7 +811,10 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                 }
 
                 repl.client.tick();
-                try repl.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+                repl.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+                while (try repl.io.run_for_ns()) {
+                    repl.client.idle();
+                }
             }
         }
 

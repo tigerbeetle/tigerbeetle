@@ -429,7 +429,8 @@ const Inspector = struct {
         inspector.busy = true;
 
         while (inspector.busy) {
-            try inspector.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            inspector.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+            while (try inspector.io.run_for_ns()) {}
         }
     }
 
