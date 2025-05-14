@@ -1792,7 +1792,12 @@ pub fn ReplicaType(
                 self.advance_commit_max(message.header.commit, @src());
                 assert(self.commit_max >= message.header.commit);
             }
-            defer if (self.backup()) self.commit_journal();
+            defer {
+                if (self.backup()) {
+                    self.commit_journal();
+                    self.repair();
+                }
+            }
 
             if (message.header.op > self.commit_min + 2 * constants.pipeline_prepare_queue_max) {
                 log.warn("{}: on_prepare: lagging behind the cluster prepare.op={} " ++
