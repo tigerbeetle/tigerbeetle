@@ -5,9 +5,9 @@ const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
 
 // vsr.zig is the root of a zig package, reexport all public APIs.
-pub const cdc = @import("cdc/runner.zig");
 //
 // Note that we don't promise any stability of these interfaces yet.
+pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
@@ -856,17 +856,22 @@ pub fn parse_addresses(
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        out_buffer[index] = try parse_address_and_port(.{ .string = raw_address });
+        out_buffer[index] = try parse_address_and_port(.{
+            .string = raw_address,
+            .port_default = constants.port,
+        });
     }
     assert(index == address_count);
 
     return out_buffer[0..address_count];
 }
 
-pub fn parse_address_and_port(options: struct {
-    string: []const u8,
-    port_default: u16 = constants.port,
-}) !std.net.Address {
+pub fn parse_address_and_port(
+    options: struct {
+        string: []const u8,
+        port_default: u16,
+    },
+) !std.net.Address {
     assert(options.string.len > 0);
     assert(options.port_default > 0);
 
