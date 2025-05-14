@@ -9,6 +9,7 @@ const protocol = @import("protocol.zig");
 const Decoder = protocol.Decoder;
 const Encoder = protocol.Encoder;
 const MethodHeader = protocol.MethodHeader;
+const Channel = protocol.Channel;
 
 pub const FRAME_METHOD = 1;
 pub const FRAME_HEADER = 2;
@@ -1687,8 +1688,8 @@ pub const ServerMethod = union(ServerMethod.Tag) {
         return @bitCast(@as(u32, @intFromEnum(self)));
     }
 
-    pub fn encode(self: ServerMethod, channel: u16, encoder: *Encoder) void {
-        const frame_reference = encoder.begin_frame(.{
+    pub fn encode(self: ServerMethod, channel: Channel, encoder: *Encoder) void {
+        encoder.begin_frame(.{
             .type = .method,
             .channel = channel,
         });
@@ -1698,6 +1699,6 @@ pub const ServerMethod = union(ServerMethod.Tag) {
                 method.encode(encoder);
             },
         }
-        encoder.finish_frame(frame_reference);
+        encoder.finish_frame(.method);
     }
 };

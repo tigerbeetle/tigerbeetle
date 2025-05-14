@@ -99,7 +99,7 @@ pub fn main() !void {
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
-        .cdc => |*args| try Command.cdc(allocator, args),
+        .amqp => |*args| try Command.amqp(allocator, args),
     }
 }
 
@@ -580,20 +580,19 @@ const Command = struct {
         try repl_instance.run(args.statements);
     }
 
-    pub fn cdc(allocator: mem.Allocator, args: *const cli.Command.CDC) !void {
+    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.AMQP) !void {
         var runner: vsr.cdc.Runner = undefined;
         try runner.init(
             allocator,
             .{
-                .tb_cluster_id = args.cluster,
-                .tb_addresses = args.addresses.const_slice(),
-                .amqp_address = args.amqp_address,
-                .amqp_user = args.amqp_user,
-                .amqp_password = args.amqp_password,
-                .amqp_vhost = args.amqp_vhost,
-                .amqp_publish_exchange = args.amqp_publish_exchange,
-                .amqp_publish_routing_key = args.amqp_publish_routing_key,
-                .amqp_progress_tracker_queue = args.amqp_progress_tracker_queue,
+                .cluster_id = args.cluster,
+                .addresses = args.addresses.const_slice(),
+                .host = args.host,
+                .user = args.user,
+                .password = args.password,
+                .vhost = args.vhost,
+                .publish_exchange = args.publish_exchange,
+                .publish_routing_key = args.publish_routing_key,
                 .event_count_max = args.event_count_max,
                 .idle_interval_ms = args.idle_interval_ms,
                 .recovery_mode = if (args.timestamp_last) |timestamp_last|

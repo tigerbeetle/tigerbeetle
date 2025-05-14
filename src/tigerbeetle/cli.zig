@@ -249,16 +249,15 @@ const CLIArgs = union(enum) {
     };
 
     // CDC connector for AMQP targets.
-    const CDC = struct {
+    const AMQP = struct {
         addresses: []const u8,
         cluster_id: u128,
-        amqp_address: []const u8,
-        amqp_user: []const u8,
-        amqp_password: []const u8,
-        amqp_vhost: []const u8,
-        amqp_publish_exchange: ?[]const u8 = null,
-        amqp_publish_routing_key: ?[]const u8 = null,
-        amqp_progress_tracker_queue: ?[]const u8 = null,
+        host: []const u8,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8 = null,
+        publish_routing_key: ?[]const u8 = null,
         event_count_max: ?u32 = null,
         idle_interval_ms: ?u32 = null,
         timestamp_last: ?u64 = null,
@@ -272,7 +271,7 @@ const CLIArgs = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
-    cdc: CDC,
+    amqp: AMQP,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -301,7 +300,7 @@ const CLIArgs = union(enum) {
         \\
         \\  repl       Enter the TigerBeetle client REPL.
         \\
-        \\  cdc        CDC connector for AMQP targets.
+        \\  amqp       CDC connector for AMQP targets.
         \\
         \\Options:
         \\
@@ -369,9 +368,9 @@ const CLIArgs = union(enum) {
         \\
         \\  tigerbeetle repl --addresses=3000,3001,3002 --cluster=0
         \\
-        \\  tigerbeetle cdc --addresses=3000,3001,3002 --cluster-id=0 \
-        \\      --amqp-address=127.0.0.1 --amqp-vhost=/ --amqp-user=guest --amqp-password=guest \
-        \\      --amqp-publish-exchange=my_exhange_name
+        \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster-id=0 \
+        \\      --host=127.0.0.1 --vhost=/ --user=guest --password=guest \
+        \\      --publish-exchange=my_exhange_name
         \\
     , .{
         .default_address = constants.address,
@@ -558,16 +557,15 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
-    pub const CDC = struct {
+    pub const AMQP = struct {
         addresses: Addresses,
         cluster: u128,
-        amqp_address: std.net.Address,
-        amqp_user: []const u8,
-        amqp_password: []const u8,
-        amqp_vhost: []const u8,
-        amqp_publish_exchange: ?[]const u8,
-        amqp_publish_routing_key: ?[]const u8,
-        amqp_progress_tracker_queue: ?[]const u8,
+        host: std.net.Address,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8,
+        publish_routing_key: ?[]const u8,
         event_count_max: ?u32,
         idle_interval_ms: ?u32,
         timestamp_last: ?u64,
@@ -581,7 +579,7 @@ pub const Command = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
-    cdc: CDC,
+    amqp: AMQP,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -597,7 +595,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
-        .cdc => |cdc| .{ .cdc = parse_args_cdc(cdc) },
+        .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
     };
 }
 
@@ -1041,37 +1039,35 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
     };
 }
 
-fn parse_args_cdc(cdc: CLIArgs.CDC) Command.CDC {
-    const port = vsr.cdc.amqp.tcp_port_default;
-    const addresses = parse_addresses(cdc.addresses, "--addresses", Command.Addresses);
-    const amqp_address = parse_address_and_port(
-        cdc.amqp_address,
-        "--amqp-address",
-        port,
+fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
+    const addresses = parse_addresses(amqp.addresses, "--addresses", Command.Addresses);
+    const host = parse_address_and_port(
+        amqp.host,
+        "--host",
+        vsr.cdc.amqp.tcp_port_default,
     );
 
-    if (cdc.amqp_publish_exchange == null and cdc.amqp_publish_routing_key == null) {
+    if (amqp.publish_exchange == null and amqp.publish_routing_key == null) {
         vsr.fatal(
             .cli,
-            "--amqp-publish-exchange and --amqp-publish-routing-key cannot both be empty.",
+            "--publish-exchange and --publish-routing-key cannot both be empty.",
             .{},
         );
     }
 
     return .{
         .addresses = addresses,
-        .cluster = cdc.cluster_id,
-        .amqp_address = amqp_address,
-        .amqp_user = cdc.amqp_user,
-        .amqp_password = cdc.amqp_password,
-        .amqp_vhost = cdc.amqp_vhost,
-        .amqp_publish_exchange = cdc.amqp_publish_exchange,
-        .amqp_publish_routing_key = cdc.amqp_publish_routing_key,
-        .amqp_progress_tracker_queue = cdc.amqp_progress_tracker_queue,
-        .event_count_max = cdc.event_count_max,
-        .idle_interval_ms = cdc.idle_interval_ms,
-        .timestamp_last = cdc.timestamp_last,
-        .log_debug = cdc.verbose,
+        .cluster = amqp.cluster_id,
+        .host = host,
+        .user = amqp.user,
+        .password = amqp.password,
+        .vhost = amqp.vhost,
+        .publish_exchange = amqp.publish_exchange,
+        .publish_routing_key = amqp.publish_routing_key,
+        .event_count_max = amqp.event_count_max,
+        .idle_interval_ms = amqp.idle_interval_ms,
+        .timestamp_last = amqp.timestamp_last,
+        .log_debug = amqp.verbose,
     };
 }
 

@@ -383,7 +383,7 @@ const Environment = struct {
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
                 groove.prefetch_setup(null);
-                groove.prefetch_exists_enqueue(getter._timestamp);
+                groove.prefetch_enqueue_by_timestamp(getter._timestamp);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 

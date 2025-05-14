@@ -25,9 +25,9 @@
 ///! │ class_id │ weight │ body_size  │ property_flags │   properties    │
 ///! │   u16    │  u16   │   u64      │     u16        │  variable size  │
 ///! └──────────┴────────┴────────────┴────────────────┴─────────────────┘
-///! Certain methods carry a content header. For example, in the `Basic.Publish` method, the
-///! content header contains metadata about the message. The frame with `type == header` always
-///! follows its corresponding `type == method` frame.
+///! Certain "method" frames are followed by a "header" frame. For example, in the `basic-publish`
+///! method, the content header contains metadata about the message being published. The frame with
+///! `type == header` always follows its corresponding `type == method` frame.
 ///! See `BasicProperties` for parsing the `property_flags` and `properties`.
 ///!
 ///! # Body payload:
@@ -36,7 +36,8 @@
 ///! │ variable size │
 ///! └───────────────┘
 ///! The body frame contains the application-specific content of the message.
-///! The body can be split across multiple frames if `body_size` exceeds the frame size.
+///! The body can be split across multiple frames if `body_size` exceeds the frame size, however we
+///! only support single-frame bodies.
 ///!
 ///! # Endianness:
 ///! Integers are encoded in network byte order (big endian).
@@ -44,10 +45,28 @@
 const std = @import("std");
 const stdx = @import("../../stdx.zig");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const spec = @import("spec.zig");
 
-pub const protocol_header: [8]u8 = [_]u8{ 'A', 'M', 'Q', 'P', 0, 0, 9, 1 };
+/// The major, minor, and revision numbers can take any value from 0 to 99 for official
+/// specifications.
+/// Major, minor, and revision numbers of 100 and above are reserved for internal testing
+/// and development purposes.
+pub const version = .{
+    .major = 0,
+    .minor = 9,
+    .revision = 1,
+};
+
+/// The protocol header consists of the upper case letters "AMQP"
+/// followed by the constant 0 and the AMQP version number.
+pub const protocol_header: *const [8]u8 = "AMQP" ++ [_]u8{
+    0,
+    version.major,
+    version.minor,
+    version.revision,
+};
 
 pub const DeliveryMode = enum(u8) {
     transient = 1,
@@ -68,6 +87,15 @@ pub const FrameType = enum(u8) {
 pub const MethodHeader = packed struct(u32) {
     class: u16,
     method: u16,
+};
+
+pub const Channel = enum(u16) {
+    /// The channel number is 0 for all frames which are global to the connection.
+    global = 0,
+    /// Id of the current channel.
+    /// Supporting multiple channels is unnecessary, as messages are submitted in batches
+    /// through io_uring without concurrency.
+    current = 1,
 };
 
 pub const ErrorCodes = enum(u16) {
@@ -163,7 +191,7 @@ pub const Decoder = struct {
 
     pub const FrameHeader = extern struct {
         type: FrameType,
-        channel: u16,
+        channel: Channel,
         size: u32,
     };
 
@@ -224,6 +252,7 @@ pub const Decoder = struct {
     };
 
     buffer: []const u8,
+    /// Invariants: index <= buffer.len
     index: usize,
 
     pub fn init(buffer: []const u8) Decoder {
@@ -239,12 +268,15 @@ pub const Decoder = struct {
 
     pub fn read_int(self: *Decoder, comptime T: type) Error!T {
         comptime assert(@typeInfo(T) == .Int);
+        comptime assert(@typeInfo(T).Int.signedness == .unsigned);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         if (self.index + @sizeOf(T) > self.buffer.len) return error.BufferExhausted;
-        const value: T = std.mem.readInt(T, self.buffer[self.index..][0..@sizeOf(T)], .big);
-        self.index += @sizeOf(T);
-        assert(self.index <= self.buffer.len);
-        return value;
+        defer {
+            self.index += @sizeOf(T);
+            assert(self.index <= self.buffer.len);
+        }
+
+        return std.mem.readInt(T, self.buffer[self.index..][0..@sizeOf(T)], .big);
     }
 
     pub fn read_enum(self: *Decoder, comptime Enum: type) Error!Enum {
@@ -266,29 +298,29 @@ pub const Decoder = struct {
 
     pub fn read_short_string(self: *Decoder) Error![]const u8 {
         const length: u8 = try self.read_int(u8);
-        if (self.index + length > self.buffer.len) return error.BufferExhausted;
-        const value = self.buffer[self.index..][0..length];
-        self.index += length;
-        assert(self.index <= self.buffer.len);
-        return value;
+        return try self.read_bytes(length);
     }
 
     pub fn read_long_string(self: *Decoder) Error![]const u8 {
         const length: u32 = try self.read_int(u32);
-        if (self.index + length > self.buffer.len) return error.BufferExhausted;
-        const value = self.buffer[self.index..][0..length];
-        self.index += length;
-        assert(self.index <= self.buffer.len);
-        return value;
+        return try self.read_bytes(length);
     }
 
     pub fn read_table(self: *Decoder) Error!Table {
         const length: u32 = try self.read_int(u32);
-        if (self.index + length > self.buffer.len) return error.BufferExhausted;
-        const value = self.buffer[self.index..][0..length];
-        self.index += length;
+        const bytes = try self.read_bytes(length);
+        return Table.init(bytes);
+    }
+
+    fn read_bytes(self: *Decoder, length: u32) Error![]const u8 {
         assert(self.index <= self.buffer.len);
-        return Table.init(value);
+        if (self.index + length > self.buffer.len) return error.BufferExhausted;
+        defer {
+            self.index += length;
+            assert(self.index <= self.buffer.len);
+        }
+
+        return self.buffer[self.index..][0..length];
     }
 
     pub fn read_field(self: *Decoder) Error!FieldValue {
@@ -321,7 +353,7 @@ pub const Decoder = struct {
     pub fn read_frame_header(self: *Decoder) Error!FrameHeader {
         return .{
             .type = try self.read_enum(FrameType),
-            .channel = try self.read_int(u16),
+            .channel = try self.read_enum(Channel),
             .size = try self.read_int(u32),
         };
     }
@@ -373,32 +405,22 @@ pub const Decoder = struct {
 pub const Encoder = struct {
     pub const FrameHeader = struct {
         /// Total size in bytes including the `size` field.
-        pub const SIZE = @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .type)) +
+        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .type)) +
             @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .channel)) +
             @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .size));
 
         type: FrameType,
-        channel: u16,
-    };
-
-    pub const FrameHeaderReference = struct {
-        index: usize,
-        frame_header: FrameHeader,
+        channel: Channel,
     };
 
     pub const Header = struct {
         /// Total size in bytes including the `body_size` field.
-        pub const SIZE = @sizeOf(std.meta.FieldType(Decoder.Header, .class)) +
+        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.Header, .class)) +
             @sizeOf(std.meta.FieldType(Decoder.Header, .weight)) +
             @sizeOf(std.meta.FieldType(Decoder.Header, .body_size));
 
         class: u16,
         weight: u16,
-    };
-
-    pub const HeaderReference = struct {
-        index: usize,
-        header: Header,
     };
 
     pub const BasicProperties = BasicPropertiesType(.encode);
@@ -407,7 +429,7 @@ pub const Encoder = struct {
     pub const FieldValue = FieldValueType(.encode);
 
     /// Interface for a user-defined set of values to be encoded as an AMQP table
-    /// directly into the send buffer without copying..
+    /// directly into the send buffer without copying.
     pub const Table = struct {
         pub const VTable = struct {
             write: *const fn (*const anyopaque, *TableEncoder) void,
@@ -448,16 +470,22 @@ pub const Encoder = struct {
     buffer: []u8,
     index: usize,
 
+    frame_reference: ?struct {
+        index: usize,
+        frame_header: FrameHeader,
+    },
+    header_reference: ?struct {
+        index: usize,
+        header: Header,
+    },
+
     pub fn init(buffer: []u8) Encoder {
         return .{
             .buffer = buffer,
             .index = 0,
+            .frame_reference = null,
+            .header_reference = null,
         };
-    }
-
-    pub fn slice(self: *const Encoder) []const u8 {
-        assert(self.index <= self.buffer.len);
-        return self.buffer[0..self.index];
     }
 
     pub fn write_int(self: *Encoder, comptime T: type, value: T) void {
@@ -556,71 +584,83 @@ pub const Encoder = struct {
     }
 
     pub fn write_bytes(self: *Encoder, bytes: []const u8) void {
-        stdx.copy_left(.inexact, u8, self.buffer[self.index..], bytes);
+        assert(bytes.len > 0);
+        assert(self.index + bytes.len <= self.buffer.len);
+        stdx.copy_disjoint(.inexact, u8, self.buffer[self.index..], bytes);
         self.index += bytes.len;
+        assert(self.index <= self.buffer.len);
     }
 
-    pub fn write_frame_end(self: *Encoder) void {
-        self.write_int(u8, @intFromEnum(FrameEnd.value));
-    }
-
-    pub fn begin_frame(self: *Encoder, frame_header: FrameHeader) FrameHeaderReference {
-        assert(self.index + FrameHeader.SIZE <= self.buffer.len);
+    pub fn begin_frame(self: *Encoder, frame_header: FrameHeader) void {
+        assert(self.frame_reference == null);
+        assert(self.header_reference == null or frame_header.type == .body);
         // Reserve the frame header bytes to be updated by `finish_frame()`.
+        assert(self.index + FrameHeader.size_total <= self.buffer.len);
         const frame_header_index = self.index;
-        self.index += FrameHeader.SIZE;
-        return .{
-            .frame_header = .{
-                .type = frame_header.type,
-                .channel = frame_header.channel,
-            },
+        self.index += FrameHeader.size_total;
+        self.frame_reference = .{
             .index = frame_header_index,
+            .frame_header = frame_header,
         };
     }
 
-    pub fn finish_frame(self: *Encoder, reference: FrameHeaderReference) void {
-        assert(reference.index < self.index);
+    pub fn finish_frame(self: *Encoder, frame_type: FrameType) void {
+        assert(self.frame_reference != null);
+        assert(self.frame_reference.?.frame_header.type == frame_type);
+        maybe(self.header_reference == null);
+
+        const reference = self.frame_reference.?;
+        self.frame_reference = null;
+        assert(reference.index + FrameHeader.size_total <= self.index);
         const restore_index = self.index;
         // The frame size field in the FrameHeader must be updated.
         // It represents the payload size, excluding the FrameHeader
         // and the frame end byte.
-        const size: u32 = @intCast(restore_index - reference.index - FrameHeader.SIZE);
-
+        const size: u32 = @intCast(restore_index - reference.index - FrameHeader.size_total);
         self.index = reference.index;
         self.write_int(u8, @intFromEnum(reference.frame_header.type));
-        self.write_int(u16, reference.frame_header.channel);
+        self.write_int(u16, @intFromEnum(reference.frame_header.channel));
         self.write_int(u32, size);
 
         self.index = restore_index;
         self.write_int(u8, spec.FRAME_END);
     }
 
-    pub fn write_method_header(self: *Encoder, method_header: MethodHeader) void {
-        self.write_int(u16, method_header.class);
-        self.write_int(u16, method_header.method);
-    }
-
-    pub fn begin_header(self: *Encoder, header: Header) HeaderReference {
-        // Reserve the frame header bytes to be updated by `finish_frame()`.
+    pub fn begin_header(self: *Encoder, header: Header) void {
+        // Reserve the frame header bytes to be updated by `finish_header()`.
+        assert(self.frame_reference != null);
+        assert(self.frame_reference.?.frame_header.type == .header);
+        assert(self.header_reference == null);
         const header_index = self.index;
-        self.index += Header.SIZE;
-        return .{
-            .header = .{
-                .class = header.class,
-                .weight = header.weight,
-            },
+        self.index += Header.size_total;
+        self.header_reference = .{
+            .header = header,
             .index = header_index,
         };
     }
 
-    pub fn finish_header(self: *Encoder, reference: HeaderReference, body_size: u64) void {
-        assert(reference.index < self.index);
+    pub fn finish_header(self: *Encoder, body_size: u64) void {
+        assert((body_size == 0) == (self.frame_reference == null));
+        assert(body_size == 0 or self.frame_reference.?.frame_header.type == .body);
+        assert(self.header_reference != null);
+
+        const reference = self.header_reference.?;
+        self.header_reference = null;
+        assert(reference.index + Header.size_total <= self.index);
         const restore_index = self.index;
         self.index = reference.index;
         self.write_int(u16, reference.header.class);
         self.write_int(u16, reference.header.weight);
         self.write_int(u64, body_size);
         self.index = restore_index;
+    }
+
+    pub fn write_method_header(self: *Encoder, method_header: MethodHeader) void {
+        assert(self.frame_reference != null);
+        assert(self.frame_reference.?.frame_header.type == .method);
+        assert(self.header_reference == null);
+        self.write_int(u16, method_header.class);
+        self.write_int(u16, method_header.method);
     }
 };
 
@@ -946,6 +986,63 @@ test "amqp: Table encode/decode" {
             try decoder.read_table(),
         );
         try testing.expect(TestingTable.eql(object, object_decoded));
+    }
+}
+
+test "amqp: frame and header" {
+    const Snap = @import("../../testing/snaptest.zig").Snap;
+    const snap = Snap.snap;
+
+    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    defer testing.allocator.free(buffer);
+
+    {
+        // Method frame.
+        var encoder = Encoder.init(buffer);
+        encoder.begin_frame(.{ .type = .method, .channel = .global });
+        encoder.write_method_header(.{ .class = 1, .method = 10 });
+        encoder.finish_frame(.method);
+        try snap(@src(),
+            \\[1,0,0,0,0,0,4,0,1,0,10,206]
+        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+    }
+
+    {
+        // Method + header.
+        var encoder = Encoder.init(buffer);
+        encoder.begin_frame(.{ .type = .method, .channel = .global });
+        encoder.write_method_header(.{ .class = 10, .method = 100 });
+        encoder.finish_frame(.method);
+
+        encoder.begin_frame(.{ .type = .header, .channel = .current });
+        encoder.begin_header(.{ .class = 10, .weight = 0 });
+        encoder.finish_frame(.header);
+        encoder.finish_header(0);
+
+        try snap(@src(),
+            \\[1,0,0,0,0,0,4,0,10,0,100,206,2,0,1,0,0,0,12,0,10,0,0,0,0,0,0,0,0,0,0,206]
+        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+    }
+
+    {
+        // Method + header + body.
+        var encoder = Encoder.init(buffer);
+        encoder.begin_frame(.{ .type = .method, .channel = .global });
+        encoder.write_method_header(.{ .class = 100, .method = 1000 });
+        encoder.finish_frame(.method);
+
+        encoder.begin_frame(.{ .type = .header, .channel = .current });
+        encoder.begin_header(.{ .class = 100, .weight = 0 });
+        encoder.finish_frame(.header);
+
+        encoder.begin_frame(.{ .type = .body, .channel = .current });
+        encoder.write_bytes("body");
+        encoder.finish_header("body".len);
+        encoder.finish_frame(.body);
+
+        try snap(@src(),
+            \\[1,0,0,0,0,0,4,0,100,3,232,206,2,0,1,0,0,0,12,0,100,0,0,0,0,0,0,0,0,0,4,206,3,0,1,0,0,0,4,98,111,100,121,206]
+        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
     }
 }
 

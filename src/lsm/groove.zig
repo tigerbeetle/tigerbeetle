@@ -520,7 +520,7 @@ pub fn GrooveType(
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);
 
-        const KeyType = enum {
+        const LookupBy = enum {
             /// Either `id` or `timestamp` for objects without the id field.
             /// This is the same key used by the object cache map.
             primary_key,
@@ -541,7 +541,7 @@ pub fn GrooveType(
             PrefetchKey,
             struct {
                 level: u8,
-                lookup_by: KeyType,
+                lookup_by: LookupBy,
             },
         );
 
@@ -926,7 +926,7 @@ pub fn GrooveType(
         fn prefetch_from_memory_by_timestamp(
             groove: *Groove,
             timestamp: u64,
-            lookup_by: KeyType,
+            lookup_by: LookupBy,
         ) void {
             assert(timestamp >= TimestampRange.timestamp_min);
             assert(timestamp <= TimestampRange.timestamp_max);
@@ -1100,7 +1100,7 @@ pub fn GrooveType(
             lookup: LookupContext = undefined,
             current: ?struct {
                 key: PrefetchKey,
-                lookup_by: KeyType,
+                lookup_by: LookupBy,
             } = null,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {

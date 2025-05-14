@@ -6,20 +6,20 @@ const Encoder = protocol.Encoder;
 const Decoder = protocol.Decoder;
 
 pub const ConnectOptions = struct {
-    address: std.net.Address,
+    host: std.net.Address,
     user_name: []const u8,
     password: []const u8,
     vhost: []const u8,
     locale: ?[]const u8 = null,
-    heartbeat: ?u16 = null,
+    heartbeat_seconds: ?u16 = null,
     properties: ConnectionProperties = ConnectionProperties.default,
 };
 
 pub const ConnectionProperties = struct {
-    product: ?[]const u8,
-    version: ?[]const u8,
-    platform: ?[]const u8,
-    capabilities: ?*const ClientCapabilities,
+    product: []const u8,
+    version: []const u8,
+    platform: []const u8,
+    capabilities: *const ClientCapabilities,
 
     pub const default: ConnectionProperties = .{
         .product = "TigerBeetle",
@@ -39,13 +39,12 @@ pub const ConnectionProperties = struct {
                 fn write(context: *const anyopaque, encoder: *Encoder.TableEncoder) void {
                     const properties: *const ConnectionProperties = @ptrCast(@alignCast(context));
                     inline for (std.meta.fields(ConnectionProperties)) |field| {
-                        if (@field(properties, field.name)) |value| {
-                            encoder.put(field.name, switch (@TypeOf(value)) {
-                                []const u8 => .{ .string = value },
-                                *const ClientCapabilities => .{ .field_table = value.table() },
-                                else => comptime unreachable,
-                            });
-                        }
+                        const value = @field(properties, field.name);
+                        encoder.put(field.name, switch (field.type) {
+                            []const u8 => .{ .string = value },
+                            *const ClientCapabilities => .{ .field_table = value.table() },
+                            else => comptime unreachable,
+                        });
                     }
                 }
             }.write,
@@ -116,6 +115,7 @@ pub const ClientCapabilities = struct {
     }
 };
 
+/// "SASL" means "Simple Authentication and Security Layer"
 pub const SASLPlainAuth = struct {
     pub const mechanism = "PLAIN";
 
@@ -129,7 +129,7 @@ pub const SASLPlainAuth = struct {
                 fn write(context: *const anyopaque, buffer: []u8) usize {
                     const auth: *const SASLPlainAuth = @ptrCast(@alignCast(context));
                     var fbs = std.io.fixedBufferStream(buffer);
-                    std.fmt.format(fbs.writer(), "\x00{s}\x00{s}", .{
+                    fbs.writer().print("\x00{s}\x00{s}", .{
                         auth.user_name,
                         auth.password,
                     }) catch unreachable;
