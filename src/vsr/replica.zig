@@ -2143,7 +2143,14 @@ pub fn ReplicaType(
                 self.write_prepare(message, .repair);
                 // Write prepare adds it synchronously to in-memory pipeline cache.
                 // Optimistically start committing without waiting for the disk write to finish.
-                if (self.status == .normal and self.backup()) self.commit_journal();
+                if (self.status == .normal and self.backup()) {
+                    self.commit_journal();
+                    self.repair_messages_budget = @min(
+                        self.repair_messages_budget + 1,
+                        constants.vsr_repair_message_budget_max + 1,
+                    );
+                    self.repair();
+                }
             }
         }
 
@@ -10262,16 +10269,7 @@ pub fn ReplicaType(
             self.flush_loopback_queue();
 
             switch (trigger) {
-                .append => {},
-                // Replenish budget and continue immediately to repair the next prepare:
-                // This is an optimization to eliminate waiting until the next repair timeout.
-                .repair => {
-                    self.repair_messages_budget = @min(
-                        self.repair_messages_budget + 1,
-                        constants.vsr_repair_message_budget_max + 1,
-                    );
-                    self.repair();
-                },
+                .append, .repair => {},
                 // Continue repairing the primary's pipeline.
                 .pipeline => self.repair(),
                 .fix => unreachable,
