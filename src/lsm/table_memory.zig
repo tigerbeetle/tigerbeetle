@@ -446,47 +446,19 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_mutable.count() <= values_count_limit);
             assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
 
-            if (table_mutable.sorted_runs_count == sorted_runs_max) {
-                // TODO: except if it is only 1.
-                // merge last two to preserve the other offsets.
-                const min = table_mutable.sorted_runs[sorted_runs_max - 2].min;
-                const max = table_mutable.sorted_runs[sorted_runs_max - 1].max;
-                const element_count = sort_suffix_from_offset(table_mutable.values[min..max], 0, .std);
-                table_mutable.sorted_runs[sorted_runs_max - 2].max = min + element_count;
-                table_mutable.value_context.count = @as(u32, @intCast(min)) + element_count;
-                table_mutable.sorted_runs[constants.lsm_compaction_ops - 1] = .{
-                    .min = std.math.maxInt(u32),
-                    .max = std.math.maxInt(u32),
-                };
-                table_mutable.sorted_runs_count -= 1;
-                // here we have a new count
-            }
-
-            // TODO: choose here the smaller buffer.
-            //  - swap it.
-            //  - if we copy the mutable values in the mutable table we should adjust the sorted runs to be stable.
-
-            // copy form immutable to mutable.
             stdx.copy_disjoint(
                 .inexact,
                 Value,
-                table_mutable.values[table_mutable.count()..],
-                table_immutable.values[0..table_immutable.count()],
+                table_immutable.values[table_immutable.count()..],
+                table_mutable.values[0..table_mutable.count()],
             );
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
-            table_mutable.sorted_runs[table_mutable.sorted_runs_count] = .{
-                .min = table_mutable.count(),
-                .max = tables_combined_count,
-            };
-            table_mutable.sorted_runs_count += 1;
-
-            table_mutable.value_context.count = tables_combined_count;
-
-            table_immutable.merge_from(table_mutable, snapshot_min);
-
+            table_immutable.value_context.count =
+                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0, .std);
             assert(table_immutable.count() <= tables_combined_count);
 
+            table_mutable.reset();
             table_immutable.mutability = .{ .immutable = .{
                 .flushed = table_immutable.value_context.count == 0,
                 .absorbed = true,
@@ -527,8 +499,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             const run_min = table.mutability.mutable.suffix_offset;
             table.mutable_sort_suffix_from_offset(
                 table.mutability.mutable.suffix_offset,
-                .std,
-                //.{ .radix = table.tmp_buffer },
+                //.std,
+                .{ .radix = table.tmp_buffer },
             );
             const run_max = table.mutability.mutable.suffix_offset;
             assert(run_min <= run_max);
