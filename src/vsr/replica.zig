@@ -472,12 +472,12 @@ pub fn ReplicaType(
         repair_messages_budget: u32 = constants.vsr_repair_message_budget_max + 1,
 
         // The next op between [commit_min + 1, op] to be requested during repair.
-        // Used to cycle through uncommitted prepares, to avoid resending the same missing prepares
+        // Used to cycle through uncommitted prepares, to avoid requesting the same missing prepares
         // repeatedly. Reset to commit_min + 1 when repair timeout is fired.
         repair_prepare_op_next_uncommitted: u64 = 0,
 
         // The next op between [op_repair_min, commit_min] to be requested during repair.
-        // Used to cycle through committed prepares, to avoid resending the same missing prepares
+        // Used to cycle through committed prepares, to avoid requesting the same missing prepares
         // repeatedly. Reset to op_repair_min when repair timeout is fired.
         repair_prepare_op_next_committed: u64 = 0,
 
@@ -2146,10 +2146,14 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 self.write_prepare(message, .repair);
-                // Write prepare adds it synchronously to in-memory pipeline cache.
-                // Optimistically start committing without waiting for the disk write to finish.
+
                 if (self.status == .normal and self.backup()) {
+                    // Write prepare adds it synchronously to in-memory pipeline cache.
+                    // Optimistically start committing without waiting for the disk write to finish.
                     self.commit_journal();
+
+                    // Increment budget and initiate repair so `repair_header`/`request_prepare`
+                    // network messages can be sent concurrently with the write IO for this prepare.
                     self.repair_messages_budget = @min(
                         self.repair_messages_budget + 1,
                         constants.vsr_repair_message_budget_max + 1,
@@ -3423,8 +3427,17 @@ pub fn ReplicaType(
                 // +1 to make it easier to decrement budget with -|.
                 constants.vsr_repair_message_budget_max + 1,
             );
-            self.repair_prepare_op_next_committed = self.op_repair_min();
-            self.repair_prepare_op_next_uncommitted = self.commit_min + 1;
+
+            // We intentionally omit setting `repair_header_op_next` to `op_repair_min`. This avoids
+            // fetching extraneous headers from `op_repair_min → header break` every time the
+            // repair_timeout is fired, since we have already attempted to fetch these headers once!
+            // If we encounter a break before `repair_header_op_next`, (for example if replica
+            // we requested from is down or if its headers message was dropped), we simply request
+            // the missing headers, which is a smaller range to request.
+            {
+                self.repair_prepare_op_next_committed = self.op_repair_min();
+                self.repair_prepare_op_next_uncommitted = self.commit_min + 1;
+            }
 
             self.repair();
         }

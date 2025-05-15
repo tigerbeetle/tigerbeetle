@@ -121,9 +121,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
 
     const r0 = t.replica(.R0);
     const r0_storage = &t.cluster.storages[r0.replicas.get(0)];
-    const fault_offset = vsr.Zone.wal_prepares.offset(0);
-    const fault_sector = @divExact(fault_offset, constants.sector_size);
-    try expect(!r0_storage.faults.isSet(fault_sector));
+    try expect(!r0_storage.area_faulty(.{ .wal_prepares = .{ .slot = 0 } }));
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)" {
