@@ -920,6 +920,10 @@ pub fn array_print(
 pub const Instant = struct {
     ns: u64,
 
+    pub fn add(now: Instant, duration: Duration) Instant {
+        return .{ .ns = now.ns + duration.ns };
+    }
+
     pub fn duration_since(now: Instant, earlier: Instant) Duration {
         assert(now.ns >= earlier.ns);
         const elapsed_ns = now.ns - earlier.ns;
@@ -936,6 +940,15 @@ pub const Duration = struct {
 
     pub fn milliseconds(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_ms);
+    }
+
+    pub fn format(
+        duration: Duration,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
     }
 };
 
