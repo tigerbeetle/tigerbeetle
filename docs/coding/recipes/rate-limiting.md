@@ -44,7 +44,7 @@ from the user:
 
 | Transfer |       Ledger | Debit Account | Credit Account | Amount | Timeout |                                                 Flags |
 | -------- | -----------: | ------------: | -------------: | -----: | ------- | ----------------------------------------------------: |
-| 2..N      | Request Rate |          User |       Operator |      1 | 60      | [`pending`](../../reference/transfer.md#flagspending) |
+| 2...N      | Request Rate |          User |       Operator |      1 | 60      | [`pending`](../../reference/transfer.md#flagspending) |
 
 Note that we use a timeout of 60 (seconds), because we wanted to limit each user to 10 requests _per
 minute_.
@@ -77,7 +77,7 @@ size:
 
 | Transfer |    Ledger | Debit Account | Credit Account |       Amount | Timeout |                                                 Flags |
 | -------- | --------: | ------------: | -------------: | -----------: | ------- | ----------------------------------------------------: |
-| 2-N      | Bandwidth |          User |       Operator | Request Size | 60      | [`pending`](../../reference/transfer.md#flagspending) |
+| 2...N      | Bandwidth |          User |       Operator | Request Size | 60      | [`pending`](../../reference/transfer.md#flagspending) |
 
 We're again using a timeout of 60 seconds, but you could adjust this to be whatever time window you
 want to use to limit requests.
