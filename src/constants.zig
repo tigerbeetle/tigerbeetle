@@ -506,10 +506,14 @@ pub const sector_size = 4096;
 /// when they were never written to disk.
 pub const direct_io = config.process.direct_io;
 
-// TODO Add in the upper-bound that the Superblock will use.
-pub const iops_read_max = journal_iops_read_max + client_replies_iops_read_max + grid_iops_read_max;
+pub const iops_read_max = journal_iops_read_max + client_replies_iops_read_max +
+    grid_iops_read_max + superblock_iops_read_max;
 pub const iops_write_max = journal_iops_write_max + client_replies_iops_write_max +
-    grid_iops_write_max;
+    grid_iops_write_max + superblock_iops_write_max;
+
+/// Superblock has at most one write in flight.
+const superblock_iops_read_max = 1;
+const superblock_iops_write_max = 1;
 
 /// The maximum number of concurrent WAL read I/O operations to allow at once.
 pub const journal_iops_read_max = config.process.journal_iops_read_max;
