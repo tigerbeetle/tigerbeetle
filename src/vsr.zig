@@ -1687,6 +1687,41 @@ pub const Snapshot = struct {
     }
 };
 
+pub const Budget = struct {
+    capacity: u32,
+    available: u32,
+    refill_max: u32,
+
+    pub fn init(options: struct {
+        capacity: u32,
+        refill_max: u32,
+    }) Budget {
+        assert(options.refill_max <= options.capacity);
+        return Budget{
+            .capacity = options.capacity,
+            .available = options.capacity,
+            .refill_max = options.refill_max,
+        };
+    }
+
+    pub fn spend(budget: *Budget, amount: u32) bool {
+        assert(budget.capacity > 0);
+        assert(budget.available <= budget.capacity);
+        assert(amount > 0);
+
+        if (budget.available < amount) return false;
+        budget.available -= amount;
+        return true;
+    }
+
+    pub fn refill(budget: *Budget, amount: u32) void {
+        assert(amount <= budget.refill_max);
+        assert(budget.available <= budget.capacity);
+
+        budget.available = @min((budget.available + amount), budget.capacity);
+    }
+};
+
 pub fn block_count_max(storage_size_limit: u64) usize {
     const shard_count_limit: usize = @intCast(@divFloor(
         storage_size_limit - superblock.data_file_size_min,
