@@ -118,6 +118,10 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
 
     try c.request(1, 1);
     try expectEqual(t.replica(.R_).commit(), 1);
+
+    const r0 = t.replica(.R0);
+    const r0_storage = &t.cluster.storages[r0.replicas.get(0)];
+    try expect(!r0_storage.area_faulty(.{ .wal_prepares = .{ .slot = 0 } }));
 }
 
 test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)" {
