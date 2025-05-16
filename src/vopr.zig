@@ -958,9 +958,15 @@ pub const Simulator = struct {
         for (simulator.cluster.replicas) |replica| {
             if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;
 
-            cluster_commit_max = @max(cluster_commit_max, replica.commit_max);
+            if (replica.log_view > cluster_log_view) {
+                maybe(cluster_op_head > replica.op);
+                cluster_op_head = replica.op;
+            } else if (replica.log_view == cluster_log_view) {
+                cluster_op_head = @max(cluster_op_head, replica.op);
+            }
+
             cluster_log_view = @max(cluster_log_view, replica.log_view);
-            cluster_op_head = @max(cluster_op_head, replica.op);
+            cluster_commit_max = @max(cluster_commit_max, replica.commit_max);
             cluster_op_repair_min = @min(cluster_op_repair_min, replica.op_repair_min());
         }
         assert(cluster_commit_max <= cluster_op_head);
