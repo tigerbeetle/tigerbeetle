@@ -3,6 +3,32 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.41
+
+Released: 2025-05-16
+
+### Safety And Performance
+
+- [#2957](https://github.com/tigerbeetle/tigerbeetle/pull/2957)
+
+  Improved latency and throughput in prepare repair operations.
+
+### Internals
+
+- [#2967](https://github.com/tigerbeetle/tigerbeetle/pull/2967)
+
+  Make the Quick Start page more direct by showing only the installation instructions for Linux
+  by default, with Windows and macOS hidden behind click-to-expand sections.
+
+- [#2958](https://github.com/tigerbeetle/tigerbeetle/pull/2958)
+
+  New `tigerbeetle inspect op` command that displays checkpoints and triggers surrounding a given
+  `op` number.
+
+### TigerTracks 🎧
+
+- [Paradise City](https://www.youtube.com/watch?v=Rbm6GXllBiw)
+
 ## TigerBeetle 0.16.40
 
 Released: 2025-05-09
