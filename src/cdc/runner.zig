@@ -598,9 +598,11 @@ pub const Runner = struct {
         switch (self.producer) {
             .idle => {
                 if (!self.buffer.producer_begin()) {
-                    // No free buffers.
+                    // No free buffers (they must be `ready` and `consuming`).
                     // The running consumer will resume the producer once it finishes.
                     assert(self.consumer != .idle);
+                    assert(self.buffer.find(.ready) != null);
+                    assert(self.buffer.find(.consuming) != null);
                     return;
                 }
                 self.producer = .request;
@@ -729,9 +731,15 @@ pub const Runner = struct {
         switch (self.consumer) {
             .idle => {
                 if (!self.buffer.consumer_begin()) {
-                    // No buffers ready.
-                    // The running producer will resume the consumer once it finishes.
-                    assert(self.buffer.all_free() or self.producer != .idle);
+                    // No buffers ready (they must be both `free` or still `producing`).
+                    // The running/waiting producer will resume the consumer once it finishes.
+                    if (self.buffer.all_free()) {
+                        assert(self.producer == .idle);
+                    } else {
+                        assert(self.producer == .request);
+                        assert(self.buffer.find(.free) != null);
+                        assert(self.buffer.find(.producing) != null);
+                    }
                     return;
                 }
                 self.consumer = .begin_transaction;
@@ -1009,7 +1017,7 @@ const DualBuffer = struct {
     pub fn producer_begin(self: *DualBuffer) bool {
         self.assert_state();
         // Already producing.
-        if (self.find(.producing) != null) return false;
+        assert(self.find(.producing) == null);
         const buffer = self.find(.free) orelse
             // No free buffers.
             return false;
@@ -1032,7 +1040,7 @@ const DualBuffer = struct {
     pub fn consumer_begin(self: *DualBuffer) bool {
         self.assert_state();
         // Already consuming.
-        if (self.find(.consuming) != null) return false;
+        assert(self.find(.consuming) == null);
         const buffer = self.find(.ready) orelse
             // No buffers ready.
             return false;
