@@ -21,7 +21,7 @@ pub const MessageBus = struct {
     cluster: u128,
     process: Process,
 
-    recive_buffer: ?ReceiveBuffer,
+    receive_buffer: ?ReceiveBuffer,
     /// The callback to be called when a message is received.
     on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *ReceiveBuffer) void,
 
@@ -42,14 +42,14 @@ pub const MessageBus = struct {
             .pool = message_pool,
             .cluster = cluster,
             .process = process,
-            .recive_buffer = ReceiveBuffer.init(message_pool),
+            .receive_buffer = ReceiveBuffer.init(message_pool),
             .on_messages_callback = on_messages_callback,
         };
     }
 
     pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
-        bus.recive_buffer.?.deinit(bus.pool);
-        bus.recive_buffer = null;
+        bus.receive_buffer.?.deinit(bus.pool);
+        bus.receive_buffer = null;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
     }

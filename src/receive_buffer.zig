@@ -16,11 +16,11 @@ pub const ReceiveBuffer = struct {
     /// enable zero-copy fast path. If a recv syscall reads exactly one message, no copying occurs.
     message: *Message,
     /// For the case where a single recv fetched more than one message, the amount of bytes
-    /// consumed from the begging of message.buffer.
+    /// consumed from the beginning of message.buffer.
     consume_size: u32 = 0,
     /// The amount of bytes received from the kernel.
     /// Only consume_size..receive_size byte range of message.buffer is initialized.
-    recieve_size: u32 = 0,
+    receive_size: u32 = 0,
 
     /// Which peer we are receiving from, inferred from the received messages. Set during parsing,
     /// and used by the message bus to map connections to replicas and clients.
@@ -50,7 +50,6 @@ pub const ReceiveBuffer = struct {
     pub fn deinit(buffer: *ReceiveBuffer, pool: *MessagePool) void {
         pool.unref(buffer.message);
         buffer.* = undefined;
-        return;
     }
 
     /// Pass this to the kernel to read into.
@@ -59,12 +58,12 @@ pub const ReceiveBuffer = struct {
         assert(buffer.invalid == null);
         if (buffer.consume_size > 0) {
             stdx.copy_left(.inexact, u8, buffer.message.buffer, buffer.available_slice());
-            buffer.recieve_size -= buffer.consume_size;
+            buffer.receive_size -= buffer.consume_size;
             buffer.consume_size = 0;
         }
 
-        assert(buffer.recieve_size < constants.message_size_max);
-        return buffer.message.buffer[buffer.recieve_size..];
+        assert(buffer.receive_size < constants.message_size_max);
+        return buffer.message.buffer[buffer.receive_size..];
     }
 
     /// When the kernel returns, informs the buffer about the read size.
@@ -72,30 +71,30 @@ pub const ReceiveBuffer = struct {
         assert(buffer.consume_size == 0);
         assert(size <= constants.message_size_max);
 
-        buffer.recieve_size += size;
-        assert(buffer.recieve_size <= constants.message_size_max);
+        buffer.receive_size += size;
+        assert(buffer.receive_size <= constants.message_size_max);
         buffer.validate();
     }
 
     // Received, but not yet consumed data:
     fn available_slice(buffer: *ReceiveBuffer) []u8 {
-        return buffer.message.buffer[buffer.consume_size..buffer.recieve_size];
+        return buffer.message.buffer[buffer.consume_size..buffer.receive_size];
     }
 
     fn available_slice_const(buffer: *const ReceiveBuffer) []const u8 {
-        return buffer.message.buffer[buffer.consume_size..buffer.recieve_size];
+        return buffer.message.buffer[buffer.consume_size..buffer.receive_size];
     }
 
     fn available_size(buffer: *const ReceiveBuffer) u32 {
-        assert(buffer.consume_size <= buffer.recieve_size);
-        const result = buffer.recieve_size - buffer.consume_size;
+        assert(buffer.consume_size <= buffer.receive_size);
+        const result = buffer.receive_size - buffer.consume_size;
         assert(result <= constants.message_size_max);
         return result;
     }
 
     pub fn invalidate(buffer: *ReceiveBuffer, reason: InvalidReason) void {
         assert(buffer.invalid == null);
-        buffer.recieve_size = 0;
+        buffer.receive_size = 0;
         buffer.consume_size = 0;
         buffer.valid_header = false;
         buffer.valid_body = false;
@@ -114,7 +113,7 @@ pub const ReceiveBuffer = struct {
             assert(!buffer.valid_body);
         }
         if (buffer.valid_body) assert(buffer.valid_header);
-        assert(buffer.consume_size <= buffer.recieve_size);
+        assert(buffer.consume_size <= buffer.receive_size);
     }
 
     fn validate_header(buffer: *ReceiveBuffer) void {
@@ -149,6 +148,8 @@ pub const ReceiveBuffer = struct {
             );
         };
 
+        //? dj: Previously in the message bus we validated the checksum before validating the size.
+        //? That makes more sense to me; why swap the order?
         if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
             buffer.invalidate(.header_size);
             return;
@@ -180,6 +181,7 @@ pub const ReceiveBuffer = struct {
     fn validate_body(buffer: *ReceiveBuffer) void {
         assert(buffer.invalid == null);
         if (buffer.valid_body) {
+            assert(buffer.valid_header);
             assert(buffer.available_size() >= @sizeOf(Header));
             return;
         }
@@ -218,11 +220,11 @@ pub const ReceiveBuffer = struct {
         assert(buffer.invalid == null);
         const header = buffer.copy_header();
         assert(buffer.available_slice().len >= header.size);
-        if (buffer.consume_size == 0 and buffer.recieve_size == header.size) {
+        if (buffer.consume_size == 0 and buffer.receive_size == header.size) {
             assert(buffer.available_size() == header.size);
 
             buffer.consume_size = 0;
-            buffer.recieve_size = 0;
+            buffer.receive_size = 0;
             buffer.valid_body = false;
             buffer.valid_header = false;
             buffer.validate(); // Just to exercise asserts.
@@ -244,7 +246,7 @@ pub const ReceiveBuffer = struct {
         buffer.consume_size += header.size;
         buffer.valid_header = false;
         buffer.valid_body = false;
-        assert(buffer.consume_size <= buffer.recieve_size);
+        assert(buffer.consume_size <= buffer.receive_size);
         buffer.validate();
 
         assert(message.header.checksum == header.checksum);

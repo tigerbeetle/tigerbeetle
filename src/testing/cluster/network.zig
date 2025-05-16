@@ -301,20 +301,20 @@ pub const Network = struct {
         });
 
         const target_bus = network.buses.items[path.target];
-        assert(target_bus.recive_buffer != null);
+        assert(target_bus.receive_buffer != null);
         stdx.copy_disjoint(
             .inexact,
             u8,
-            target_bus.recive_buffer.?.recv_slice(),
+            target_bus.receive_buffer.?.recv_slice(),
             message.buffer[0..message.header.size],
         );
-        target_bus.recive_buffer.?.recv_advance(message.header.size);
-        target_bus.on_messages_callback(target_bus, &target_bus.recive_buffer.?);
-        assert(target_bus.recive_buffer != null);
-        assert(target_bus.recive_buffer.?.invalid == null);
-        assert(target_bus.recive_buffer.?.recieve_size == 0);
-        assert(target_bus.recive_buffer.?.consume_size == 0);
-        target_bus.recive_buffer.?.peer = .unknown;
+        target_bus.receive_buffer.?.recv_advance(message.header.size);
+        target_bus.on_messages_callback(target_bus, &target_bus.receive_buffer.?);
+        assert(target_bus.receive_buffer != null);
+        assert(target_bus.receive_buffer.?.invalid == null);
+        assert(target_bus.receive_buffer.?.recieve_size == 0);
+        assert(target_bus.receive_buffer.?.consume_size == 0);
+        target_bus.receive_buffer.?.peer = .unknown;
     }
 
     fn raw_process_to_process(raw: u128) Process {
