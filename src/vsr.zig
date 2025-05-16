@@ -79,6 +79,11 @@ pub const Release = multiversioning.Release;
 pub const ReleaseTriple = multiversioning.ReleaseTriple;
 
 pub const ProcessType = enum { replica, client };
+pub const Peer = union(enum) {
+    unknown,
+    replica: u8,
+    client: u128,
+};
 
 pub const Zone = enum {
     superblock,
@@ -636,6 +641,7 @@ const FatalReason = enum(u8) {
     storage_size_exceeds_limit = 4,
     storage_size_would_exceed_limit = 5,
     forest_tables_count_would_exceed_limit = 6,
+    unknown_command = 7,
 
     fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);

@@ -379,6 +379,24 @@ test chance {
     ).diff_fmt("balance = {d}", .{balance});
 }
 
+/// Like enum_weighted, but doesn't require specifying the enum up-front.
+pub fn chances(prng: *PRNG, weights: anytype) std.meta.FieldEnum(@TypeOf(weights)) {
+    return enum_weighted(prng, std.meta.FieldEnum(@TypeOf(weights)), weights);
+}
+
+test chances {
+    var prng = from_seed(92);
+    var count: struct { a: u32 = 0, b: u32 = 0, c: u32 = 0 } = .{};
+    for (0..1000) |_| {
+        switch (prng.chances(.{ .a = 1, .b = 3, .c = 2 })) {
+            inline else => |tag| @field(count, @tagName(tag)) += 1,
+        }
+    }
+    try snap(@src(),
+        \\a=166 b=475 c=359
+    ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
+}
+
 /// Returns a random value of an enum.
 pub fn enum_uniform(prng: *PRNG, Enum: type) Enum {
     const values = std.enums.values(Enum);

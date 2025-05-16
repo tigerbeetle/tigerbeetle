@@ -194,11 +194,7 @@ pub const Header = extern struct {
     /// Returns whether the immediate sender is a replica or client (if this can be determined).
     /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
     /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
-    pub fn peer_type(self: *const Header) union(enum) {
-        unknown,
-        replica: u8,
-        client: u128,
-    } {
+    pub fn peer_type(self: *const Header) vsr.Peer {
         switch (self.into_any()) {
             .reserved => unreachable,
             // TODO: replicas used to forward requests. They no longer do, and can always return

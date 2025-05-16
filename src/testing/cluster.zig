@@ -124,7 +124,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_count: u8,
         standby_count: u8,
 
-        clients: []Client,
+        clients: []?Client,
         client_pools: []MessagePool,
         /// Updated when the *client* is informed of the eviction.
         /// (Which may be some time after the client is actually evicted by the cluster.)
@@ -285,11 +285,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             @memset(client_eviction_reasons, null);
 
             const client_id_permutation = IdPermutation.generate(&prng);
-            var clients = try allocator.alloc(Client, options.cluster.client_count);
+            var clients = try allocator.alloc(?Client, options.cluster.client_count);
             errdefer allocator.free(clients);
 
             for (clients, 0..) |*client, i| {
-                errdefer for (clients[0..i]) |*c| c.deinit(allocator);
+                errdefer for (clients[0..i]) |*c| c.*.?.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
                     .{
@@ -307,9 +307,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .eviction_callback = client_on_eviction,
                     },
                 );
-                client.release = options.cluster.client_release;
+                client.*.?.release = options.cluster.client_release;
             }
-            errdefer for (clients) |*client| client.deinit(allocator);
+            errdefer for (clients) |*client| client.*.?.deinit(allocator);
 
             var state_checker = try StateChecker.init(allocator, .{
                 .cluster_id = options.cluster.cluster_id,
@@ -403,9 +403,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
 
             for (clients) |*client| {
-                client.on_reply_context = cluster;
-                client.on_reply_callback = client_on_reply;
-                network.link(client.message_bus.process, &client.message_bus);
+                client.*.?.on_reply_context = cluster;
+                client.*.?.on_reply_callback = client_on_reply;
+                network.link(client.*.?.message_bus.process, &client.*.?.message_bus);
             }
 
             return cluster;
@@ -417,8 +417,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.state_checker.deinit();
             cluster.network.deinit();
 
-            for (cluster.clients, cluster.client_eviction_reasons) |*client, reason| {
-                if (reason == null) {
+            for (cluster.clients) |*client_maybe| {
+                if (client_maybe.*) |*client| {
                     client.deinit(cluster.allocator);
                 }
             }
@@ -460,6 +460,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 var advanced = false;
                 advanced = cluster.network.step() or advanced;
 
+                for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
+                    if (client.* != null and eviction_reason != null) {
+                        client.*.?.deinit(cluster.allocator);
+                        client.* = null;
+                    }
+                }
+
                 for (
                     cluster.storages,
                     cluster.replica_health,
@@ -480,8 +487,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.network.tick();
 
-            for (cluster.clients, cluster.client_eviction_reasons) |*client, eviction_reason| {
-                if (eviction_reason == null) client.tick();
+            for (cluster.clients) |*client_maybe| {
+                if (client_maybe.*) |*client| client.tick();
             }
 
             for (
@@ -706,7 +713,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         }
 
         pub fn register(cluster: *Cluster, client_index: usize) void {
-            const client = &cluster.clients[client_index];
+            const client = &cluster.clients[client_index].?;
             client.register(register_callback, undefined);
         }
 
@@ -728,7 +735,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             assert(cluster.client_eviction_reasons[client_index] == null);
 
-            const client = &cluster.clients[client_index];
+            const client = &cluster.clients[client_index].?;
             const message = request_message.build(.request);
 
             message.header.* = .{
@@ -782,7 +789,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const client_index =
                 cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
-            assert(&cluster.clients[client_index] == client);
+            assert(&cluster.clients[client_index].? == client);
             assert(cluster.client_eviction_reasons[client_index] == null);
 
             if (cluster.callbacks.on_client_reply) |on_client_reply| {
@@ -803,7 +810,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const client_index =
                 cluster.client_id_permutation.decode(client.id) - client_id_permutation_shift;
-            assert(&cluster.clients[client_index] == client);
+            assert(&cluster.clients[client_index].? == client);
             assert(cluster.client_eviction_reasons[client_index] == null);
 
             cluster.client_eviction_reasons[client_index] = eviction.header.reason;
@@ -812,8 +819,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.client_eviction_requests_cancelled +=
                 @intFromBool(client.request_inflight != null and
                 client.request_inflight.?.message.header.operation != .register);
-
-            client.deinit(cluster.allocator);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
