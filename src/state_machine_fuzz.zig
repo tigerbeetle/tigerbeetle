@@ -115,6 +115,8 @@ fn build_batch(
 ) u32 {
     return switch (operation) {
         // No payload, so not very interesting yet.
+        //? dj: get_events has a payload now, so we should add it to this fuzzer.
+        //? resolved.
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
