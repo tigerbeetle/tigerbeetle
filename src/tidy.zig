@@ -601,7 +601,10 @@ const DeadFilesDetector = struct {
         defer detector.files.clearRetainingCapacity();
 
         for (detector.files.keys(), detector.files.values()) |name, state| {
-            assert(state.definition_count > 0);
+            if (state.definition_count == 0) {
+                std.debug.print("imported file untracked by git: {s}\n", .{name});
+                return error.DeadFile;
+            }
             if (state.import_count == 0 and !is_entry_point(name)) {
                 std.debug.print("file never imported: {s}\n", .{name});
                 return error.DeadFile;

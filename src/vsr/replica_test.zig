@@ -11,6 +11,7 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const marks = @import("../testing/marks.zig");
 const StateMachineType = @import("../testing/state_machine.zig").StateMachineType;
 const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
@@ -2010,7 +2011,7 @@ const TestContext = struct {
 
     pub fn client_bus(t: *TestContext, client_index: usize) !*TestClientBus {
         // Reuse one of `Cluster.clients`' ids since the Network preallocated links for it.
-        return TestClientBus.init(t, t.cluster.clients[client_index].id);
+        return TestClientBus.init(t, t.cluster.clients[client_index].?.id);
     }
 
     pub fn run(t: *TestContext) void {
@@ -2085,7 +2086,7 @@ const TestContext = struct {
                 .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
             .B5 => array
                 .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
-            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].id }),
+            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].?.id }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
@@ -2099,7 +2100,7 @@ const TestContext = struct {
                 }
                 if (selector == .__ or selector == .C_) {
                     for (t.cluster.clients) |*client| {
-                        array.append_assume_capacity(.{ .client = client.id });
+                        array.append_assume_capacity(.{ .client = client.*.?.id });
                     }
                 }
             },
@@ -2537,19 +2538,20 @@ const TestClients = struct {
             if (t.context.tick()) tick = 0;
 
             for (t.clients.const_slice()) |c| {
-                const client = &t.cluster.clients[c];
-                if (client.request_inflight == null and
-                    t.context.client_requests[c] > client.request_number)
-                {
-                    if (client.request_number == 0) {
-                        t.cluster.register(c);
-                    } else {
-                        const message = client.get_message();
-                        errdefer client.release_message(message);
+                if (t.cluster.clients[c]) |*client| {
+                    if (client.request_inflight == null and
+                        t.context.client_requests[c] > client.request_number)
+                    {
+                        if (client.request_number == 0) {
+                            t.cluster.register(c);
+                        } else {
+                            const message = client.get_message();
+                            errdefer client.release_message(message);
 
-                        const body_size = 123;
-                        @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
-                        t.cluster.request(c, .echo, message, body_size);
+                            const body_size = 123;
+                            @memset(message.buffer[@sizeOf(vsr.Header)..][0..body_size], 42);
+                            t.cluster.request(c, .echo, message, body_size);
+                        }
                     }
                 }
             }
@@ -2609,7 +2611,7 @@ const TestClientBus = struct {
                 context.cluster.options.cluster_id,
                 .{ .client = client_id },
                 message_pool,
-                on_message,
+                on_messages,
                 .{ .network = context.cluster.network },
             ),
         };
@@ -2632,17 +2634,21 @@ const TestClientBus = struct {
         allocator.destroy(t);
     }
 
-    fn on_message(message_bus: *Cluster.MessageBus, message: *Message) void {
+    fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer) void {
         const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
-        assert(message.header.cluster == t.context.cluster.options.cluster_id);
+        while (buffer.consume_message(t.message_pool)) |message| {
+            defer t.message_pool.unref(message);
 
-        switch (message.header.command) {
-            .reply, .eviction => {
-                assert(t.reply == null);
-                t.reply = message.ref();
-            },
-            .pong_client => {},
-            else => unreachable,
+            assert(message.header.cluster == t.context.cluster.options.cluster_id);
+
+            switch (message.header.command) {
+                .reply, .eviction => {
+                    assert(t.reply == null);
+                    t.reply = message.ref();
+                },
+                .pong_client => {},
+                else => unreachable,
+            }
         }
     }
 

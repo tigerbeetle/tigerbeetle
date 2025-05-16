@@ -14,6 +14,7 @@ const BlockPtr = @import("grid.zig").BlockPtr;
 const IOPSType = @import("../iops.zig").IOPSType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
@@ -1160,7 +1161,7 @@ pub fn ReplicaType(
                 options.cluster,
                 .{ .replica = options.replica_index },
                 options.message_pool,
-                Replica.on_message_from_bus,
+                Replica.on_messages_from_bus,
                 options.message_bus_options,
             );
             errdefer self.message_bus.deinit(allocator);
@@ -1415,12 +1416,46 @@ pub fn ReplicaType(
         }
 
         /// Called by the MessageBus to deliver a message to the replica.
-        fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
+        fn on_messages_from_bus(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
-            if (message.header.into(.request)) |header| {
-                assert(header.client != 0 or constants.aof_recovery);
+            self.on_messages(buffer);
+        }
+
+        pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
+            var message_count: u32 = 0;
+            while (buffer.consume_message(self.message_bus.pool)) |message| {
+                defer self.message_bus.unref(message);
+                assert(message.references == 1);
+
+                message_count += 1;
+
+                if (message.header.cluster != self.cluster) {
+                    buffer.invalidate(.header_cluster);
+                    return;
+                }
+
+                if (message.header.command == .request or
+                    message.header.command == .prepare or
+                    message.header.command == .block)
+                {
+                    const sector_ceil = vsr.sector_ceil(message.header.size);
+                    if (message.header.size != sector_ceil) {
+                        assert(message.header.size < sector_ceil);
+                        assert(message.buffer.len == constants.message_size_max);
+                        @memset(message.buffer[message.header.size..sector_ceil], 0);
+                    }
+                }
+
+                if (message.header.into(.request)) |header| {
+                    assert(header.client != 0 or constants.aof_recovery);
+                }
+
+                self.on_message(message);
             }
-            self.on_message(message);
+
+            if (message_count > constants.bus_message_burst_warn_min) {
+                log.warn("{}: on_messages: message count={}", .{ self.replica, message_count });
+            }
         }
 
         pub fn on_message(self: *Replica, message: *Message) void {

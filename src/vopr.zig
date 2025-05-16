@@ -734,11 +734,8 @@ pub const Simulator = struct {
         assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled ==
             simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
-        for (
-            simulator.cluster.clients,
-            simulator.cluster.client_eviction_reasons,
-        ) |*client, reason| {
-            if (reason == null) {
+        for (simulator.cluster.clients) |*client_maybe| {
+            if (client_maybe.*) |client| {
                 if (client.request_inflight) |request| {
                     // Registration isn't counted by requests_sent, so an operation=register may
                     // still be in-flight. Any other requests should already be complete before
@@ -1316,16 +1313,15 @@ pub const Simulator = struct {
             }
         };
 
-        var client = &simulator.cluster.clients[client_index];
+        var client = &simulator.cluster.clients[client_index].?;
 
         // Messages aren't added to the ReplySequence until a reply arrives.
         // Before sending a new message, make sure there will definitely be room for it.
         var reserved: usize = 0;
         for (
             simulator.cluster.clients,
-            simulator.cluster.client_eviction_reasons,
-        ) |*c, reason| {
-            if (reason == null) {
+        ) |*client_maybe| {
+            if (client_maybe.*) |*c| {
                 // Count the number of clients that are still waiting for a `register` to complete,
                 // since they may start one at any time.
                 reserved += @intFromBool(c.session == 0);

@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
+const MessageBuffer = @import("../../message_buffer.zig").MessageBuffer;
 const vsr = @import("../../vsr.zig");
 const ProcessType = vsr.ProcessType;
 
@@ -20,8 +21,9 @@ pub const MessageBus = struct {
     cluster: u128,
     process: Process,
 
+    buffer: ?MessageBuffer,
     /// The callback to be called when a message is received.
-    on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
+    on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
     pub const Options = struct {
         network: *Network,
@@ -32,7 +34,7 @@ pub const MessageBus = struct {
         cluster: u128,
         process: Process,
         message_pool: *MessagePool,
-        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
+        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
         options: Options,
     ) !MessageBus {
         return MessageBus{
@@ -40,12 +42,17 @@ pub const MessageBus = struct {
             .pool = message_pool,
             .cluster = cluster,
             .process = process,
-            .on_message_callback = on_message_callback,
+            .buffer = MessageBuffer.init(message_pool),
+            .on_messages_callback = on_messages_callback,
         };
     }
 
-    /// TODO
-    pub fn deinit(_: *MessageBus, _: std.mem.Allocator) void {}
+    pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
+        bus.buffer.?.deinit(bus.pool);
+        bus.buffer = null;
+        // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
+        // so we don't assign bus.* to undefined here.
+    }
 
     pub fn tick(_: *MessageBus) void {}
 
