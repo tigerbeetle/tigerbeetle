@@ -887,3 +887,140 @@ test "cancel_all" {
         }
     }.run_test();
 }
+
+// Ensures there are no resource leaks and the socket is properly cleaned up after async operation
+test "socket close after async operation" {
+    try struct {
+        const Self = @This();
+
+        io: IO,
+        client: posix.socket_t,
+        server: posix.socket_t,
+        context: Context = undefined,
+
+        const Context = struct {
+            connected: bool = false,
+            sent: bool = false,
+            closed: bool = false,
+            server_accepted: posix.socket_t = IO.INVALID_SOCKET,
+        };
+
+        fn run_test() !void {
+            var self: Self = .{
+                .io = try IO.init(32, 0),
+                .server = try IO.open_socket_tcp(posix.AF.INET, tcp_options),
+                .client = try IO.open_socket_tcp(posix.AF.INET, tcp_options),
+            };
+            defer self.io.deinit();
+            defer self.io.close_socket(self.server);
+            defer self.io.close_socket(self.client);
+
+            // Server setup
+            const address = try std.net.Address.parseIp4("127.0.0.1", 0);
+            try posix.setsockopt(
+                self.server,
+                posix.SOL.SOCKET,
+                posix.SO.REUSEADDR,
+                &std.mem.toBytes(@as(c_int, 1)),
+            );
+            try posix.bind(self.server, &address.any, address.getOsSockLen());
+            try posix.listen(self.server, 1);
+
+            // Get server address
+            var server_address = std.net.Address.initIp4(undefined, undefined);
+            var server_address_len = server_address.getOsSockLen();
+            try posix.getsockname(self.server, &server_address.any, &server_address_len);
+
+            // Async operations
+            var connect_completion: IO.Completion = undefined;
+            var accept_completion: IO.Completion = undefined;
+
+            // 1. Connect client
+            self.io.connect(
+                Context,
+                &self.context,
+                struct {
+                    fn on_connect(
+                        context: *Context,
+                        completion: *IO.Completion,
+                        result: IO.ConnectError!void,
+                    ) void {
+                        _ = result catch @panic("connect failed");
+                        context.connected = true;
+
+                        // 2. Send data
+                        var send_buf: [10]u8 = undefined;
+                        context.io.send(
+                            Context,
+                            context,
+                            struct {
+                                fn on_send(
+                                    send_context: *Context,
+                                    send_completion: *IO.Completion, 
+                                    send_result: IO.SendError!usize,
+                                ) void {
+                                    _ = send_result catch @panic("send failed");
+                                    send_context.sent = true;
+
+                                    // 3. Close client
+                                    send_context.io.close(
+                                        Context,
+                                        send_context,
+                                        struct {
+                                            fn on_close(
+                                                close_context: *Context,
+                                                _: *IO.Completion,
+                                                close_result: IO.CloseError!void,
+                                            ) void {
+                                                _ = close_result catch @panic("close failed");
+                                                close_context.closed = true;
+                                            }
+                                        }.on_close,
+                                        send_completion,
+                                        send_context.client,
+                                    );
+                                }
+                            }.on_send,
+                            completion,
+                            context.client,
+                            &send_buf,
+                        );
+                    }
+                }.on_connect,
+                &connect_completion,
+                self.client,
+                server_address,
+            );
+
+            // 4. Accept connection
+            self.io.accept(
+                Context,
+                &self.context,
+                struct {
+                    fn on_accept(
+                        context: *Context,
+                        _: *IO.Completion,
+                        result: IO.AcceptError!posix.socket_t,
+                    ) void {
+                        context.server_accepted = result catch @panic("accept failed");
+                        context.io.close_socket(context.server_accepted);
+                    }
+                }.on_accept,
+                &accept_completion,
+                self.server,
+            );
+
+            // Run event loop
+            while (!self.context.closed) try self.io.run();
+
+            // Verification
+            var send_buf: [1]u8 = undefined;
+            const send_result = posix.send(self.client, &send_buf, 0);
+            try testing.expectError(
+                posix.SendError.FileDescriptorInvalid,
+                send_result,
+                "socket should be invalid after close",
+            );
+        }
+    }.run_test();
+}
