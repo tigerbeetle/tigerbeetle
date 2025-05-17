@@ -20,6 +20,9 @@ pub const IO = struct {
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
 
+    run_for_ns_completion: Completion = undefined,
+    run_for_ns_timed_out: bool = false,
+
     pub fn init(entries: u12, flags: u32) !IO {
         _ = entries;
         _ = flags;
@@ -48,26 +51,38 @@ pub const IO = struct {
         return self.flush(.non_blocking);
     }
 
-    pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        const Callback = struct {
-            fn on_timeout(
-                timed_out: *bool,
-                completion: *Completion,
-                result: TimeoutError!void,
-            ) void {
-                _ = result catch unreachable;
-                _ = completion;
-                timed_out.* = true;
+    pub fn run_for_ns_setup(self: *IO, nanoseconds: u63) void {
+        assert(!self.run_for_ns_timed_out);
+        const on_timeout = struct {
+            fn callback(io: *IO, _: *Completion, result: TimeoutError!void) void {
+                result catch unreachable;
+                io.run_for_ns_timed_out = true;
             }
-        };
+        }.callback;
+        self.timeout(
+            *IO,
+            self,
+            on_timeout,
+            &self.run_for_ns_completion,
+            nanoseconds,
+        );
+    }
 
-        var timed_out = false;
-        var completion: Completion = undefined;
-        self.timeout(*bool, &timed_out, Callback.on_timeout, &completion, nanoseconds);
-
-        while (!timed_out) {
-            try self.flush(.blocking);
+    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
+    /// Use with run_for_ns_setup:
+    ///
+    ///     io.run_for_ns_setup(timeout);
+    ///     while (try io.run_for_ns()) {
+    ///         // Can schedule extra work here.
+    ///     }
+    pub fn run_for_ns(self: *IO) !bool {
+        if (self.run_for_ns_timed_out) {
+            self.run_for_ns_completion = undefined;
+            self.run_for_ns_timed_out = false;
+            return false;
         }
+        try self.flush(.blocking);
+        return true;
     }
 
     const FlushMode = enum {

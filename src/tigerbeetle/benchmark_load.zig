@@ -318,7 +318,10 @@ const Benchmark = struct {
 
         while (b.stage != .idle) {
             for (b.clients) |*client| client.tick();
-            try b.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            b.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+            while (try b.io.run_for_ns()) {
+                for (b.clients) |*client| client.idle();
+            }
         }
     }
 

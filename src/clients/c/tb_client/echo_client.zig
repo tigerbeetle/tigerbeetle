@@ -103,6 +103,10 @@ pub fn EchoClientType(
             }
         }
 
+        pub fn idle(_: *EchoClient) void {
+            // EchoClient doesn't have message bus, message deliver is driven by tick.
+        }
+
         pub fn register(
             self: *EchoClient,
             callback: Request.RegisterCallback,

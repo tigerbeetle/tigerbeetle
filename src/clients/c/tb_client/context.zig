@@ -368,13 +368,16 @@ pub fn ContextType(
         fn io_thread(self: *Context) void {
             while (self.signal.status() != .stopped) {
                 self.tick();
-                self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
+                self.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+                while (self.io.run_for_ns() catch |err| {
                     log.err("{}: IO.run() failed: {s}", .{
                         self.client_id,
                         @errorName(err),
                     });
                     @panic("IO.run() failed");
-                };
+                }) {
+                    self.client.idle();
+                }
             }
 
             self.cancel_request_inflight();

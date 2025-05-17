@@ -695,7 +695,8 @@ test "pipe data over socket" {
             while (self.rx.transferred != self.rx.buffer.len) : (tick +%= 1) {
                 if (tick % 61 == 0) {
                     const timeout_ns = tick % (10 * std.time.ns_per_ms);
-                    try self.io.run_for_ns(@as(u63, @intCast(timeout_ns)));
+                    self.io.run_for_ns_setup(@as(u63, @intCast(timeout_ns)));
+                    while (try self.io.run_for_ns()) {}
                 } else {
                     try self.io.run();
                 }

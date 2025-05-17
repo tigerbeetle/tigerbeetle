@@ -295,30 +295,22 @@ pub const Network = struct {
         }
 
         const target_bus = network.buses.items[path.target];
-        const target_message = target_bus.get_message(null);
-        defer target_bus.unref(target_message);
 
-        stdx.copy_disjoint(.exact, u8, target_message.buffer, message.buffer);
-
+        target_bus.receive_queue.push(message.ref()) catch |err| switch (err) {
+            error.NoSpaceLeft => {
+                log.debug("deliver_message: {} > {}: {} (dropped; receive queue full)", .{
+                    process_path.source,
+                    process_path.target,
+                    message.header.command,
+                });
+                network.message_pool.unref(message);
+            },
+        };
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
             message.header.command,
         });
-
-        if (target_message.header.command == .request or
-            target_message.header.command == .prepare or
-            target_message.header.command == .block)
-        {
-            const sector_ceil = vsr.sector_ceil(target_message.header.size);
-            if (target_message.header.size != sector_ceil) {
-                assert(target_message.header.size < sector_ceil);
-                assert(target_message.buffer.len == constants.message_size_max);
-                @memset(target_message.buffer[target_message.header.size..sector_ceil], 0);
-            }
-        }
-
-        target_bus.on_message_callback(target_bus, target_message);
     }
 
     fn raw_process_to_process(raw: u128) Process {

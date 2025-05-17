@@ -3,8 +3,12 @@ const assert = std.debug.assert;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
+const Header = vsr.Header;
 const vsr = @import("../../vsr.zig");
+const stdx = @import("../../stdx.zig");
 const ProcessType = vsr.ProcessType;
+const RingBufferType = stdx.RingBufferType;
+const constants = vsr.constants;
 
 const Network = @import("network.zig").Network;
 
@@ -20,9 +24,11 @@ pub const MessageBus = struct {
     cluster: u128,
     process: Process,
 
-    /// The callback to be called when a message is received.
-    on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
+    receive_queue: RingBufferType(*Message, .{
+        .array = receive_queue_capacity,
+    }) = .{ .buffer = undefined },
 
+    pub const receive_queue_capacity = 4;
     pub const Options = struct {
         network: *Network,
     };
@@ -32,7 +38,6 @@ pub const MessageBus = struct {
         cluster: u128,
         process: Process,
         message_pool: *MessagePool,
-        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
         options: Options,
     ) !MessageBus {
         return MessageBus{
@@ -40,7 +45,6 @@ pub const MessageBus = struct {
             .pool = message_pool,
             .cluster = cluster,
             .process = process,
-            .on_message_callback = on_message_callback,
         };
     }
 
@@ -82,5 +86,33 @@ pub const MessageBus = struct {
             .source = bus.process,
             .target = .{ .client = client_id },
         });
+    }
+
+    pub fn peek_message(bus: *const MessageBus) ?Header {
+        const messsage = bus.receive_queue.head() orelse return null;
+        return messsage.header.*;
+    }
+
+    pub fn receive_message(bus: *MessageBus) ?*Message {
+        const message = bus.receive_queue.pop() orelse return null;
+        defer bus.network.message_pool.unref(message);
+
+        const target_message = bus.get_message(null);
+
+        stdx.copy_disjoint(.exact, u8, target_message.buffer, message.buffer);
+
+        if (target_message.header.command == .request or
+            target_message.header.command == .prepare or
+            target_message.header.command == .block)
+        {
+            const sector_ceil = vsr.sector_ceil(target_message.header.size);
+            if (target_message.header.size != sector_ceil) {
+                assert(target_message.header.size < sector_ceil);
+                assert(target_message.buffer.len == constants.message_size_max);
+                @memset(target_message.buffer[target_message.header.size..sector_ceil], 0);
+            }
+        }
+
+        return target_message;
     }
 };

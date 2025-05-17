@@ -305,7 +305,8 @@ const Supervisor = struct {
         var acceptable_faults_start_ns: ?u64 = null;
         const workload_result = while (std.time.nanoTimestamp() < supervisor.test_deadline) {
             supervisor.network.tick();
-            try supervisor.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            supervisor.io.run_for_ns_setup(constants.tick_ms * std.time.ns_per_ms);
+            while (try supervisor.io.run_for_ns()) {}
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
             const running_replicas = replicas_in_state(

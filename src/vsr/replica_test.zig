@@ -1561,7 +1561,6 @@ test "Cluster: client: empty command=request operation=register body" {
             t.run();
 
             var client_bus = try t.client_bus(0);
-            defer client_bus.deinit();
 
             var request_header = vsr.Header.Request{
                 .cluster = t.cluster.options.cluster_id,
@@ -1901,6 +1900,7 @@ const TestContext = struct {
     log_level: std.log.Level,
     client_requests: []usize,
     client_replies: []usize,
+    test_client_bus: ?*TestClientBus = null,
 
     pub fn init(options: struct {
         replica_count: u8,
@@ -1985,6 +1985,10 @@ const TestContext = struct {
 
     pub fn deinit(t: *TestContext) void {
         std.testing.log_level = t.log_level;
+        if (t.test_client_bus) |bus| {
+            bus.deinit();
+        }
+
         allocator.free(t.client_replies);
         allocator.free(t.client_requests);
         t.cluster.deinit();
@@ -2013,8 +2017,10 @@ const TestContext = struct {
     }
 
     pub fn client_bus(t: *TestContext, client_index: usize) !*TestClientBus {
+        assert(t.test_client_bus == null);
         // Reuse one of `Cluster.clients`' ids since the Network preallocated links for it.
-        return TestClientBus.init(t, t.cluster.clients[client_index].id);
+        t.test_client_bus = try TestClientBus.init(t, t.cluster.clients[client_index].id);
+        return t.test_client_bus.?;
     }
 
     pub fn run(t: *TestContext) void {
@@ -2037,6 +2043,7 @@ const TestContext = struct {
     fn tick(t: *TestContext) bool {
         const commits_before = t.cluster.state_checker.commits.items.len;
         t.cluster.tick();
+        if (t.test_client_bus) |bus| bus.idle();
         return commits_before != t.cluster.state_checker.commits.items.len;
     }
 
@@ -2613,7 +2620,6 @@ const TestClientBus = struct {
                 context.cluster.options.cluster_id,
                 .{ .client = client_id },
                 message_pool,
-                on_message,
                 .{ .network = context.cluster.network },
             ),
         };
@@ -2636,8 +2642,15 @@ const TestClientBus = struct {
         allocator.destroy(t);
     }
 
-    fn on_message(message_bus: *Cluster.MessageBus, message: *Message) void {
-        const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
+    pub fn idle(t: *TestClientBus) void {
+        while (t.message_bus.receive_message()) |message| {
+            defer t.message_pool.unref(message);
+
+            t.on_message(message);
+        }
+    }
+
+    fn on_message(t: *TestClientBus, message: *Message) void {
         assert(message.header.cluster == t.context.cluster.options.cluster_id);
 
         switch (message.header.command) {

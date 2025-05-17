@@ -152,7 +152,6 @@ pub fn ClientType(
                 options.cluster,
                 .{ .client = options.id },
                 options.message_pool,
-                Client.on_message,
                 options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
@@ -188,8 +187,7 @@ pub fn ClientType(
             self.message_bus.deinit(allocator);
         }
 
-        pub fn on_message(message_bus: *MessageBus, message: *Message) void {
-            const self: *Client = @fieldParentPtr("message_bus", message_bus);
+        pub fn on_message(self: *Client, message: *Message) void {
             assert(!self.evicted);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
@@ -238,6 +236,14 @@ pub fn ClientType(
 
             if (self.ping_timeout.fired()) self.on_ping_timeout();
             if (self.request_timeout.fired()) self.on_request_timeout();
+        }
+
+        pub fn idle(self: *Client) void {
+            while (self.message_bus.receive_message()) |message| {
+                defer self.message_bus.unref(message);
+
+                self.on_message(message);
+            }
         }
 
         /// Registers a session with the cluster for the client, if this has not yet been done.

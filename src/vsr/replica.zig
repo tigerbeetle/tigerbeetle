@@ -1235,7 +1235,6 @@ pub fn ReplicaType(
                 options.cluster,
                 .{ .replica = options.replica_index },
                 options.message_pool,
-                Replica.on_message_from_bus,
                 options.message_bus_options,
             );
             errdefer self.message_bus.deinit(allocator);
@@ -1491,13 +1490,23 @@ pub fn ReplicaType(
             assert(self.loopback_queue == null);
         }
 
-        /// Called by the MessageBus to deliver a message to the replica.
-        fn on_message_from_bus(message_bus: *MessageBus, message: *Message) void {
-            const self: *Replica = @alignCast(@fieldParentPtr("message_bus", message_bus));
-            if (message.header.into(.request)) |header| {
-                assert(header.client != 0 or constants.aof_recovery);
+        /// Called every time the event loop processed all ready events.
+        /// This is the place where we pull messages off the message bus, exerting backpressure
+        /// for messages we can't start processing due to lack of resources.
+        pub fn idle(self: *Replica) void {
+            while (self.message_bus.peek_message()) |header| {
+                if ((header.command == .prepare and self.journal.writes.available() == 0) or
+                    (header.command == .block and self.grid_repair_writes.available() == 0))
+                {
+                    return;
+                }
+
+                const message = self.message_bus.receive_message().?;
+                defer self.message_bus.unref(message);
+
+                assert(message.header.checksum == header.checksum);
+                self.on_message(message);
             }
-            self.on_message(message);
         }
 
         pub fn on_message(self: *Replica, message: *Message) void {

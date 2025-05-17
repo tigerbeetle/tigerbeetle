@@ -59,6 +59,9 @@ pub const IO = struct {
         done,
     } = .inactive,
 
+    // The absolute CLOCK_MONOTONIC time after which we may break from run_for_ns:
+    run_for_ns_deadline: ?os.linux.kernel_timespec = null,
+
     pub fn init(entries: u12, flags: u32) !IO {
         // Detect the linux version to ensure that we support all io_uring ops used.
         const uts = posix.uname();
@@ -112,46 +115,62 @@ pub const IO = struct {
         }
     }
 
-    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
     /// The `nanoseconds` argument is a u63 to allow coercion to the i64 used
     /// in the kernel_timespec struct.
-    pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
-        assert(self.cancel_status != .done);
-
+    pub fn run_for_ns_setup(self: *IO, nanoseconds: u63) void {
+        assert(self.run_for_ns_deadline == null);
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
         var current_ts: posix.timespec = undefined;
         posix.clock_gettime(posix.CLOCK.MONOTONIC, &current_ts) catch unreachable;
-        // The absolute CLOCK_MONOTONIC time after which we may return from this function:
-        const timeout_ts: os.linux.kernel_timespec = .{
+        self.run_for_ns_deadline = .{
             .tv_sec = current_ts.tv_sec,
             .tv_nsec = current_ts.tv_nsec + nanoseconds,
         };
+    }
+
+    /// Pass all queued submissions to the kernel and run for `nanoseconds`.
+    /// Use with run_for_ns_setup:
+    ///
+    ///     io.run_for_ns_setup(timeout);
+    ///     while (try io.run_for_ns()) {
+    ///         // Can schedule extra work here.
+    ///     }
+    pub fn run_for_ns(self: *IO) !bool {
+        assert(self.cancel_status != .done);
+        assert(self.run_for_ns_deadline != null);
+
         var timeouts: usize = 0;
         var etime = false;
-        while (!etime) {
-            const timeout_sqe = self.ring.get_sqe() catch blk: {
-                // The submission queue is full, so flush submissions to make space:
-                try self.flush_submissions(0, &timeouts, &etime);
-                break :blk self.ring.get_sqe() catch unreachable;
-            };
-            // Submit an absolute timeout that will be canceled if any other SQE completes first:
-            timeout_sqe.prep_timeout(&timeout_ts, 1, os.linux.IORING_TIMEOUT_ABS);
-            timeout_sqe.user_data = 0;
-            timeouts += 1;
+        const timeout_sqe = self.ring.get_sqe() catch blk: {
+            // The submission queue is full, so flush submissions to make space:
+            try self.flush_submissions(0, &timeouts, &etime);
+            break :blk self.ring.get_sqe() catch unreachable;
+        };
+        // Submit an absolute timeout that will be canceled if any other SQE completes first:
+        timeout_sqe.prep_timeout(&self.run_for_ns_deadline.?, 1, os.linux.IORING_TIMEOUT_ABS);
+        timeout_sqe.user_data = 0;
+        timeouts += 1;
 
-            // We don't really want to count this timeout as an io,
-            // but it's tricky to track separately.
-            self.ios_queued += 1;
+        // We don't really want to count this timeout as an io,
+        // but it's tricky to track separately.
+        self.ios_queued += 1;
 
-            // The amount of time this call will block is bounded by the timeout we just submitted:
-            try self.flush(1, &timeouts, &etime);
+        // The amount of time this call will block is bounded by the timeout we just submitted:
+        try self.flush(1, &timeouts, &etime);
+        if (etime) {
+            assert(timeouts == 0);
+            return false;
+        } else {
+            // Reap any remaining timeouts.
+            // The busy loop here is required to avoid a potential deadlock, as the kernel
+            // determines when the timeouts are pushed to the completion queue, not us.
+            while (timeouts > 0) {
+                try self.flush_completions(0, &timeouts, &etime);
+            }
+            return true;
         }
-        // Reap any remaining timeouts, which reference the timespec in the current stack frame.
-        // The busy loop here is required to avoid a potential deadlock, as the kernel determines
-        // when the timeouts are pushed to the completion queue, not us.
-        while (timeouts > 0) _ = try self.flush_completions(0, &timeouts, &etime);
     }
 
     fn flush(self: *IO, wait_nr: u32, timeouts: *usize, etime: *bool) !void {
