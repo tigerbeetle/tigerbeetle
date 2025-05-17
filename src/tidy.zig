@@ -222,19 +222,30 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
 
-                if (std.mem.startsWith(u8, string_value, " account A") or
+                if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
+                    (std.mem.startsWith(u8, string_value, " account A") or
                     std.mem.startsWith(u8, string_value, " transfer T") or
-                    std.mem.startsWith(u8, string_value, " transfer   "))
+                    std.mem.startsWith(u8, string_value, " transfer   ")))
                 {
                     // Table tests from state_machine.zig. They are intentionally wide.
                     continue;
                 }
 
                 // vsr.zig's Checkpoint ops diagram.
-                if (std.mem.startsWith(u8, string_value, "OPS: ")) continue;
+                if (std.mem.endsWith(u8, file.path, "vsr.zig") and
+                    std.mem.startsWith(u8, string_value, "OPS: ")) continue;
 
                 // trace.zig's JSON snapshot test.
-                if (std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
+                if (std.mem.endsWith(u8, file.path, "trace.zig") and
+                    std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
+
+                // AMQP encoder snapshot test.
+                if (std.mem.endsWith(u8, file.path, "cdc/amqp/protocol.zig") and
+                    std.mem.startsWith(u8, string_value, "[1,0,0")) continue;
+
+                // AMQP JSON snapshot test.
+                if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
+                    std.mem.startsWith(u8, string_value, "{\"timestamp\":")) continue;
             }
 
             return line_index;
