@@ -13,6 +13,7 @@ comptime {
     _ = @import("tidy.zig");
     _ = @import("time.zig");
     _ = @import("git-review.zig");
+    _ = @import("receive_buffer.zig");
 
     _ = @import("stdx.zig");
     _ = @import("stdx/aegis.zig");

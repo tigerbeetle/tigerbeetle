@@ -35,7 +35,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
 
         replicas: []const Replica,
-        clients: []const Client,
+        clients: []const ?Client,
         /// Tracks the latest reply for every non-evicted client.
         client_replies: std.AutoArrayHashMapUnmanaged(u128, vsr.Header.Reply),
         clients_exhaustive: bool = true,
@@ -51,7 +51,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             cluster_id: u128,
             replica_count: u8,
             replicas: []const Replica,
-            clients: []const Client,
+            clients: []const ?Client,
         }) !StateChecker {
             const root_prepare = vsr.Header.Prepare.root(options.cluster_id);
 
@@ -239,8 +239,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     // The replica has transitioned to state `b` that is not yet in the commit
                     // history. Check if this is a valid new state based on the originating client's
                     // inflight request.
-                    const client = for (state_checker.clients) |*client| {
-                        if (client.id == header_b.?.client) break client;
+                    const client: *const Client = for (state_checker.clients) |*client| {
+                        if (client.*.?.id == header_b.?.client) break &client.*.?;
                     } else unreachable;
 
                     if (client.request_inflight == null) {
