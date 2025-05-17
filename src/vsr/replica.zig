@@ -468,8 +468,9 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: DVCQuorumMessages = dvc_quorum_messages_null,
 
-        // +1 to make it easier to decrement budget with -|.
-        repair_messages_budget: u32 = constants.vsr_repair_message_budget_max + 1,
+        repair_messages_budget_grid: vsr.Budget,
+
+        repair_messages_budget_journal: vsr.Budget,
 
         // The next op between [commit_min + 1, op] to be requested during repair.
         // Used to cycle through uncommitted prepares, to avoid requesting the same missing prepares
@@ -1049,6 +1050,65 @@ pub fn ReplicaType(
             const replica_index = options.replica_index;
             assert(replica_index < node_count);
 
+            self.replica_count = replica_count;
+            self.standby_count = standby_count;
+            self.node_count = node_count;
+            self.replica = replica_index;
+
+            // Ensure each replica can have a maximum of two inflight WAL repair messages
+            // (`request_headers` and `request_prepares`) per remote replica, at any point of time.
+            //
+            // This is merely an approximation that is loosely enforced by randomizing the remote
+            // replica we choose for repair, instead of strictly by ensuring that there is *exactly*
+            // two inflight repair messages to a specific replica. It also applies to
+            // `repair_messages_budget_grid_max` below.
+            const repair_messages_budget_journal_max =
+                2 * (replica_count - @intFromBool(!self.standby()));
+            const repair_messages_budget_journal_refill =
+                @divFloor(repair_messages_budget_journal_max, 2);
+            self.repair_messages_budget_journal = vsr.Budget.init(
+                .{
+                    .capacity = repair_messages_budget_journal_max,
+                    .refill_max = repair_messages_budget_journal_refill,
+                },
+            );
+            assert(self.repair_messages_budget_journal.available ==
+                self.repair_messages_budget_journal.capacity);
+
+            // Ensure each replica can have a maximum of two inflight grid repair messages
+            // (`request_blocks`) per remote replica, at any point of time.
+            // We track the number of requested blocks instead of the number of inflight
+            // `request_blocks` messages, since the response for each `request_blocks` message is
+            // potentially multiple blocks (up to `grid_repair_request_max`).
+            const repair_messages_budget_grid_max =
+                2 * @as(u32, constants.grid_repair_request_max) *
+                (replica_count - @intFromBool(!self.standby()));
+            const repair_messages_budget_grid_refill =
+                @divFloor(repair_messages_budget_grid_max, 2);
+            self.repair_messages_budget_grid = vsr.Budget.init(
+                .{
+                    .capacity = repair_messages_budget_grid_max,
+                    .refill_max = repair_messages_budget_grid_refill,
+                },
+            );
+            assert(self.repair_messages_budget_grid.available ==
+                self.repair_messages_budget_grid.capacity);
+
+            if (self.solo()) {
+                assert(self.repair_messages_budget_journal.capacity == 0);
+                assert(self.repair_messages_budget_grid.capacity == 0);
+            } else {
+                assert(self.repair_messages_budget_journal.capacity > 0);
+                assert(self.repair_messages_budget_journal.refill_max > 0);
+
+                assert(self.repair_messages_budget_grid.capacity > 0);
+                assert(self.repair_messages_budget_grid.capacity >=
+                    constants.grid_repair_request_max);
+                assert(self.repair_messages_budget_grid.refill_max > 0);
+                assert(self.repair_messages_budget_grid.refill_max >=
+                    constants.grid_repair_request_max);
+            }
+
             assert(self.opened);
             assert(self.superblock.opened);
             self.superblock.working.vsr_state.assert_internally_consistent();
@@ -1199,6 +1259,8 @@ pub fn ReplicaType(
                 .releases_bundled = options.releases_bundled,
                 .release_execute = options.release_execute,
                 .release_execute_context = options.release_execute_context,
+                .repair_messages_budget_grid = self.repair_messages_budget_grid,
+                .repair_messages_budget_journal = self.repair_messages_budget_journal,
                 .nonce = options.nonce,
                 .clock = self.clock,
                 .journal = self.journal,
@@ -2154,10 +2216,7 @@ pub fn ReplicaType(
 
                     // Increment budget and initiate repair so `repair_header`/`request_prepare`
                     // network messages can be sent concurrently with the write IO for this prepare.
-                    self.repair_messages_budget = @min(
-                        self.repair_messages_budget + 1,
-                        constants.vsr_repair_message_budget_max + 1,
-                    );
+                    self.repair_messages_budget_journal.refill(1);
                     self.repair();
                 }
             }
@@ -2907,11 +2966,7 @@ pub fn ReplicaType(
             // one header. This guards us against double incrementing the budget in case of
             // duplicate headers messages.
             if (header_repaired) {
-                self.repair_messages_budget = @min(
-                    self.repair_messages_budget + 1,
-                    // +1 to make it easier to decrement budget with -|.
-                    constants.vsr_repair_message_budget_max + 1,
-                );
+                self.repair_messages_budget_journal.refill(1);
             }
 
             self.repair();
@@ -3109,6 +3164,15 @@ pub fn ReplicaType(
                         message.header.checksum,
                     });
                 }
+
+                self.repair_messages_budget_grid.refill(1);
+
+                // Attempt to send full batches to amortize the network cost of fetching blocks.
+                if (self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max)
+                {
+                    self.send_request_blocks();
+                }
             }
 
             if (!grid_fulfill and !grid_repair) {
@@ -3125,12 +3189,6 @@ pub fn ReplicaType(
             const self = write.replica;
             defer {
                 self.grid_repair_writes.release(write);
-                // Proactively send another request_blocks request if there are enough write IOPs.
-                if (self.grid.callback != .cancel and
-                    self.grid_repair_writes.available() >= constants.grid_repair_request_max)
-                {
-                    self.send_request_blocks();
-                }
             }
             log.debug("{}: on_block: repair done address={}", .{
                 self.replica,
@@ -3420,13 +3478,9 @@ pub fn ReplicaType(
 
         fn on_repair_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
-            assert(self.repair_messages_budget <= constants.vsr_repair_message_budget_max + 1);
 
-            self.repair_messages_budget = @min(
-                (self.repair_messages_budget + constants.vsr_repair_message_budget_refill),
-                // +1 to make it easier to decrement budget with -|.
-                constants.vsr_repair_message_budget_max + 1,
-            );
+            const refill_amount = self.repair_messages_budget_journal.refill_max;
+            self.repair_messages_budget_journal.refill(refill_amount);
 
             // We intentionally omit setting `repair_header_op_next` to `op_repair_min`. This avoids
             // fetching extraneous headers from `op_repair_min → header break` every time the
@@ -3483,6 +3537,9 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             self.grid_repair_message_timeout.reset();
+
+            const refill_amount = self.repair_messages_budget_grid.refill_max;
+            self.repair_messages_budget_grid.refill(refill_amount);
             if (self.grid.callback != .cancel) {
                 self.send_request_blocks();
             }
@@ -6817,8 +6874,7 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-                self.repair_messages_budget -|= 1;
-                if (self.repair_messages_budget > 0) {
+                if (self.repair_messages_budget_journal.spend(1)) {
                     self.send_header_to_replica(
                         self.primary_index(self.view),
                         @bitCast(Header.RequestStartView{
@@ -6868,8 +6924,8 @@ pub fn ReplicaType(
                         self.op,
                     },
                 );
-                self.repair_messages_budget -|= 1;
-                if (self.repair_messages_budget > 0) {
+
+                if (self.repair_messages_budget_journal.spend(1)) {
                     self.send_header_to_replica(
                         self.choose_any_other_replica(),
                         @bitCast(Header.RequestHeaders{
@@ -7421,7 +7477,7 @@ pub fn ReplicaType(
 
             // Don't check the repair budget for a potential primary in view change, use the full
             // write bandwidth for repair.
-            if (self.status == .normal and self.repair_messages_budget == 0) {
+            if (self.status == .normal and self.repair_messages_budget_journal.available == 0) {
                 log.debug("{}: repair_prepares: waiting for repair budget", .{self.replica});
                 return null;
             }
@@ -7437,8 +7493,8 @@ pub fn ReplicaType(
 
                             io_budget -= 1;
                             if (self.status == .normal) {
-                                self.repair_messages_budget -= 1;
-                                if (self.repair_messages_budget == 0) {
+                                assert(self.repair_messages_budget_journal.spend(1));
+                                if (self.repair_messages_budget_journal.available == 0) {
                                     log.debug("{}: repair_prepares: repair budget used", .{
                                         self.replica,
                                     });
@@ -10299,6 +10355,8 @@ pub fn ReplicaType(
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
 
+            self.grid_repair_message_timeout.reset();
+
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
 
@@ -10311,6 +10369,9 @@ pub fn ReplicaType(
             const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
+
+            assert(self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
+            assert(self.repair_messages_budget_grid.spend(requests_count));
 
             for (requests[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));
