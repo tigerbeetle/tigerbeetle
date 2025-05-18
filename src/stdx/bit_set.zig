@@ -2,15 +2,15 @@ const stdx = @import("../stdx.zig");
 const std = @import("std");
 const assert = std.debug.assert;
 
-/// Take a u8 to limit to 255 items max (2^8 - 1 = 255).
-/// Use dynamic bitset for larger sizes.
-pub fn BitSetType(comptime with_capacity: u8) type {
+/// Takes a u16, but the maximum size is bounded by the Word selection below.
+/// Use a dynamic bitset for larger sizes.
+pub fn BitSetType(comptime with_capacity: u16) type {
     return struct {
         // While mathematically 0 and 1 are symmetric, we intentionally bias the API to use zeros
         // default, as zero-initialization reduces binary size.
         bits: Word = 0,
 
-        pub const Word = for (.{ u8, u16, u32, u64, u128, u256 }) |w| {
+        pub const Word = for (.{ u8, u16, u32, u64, u128, u256, u512 }) |w| {
             if (@bitSizeOf(w) >= with_capacity) break w;
         } else unreachable;
 
@@ -89,7 +89,7 @@ pub fn BitSetType(comptime with_capacity: u8) type {
 
 test BitSetType {
     var prng = stdx.PRNG.from_seed(92);
-    inline for (.{ 0, 1, 8, 32, 65, 255 }) |N| {
+    inline for (.{ 0, 1, 8, 32, 65, 255, 256, 512 }) |N| {
         const BitSet = BitSetType(N);
 
         var set: BitSet = .{};
