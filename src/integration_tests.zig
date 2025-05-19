@@ -555,3 +555,7 @@ test "vortex smoke" {
         .script_path = script_path,
     });
 }
+
+comptime {
+    _ = @import("./cdc/integration_tests.zig");
+}

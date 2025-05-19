@@ -28,8 +28,8 @@ pub const GetMessagePropertiesResult = types.GetMessagePropertiesResult;
 pub const GetMessageOptions = types.GetMessageOptions;
 pub const BasicNackOptions = types.BasicNackOptions;
 
-pub const tcp_port_default = 5672;
-pub const frame_min_size = spec.FRAME_MIN_SIZE;
+pub const tcp_port_default = protocol.tcp_port_default;
+pub const frame_min_size = protocol.frame_min_size;
 
 /// AMQP (Advanced Message Queuing Protocol) 0.9.1 client.
 /// - Uses TigerBeetle's IO interface.
@@ -44,10 +44,13 @@ pub const Client = struct {
         self: *Client,
         result: ?GetMessagePropertiesResult,
     ) Decoder.Error!void;
+    pub const GetMessageBodyCallback = *const fn (
+        self: *Client,
+        body: []const u8,
+    ) Decoder.Error!void;
 
     io: *IO,
     fd: IO.socket_t = IO.INVALID_SOCKET,
-    frame_size_max: u32,
     reply_timeout_ticks: u64,
 
     receive_buffer: ReceiveBuffer,
@@ -71,16 +74,25 @@ pub const Client = struct {
                 auth,
                 connection_open,
                 channel_open,
+                confirm_select,
             },
             callback: Callback,
         },
         close: Callback,
-        tx_select: Callback,
-        tx_commit: Callback,
         queue_declare: Callback,
         exchange_declare: Callback,
         get_message: GetMessagePropertiesCallback,
+        message_body_pending: struct {
+            body_size: u64,
+        },
+        get_message_body: struct {
+            body_size: u64,
+            callback: GetMessageBodyCallback,
+        },
         nack: Callback,
+        publish_enqueue: struct {
+            count: u32 = 0,
+        },
         publish: Callback,
     } = .none,
 
@@ -117,7 +129,19 @@ pub const Client = struct {
                 header: Decoder.Header,
             ) Decoder.Error!void,
         },
+        /// Invokes the callback when an AMQP body frame is received.
+        /// Invariant: the send buffer must be empty.
+        await_body: struct {
+            channel: Channel,
+            duration_ticks: u64 = 0,
+            callback: *const fn (
+                self: *Client,
+                body: []const u8,
+            ) Decoder.Error!void,
+        },
     } = .none,
+
+    publish_confirms: Confirms,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -152,12 +176,15 @@ pub const Client = struct {
         const send_buffer = try allocator.alloc(u8, send_buffer_size);
         errdefer allocator.free(send_buffer);
 
+        var publish_confirms: Confirms = try Confirms.init(allocator, options.message_count_max);
+        errdefer publish_confirms.deinit(allocator);
+
         return .{
             .io = options.io,
             .receive_buffer = ReceiveBuffer.init(receive_buffer),
             .send_buffer = SendBuffer.init(send_buffer),
-            .frame_size_max = frame_size,
             .reply_timeout_ticks = options.reply_timeout_ticks,
+            .publish_confirms = publish_confirms,
         };
     }
 
@@ -165,6 +192,11 @@ pub const Client = struct {
         self: *Client,
         allocator: std.mem.Allocator,
     ) void {
+        if (self.fd != IO.INVALID_SOCKET) {
+            self.io.close_socket(self.fd);
+            self.fd = IO.INVALID_SOCKET;
+        }
+        self.publish_confirms.deinit(allocator);
         allocator.free(self.send_buffer.buffer);
         allocator.free(self.receive_buffer.buffer);
     }
@@ -298,10 +330,7 @@ pub const Client = struct {
                 log.info("frame_max {}", .{args.frame_max});
                 log.info("heartbeat {}", .{args.heartbeat});
                 // Zero indicates no specified limit.
-                assert(args.frame_max == 0 or args.frame_max >= @max(
-                    frame_min_size,
-                    self.frame_size_max,
-                ));
+                assert(args.frame_max == 0 or args.frame_max >= frame_min_size);
                 maybe(args.channel_max == 0);
                 maybe(args.heartbeat == 0);
 
@@ -312,7 +341,10 @@ pub const Client = struct {
                 const method_tune_ok: spec.ServerMethod = .{
                     .connection_tune_ok = .{
                         .channel_max = 1,
-                        .frame_max = @max(frame_min_size, self.frame_size_max),
+                        // Don't override `frame_max`. RabbitMQ 4.1 requires frame sizes larger
+                        // than those specified in the AMQP spec.
+                        // https://www.rabbitmq.com/blog/2025/04/15/rabbitmq-4.1.0-is-released#initial-amqp-0-9-1-maximum-frame-size
+                        .frame_max = args.frame_max,
                         .heartbeat = if (args.heartbeat == 0)
                             // Zero means the server does not want a heartbeat.
                             0
@@ -340,6 +372,16 @@ pub const Client = struct {
             .channel_open_ok => {
                 assert(self.action.connect.phase == .channel_open);
 
+                // Enabling the `confirm` mode on the channel.
+                // https://www.rabbitmq.com/docs/confirms#publisher-confirms
+                const method: spec.ServerMethod = .{ .confirm_select = .{ .nowait = false } };
+                method.encode(.current, self.send_buffer.encoder());
+                self.action.connect.phase = .confirm_select;
+                self.send_and_await_reply(.current, &connect_dispatch);
+            },
+            .confirm_select_ok => {
+                assert(self.action.connect.phase == .confirm_select);
+
                 const callback = self.action.connect.callback;
                 self.action = .none;
                 callback(self);
@@ -349,41 +391,6 @@ pub const Client = struct {
                 .{@tagName(reply)},
             ),
         }
-    }
-
-    pub fn tx_select(self: *Client, callback: Callback) void {
-        assert(self.action == .none);
-        self.action = .{ .tx_select = callback };
-
-        const method: spec.ServerMethod = .{ .tx_select = .{} };
-        method.encode(.current, self.send_buffer.encoder());
-        self.send_and_await_reply(.current, &struct {
-            fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
-                assert(reply == .tx_select_ok);
-                assert(context.action == .tx_select);
-                const tx_select_callback = context.action.tx_select;
-                context.action = .none;
-                tx_select_callback(context);
-            }
-        }.dispatch);
-    }
-
-    pub fn tx_commit(self: *Client, callback: Callback) void {
-        assert(self.action == .none);
-        self.action = .{ .tx_commit = callback };
-
-        const method: spec.ServerMethod = .{ .tx_commit = .{} };
-        method.encode(.current, self.send_buffer.encoder());
-        self.send_and_await_reply(.current, &struct {
-            fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
-                assert(reply == .tx_commit_ok);
-                assert(context.action == .tx_commit);
-
-                const tx_commit_callback = context.action.tx_commit;
-                context.action = .none;
-                tx_commit_callback(context);
-            }
-        }.dispatch);
     }
 
     pub fn exchange_declare(
@@ -454,7 +461,11 @@ pub const Client = struct {
 
     /// Enqueue a message to be sent by `publish_send()`.
     pub fn publish_enqueue(self: *Client, options: BasicPublishOptions) void {
-        assert(self.action == .none);
+        assert(self.awaiter == .none);
+        if (self.action == .none) self.action = .{ .publish_enqueue = .{} };
+
+        assert(self.action == .publish_enqueue);
+        self.action.publish_enqueue.count += 1;
 
         // To send a message with metadata and payload, the following `Frames` must be written:
         const encoder = self.send_buffer.encoder();
@@ -503,23 +514,41 @@ pub const Client = struct {
         callback: Callback,
     ) void {
         assert(self.awaiter == .none);
-        assert(self.action == .none);
         assert(self.send_buffer.state == .writing);
+        assert(self.action == .publish_enqueue);
+        assert(self.action.publish_enqueue.count > 0);
+
+        self.publish_confirms.wait(self.action.publish_enqueue.count);
         self.action = .{ .publish = callback };
-        self.send_and_forget(&struct {
-            fn dispatch(context: *Client) void {
-                assert(context.action == .publish);
-                const publish_callback = context.action.publish;
-                context.action = .none;
-                publish_callback(context);
-            }
-        }.dispatch);
+        self.send_and_await_reply(
+            .current,
+            &struct {
+                fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
+                    assert(reply == .basic_ack);
+                    assert(context.action == .publish);
+                    if (context.publish_confirms.confirm(reply.basic_ack)) {
+                        const publish_callback = context.action.publish;
+                        context.action = .none;
+                        publish_callback(context);
+                        return;
+                    }
+                    // Continue waiting if there are still messages to be confirmed by the server.
+                    assert(context.awaiter == .none);
+                    context.awaiter = .{ .send_and_await_reply = .{
+                        .channel = .current,
+                        .state = .{ .awaiting = .{} },
+                        .callback = &@This().dispatch,
+                    } };
+                }
+            }.dispatch,
+        );
     }
 
     /// Uses a polling model to retrieve a message (`Basic.Get`).
     /// The callback is invoked with either `null` properties if the queue is empty,
     /// or with the properties of the first available message.
     /// N.B.: The message body is not retrieved.
+    /// The method `get_message_body` **MUST** be called if `has_body == true`.
     pub fn get_message(
         self: *Client,
         callback: GetMessagePropertiesCallback,
@@ -557,16 +586,23 @@ pub const Client = struct {
                         header: Decoder.Header,
                     ) Decoder.Error!void {
                         assert(context.action == .get_message);
+                        assert(header.body_size <= protocol.frame_min_size);
                         const properties = try Decoder.BasicProperties.decode(
                             header.property_flags,
                             header.properties,
                         );
                         const get_message_callback = context.action.get_message;
-                        context.action = .none;
+                        const has_body = header.body_size > 0;
+                        context.action = if (has_body) .{
+                            .message_body_pending = .{
+                                .body_size = header.body_size,
+                            },
+                        } else .none;
                         try get_message_callback(context, .{
                             .delivery_tag = delivery_tag,
                             .message_count = message_count,
                             .properties = properties,
+                            .has_body = has_body,
                         });
                     }
                 }.dispatch,
@@ -576,6 +612,34 @@ pub const Client = struct {
                 .{@tagName(reply)},
             ),
         }
+    }
+
+    pub fn get_message_body(
+        self: *Client,
+        callback: GetMessageBodyCallback,
+    ) void {
+        assert(self.action == .message_body_pending);
+        assert(self.action.message_body_pending.body_size <= protocol.frame_min_size);
+        const body_size = self.action.message_body_pending.body_size;
+        self.action = .{ .get_message_body = .{
+            .body_size = body_size,
+            .callback = callback,
+        } };
+        self.awaiter = .{ .await_body = .{
+            .channel = .current,
+            .callback = &struct {
+                fn dispatch(
+                    context: *Client,
+                    body: []const u8,
+                ) Decoder.Error!void {
+                    assert(context.action == .get_message_body);
+                    assert(context.action.get_message_body.body_size == body.len);
+                    const get_message_body_callback = context.action.get_message_body.callback;
+                    context.action = .none;
+                    try get_message_body_callback(context, body);
+                }
+            }.dispatch,
+        } };
     }
 
     /// Rejects a message.
@@ -639,7 +703,7 @@ pub const Client = struct {
                     self.send_buffer.flush(),
                 );
             },
-            .none, .await_content_header => unreachable,
+            .none, .await_content_header, .await_body => unreachable,
         }
     }
 
@@ -675,7 +739,7 @@ pub const Client = struct {
                 assert(awaiter.state == .sending);
                 awaiter.state = .{ .awaiting = .{} };
             },
-            .none, .await_content_header => unreachable,
+            .none, .await_content_header, .await_body => unreachable,
         }
     }
 
@@ -820,7 +884,6 @@ pub const Client = struct {
             .connection_blocked,
             .connection_unblocked,
             .basic_deliver,
-            .basic_ack,
             .basic_nack,
             => fatal(
                 "AMQP operation not supported: {s} channel={}",
@@ -852,10 +915,10 @@ pub const Client = struct {
         header: Decoder.Header,
     ) Decoder.Error!void {
         assert(frame_header.type == .header);
+        maybe(header.body_size == 0);
         if (self.awaiter == .await_content_header) {
             const awaiter = self.awaiter.await_content_header;
-            // We don't support reading the message body.
-            if (frame_header.channel == awaiter.channel and header.body_size == 0) {
+            if (frame_header.channel == awaiter.channel) {
                 self.awaiter = .none;
                 return try awaiter.callback(
                     self,
@@ -880,8 +943,18 @@ pub const Client = struct {
         frame_header: Decoder.FrameHeader,
         body: []const u8,
     ) Decoder.Error!void {
-        _ = self;
         assert(frame_header.type == .body);
+        assert(body.len > 0);
+        if (self.awaiter == .await_body) {
+            const awaiter = self.awaiter.await_body;
+            if (frame_header.channel == awaiter.channel) {
+                self.awaiter = .none;
+                return try awaiter.callback(
+                    self,
+                    body,
+                );
+            }
+        }
         fatal(
             "Unexpected message body: channel={} body_size={}",
             .{
@@ -941,7 +1014,7 @@ pub const Client = struct {
                 awaiter.state.awaiting.duration_ticks += 1;
                 break :ticks awaiter.state.awaiting.duration_ticks;
             },
-            .await_content_header => |*awaiter| ticks: {
+            inline .await_content_header, .await_body => |*awaiter| ticks: {
                 awaiter.duration_ticks += 1;
                 break :ticks awaiter.duration_ticks;
             },
@@ -1110,6 +1183,111 @@ fn log_table(name: []const u8, table: Decoder.Table) Decoder.Error!void {
     }
 }
 
+/// Implements the RabbitMQ Publisher Confirms acknowledgment logic.
+/// Both the broker and the client count messages.
+/// Counting starts at 1 on the first `confirm_select`.
+/// https://www.rabbitmq.com/docs/confirms#publisher-confirms
+/// https://www.rabbitmq.com/blog/2011/02/10/introducing-publisher-confirms
+const Confirms = struct {
+    processed: std.DynamicBitSetUnmanaged,
+    state: union(enum) {
+        idle: struct {
+            sequence: u64,
+        },
+        waiting: struct {
+            count: u32,
+            sequence_initial: u64,
+        },
+    },
+
+    fn init(allocator: std.mem.Allocator, capacity: u32) !Confirms {
+        assert(capacity > 0);
+        const processed = try std.DynamicBitSetUnmanaged.initEmpty(allocator, capacity);
+        return .{
+            .state = .{ .idle = .{ .sequence = 1 } },
+            .processed = processed,
+        };
+    }
+
+    fn deinit(self: *Confirms, allocator: std.mem.Allocator) void {
+        assert(self.state == .idle);
+        assert(self.processed.count() == 0);
+        self.processed.deinit(allocator);
+    }
+
+    /// Waits until `count` published messages have been acknowledged by the server.
+    fn wait(self: *Confirms, count: u32) void {
+        assert(count > 0);
+        assert(count <= self.processed.capacity());
+        assert(self.processed.count() == 0);
+        assert(self.state == .idle);
+
+        const sequence = self.state.idle.sequence;
+        assert(sequence > 0);
+        self.state = .{ .waiting = .{
+            .count = count,
+            .sequence_initial = sequence,
+        } };
+    }
+
+    /// Confirms that the server has received and fsync'ed a batch of published messages.
+    /// Returns `true` if there are no more messages pending acknowledgment.
+    fn confirm(self: *Confirms, ack: std.meta.TagPayload(spec.ClientMethod, .basic_ack)) bool {
+        assert(self.state == .waiting);
+
+        const state = self.state.waiting;
+        assert(state.count > 0);
+        assert(state.sequence_initial > 0);
+
+        // The server must not use a zero value for delivery tags.
+        // Zero is reserved for client use, meaning "all messages so far received".
+        // https://www.rabbitmq.com/docs/specification#rules
+        assert(ack.delivery_tag > 0);
+        assert(ack.delivery_tag >= state.sequence_initial);
+        assert(ack.delivery_tag < state.sequence_initial + state.count);
+
+        const range: std.bit_set.Range = range: {
+            const index = ack.delivery_tag - state.sequence_initial;
+            // Published messages will be confirmed only once.
+            assert(!self.processed.isSet(index));
+            const start: usize = start: {
+                if (!ack.multiple) break :start index; // Single message.
+
+                // Finds the first unconfirmed delivery tag to acknowledge
+                // all pending messages up to `ack.delivery_tag`.
+                var iterator = self.processed.iterator(.{
+                    .direction = .forward,
+                    .kind = .unset,
+                });
+                const unconfirmed_index = iterator.next().?;
+                assert(unconfirmed_index <= index);
+                break :start unconfirmed_index;
+            };
+            break :range .{
+                .start = start,
+                .end = index + 1, // +1 to be inclusive.
+            };
+        };
+        self.processed.setRangeValue(range, true);
+
+        log.debug("basic_ack: delivery_tag={} multiple={} count={} confirmed={}", .{
+            ack.delivery_tag,
+            ack.multiple,
+            state.count,
+            self.processed.count(),
+        });
+
+        if (self.processed.count() == state.count) {
+            self.processed.unsetAll();
+            self.state = .{ .idle = .{
+                .sequence = state.sequence_initial + state.count,
+            } };
+            return true;
+        }
+        return false;
+    }
+};
+
 const testing = std.testing;
 
 test "amqp: SendBuffer" {
@@ -1208,6 +1386,53 @@ test "amqp: ReceiveBuffer" {
         try testing.expectEqualSlices(u8, buffer[decoded_remain..], receive_slice_next);
     }
 }
+
+test "amqp: Confirms" {
+    // Confirmations can be out of order, for example:
+    // Pending tags              Ack
+    // [1,2,3,4,5,6,7,8,9,10] -> tag=1  multiple=true
+    // [2,3,4,5,6,7,8,9,10]   -> tag=3  multiple=false
+    // [2,4,5,6,7,8,9,10]     -> tag=2  multiple=false
+    // [4,5,6,7,8,9,10]       -> tag=5  multiple=true
+    // [6,7,8,9,10]           -> tag=7  multiple=false
+    // [6,8,9,10]             -> tag=10 multiple=true
+    // []                     -> finished
+    var confirms = try Confirms.init(testing.allocator, 10);
+    defer confirms.deinit(testing.allocator);
+
+    try testing.expect(confirms.state == .idle);
+    try testing.expect(confirms.state.idle.sequence == 1);
+
+    confirms.wait(10);
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 0), confirms.processed.count());
+
+    try testing.expectEqual(false, confirms.confirm(.{ .delivery_tag = 1, .multiple = true }));
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 1), confirms.processed.count());
+
+    try testing.expectEqual(false, confirms.confirm(.{ .delivery_tag = 3, .multiple = false }));
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 2), confirms.processed.count());
+
+    try testing.expectEqual(false, confirms.confirm(.{ .delivery_tag = 2, .multiple = false }));
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 3), confirms.processed.count());
+
+    try testing.expectEqual(false, confirms.confirm(.{ .delivery_tag = 5, .multiple = true }));
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 5), confirms.processed.count());
+
+    try testing.expectEqual(false, confirms.confirm(.{ .delivery_tag = 7, .multiple = false }));
+    try testing.expect(confirms.state == .waiting);
+    try testing.expectEqual(@as(usize, 6), confirms.processed.count());
+
+    try testing.expectEqual(true, confirms.confirm(.{ .delivery_tag = 10, .multiple = true }));
+    try testing.expect(confirms.state == .idle);
+    try testing.expectEqual(@as(usize, 0), confirms.processed.count());
+    try testing.expect(confirms.state.idle.sequence == 11);
+}
+
 test "amqp: spec" {
     // Sanity check to ensure the spec hasn't been manually modified.
     // Checking the hash to avoid downloading the XML from external sources during CI.
