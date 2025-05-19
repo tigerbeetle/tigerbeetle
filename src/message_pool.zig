@@ -27,7 +27,7 @@ pub const Options = union(vsr.ProcessType) {
             .client => messages_max: {
                 var sum: u32 = 0;
 
-                sum += constants.replicas_max; // Connection.recv_message
+                sum += constants.replicas_max; // Connection.recv_buffer
                 // Connection.send_queue:
                 sum += constants.replicas_max * constants.connection_send_queue_max_client;
                 sum += 1; // Client.request_inflight
@@ -74,7 +74,7 @@ pub const Options = union(vsr.ProcessType) {
                 // yet, so we may guess high. (We can't differentiate between replicas and
                 // standbys.)
                 sum += @min(replica.members_count, constants.replicas_max);
-                sum += connections_max; // Connection.recv_message
+                sum += connections_max; // Connection.recv_buffer
                 // Connection.send_queue:
                 sum += connections_max * constants.connection_send_queue_max_replica;
                 sum += 1; // Handle bursts (e.g. Connection.parse_message)

@@ -294,31 +294,27 @@ pub const Network = struct {
             return;
         }
 
-        const target_bus = network.buses.items[path.target];
-        const target_message = target_bus.get_message(null);
-        defer target_bus.unref(target_message);
-
-        stdx.copy_disjoint(.exact, u8, target_message.buffer, message.buffer);
-
         log.debug("deliver_message: {} > {}: {}", .{
             process_path.source,
             process_path.target,
             message.header.command,
         });
 
-        if (target_message.header.command == .request or
-            target_message.header.command == .prepare or
-            target_message.header.command == .block)
-        {
-            const sector_ceil = vsr.sector_ceil(target_message.header.size);
-            if (target_message.header.size != sector_ceil) {
-                assert(target_message.header.size < sector_ceil);
-                assert(target_message.buffer.len == constants.message_size_max);
-                @memset(target_message.buffer[target_message.header.size..sector_ceil], 0);
-            }
-        }
-
-        target_bus.on_message_callback(target_bus, target_message);
+        const target_bus = network.buses.items[path.target];
+        assert(target_bus.buffer != null);
+        stdx.copy_disjoint(
+            .inexact,
+            u8,
+            target_bus.buffer.?.recv_slice(),
+            message.buffer[0..message.header.size],
+        );
+        target_bus.buffer.?.recv_advance(message.header.size);
+        target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
+        assert(target_bus.buffer != null);
+        assert(target_bus.buffer.?.invalid == null);
+        assert(target_bus.buffer.?.receive_size == 0);
+        assert(target_bus.buffer.?.consume_size == 0);
+        target_bus.buffer.?.peer = .unknown;
     }
 
     fn raw_process_to_process(raw: u128) Process {

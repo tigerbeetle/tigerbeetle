@@ -10,6 +10,7 @@ const Header = vsr.Header;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
+const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
 
 const log = stdx.log.scoped(.client);
 
@@ -152,7 +153,7 @@ pub fn ClientType(
                 options.cluster,
                 .{ .client = options.id },
                 options.message_pool,
-                Client.on_message,
+                Client.on_messages,
                 options.message_bus_options,
             );
             errdefer message_bus.deinit(allocator);
@@ -188,8 +189,21 @@ pub fn ClientType(
             self.message_bus.deinit(allocator);
         }
 
-        pub fn on_message(message_bus: *MessageBus, message: *Message) void {
+        pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
+            while (buffer.consume_message(self.message_bus.pool)) |message| {
+                defer self.message_bus.unref(message);
+
+                if (message.header.cluster != self.cluster) {
+                    buffer.invalidate(.header_cluster);
+                    return;
+                }
+                self.on_message(message);
+                if (self.evicted) break;
+            }
+        }
+
+        pub fn on_message(self: *Client, message: *Message) void {
             assert(!self.evicted);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.

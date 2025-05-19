@@ -6,13 +6,13 @@ const constants = @import("constants.zig");
 const log = std.log.scoped(.message_bus);
 
 const vsr = @import("vsr.zig");
-const Header = vsr.Header;
 
 const stdx = @import("stdx.zig");
 const RingBufferType = stdx.RingBufferType;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
+const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 
 pub const MessageBusReplica = MessageBusType(.replica);
 pub const MessageBusClient = MessageBusType(.client);
@@ -66,7 +66,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         id: u128,
 
         /// The callback to be called when a message is received.
-        on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
+        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -97,7 +97,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             cluster: u128,
             process_id: ProcessID,
             message_pool: *MessagePool,
-            on_message_callback: *const fn (message_bus: *MessageBus, message: *Message) void,
+            on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
             options: Options,
         ) !MessageBus {
             assert(@as(vsr.ProcessType, process_id) == process_type);
@@ -160,7 +160,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .replica => |index| @as(u128, index),
                     .client => |id| id,
                 },
-                .on_message_callback = on_message_callback,
+                .on_messages_callback = on_messages_callback,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -186,7 +186,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     bus.io.close_socket(connection.fd);
                 }
 
-                if (connection.recv_message) |message| bus.unref(message);
+                if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
+                connection.recv_buffer = null;
                 while (connection.send_queue.pop()) |message| bus.unref(message);
             }
             allocator.free(bus.connections);
@@ -417,15 +418,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// True exactly when the recv_completion has been submitted to the IO abstraction
             /// but the callback has not yet been run.
             recv_submitted: bool = false,
-            /// The Message with the buffer passed to the kernel for recv operations.
-            recv_message: ?*Message = null,
-            /// The number of bytes in `recv_message` that have been received and need parsing.
-            recv_progress: usize = 0,
-            /// The number of bytes in `recv_message` that have been parsed.
-            recv_parsed: usize = 0,
-            /// True if we have already checked the header checksum of the message we
-            /// are currently receiving/parsing.
-            recv_checked_header: bool = false,
+            recv_buffer: ?MessageBuffer = null,
 
             /// This completion is used for all send operations.
             send_completion: IO.Completion = undefined,
@@ -552,7 +545,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.replicas_connect_attempts[connection.peer.replica] = 0;
 
                 connection.assert_recv_send_initial_state(bus);
-                connection.get_recv_message_and_recv(bus);
+                assert(connection.recv_buffer == null);
+                connection.recv_buffer = MessageBuffer.init(bus.pool);
+                connection.recv(bus);
                 // A message may have been queued for sending while we were connecting:
                 // TODO Should we relax recv() and send() to return if `state != .connected`?
                 if (connection.state == .connected) connection.send(bus);
@@ -571,8 +566,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.connections_used += 1;
 
                 connection.assert_recv_send_initial_state(bus);
-                connection.get_recv_message_and_recv(bus);
                 assert(connection.send_queue.empty());
+
+                assert(connection.recv_buffer == null);
+                connection.recv_buffer = MessageBuffer.init(bus.pool);
+                connection.recv(bus);
             }
 
             fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
@@ -583,9 +581,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.fd != IO.INVALID_SOCKET);
 
                 assert(connection.recv_submitted == false);
-                assert(connection.recv_message == null);
-                assert(connection.recv_progress == 0);
-                assert(connection.recv_parsed == 0);
+                assert(connection.recv_buffer == null);
 
                 assert(connection.send_submitted == false);
                 assert(connection.send_progress == 0);
@@ -673,189 +669,20 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.maybe_close(bus);
             }
 
-            fn parse_messages(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.peer != .none);
-                assert(connection.state == .connected);
-                assert(connection.fd != IO.INVALID_SOCKET);
-
-                var count: u32 = 0;
-                while (connection.parse_message(bus)) |message| {
-                    defer bus.unref(message);
-
-                    count += 1;
-                    connection.on_message(bus, message);
-                }
-                if (count > constants.bus_message_burst_warn_min) {
-                    log.warn("{}: parse_messages: message count={}", .{ bus.id, count });
-                }
-            }
-
-            fn parse_message(connection: *Connection, bus: *MessageBus) ?*Message {
-                const data = connection.recv_message.?
-                    .buffer[connection.recv_parsed..connection.recv_progress];
-                if (data.len < @sizeOf(Header)) {
-                    connection.get_recv_message_and_recv(bus);
-                    return null;
-                }
-
-                // If the message bus receives more than one message at a time, subsequent messages
-                // might not be aligned to 16. These messages would be copied over to a fresh
-                // `Message` anyway, fixing the alignment issue, but care must be taken to
-                // ensure header alignment before that.
-                var header: Header = undefined;
-                stdx.copy_disjoint(.exact, u8, mem.asBytes(&header), data[0..@sizeOf(Header)]);
-
-                if (!connection.recv_checked_header) {
-                    if (!header.valid_checksum()) {
-                        log.warn("{}: parse_message: from={} invalid header checksum", .{
-                            bus.id,
-                            connection.peer,
-                        });
-                        connection.terminate(bus, .shutdown);
-                        return null;
-                    }
-
-                    if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
-                        log.warn("{}: parse_message: from={} invalid size={d}", .{
-                            bus.id,
-                            connection.peer,
-                            header.size,
-                        });
-                        connection.terminate(bus, .shutdown);
-                        return null;
-                    }
-
-                    if (header.cluster != bus.cluster) {
-                        log.warn("{}: parse_message: from={} wrong cluster={}", .{
-                            bus.id,
-                            connection.peer,
-                            header.cluster,
-                        });
-                        connection.terminate(bus, .shutdown);
-                        return null;
-                    }
-
-                    comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
-                        @TypeOf(header.command) == vsr.Command);
-                    const command_raw: u8 = data[@offsetOf(Header, "command")];
-                    _ = std.meta.intToEnum(vsr.Command, @intFromEnum(header.command)) catch {
-                        log.err(
-                            "{}: parse_message: from={} unknown command, crashing for safety " ++
-                                "(command={d} protocol={d} replica={d} release={})",
-                            .{
-                                bus.id,
-                                connection.peer,
-                                command_raw,
-                                header.protocol,
-                                header.replica,
-                                header.release,
-                            },
-                        );
-                        @panic("unknown vsr command");
-                    };
-
-                    switch (process_type) {
-                        // Replicas may forward messages from clients or from other replicas so we
-                        // may receive messages from a peer before we know who they are:
-                        // This has the same effect as an asymmetric network where, for a short time
-                        // bounded by the time it takes to ping, we can hear from a peer before we
-                        // can send back to them.
-                        .replica => if (!connection.set_and_verify_peer(bus, &header)) {
-                            log.warn(
-                                "{}: parse_message: from={} unexpected peer header={}",
-                                .{ bus.id, connection.peer, header },
-                            );
-                            connection.terminate(bus, .shutdown);
-                            return null;
-                        },
-                        // The client connects only to replicas and should set peer when connecting:
-                        .client => assert(connection.peer == .replica),
-                    }
-
-                    connection.recv_checked_header = true;
-                }
-
-                if (data.len < header.size) {
-                    connection.get_recv_message_and_recv(bus);
-                    return null;
-                }
-
-                // At this point we know that we have the full message in our buffer.
-                // We will now either deliver this message or terminate the connection
-                // due to an error, so reset recv_checked_header for the next message.
-                assert(connection.recv_checked_header);
-                connection.recv_checked_header = false;
-
-                const body = data[@sizeOf(Header)..header.size];
-                if (!header.valid_checksum_body(body)) {
-                    log.warn("{}: parse_message: from={} invalid body checksum", .{
-                        bus.id,
-                        connection.peer,
-                    });
-                    connection.terminate(bus, .shutdown);
-                    return null;
-                }
-
-                connection.recv_parsed += header.size;
-
-                // Return the parsed message using zero-copy if we can, or copy if the client is
-                // pipelining:
-                // If this is the first message but there are messages in the pipeline then we
-                // copy the message so that its sector padding (if any) will not overwrite the
-                // front of the pipeline.  If this is not the first message then we must copy
-                // the message to a new message as each message needs to have its own unique
-                // `references` and `header` metadata.
-                if (connection.recv_progress == header.size) return connection.recv_message.?.ref();
-
-                const message = bus.get_message(null);
-                stdx.copy_disjoint(.inexact, u8, message.buffer, data[0..header.size]);
-                return message;
-            }
-
-            /// Forward a received message to `Process.on_message()`.
-            /// Zero any `.prepare` sector padding up to the nearest sector multiple after the body.
-            fn on_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
-                if (message == connection.recv_message.?) {
-                    assert(connection.recv_parsed == message.header.size);
-                    assert(connection.recv_parsed == connection.recv_progress);
-                } else if (connection.recv_parsed == message.header.size) {
-                    assert(connection.recv_parsed < connection.recv_progress);
-                } else {
-                    assert(connection.recv_parsed > message.header.size);
-                    assert(connection.recv_parsed <= connection.recv_progress);
-                }
-
-                if (message.header.command == .request or
-                    message.header.command == .prepare or
-                    message.header.command == .block)
-                {
-                    const sector_ceil = vsr.sector_ceil(message.header.size);
-                    if (message.header.size != sector_ceil) {
-                        assert(message.header.size < sector_ceil);
-                        assert(message.buffer.len == constants.message_size_max);
-                        @memset(message.buffer[message.header.size..sector_ceil], 0);
-                    }
-                }
-
-                bus.on_message_callback(bus, message);
-            }
-
             fn set_and_verify_peer(
                 connection: *Connection,
                 bus: *MessageBus,
-                header: *const Header,
             ) bool {
                 comptime assert(process_type == .replica);
 
-                assert(bus.cluster == header.cluster);
                 assert(bus.connections_used > 0);
 
                 assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
-                assert(!connection.recv_checked_header);
+                assert(connection.recv_buffer != null);
 
-                const header_peer: Connection.Peer = switch (header.peer_type()) {
+                const header_peer: Connection.Peer = switch (connection.recv_buffer.?.peer) {
                     .unknown => return true,
                     .replica => |replica| .{ .replica = replica },
                     .client => |client| .{ .client = client },
@@ -908,48 +735,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 return true;
             }
 
-            /// Acquires a free message if necessary and then calls `recv()`.
-            /// If the connection has a `recv_message` and the message being parsed is
-            /// at pole position then calls `recv()` immediately, otherwise copies any
-            /// partially received message into a new Message and sets `recv_message`,
-            /// releasing the old one.
-            fn get_recv_message_and_recv(connection: *Connection, bus: *MessageBus) void {
-                if (connection.recv_message != null and connection.recv_parsed == 0) {
-                    connection.recv(bus);
-                    return;
-                }
-
-                const new_message = bus.get_message(null);
-                defer bus.unref(new_message);
-
-                if (connection.recv_message) |recv_message| {
-                    defer bus.unref(recv_message);
-
-                    assert(connection.recv_progress > 0);
-                    assert(connection.recv_parsed > 0);
-                    const data =
-                        recv_message.buffer[connection.recv_parsed..connection.recv_progress];
-                    stdx.copy_disjoint(.inexact, u8, new_message.buffer, data);
-                    connection.recv_progress = data.len;
-                    connection.recv_parsed = 0;
-                } else {
-                    assert(connection.recv_progress == 0);
-                    assert(connection.recv_parsed == 0);
-                }
-
-                connection.recv_message = new_message.ref();
-                connection.recv(bus);
-            }
-
             fn recv(connection: *Connection, bus: *MessageBus) void {
                 assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
+                assert(connection.recv_buffer != null);
 
                 assert(!connection.recv_submitted);
                 connection.recv_submitted = true;
-
-                assert(connection.recv_progress < constants.message_size_max);
 
                 bus.io.recv(
                     *MessageBus,
@@ -957,8 +750,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     on_recv,
                     &connection.recv_completion,
                     connection.fd,
-                    connection.recv_message.?
-                        .buffer[connection.recv_progress..constants.message_size_max],
+                    connection.recv_buffer.?.recv_slice(),
                 );
             }
 
@@ -989,8 +781,42 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     connection.terminate(bus, .close);
                     return;
                 }
-                connection.recv_progress += bytes_received;
-                connection.parse_messages(bus);
+                assert(bytes_received <= constants.message_size_max);
+                connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
+
+                switch (process_type) {
+                    // Replicas may forward messages from clients or from other replicas so we
+                    // may receive messages from a peer before we know who they are:
+                    // This has the same effect as an asymmetric network where, for a short time
+                    // bounded by the time it takes to ping, we can hear from a peer before we
+                    // can send back to them.
+                    .replica => if (!connection.set_and_verify_peer(bus)) {
+                        log.warn(
+                            "message from unexpected peer: peer={}",
+                            .{connection.peer},
+                        );
+                        connection.terminate(bus, .shutdown);
+                        return;
+                    },
+                    // The client connects only to replicas and should set peer when connecting:
+                    .client => assert(connection.peer == .replica),
+                }
+
+                if (connection.recv_buffer.?.valid_body) {
+                    bus.on_messages_callback(bus, &connection.recv_buffer.?);
+                }
+
+                if (connection.recv_buffer.?.invalid) |reason| {
+                    log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
+                        bus.id,
+                        connection.peer,
+                        @tagName(reason),
+                    });
+                    connection.terminate(bus, .close);
+                    return;
+                }
+
+                connection.recv(bus);
             }
 
             fn send(connection: *Connection, bus: *MessageBus) void {
@@ -1089,10 +915,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 while (connection.send_queue.pop()) |message| {
                     bus.unref(message);
                 }
-                if (connection.recv_message) |message| {
-                    bus.unref(message);
-                    connection.recv_message = null;
-                }
+                if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
+                connection.recv_buffer = null;
                 assert(connection.fd != IO.INVALID_SOCKET);
                 defer connection.fd = IO.INVALID_SOCKET;
                 // It's OK to use the send completion here as we know that no send
@@ -1122,7 +946,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 // Reset the connection to its initial state.
                 defer {
-                    assert(connection.recv_message == null);
+                    assert(connection.recv_buffer == null);
                     assert(connection.send_queue.empty());
 
                     switch (connection.peer) {
