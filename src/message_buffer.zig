@@ -153,16 +153,6 @@ pub const MessageBuffer = struct {
             );
         };
 
-        //? dj: Previously in the message bus we validated the checksum before validating the size.
-        //? That makes more sense to me; why swap the order?
-        //?
-        //? matklad: huh, I remember doing this intentionally, but I don't recall _why_. The old
-        //? way definitely makes more sense to me! I'll also restore the relative order of command
-        //? validation. I don't _love_ materializing header with a "poisoned" command, but we should
-        //? validate the checksum first. So the order is checksum, command, size, to make sure that
-        //? we don't mis-interpret fields.
-        //?
-        //? resolved.
         if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
             buffer.invalidate(.header_size);
             return;

@@ -81,9 +81,6 @@ pub const Options = union(vsr.ProcessType) {
                 // Handle Replica.commit_op's reply:
                 // (This is separate from the burst +1 because they may occur concurrently).
                 sum += 1;
-                //? dj: Do we need to increment to account for the receive buffer's `message`?
-                //? matklad: no, we already account for that. I've updated the comment though!
-                //? resolved.
 
                 // This conditions is necessary (but not sufficient) to prevent deadlocks.
                 assert(sum > constants.replicas_max);
