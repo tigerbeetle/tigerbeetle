@@ -9,6 +9,10 @@ Released: 2025-05-16
 
 ### Safety And Performance
 
+- [#2972](https://github.com/tigerbeetle/tigerbeetle/pull/2972)
+
+  Implement request throttling for grid repair, making state sync less chatty over the network.
+
 - [#2957](https://github.com/tigerbeetle/tigerbeetle/pull/2957)
 
   Improved latency and throughput in prepare repair operations.
