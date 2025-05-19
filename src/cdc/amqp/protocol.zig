@@ -43,11 +43,15 @@
 ///! Integers are encoded in network byte order (big endian).
 ///!
 const std = @import("std");
+const builtin = @import("builtin");
 const stdx = @import("../../stdx.zig");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const spec = @import("spec.zig");
+
+pub const frame_min_size = spec.FRAME_MIN_SIZE;
+pub const tcp_port_default = 5672;
 
 /// The major, minor, and revision numbers can take any value from 0 to 99 for official
 /// specifications.
@@ -794,7 +798,7 @@ pub fn fatal(comptime format: []const u8, args: anytype) noreturn {
 const testing = std.testing;
 
 test "amqp: Encoder/Decoder primitives" {
-    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
     const Primitives = enum {
@@ -845,7 +849,7 @@ test "amqp: Encoder/Decoder primitives" {
                 try testing.expectEqualStrings(value, try decoder.read_short_string());
             },
             .long_string => {
-                const size = prng.range_inclusive(u32, 256, spec.FRAME_MIN_SIZE - @sizeOf(u32));
+                const size = prng.range_inclusive(u32, 256, frame_min_size - @sizeOf(u32));
                 const value = try testing.allocator.alloc(u8, size);
                 defer testing.allocator.free(value);
 
@@ -860,7 +864,7 @@ test "amqp: Encoder/Decoder primitives" {
 }
 
 test "amqp: Encoder/Decoder enums" {
-    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
     const Enum = enum(u8) {
@@ -928,7 +932,7 @@ test "amqp: BasicProperties property_flags" {
 }
 
 test "amqp: BasicProperties encode/decode" {
-    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
     var prng = stdx.PRNG.from_seed(42);
@@ -993,7 +997,7 @@ test "amqp: frame and header" {
     const Snap = @import("../../testing/snaptest.zig").Snap;
     const snap = Snap.snap;
 
-    var buffer = try testing.allocator.alloc(u8, spec.FRAME_MIN_SIZE);
+    var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
     {
@@ -1181,8 +1185,8 @@ const TestingTable = struct {
     }
 };
 
-const TestingBasicProperties = struct {
-    fn random(options: struct {
+pub const TestingBasicProperties = if (builtin.is_test) struct {
+    pub fn random(options: struct {
         arena: std.mem.Allocator,
         prng: *stdx.PRNG,
     }) !Encoder.BasicProperties {
@@ -1219,7 +1223,7 @@ const TestingBasicProperties = struct {
         return properties;
     }
 
-    fn eql(
+    pub fn eql(
         arena: std.mem.Allocator,
         properties1: Encoder.BasicProperties,
         properties2: Decoder.BasicProperties,
@@ -1252,4 +1256,4 @@ const TestingBasicProperties = struct {
         }
         return true;
     }
-};
+} else unreachable;

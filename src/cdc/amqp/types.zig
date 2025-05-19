@@ -65,7 +65,7 @@ pub const ClientCapabilities = struct {
     direct_reply_to: bool,
 
     pub const default: ClientCapabilities = .{
-        .publisher_confirms = false,
+        .publisher_confirms = true,
         .exchange_exchange_bindings = false,
         .basic_nack = true,
         .consumer_cancel_notify = false,
@@ -158,7 +158,7 @@ pub const QueueDeclareArguments = struct {
     message_ttl: ?u32 = null,
     /// Sets the queue overflow behaviour.
     /// This determines what happens to messages when the maximum length of a queue is reached.
-    overflow: ?QueueOverflow,
+    overflow: ?QueueOverflow = null,
     /// If set, makes sure only one consumer at a time consumes from the queue and fails over
     /// to another registered consumer in case the active one is cancelled or dies.
     /// (Sets the "x-single-active-consumer" argument.)
@@ -322,6 +322,8 @@ pub const GetMessagePropertiesResult = struct {
     message_count: u32,
     /// Basic properties including custom headers.
     properties: Decoder.BasicProperties,
+    /// Indicates whether the message includes a body frame.
+    has_body: bool,
 };
 
 pub const BasicNackOptions = struct {

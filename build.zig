@@ -909,6 +909,7 @@ fn build_test_integration(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    integration_tests.root_module.addOptions("vsr_options", vsr_options);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
 

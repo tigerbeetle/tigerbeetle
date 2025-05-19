@@ -82,9 +82,7 @@ pub const Runner = struct {
     /// The consumer is responsible to publish events on the AMQP server.
     consumer: enum {
         idle,
-        begin_transaction,
         publish,
-        commit_transaction,
         progress_update,
     },
 
@@ -495,8 +493,8 @@ pub const Runner = struct {
                                             "Unexpected message_count={} in the progress queue.",
                                             .{result.message_count},
                                         );
+                                        assert(!result.has_body);
                                         assert(result.delivery_tag > 0);
-
                                         // Recovering from a valid timestamp is crucial,
                                         // otherwise `get_events` may return empty results
                                         // due to invalid filters.
@@ -742,7 +740,7 @@ pub const Runner = struct {
                     }
                     return;
                 }
-                self.consumer = .begin_transaction;
+                self.consumer = .publish;
                 self.metrics.consumer.timer.reset();
                 self.consume_dispatch();
             },
@@ -760,19 +758,16 @@ pub const Runner = struct {
         assert(self.state.last.producer_timestamp > self.state.last.consumer_timestamp);
         switch (self.consumer) {
             .idle => unreachable,
-            // Starting a transaction with the AMQP server.
-            // The entire batch of published messages must succeed atomically.
-            .begin_transaction => {
-                self.amqp_client.tx_select(&struct {
-                    fn callback(context: *amqp.Client) void {
-                        const runner: *Runner = @alignCast(@fieldParentPtr("amqp_client", context));
-                        assert(runner.consumer == .begin_transaction);
-                        runner.consumer = .publish;
-                        runner.consume_dispatch();
-                    }
-                }.callback);
-            },
-            // Publishing the events.
+            // Publishes a batch of events and waits until the AMQP server acknowledges it.
+            // N.B.: TigerBeetle guarantees at-least-once semantics when publishing,
+            // and makes a best effort to prevent duplicate messages.
+            // Publishing uses `confirm.select` instead of `tx.select`, as the former provides
+            // better performance with equivalent delivery guarantees. However, neither can
+            // ensure exactly-once delivery in case of crashes in the middle of the operation.
+            // From https://www.rabbitmq.com/docs/semantics:
+            // "RabbitMQ provides no atomicity guarantees even in case of transactions involving
+            // just a single queue, e.g. a fault during tx.commit can result in a sub-set of the
+            // transaction's publishes appearing in the queue after a broker restart.
             .publish => {
                 const events: []const tb.Event = self.buffer.get_consumer_buffer();
                 assert(events.len > 0);
@@ -801,30 +796,13 @@ pub const Runner = struct {
                             context,
                         ));
                         assert(runner.consumer == .publish);
-                        runner.consumer = .commit_transaction;
-                        runner.consume_dispatch();
-                    }
-                }.callback);
-            },
-            // Committing the transaction with the AMQP server.
-            .commit_transaction => {
-                self.amqp_client.tx_commit(&struct {
-                    fn callback(context: *amqp.Client) void {
-                        const runner: *Runner = @alignCast(@fieldParentPtr(
-                            "amqp_client",
-                            context,
-                        ));
-                        assert(runner.consumer == .commit_transaction);
                         runner.consumer = .progress_update;
                         runner.consume_dispatch();
                     }
                 }.callback);
             },
-            // Publishing the progress-tracking message containing the last timestamp.
-            // N.B.: Message brokers cannot guarantee transaction atomicity across queues,
-            // and may allow partially committed transactions.
-            // Updating the status *after* confirming `tx_commit` leaves room for duplicated
-            // messages, but guarantees *at least once* semantics.
+            // Publishes the progress-tracking message containing the last timestamp
+            // *after* the batch of events has been acknowledged by the AMQP server.
             .progress_update => {
                 const progress_tracker: ProgressTrackerMessage = progress: {
                     const events = self.buffer.get_consumer_buffer();
