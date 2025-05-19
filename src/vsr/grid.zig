@@ -710,14 +710,14 @@ pub fn GridType(comptime Storage: type) type {
 
             const block_header = schema.header_from_block(block);
             assert(block_header.cluster == grid.superblock.working.cluster);
-            assert(block_header.release.value <=
-                grid.superblock.working.vsr_state.checkpoint.release.value);
 
             var reads_iterator = grid.read_global_queue.iterate();
             while (reads_iterator.next()) |read| {
                 if (read.checksum == block_header.checksum and
                     read.address == block_header.address)
                 {
+                    assert(block_header.release.value <=
+                        grid.superblock.working.vsr_state.checkpoint.release.value);
                     grid.read_global_queue.remove(read);
                     grid.read_block_resolve(read, .{ .valid = block });
                     return true;
