@@ -215,7 +215,7 @@ pub const AccountingAuditor = struct {
             };
             assert(count > 0);
             if (self.current.count_total() + count > self.changes_events_max) {
-                // Reset the counters if reach the maximum size.
+                // Reset the counters if we reach the maximum size.
                 self.current = Counter.init();
                 // Too many events to keep track of.
                 if (count > self.changes_events_max) return;
@@ -224,10 +224,18 @@ pub const AccountingAuditor = struct {
             switch (change) {
                 .transfer => |transfer| {
                     assert(TimestampRange.valid(transfer.timestamp));
-                    if (self.current.timestamp_min == 0) {
+                    if (self.current.timestamp_min == 0 and
+                        self.current.timestamp_max == 0)
+                    {
                         self.current.timestamp_min = transfer.timestamp;
+                        self.current.timestamp_max = transfer.timestamp;
+                    } else {
+                        assert(TimestampRange.valid(self.current.timestamp_min));
+                        assert(TimestampRange.valid(self.current.timestamp_max));
+                        assert(self.current.timestamp_min <= self.current.timestamp_max);
+                        assert(transfer.timestamp > self.current.timestamp_max);
+                        self.current.timestamp_max = transfer.timestamp;
                     }
-                    self.current.timestamp_max = transfer.timestamp;
 
                     if (transfer.flags.pending) {
                         self.current.count.getPtr(.two_phase_pending).* += 1;
@@ -240,13 +248,21 @@ pub const AccountingAuditor = struct {
                     }
                 },
                 .expiry => |expiry| {
-                    const timestamp_first: u64 = expiry.timestamp - expiry.expired_count;
-                    assert(TimestampRange.valid(timestamp_first));
                     assert(TimestampRange.valid(expiry.timestamp));
-                    if (self.current.timestamp_min == 0) {
+                    if (self.current.timestamp_min == 0 and
+                        self.current.timestamp_max == 0)
+                    {
+                        const timestamp_first: u64 = expiry.timestamp - expiry.expired_count;
+                        assert(TimestampRange.valid(timestamp_first));
                         self.current.timestamp_min = timestamp_first;
+                        self.current.timestamp_max = expiry.timestamp;
+                    } else {
+                        assert(TimestampRange.valid(self.current.timestamp_min));
+                        assert(TimestampRange.valid(self.current.timestamp_max));
+                        assert(self.current.timestamp_min <= self.current.timestamp_max);
+                        assert(expiry.timestamp > self.current.timestamp_max);
+                        self.current.timestamp_max = expiry.timestamp;
                     }
-                    self.current.timestamp_max = expiry.timestamp;
                     self.current.count.getPtr(.two_phase_expired).* += expiry.expired_count;
                 },
             }
