@@ -8,5 +8,5 @@ in the harshest conditions, there's certainly a preferred way to handle one!
 - [Hardware](./hardware.md) specifies the host requirements.
 - [Cluster](./cluster.md) specifies the overall cluster requirements and recommendations.
 - [Deploying](./deploying/) spells out deployment process and its variations.
-- [Upgrading](./upgrading.md) explains how to move to a newer TigerBeetle version without
-  downtime.
+- [Upgrading](./upgrading.md) explains how to move to a newer TigerBeetle version without downtime.
+- [Change Data Capture](./cdc.md) explains how to stream data out of TigerBeetle.
