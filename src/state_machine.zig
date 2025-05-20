@@ -1284,7 +1284,6 @@ pub fn StateMachineType(
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op > 0);
-            assert(op != 0);
             assert(self.prefetch_operation == null);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
@@ -2476,8 +2475,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
-            assert(self.prefetch_timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(self.prefetch_timestamp));
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
@@ -3073,9 +3071,7 @@ pub fn StateMachineType(
                     }
 
                     if (event.flags.imported) {
-                        if (event.timestamp < TimestampRange.timestamp_min or
-                            event.timestamp > TimestampRange.timestamp_max)
-                        {
+                        if (!TimestampRange.valid(event.timestamp)) {
                             break :blk .imported_event_timestamp_out_of_range;
                         }
                         if (event.timestamp >= timestamp) {
@@ -3086,8 +3082,7 @@ pub fn StateMachineType(
                         event.timestamp = timestamp - events.len + index + 1;
                     }
 
-                    assert(event.timestamp >= TimestampRange.timestamp_min);
-                    assert(event.timestamp <= TimestampRange.timestamp_max);
+                    assert(TimestampRange.valid(event.timestamp));
 
                     break :blk switch (operation) {
                         .deprecated_create_accounts,
@@ -4272,8 +4267,7 @@ pub fn StateMachineType(
                 assert(p.timeout > 0);
 
                 const event_timestamp = timestamp - transfers_pending.len + index + 1;
-                assert(event_timestamp >= TimestampRange.timestamp_min);
-                assert(event_timestamp <= TimestampRange.timestamp_max);
+                assert(TimestampRange.valid(event_timestamp));
                 assert(self.commit_timestamp < event_timestamp);
                 defer self.commit_timestamp = event_timestamp;
 
@@ -4672,8 +4666,7 @@ fn ExpirePendingTransfersType(
             },
         ) *ScanRange {
             assert(self.phase == .idle);
-            assert(filter.expires_at_max >= TimestampRange.timestamp_min and
-                filter.expires_at_max <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(filter.expires_at_max));
             maybe(filter.expires_at_max != TimestampRange.timestamp_min and
                 filter.expires_at_max != TimestampRange.timestamp_max and
                 self.pulse_next_timestamp > filter.expires_at_max);
