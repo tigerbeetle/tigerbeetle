@@ -3,11 +3,11 @@
 TigerBeetle can stream changes (transfers and balance updates) to message queues using
 the AMQP 0.9.1 protocol, which is compatible with RabbitMQ and various other message brokers.
 
-Here’s how to deploy the CDC job:
+See [Installing](./installing.md) for instructions on how to deploy the TigerBeetle binary.
+
+Here’s how to start the CDC job:
 
 ```console
-curl -Lo tigerbeetle.zip https://linux.tigerbeetle.com && unzip tigerbeetle.zip && ./tigerbeetle version
-
 ./tigerbeetle amqp --cluster-id=0 \
     --addresses=3000 \
     --host=127.0.0.1 \

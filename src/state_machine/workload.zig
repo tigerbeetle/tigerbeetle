@@ -31,6 +31,7 @@ const vsr = @import("../vsr.zig");
 const accounting_auditor = @import("auditor.zig");
 const Auditor = accounting_auditor.AccountingAuditor;
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
+const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 const fuzz = @import("../testing/fuzz.zig");
 
 const PriorityQueue = std.PriorityQueue;
@@ -1094,11 +1095,15 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         .timestamp_max = 0,
                     },
                     .invalid_timestamps => filter: {
-                        const timestamp: u64 = self.prng.int(u64) +| 1;
+                        const timestamp: u64 = self.prng.range_inclusive(
+                            u64,
+                            TimestampRange.timestamp_min,
+                            TimestampRange.timestamp_max,
+                        );
                         break :filter .{
                             .limit = self.prng.int(u32),
-                            .timestamp_min = timestamp,
-                            .timestamp_max = timestamp - 1,
+                            .timestamp_min = timestamp + 1,
+                            .timestamp_max = timestamp,
                         };
                     },
                 };
