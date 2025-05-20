@@ -258,24 +258,6 @@ pub const Runner = struct {
                 .vhost = options.vhost,
             },
         );
-
-        self.vsr_client.register(
-            &struct {
-                fn callback(
-                    user_data: u128,
-                    result: *const vsr.RegisterResult,
-                ) void {
-                    const runner: *Runner = @ptrFromInt(@as(usize, @intCast(user_data)));
-                    assert(!runner.connected.vsr);
-                    maybe(runner.connected.amqp);
-                    log.info("VSR client registered.", .{});
-                    runner.vsr_client.batch_size_limit = result.batch_size_limit;
-                    runner.connected.vsr = true;
-                    runner.start();
-                }
-            }.callback,
-            @as(u128, @intCast(@intFromPtr(self))),
-        );
     }
 
     pub fn deinit(self: *Runner, allocator: std.mem.Allocator) void {
@@ -285,20 +267,6 @@ pub const Runner = struct {
         self.buffer.deinit(allocator);
         allocator.free(self.progress_tracker_queue);
         allocator.free(self.locker_queue);
-    }
-
-    fn start(self: *Runner) void {
-        assert(self.connected.vsr or self.connected.amqp);
-        assert(self.producer == .idle);
-        assert(self.consumer == .idle);
-
-        if (self.connected.vsr and
-            self.connected.amqp and
-            self.state == .last)
-        {
-            log.info("Starting CDC.", .{});
-            self.produce();
-        }
     }
 
     /// To make the CDC stateless, internal queues are used to store the state:
@@ -442,7 +410,7 @@ pub const Runner = struct {
                                                 .producer_timestamp = timestamp_override + 1,
                                             },
                                         };
-                                        return runner.start();
+                                        return runner.vsr_register();
                                     }
                                     assert(recovering.timestamp_last == null);
 
@@ -531,7 +499,7 @@ pub const Runner = struct {
                                         .consumer_timestamp = 0,
                                         .producer_timestamp = TimestampRange.timestamp_min,
                                     } };
-                                    runner.start();
+                                    runner.vsr_register();
                                 },
                                 else => unreachable,
                             }
@@ -569,7 +537,7 @@ pub const Runner = struct {
                                     .consumer_timestamp = recovering.timestamp_last.?,
                                     .producer_timestamp = recovering.timestamp_last.? + 1,
                                 } };
-                                runner.start();
+                                runner.vsr_register();
                             },
                             else => unreachable,
                         }
@@ -581,6 +549,36 @@ pub const Runner = struct {
                 });
             },
         }
+    }
+
+    fn vsr_register(self: *Runner) void {
+        assert(self.connected.amqp);
+        assert(!self.connected.vsr);
+        assert(self.producer == .idle);
+        assert(self.consumer == .idle);
+        assert(self.state == .last);
+
+        // Register the VSR client as the last step to avoid unnecessarily joining the cluster
+        // in case the CDC fails due to connectivity or configuration issues with the AMQP server.
+        self.vsr_client.register(
+            &struct {
+                fn callback(
+                    user_data: u128,
+                    result: *const vsr.RegisterResult,
+                ) void {
+                    const runner: *Runner = @ptrFromInt(@as(usize, @intCast(user_data)));
+                    assert(runner.connected.amqp);
+                    assert(!runner.connected.vsr);
+                    log.info("VSR client registered.", .{});
+                    runner.vsr_client.batch_size_limit = result.batch_size_limit;
+                    runner.connected.vsr = true;
+
+                    log.info("Starting CDC.", .{});
+                    runner.produce();
+                }
+            }.callback,
+            @as(u128, @intCast(@intFromPtr(self))),
+        );
     }
 
     /// The "Producer" fetches events from TigerBeetle (`get_events` operation) into a buffer
