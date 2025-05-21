@@ -251,7 +251,7 @@ const CLIArgs = union(enum) {
     // CDC connector for AMQP targets.
     const AMQP = struct {
         addresses: []const u8,
-        cluster_id: u128,
+        cluster: u128,
         host: []const u8,
         user: []const u8,
         password: []const u8,
@@ -368,7 +368,7 @@ const CLIArgs = union(enum) {
         \\
         \\  tigerbeetle repl --addresses=3000,3001,3002 --cluster=0
         \\
-        \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster-id=0 \
+        \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster=0 \
         \\      --host=127.0.0.1 --vhost=/ --user=guest --password=guest \
         \\      --publish-exchange=my_exhange_name
         \\
@@ -1057,7 +1057,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
 
     return .{
         .addresses = addresses,
-        .cluster = amqp.cluster_id,
+        .cluster = amqp.cluster,
         .host = host,
         .user = amqp.user,
         .password = amqp.password,
