@@ -1743,15 +1743,26 @@ pub fn StateMachineType(
                             scan,
                         );
 
-                        // Limiting the buffer size according to the query limit.
-                        // TODO: Prevent clients from setting the limit larger than the buffer size.
-                        const limit = @min(
-                            filter.limit,
+                        const limit_max = @min(
                             operation_result_max(
                                 self.prefetch_operation.?,
                                 self.batch_size_limit,
                             ),
+                            // Also constrained by the maximum number of available prefetches.
+                            @max(
+                                operation_result_max(
+                                    .lookup_accounts,
+                                    self.batch_size_limit,
+                                ),
+                                operation_result_max(
+                                    .deprecated_lookup_accounts,
+                                    self.batch_size_limit,
+                                ),
+                            ),
                         );
+                        // Limiting the buffer size according to the query limit.
+                        // TODO: Prevent clients from setting the limit larger than the buffer size.
+                        const limit = @min(filter.limit, limit_max);
                         assert(scan_buffer.len >= limit);
                         scan_lookup.read(
                             scan_buffer[0..limit],
@@ -2325,15 +2336,59 @@ pub fn StateMachineType(
                     self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
                 );
 
-                // Limiting the buffer size according to the query limit.
-                // TODO: Prevent clients from setting the limit larger than the buffer size.
-                const limit = @min(
-                    filter.limit,
-                    operation_result_max(
+                // TODO: Improve how we calculate the maximum number of events/results:
+                //
+                // - It's currently based on `message_body_size_max / event_size`, but we also
+                //   need to consider a custom `batch_size_limit`, which applies only to the
+                //   request, not the reply.
+                //   For example, `create_transfers` with a `batch_size_limit` of 128 bytes can
+                //   process only one event. However, since the reply isn't subject to this limit,
+                //   `lookup_transfers` with the same limit could process up to 8 events (16 bytes
+                //   each id).
+                //
+                // - For queries, sometimes no prefetching is needed (e.g., `query_accounts` and
+                //   `query_transfers`), so the limit is simply the `message_body_size_max /
+                //   result_size`.
+                //   Other queries like `get_account_balances` and `get_events` require
+                //   prefetching related objects. In these cases, we must also consider the number
+                //   of available prefetches.
+                //   Example: `get_events` would crash if running with the `--development` flag and
+                //   the default `limit`.
+                //   `get_account_balances` doesn't crash just because there are 2x available
+                //    prefetches for accounts.
+                //
+                // We could either:
+                // - Calculate the number of prefetches based on the reply size, or
+                // - Limit the reply size based on the number of prefetches.
+                //
+                // Currently, this is inconsistent: `forest_options` prefetch limit includes
+                // `create_*` and `lookups_*`, but not queries.
+                const limit_max: u32 = limit_max: {
+                    const result_max = operation_result_max(
                         self.prefetch_operation.?,
                         self.batch_size_limit,
-                    ),
-                );
+                    );
+                    // Also constrained by the maximum number of available prefetches.
+                    const prefetch_transfers = @max(
+                        operation_event_max(.lookup_transfers, self.batch_size_limit),
+                        operation_event_max(.deprecated_lookup_transfers, self.batch_size_limit),
+                    );
+                    const prefetch_accounts = @max(
+                        operation_event_max(.lookup_accounts, self.batch_size_limit),
+                        operation_event_max(.deprecated_lookup_accounts, self.batch_size_limit),
+                    );
+
+                    break :limit_max @min(
+                        result_max,
+                        prefetch_transfers,
+                        // Each event == 2 accounts.
+                        @divFloor(prefetch_accounts, 2),
+                    );
+                };
+
+                // Limiting the buffer size according to the query limit.
+                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                const limit = @min(filter.limit, limit_max);
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
