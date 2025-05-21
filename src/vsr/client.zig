@@ -191,7 +191,8 @@ pub fn ClientType(
 
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
-            while (buffer.consume_message(self.message_bus.pool)) |message| {
+            while (buffer.next_header()) |header| {
+                const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
 
                 if (message.header.cluster != self.cluster) {

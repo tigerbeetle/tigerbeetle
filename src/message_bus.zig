@@ -8,11 +8,13 @@ const log = std.log.scoped(.message_bus);
 const vsr = @import("vsr.zig");
 
 const stdx = @import("stdx.zig");
+const maybe = stdx.maybe;
 const RingBufferType = stdx.RingBufferType;
 const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
+const QueueType = @import("./queue.zig").QueueType;
 
 pub const MessageBusReplica = MessageBusType(.replica);
 pub const MessageBusClient = MessageBusType(.client);
@@ -72,6 +74,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.peer != .none).
         connections_used: usize = 0,
+        connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
+            .name = null,
+        }),
+        resume_receive_completion: IO.Completion = undefined,
+        resume_receive_submitted: bool = false,
 
         /// Map from replica index to the currently active connection for that replica, if any.
         /// The connection for the process replica if any will always be null.
@@ -344,6 +351,50 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             bus.pool.unref(message);
         }
 
+        pub fn resume_needed(bus: *MessageBus) bool {
+            if (bus.connections_suspended.empty()) return false;
+            if (bus.resume_receive_submitted) return false;
+            return true;
+        }
+
+        pub fn resume_receive(bus: *MessageBus) void {
+            if (!bus.resume_needed()) return;
+
+            bus.resume_receive_submitted = true;
+            bus.io.timeout(
+                *MessageBus,
+                bus,
+                ready_to_receive_callback,
+                &bus.resume_receive_completion,
+                0, // Zero timeout means next tick.
+            );
+        }
+
+        fn ready_to_receive_callback(
+            bus: *MessageBus,
+            completion: *IO.Completion,
+            result: IO.TimeoutError!void,
+        ) void {
+            assert(completion == &bus.resume_receive_completion);
+            _ = result catch |e| switch (e) {
+                error.Canceled => unreachable,
+                error.Unexpected => unreachable,
+            };
+            assert(bus.resume_receive_submitted);
+            bus.resume_receive_submitted = false;
+
+            // Steal the queue to avoid an infinite loop.
+            var connections_suspended = bus.connections_suspended;
+            bus.connections_suspended.reset();
+
+            while (connections_suspended.pop()) |connecton| {
+                assert(connecton.recv_buffer != null);
+                assert(connecton.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
+                assert(connecton.recv_buffer.?.has_message());
+                connecton.call_on_messages(bus);
+            }
+        }
+
         pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
             // Messages sent by a replica to itself should never be passed to the message bus.
             if (process_type == .replica) assert(replica != bus.process.replica);
@@ -429,6 +480,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             send_progress: usize = 0,
             /// The queue of messages to send to the client or replica peer.
             send_queue: SendQueue = SendQueue.init(),
+            /// For connections_suspended.
+            link: QueueType(Connection).Link = .{},
 
             /// Attempt to connect to a replica.
             /// The slot in the Message.replicas slices is immediately reserved.
@@ -801,8 +854,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // The client connects only to replicas and should set peer when connecting:
                     .client => assert(connection.peer == .replica),
                 }
+                connection.call_on_messages(bus);
+            }
 
-                if (connection.recv_buffer.?.valid_body) {
+            fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
+                if (connection.recv_buffer.?.has_message()) {
                     bus.on_messages_callback(bus, &connection.recv_buffer.?);
                 }
 
@@ -816,7 +872,16 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
 
-                connection.recv(bus);
+                if (connection.recv_buffer.?.has_message()) {
+                    maybe(connection.state == .terminating);
+                    bus.connections_suspended.push(connection);
+                } else {
+                    if (connection.state == .terminating) {
+                        connection.maybe_close(bus);
+                    } else {
+                        connection.recv(bus);
+                    }
+                }
             }
 
             fn send(connection: *Connection, bus: *MessageBus) void {
@@ -909,6 +974,12 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // submitting a close would cause a race. Therefore we must wait for
                 // any currently submitted operation to complete.
                 if (connection.recv_submitted or connection.send_submitted) return;
+                // Even if there's no active physical IO in progress, we want to wait until all
+                // messages already received are consumed, to prevent graceful termination of
+                // connection from dropping messages.
+                if (connection.recv_buffer) |*receive_buffer| {
+                    if (receive_buffer.has_message()) return;
+                }
                 connection.send_submitted = true;
                 connection.recv_submitted = true;
                 // We can free resources now that there is no longer any I/O in progress.

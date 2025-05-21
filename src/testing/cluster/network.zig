@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
@@ -110,7 +111,18 @@ pub const Network = struct {
     }
 
     pub fn step(network: *Network) bool {
-        return network.packet_simulator.step();
+        var advanced = false;
+        for (network.buses.items) |bus| {
+            if (bus.resume_scheduled) {
+                bus.resume_scheduled = false;
+                bus.on_messages_callback(bus, &bus.buffer.?);
+                if (bus.buffer.?.has_message()) {
+                    bus.suspended = true;
+                }
+                advanced = true;
+            }
+        }
+        return network.packet_simulator.step() or advanced;
     }
 
     pub fn tick(network: *Network) void {
@@ -302,6 +314,16 @@ pub const Network = struct {
 
         const target_bus = network.buses.items[path.target];
         assert(target_bus.buffer != null);
+
+        if (target_bus.buffer.?.receive_size + message.header.size > constants.message_size_max) {
+            log.debug("deliver_message: {} > {}: {} (dropped; buffer is full)", .{
+                process_path.source,
+                process_path.target,
+                message.header.command,
+            });
+            return;
+        }
+
         stdx.copy_disjoint(
             .inexact,
             u8,
@@ -312,8 +334,12 @@ pub const Network = struct {
         target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
         assert(target_bus.buffer != null);
         assert(target_bus.buffer.?.invalid == null);
-        assert(target_bus.buffer.?.receive_size == 0);
-        assert(target_bus.buffer.?.consume_size == 0);
+        maybe(target_bus.buffer.?.receive_size > 0);
+        maybe(target_bus.buffer.?.process_size > 0);
+        if (target_bus.buffer.?.has_message()) {
+            target_bus.suspended = true;
+        }
+
         target_bus.buffer.?.peer = .unknown;
     }
 

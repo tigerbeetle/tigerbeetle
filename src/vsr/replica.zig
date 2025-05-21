@@ -1454,6 +1454,12 @@ pub fn ReplicaType(
             assert(self.loopback_queue == null);
             defer self.invariants();
 
+            if (self.message_bus.resume_needed()) {
+                // See suspend conditions in on_messages.
+                assert(self.journal.writes.available() == 0 or
+                    self.grid_repair_writes.available() == 0);
+            }
+
             // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
             self.message_bus.tick();
@@ -1500,7 +1506,16 @@ pub fn ReplicaType(
 
         pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
             var message_count: u32 = 0;
-            while (buffer.consume_message(self.message_bus.pool)) |message| {
+            while (buffer.next_header()) |header| {
+                // See tick for an assert to verify that we don't miss resumption.
+                if ((header.command == .prepare and self.journal.writes.available() == 0) or
+                    (header.command == .block and self.grid_repair_writes.available() == 0))
+                {
+                    buffer.suspend_message(&header);
+                    continue;
+                }
+
+                const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
                 assert(message.references == 1);
 
@@ -1523,8 +1538,8 @@ pub fn ReplicaType(
                     }
                 }
 
-                if (message.header.into(.request)) |header| {
-                    assert(header.client != 0 or constants.aof_recovery);
+                if (message.header.into(.request)) |request_header| {
+                    assert(request_header.client != 0 or constants.aof_recovery);
                 }
 
                 self.on_message(message);
@@ -3142,6 +3157,7 @@ pub fn ReplicaType(
             assert(message.header.address > 0);
             assert(message.header.protocol <= vsr.Version);
             maybe(message.header.protocol < vsr.Version);
+            assert(self.grid_repair_writes.available() > 0);
 
             if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.empty());
@@ -3172,33 +3188,25 @@ pub fn ReplicaType(
             if (grid_repair) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
-                if (self.grid_repair_writes.acquire()) |write| {
-                    const write_index = self.grid_repair_writes.index(write);
-                    const write_block = &self.grid_repair_write_blocks[write_index];
+                const write = self.grid_repair_writes.acquire().?;
+                const write_index = self.grid_repair_writes.index(write);
+                const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
 
-                    log.debug("{}: on_block: repairing address={} checksum={}", .{
-                        self.replica,
-                        message.header.address,
-                        message.header.checksum,
-                    });
+                log.debug("{}: on_block: repairing address={} checksum={}", .{
+                    self.replica,
+                    message.header.address,
+                    message.header.checksum,
+                });
 
-                    stdx.copy_disjoint(
-                        .inexact,
-                        u8,
-                        write_block.*,
-                        message.buffer[0..message.header.size],
-                    );
+                stdx.copy_disjoint(
+                    .inexact,
+                    u8,
+                    write_block.*,
+                    message.buffer[0..message.header.size],
+                );
 
-                    write.* = .{ .replica = self };
-                    self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
-                } else {
-                    log.debug("{}: on_block: ignoring; no write available " ++
-                        "(address={} checksum={})", .{
-                        self.replica,
-                        message.header.address,
-                        message.header.checksum,
-                    });
-                }
+                write.* = .{ .replica = self };
+                self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
 
                 self.repair_messages_budget_grid.refill(1);
 
@@ -3231,6 +3239,7 @@ pub fn ReplicaType(
             });
 
             self.sync_reclaim_tables();
+            self.message_bus.resume_receive();
         }
 
         fn on_ping_timeout(self: *Replica) void {
@@ -10369,6 +10378,8 @@ pub fn ReplicaType(
             wrote: ?*Message.Prepare,
             trigger: Journal.Write.Trigger,
         ) void {
+            self.message_bus.resume_receive();
+
             // `null` indicates that we did not complete the write for some reason.
             const message = wrote orelse return;
 
