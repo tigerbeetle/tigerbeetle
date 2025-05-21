@@ -6,6 +6,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
+const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 
 const log = std.log.scoped(.lsm_scan_fuzz);
@@ -567,6 +568,7 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
         commits_max: u32,
+        query_chance: Ratio,
     ) !void {
         assert(commits_max > 0);
         log.info("commits = {}", .{commits_max});
@@ -640,10 +642,16 @@ const Environment = struct {
             }
             try env.commit();
 
-            for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
-                const query_results_count = try env.run_query(query_spec, query_matches);
-                assert(query_results_count == query_matches.count()); // Sanity-check.
+            if (env.prng.chance(query_chance)) {
+                for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
+                    const query_results_count = try env.run_query(query_spec, query_matches);
+                    assert(query_results_count == query_matches.count()); // Sanity-check.
+                }
             }
+        }
+        for (&query_specs, &env.model_matches) |*query_spec, *query_matches| {
+            const query_results_count = try env.run_query(query_spec, query_matches);
+            assert(query_results_count == query_matches.count()); // Sanity-check.
         }
     }
 
@@ -951,7 +959,25 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         fuzz_args.events_max orelse prng.range_inclusive(u32, 1, 1024),
     );
 
-    try Environment.run(gpa, &storage, &prng, commits_max);
+    try Environment.run(gpa, &storage, &prng, commits_max, lerp_query_chance(commits_max));
 
     log.info("Passed!", .{});
+}
+
+// Fuzzer is quadratic in commit_max, so make query probability decay linearly to 10% if
+// commit_max ≥ 1_000
+fn lerp_query_chance(commits_max: u64) Ratio {
+    return ratio(
+        // See the comptime test below.
+        @max(100 - @divFloor(100 * @as(u64, @min(commits_max, 1_000)), 1_000), 10),
+        100,
+    );
+}
+
+comptime {
+    assert(lerp_query_chance(0).numerator == 100);
+    assert(lerp_query_chance(10).numerator == 99);
+    assert(lerp_query_chance(500).numerator == 50);
+    assert(lerp_query_chance(1_000).numerator == 10);
+    assert(lerp_query_chance(10_000).numerator == 10);
 }
