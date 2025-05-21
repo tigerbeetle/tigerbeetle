@@ -8,35 +8,34 @@ See [Installing](./installing.md) for instructions on how to deploy the TigerBee
 Here’s how to start the CDC job:
 
 ```console
-./tigerbeetle amqp --cluster-id=0 \
-    --addresses=3000 \
+./tigerbeetle amqp --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 --cluster=0 \
     --host=127.0.0.1 \
-    --user=guest \
-    --password=guest \
     --vhost=/ \
+    --user=guest --password=guest \
     --publish-exchange=tigerbeetle
 ```
 
 Here what the arguments mean:
 
-* `--cluster` specifies a globally unique 128 bit cluster ID.
-
 * `--addresses` specify IP addresses of all the replicas in the cluster.
   **The order of addresses must correspond to the order of replicas**.
 
+* `--cluster` specifies a globally unique 128 bit cluster ID.
+
 * `--host` the AMQP host address in the format `ip:port`.<br>
-  Both IPv4 and IPv6 addresses are supported. If `port` is omitted, the default is `5672`.<br>
-  Multiple addresses (for clustered environments) and DNS names are not supported.<br>
+  Both IPv4 and IPv6 addresses are supported.
+  If `port` is omitted, the AMQP default `5672` is used.<br>
+  Multiple addresses (for clustered environments) and DNS names are **not supported**.<br>
   The operator must resolve the IP address of the preferred/reachable server.<br>
   The CDC job will exit with a non-zero code in case of any connectivity or configuration issue
   with the AMQP server.
+
+* `--vhost` the AMQP virtual host name.
 
 * `--user` the AMQP username.
 
 * `--password` the AMQP password.<br>
    Only PLAIN authentication is supported.
-
-* `--vhost` the AMQP virtual host name.
 
 * `--publish-exchange` the exchange name.<br>
   Must be a pre-existing exchange provided by the operator.<br>
@@ -66,7 +65,7 @@ Message headers:
 
 | Key                   | AMQP data type     | Description                              |
 |-----------------------|--------------------|------------------------------------------|
-| `event_type`          | `string`           | The event type.¹                         |
+| `event_type`          | `string`           | The event type.                          |
 | `ledger`              | `long_uint`        | The ledger of the transfer and accounts. |
 | `transfer_code`       | `short_uint`       | The transfer code.                       |
 | `debit_account_code`  | `short_uint`       | The debit account code.                  |
@@ -74,20 +73,37 @@ Message headers:
 | `app_id`              | `string`           | Constant `tigerbeetle`.                  |
 | `content_type`        | `string`           | Constant `application/json`              |
 | `delivery_mode`       | `short_short_uint` | Constant `2` which means _persistent_.   |
-| `timestamp`           | `timestamp`        | The event timestamp.²                    |
+| `timestamp`           | `timestamp`        | The event timestamp.¹                    |
 
-
-> ¹ _One of `single_phase`, `two_phase_pending`, `two_phase_posted`, `two_phase_voided` or
-  `two_phase_expired`._
-
-> ² _It's the transfer's timestamp, except when `event_type == 'two_phase_expired'` when
-  it's the expiry timestamp.<br>
-  The AMQP standard is in seconds, so TigerBeetle timestamps are truncated.
-  Use the message body timestamp for the full precision._
+> ¹ _AMQP timestamps are represented in seconds, so TigerBeetle timestamps are truncated.<br>
+    Use the `timestamp` field in the message body for full nanosecond precision._
 
 Message body:
 
-The message body is encoded as JSON without line breaks or spaces.
+Each _event_ published contains information about the [transfer](../reference/transfer.md)
+and the [account](../reference/account.md)s involved.
+
+* `type`: The type of event.<br>
+  One of `single_phase`, `two_phase_pending`, `two_phase_posted`, `two_phase_voided` or
+  `two_phase_expired`.<br>
+  See the [Two-Phase Transfers](../coding/two-phase-transfers.md) for more details.
+
+* `timestamp`: The event timestamp.<br>
+  Usually, it's the same as the transfer's timestamp,
+  except when `event_type == 'two_phase_expired'` when it's the expiry timestamp.
+
+* `ledger`: The [ledger](../coding/data-modeling.md#ledgers) code.
+
+* `transfer`: Full details of the [transfer](../reference/transfer.md).<br>
+  For `two_phase_expired` events, it's the pending transfer that was reverted.
+
+* `debit_account`: Full details of the [debit account](../reference/transfer.md#debit_account_id),
+  with the balance _as of_ the time of the event.
+
+* `credit_account`: Full details of the [credit account](../reference/transfer.md#credit_account_id),
+  with the balance _as of_ the time of the event.
+
+The message body is encoded as a UTF-8 JSON without line breaks or spaces.
 Long integers such as `u128` and `u64` are encoded as JSON strings to improve interoperability.
 
 Here is a formatted example (with indentation and line breaks) for readability.
@@ -145,4 +161,4 @@ and makes a best effort to prevent duplicate messages.
 However, during crash recovery, the CDC job may replay unacknowledged messages that could have
 been already delivered to consumers.
 
-**It is the consumer's responsibility to perform idempotency checks.**
+It is the consumer's responsibility to perform **idempotency checks** when processing messages.
