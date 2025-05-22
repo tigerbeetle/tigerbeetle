@@ -382,6 +382,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             };
             assert(bus.resume_receive_submitted);
             bus.resume_receive_submitted = false;
+            maybe(bus.connections_suspended.empty());
 
             // Steal the queue to avoid an infinite loop.
             var connections_suspended = bus.connections_suspended;
