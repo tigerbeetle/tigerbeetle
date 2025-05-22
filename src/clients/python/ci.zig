@@ -43,7 +43,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
 
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
-        try shell.exec("python3 -m pytest tests/", .{});
+        try shell.exec("python3 -m pytest -s tests/", .{});
     }
 
     inline for ([_][]const u8{ "basic", "two-phase", "two-phase-many", "walkthrough" }) |sample| {
