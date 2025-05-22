@@ -1455,7 +1455,7 @@ pub fn ReplicaType(
             defer self.invariants();
 
             if (self.message_bus.resume_needed()) {
-                // See suspend conditions in on_messages.
+                // See fn suspend_message conditions.
                 assert(self.journal.writes.available() == 0 or
                     self.grid_repair_writes.available() == 0);
             }
@@ -1506,25 +1506,25 @@ pub fn ReplicaType(
 
         pub fn on_messages(self: *Replica, buffer: *MessageBuffer) void {
             var message_count: u32 = 0;
+            var message_suspended_count: u32 = 0;
             while (buffer.next_header()) |header| {
-                // See tick for an assert to verify that we don't miss resumption.
-                if ((header.command == .prepare and self.journal.writes.available() == 0) or
-                    (header.command == .block and self.grid_repair_writes.available() == 0))
-                {
+                message_count += 1;
+
+                if (header.cluster != self.cluster) {
+                    buffer.invalidate(.header_cluster);
+                    return;
+                }
+
+                if (self.suspend_message(&header)) {
                     buffer.suspend_message(&header);
+                    message_suspended_count += 1;
                     continue;
                 }
 
                 const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
+
                 assert(message.references == 1);
-
-                message_count += 1;
-
-                if (message.header.cluster != self.cluster) {
-                    buffer.invalidate(.header_cluster);
-                    return;
-                }
 
                 if (message.header.command == .request or
                     message.header.command == .prepare or
@@ -1546,11 +1546,42 @@ pub fn ReplicaType(
             }
 
             if (message_count > constants.bus_message_burst_warn_min) {
-                log.warn("{}: on_messages: message count={}", .{ self.replica, message_count });
+                log.warn("{}: on_messages: message count={} suspended={}", .{
+                    self.replica,
+                    message_count,
+                    message_suspended_count,
+                });
             }
         }
 
-        pub fn on_message(self: *Replica, message: *Message) void {
+        // See fn tick for an assert to verify that we don't miss resumption.
+        fn suspend_message(self: *const Replica, header: *const Header) bool {
+            switch (header.into_any()) {
+                .prepare => |header_prepare| if (self.journal.writes.available() == 0) {
+                    log.warn("{}: on_messages: suspending command=prepare " ++
+                        "op={} view={} checksum={}", .{
+                        self.replica,
+                        header_prepare.op,
+                        header_prepare.view,
+                        header_prepare.checksum,
+                    });
+                    return true;
+                },
+                .block => |header_block| if (self.grid_repair_writes.available() == 0) {
+                    log.warn("{}: on_messages: suspending command=block " ++
+                        "address={} checksum={}", .{
+                        self.replica,
+                        header_block.address,
+                        header_block.checksum,
+                    });
+                    return true;
+                },
+                else => {},
+            }
+            return false;
+        }
+
+        fn on_message(self: *Replica, message: *Message) void {
             assert(self.opened);
             assert(self.loopback_queue == null);
             assert(message.references > 0);
@@ -2013,7 +2044,7 @@ pub fn ReplicaType(
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
-                log.debug("{}: on_prepare_ok: not preparing ok={} checksum={}", .{
+                log.debug("{}: on_prepare_ok: not preparing op={} checksum={}", .{
                     self.replica,
                     message.header.op,
                     message.header.prepare_checksum,
