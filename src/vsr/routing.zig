@@ -371,7 +371,7 @@ pub fn route_decode(routing: *const Routing, code: u64) ?Route {
 test route_decode {
     var prng = stdx.PRNG.from_seed(92);
     var valid: u32 = 0;
-    for (0..100_000) |_| {
+    for (0..200_000) |_| {
         const replica_count = prng.range_inclusive(u8, 1, constants.replicas_max);
 
         var code_bytes: [8]u8 = .{0} ** 8;
@@ -381,7 +381,11 @@ test route_decode {
             else
                 0xFF;
         }
-        const code: u64 = @bitCast(code_bytes);
+        var code: u64 = @bitCast(code_bytes);
+
+        if (prng.chance(ratio(1, 20))) {
+            code ^= @as(u64, 1) << prng.int_inclusive(u6, @bitSizeOf(u64) - 1);
+        }
 
         var routing = Routing.init(.{
             .replica = prng.int_inclusive(u8, replica_count - 1),
