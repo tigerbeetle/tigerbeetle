@@ -375,7 +375,7 @@ pub const Header = extern struct {
         ping_timestamp_monotonic: u64,
         release_count: u16,
         route_padding: [6]u8 = [_]u8{0} ** 6,
-        route: u64 = 0,
+        route: u64,
 
         reserved: [80]u8 = [_]u8{0} ** 80,
 
