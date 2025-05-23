@@ -3,6 +3,32 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.42
+
+Released: 2025-05-23
+
+### Safety And Performance
+
+- [#2980](https://github.com/tigerbeetle/tigerbeetle/pull/2980)
+
+  Fix assert in `fulfill_block`, if a replica receives a block that it didn't ask for from a newer
+  replica.
+
+### Internals
+
+- [#2973](https://github.com/tigerbeetle/tigerbeetle/pull/2973)
+
+  Extract the parsing parts of MessageBus into a sans-IO style ReceiveBuffer, that'll be used for
+  the [upcoming](https://github.com/tigerbeetle/tigerbeetle/pull/2970) pull based MessageBus.
+
+- [#2979](https://github.com/tigerbeetle/tigerbeetle/pull/2979)
+
+  Speed up the LSM scan fuzzer.
+
+### TigerTracks 🎧
+
+- [Knowing Me, Knowing You](https://www.youtube.com/watch?v=iUrzicaiRLU)
+
 ## TigerBeetle 0.16.41
 
 Released: 2025-05-16
