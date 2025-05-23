@@ -5,6 +5,8 @@ const maybe = stdx.maybe;
 const log = std.log.scoped(.vsr);
 
 // vsr.zig is the root of a zig package, reexport all public APIs.
+//? dj: Why is this line in the middle of a comment?
+//? resolved.
 //
 // Note that we don't promise any stability of these interfaces yet.
 pub const cdc = @import("cdc/runner.zig");
@@ -869,6 +871,8 @@ pub fn parse_addresses(
 pub fn parse_address_and_port(
     options: struct {
         string: []const u8,
+        //? dj: Let's remove the default value for consistency and just always pass this in.
+        //? resolved.
         port_default: u16,
     },
 ) !std.net.Address {
