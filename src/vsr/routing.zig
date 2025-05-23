@@ -167,6 +167,8 @@ const Cost = struct {
             rhs.ns * threshold.denominator;
     }
 
+    //? dj: I would call this "average"; I don't think it warrants abbreviation.
+    //? resolved.
     fn average(lhs: Cost, rhs: Cost) Cost {
         return .{
             .median = .{ .ns = @divFloor(lhs.median.ns + rhs.median.ns, 2) },
@@ -219,6 +221,12 @@ pub fn init(options: struct {
     };
 }
 
+//? dj: I was initially thinking that we could initialize the route using what we know of the
+//? topology from the old route... but not only would that be more complicated, but if the view
+//? changed then the topology has probably changed anyhow.
+//?
+//? matklad: Yeah, precisely! We are changing view because the old path didn't work.
+//? resolved.
 pub fn view_change(routing: *Routing, view: u32) void {
     assert(view > routing.view or (view == 0 and routing.view == 0));
     assert(routing.history_empty());
@@ -382,6 +390,12 @@ test route_decode {
                 0xFF;
         }
         var code: u64 = @bitCast(code_bytes);
+        //? dj: We could increase the space fuzzed here by occasionally flipping a single bit within
+        //? the code. (To make sure that we catch involved replica indexes with validation rather
+        //? than assertions.)
+        //?
+        //? matklad: Great suggestion, thanks!
+        //? resolved.
 
         if (prng.chance(ratio(1, 20))) {
             code ^= @as(u64, 1) << prng.int_inclusive(u6, @bitSizeOf(u64) - 1);
@@ -430,6 +444,10 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
     if (routing.replica < routing.replica_count) {
         // Normal replication: replicate to 0-2 other replicas using a dynamic route.
 
+        //? dj: What do you think of referring to this as a replica_position, since replica_index is
+        //? also what `routing.replica` is.
+        //? matklad: Excellent name, thanks!
+        //? resolved.
         const replica_position = std.mem.indexOfScalar(u8, route.const_slice(), routing.replica).?;
 
         if (replica_position <= primary_position and replica_position > 0) {
@@ -459,6 +477,10 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
 }
 
 pub fn op_prepare(routing: *Routing, op: u64, now: Instant) void {
+    //? dj: This seems like a useful assert in several different places so maybe we should add a
+    //? routing.primary() function.
+    //? matklad: yup!
+    //? resolved.
     assert(routing.primary());
     assert(op != 0); // Root ops is never prepared.
     const slot = op % history_max;
@@ -510,6 +532,15 @@ fn op_finalize(
 
             const slot = experiment % history_max;
             if (routing.history[slot].op != experiment) {
+                //? dj: What about "Haven't started both experiments yet."? The current version
+                //? makes it sound like we are waiting for both sets of results, which is not the
+                //? case afaict.
+                //?
+                //? matklad: Tricky! "Haven't started both" would be incorrect for the same reason:
+                //? we did start one! And it also could be that the other experiment is already
+                //? evicted (this is common case, we evict one, and then the other). Tried to
+                //? clarify a bit
+                //? resolved.
                 // Don't have data for the other experiment yet.
                 return;
             }
@@ -521,6 +552,19 @@ fn op_finalize(
         }
         assert(cost_average != null);
 
+        //? dj: I think that it would be simpler to remove the preceding early return and replace
+        //? the below condition with this:
+        //?
+        //?     if ((reason == .evicted and replicated_fully_count < 2) or
+        //?         (reason == .replicated_fully and replicated_fully_count == 2))
+        //?     {
+        //?
+        //? Even though the condition is composite it is imo easier to understand since it is all in
+        //? one place, and the branches are mirrors.
+        //?
+        //? matklad: Yeah, getting rid of both early returns looks better, thanks!
+        //? State invariants positively!
+        //? resolved.
         if ((reason == .replicated_fully and replicated_fully_count == 2) or
             (reason == .evicted and replicated_fully_count < 2))
         {
@@ -532,6 +576,10 @@ fn op_finalize(
     } else {
         const slot = op % history_max;
 
+        //? dj: This early return means that in order to understand the code below you have to
+        //? implicitly negate this condition, which is complicated. What about instead describing
+        //? positively?
+        //? resolved.
         if (reason == .replicated_fully or
             (reason == .evicted and routing.history[slot].present.count() < routing.replica_count))
         {
@@ -575,6 +623,10 @@ fn history_cost(routing: *const Routing, op: u64) Cost {
     assert(routing.history[slot].op == op);
     assert(routing.history[slot].present.count() <= routing.replica_count);
 
+    //? dj: Maybe add an explicit type signature here to make it clear that the reason this is
+    //? broken out into a separate variable is to ensure that it is copied so that the sort doesn't
+    //? mutate the original version.
+    //? resolved.
     var latencies_buffer: [constants.replicas_max]Duration = routing.history[slot].prepare_ok;
     const latencies = latencies_buffer[0..routing.replica_count];
     // Use a simpler sort for code size.
