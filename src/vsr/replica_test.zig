@@ -2640,7 +2640,8 @@ const TestClientBus = struct {
 
     fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer) void {
         const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
-        while (buffer.consume_message(t.message_pool)) |message| {
+        while (buffer.next_header()) |header| {
+            const message = buffer.consume_message(t.message_pool, &header);
             defer t.message_pool.unref(message);
 
             assert(message.header.cluster == t.context.cluster.options.cluster_id);
