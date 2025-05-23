@@ -167,7 +167,7 @@ const Cost = struct {
             rhs.ns * threshold.denominator;
     }
 
-    fn avg(lhs: Cost, rhs: Cost) Cost {
+    fn average(lhs: Cost, rhs: Cost) Cost {
         return .{
             .median = .{ .ns = @divFloor(lhs.median.ns + rhs.median.ns, 2) },
             .maximum = .{ .ns = @divFloor(lhs.maximum.ns + rhs.maximum.ns, 2) },
@@ -502,7 +502,7 @@ fn op_finalize(
 
     if (routing.op_route_b(op)) |route_b| {
         var replicated_fully_count: u8 = 0;
-        var cost_avg: ?Cost = null;
+        var cost_average: ?Cost = null;
 
         for ([2]u64{ op, op ^ 1 }) |experiment| {
             assert(std.meta.eql(routing.op_route_b(experiment), route_b));
@@ -516,9 +516,9 @@ fn op_finalize(
             replicated_fully_count +=
                 @intFromBool(routing.history[slot].present.count() == routing.replica_count);
             const new = routing.history_cost(experiment);
-            cost_avg = if (cost_avg) |old| Cost.avg(old, new) else new;
+            cost_average = if (cost_average) |old| Cost.average(old, new) else new;
         }
-        assert(cost_avg != null);
+        assert(cost_average != null);
 
         if (reason == .evicted and replicated_fully_count == 2) {
             // Already accounted for on .replicated_fully.
@@ -526,9 +526,9 @@ fn op_finalize(
         }
 
         if (reason == .evicted or replicated_fully_count == 2) {
-            if (routing.b_cost == null or Cost.less(cost_avg.?, routing.b_cost.?)) {
+            if (routing.b_cost == null or Cost.less(cost_average.?, routing.b_cost.?)) {
                 routing.b = route_b;
-                routing.b_cost = cost_avg.?;
+                routing.b_cost = cost_average.?;
             }
         }
     } else {
