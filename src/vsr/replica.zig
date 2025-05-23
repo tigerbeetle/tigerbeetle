@@ -7969,8 +7969,9 @@ pub fn ReplicaType(
                 assert(replica_target != self.replica);
                 assert(replica_target != self.view % self.replica_count);
                 assert(replica_target < self.replica_count + self.standby_count);
-                log.debug("{}: replicate: replicating to replica {}", .{
+                log.debug("{}: replicate: replicating op={} to replica {}", .{
                     self.replica,
+                    message.header.op,
                     replica_target,
                 });
                 self.send_message_to_replica(replica_target, message);

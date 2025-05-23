@@ -154,17 +154,17 @@ const Cost = struct {
             .{ "sum", ratio(1, 20) },
         }) |field_threshold| {
             const field, const threshold = field_threshold;
-            if (less_signifiantly(@field(lhs, field), @field(rhs, field), threshold)) return true;
+            if (less_significantly(@field(lhs, field), @field(rhs, field), threshold)) return true;
             if (@field(lhs, field).ns > @field(rhs, field).ns) return false;
         }
         return false;
     }
 
     // Returns true if lhs + lhs⋅threshold < rhs.
-    fn less_signifiantly(lhs: Duration, rhs: Duration, thershold: Ratio) bool {
-        assert(thershold.numerator < thershold.denominator);
-        return lhs.ns * (thershold.numerator + thershold.denominator) <
-            rhs.ns * thershold.denominator;
+    fn less_significantly(lhs: Duration, rhs: Duration, threshold: Ratio) bool {
+        assert(threshold.numerator < threshold.denominator);
+        return lhs.ns * (threshold.numerator + threshold.denominator) <
+            rhs.ns * threshold.denominator;
     }
 
     fn avg(lhs: Cost, rhs: Cost) Cost {
@@ -288,6 +288,7 @@ fn route_random(prng: *stdx.PRNG, view: u32, replica_count: u8) Route {
 }
 
 pub fn route_encode(routing: *const Routing, route: Route) u64 {
+    comptime assert(constants.replicas_max <= @sizeOf(u64));
     assert(routing.route_valid(route));
     var code: u64 = 0;
     for (0..@sizeOf(u64)) |index| {
@@ -324,7 +325,7 @@ test route_encode {
             assert(route.count() == replica_count);
             assert(pool.count() == 0);
 
-            const primary = route.const_slice()[@divFloor(route.count(), 2)];
+            const primary = route.get(@divFloor(route.count(), 2));
             var routing = Routing.init(.{
                 .replica = primary,
                 .replica_count = @intCast(replica_count),
@@ -439,8 +440,8 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
             (replica_index == primary_index and routing.replica_count >= 3));
         if (routing.standby_count > 0) {
             if (replica_index == 0) {
-                const frist_standby = routing.replica_count;
-                result.append_assume_capacity(frist_standby);
+                const first_standby = routing.replica_count;
+                result.append_assume_capacity(first_standby);
             }
         }
     } else {
@@ -454,6 +455,8 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
 }
 
 pub fn op_prepare(routing: *Routing, op: u64, now: Instant) void {
+    const primary: u8 = @intCast(routing.view % routing.replica_count);
+    assert(primary == routing.replica);
     assert(op != 0); // Root ops is never prepared.
     const slot = op % history_max;
     if (routing.history[slot].op != 0) {
@@ -467,7 +470,9 @@ pub fn op_prepare(routing: *Routing, op: u64, now: Instant) void {
 }
 
 pub fn op_prepare_ok(routing: *Routing, op: u64, replica: u8, now: Instant) void {
-    // Replicas can ack the root op after repair. While can prevent replicas from sending such
+    const primary: u8 = @intCast(routing.view % routing.replica_count);
+    assert(primary == routing.replica);
+    // Replicas can ack the root op after repair. While we can prevent replicas from sending such
     // prepare_ok that will make the protocol more complex. Instead, ignore op=0 here and treat it
     // as empty slot elsewhere.
     if (op == 0) return;
@@ -486,7 +491,14 @@ fn op_finalize(
     op: u64,
     reason: enum { evicted, replicated_fully },
 ) void {
+    const primary: u8 = @intCast(routing.view % routing.replica_count);
+    assert(primary == routing.replica);
+    assert(op != 0);
     assert(routing.history[op % history_max].op == op);
+    assert(routing.history[op % history_max].present.count() <= routing.replica_count);
+    if (reason == .replicated_fully) {
+        assert(routing.history[op % history_max].present.count() == routing.replica_count);
+    }
 
     if (routing.op_route_b(op)) |route_b| {
         var replicated_fully_count: u8 = 0;
@@ -564,6 +576,8 @@ pub fn history_reset(routing: *Routing) void {
 
 fn history_cost(routing: *const Routing, op: u64) Cost {
     const slot = op % history_max;
+    assert(routing.history[slot].op == op);
+    assert(routing.history[slot].present.count() <= routing.replica_count);
 
     var latencies_buffer = routing.history[slot].prepare_ok;
     const latencies = latencies_buffer[0..routing.replica_count];
