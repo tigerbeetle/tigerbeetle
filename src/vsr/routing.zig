@@ -583,7 +583,7 @@ fn history_cost(routing: *const Routing, op: u64) Cost {
     assert(routing.history[slot].op == op);
     assert(routing.history[slot].present.count() <= routing.replica_count);
 
-    var latencies_buffer = routing.history[slot].prepare_ok;
+    var latencies_buffer: [constants.replicas_max]Duration = routing.history[slot].prepare_ok;
     const latencies = latencies_buffer[0..routing.replica_count];
     // Use a simpler sort for code size.
     assert(latencies.len < 16);
