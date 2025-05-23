@@ -373,9 +373,15 @@ pub const Header = extern struct {
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
+        //? dj: Positioning the field here is nice for alignment, but makes the upgrade more
+        //? complicated than if we just appended the field after release_count.
+        //? matklad: Indeed!
+        //? resolved.
         release_count: u16,
+        route_padding: [6]u8 = [_]u8{0} ** 6,
+        route: u64,
 
-        reserved: [94]u8 = [_]u8{0} ** 94,
+        reserved: [80]u8 = [_]u8{0} ** 80,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -390,6 +396,7 @@ pub const Header = extern struct {
             if (self.release_count > constants.vsr_releases_max) {
                 return "release_count > vsr_releases_max";
             }
+            if (!stdx.zeroed(&self.route_padding)) return "route_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
