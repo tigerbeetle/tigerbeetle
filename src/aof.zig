@@ -6,19 +6,19 @@ const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 
 const stdx = @import("stdx.zig");
-const IO = @import("io.zig").IO;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
-const Storage = vsr.storage.StorageType(IO, Tracer);
-const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
-
 const Header = vsr.Header;
-const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
+
 const log = std.log.scoped(.aof);
 
 const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
+
+const IOTest = @import("testing/io.zig").IO;
+const IOProd = @import("io.zig").IO;
+const AOFIterator = IteratorType(IOProd);
 
 pub const AOFEntry = extern struct {
     /// In case of extreme corruption, start each entry with a fixed random integer,
@@ -102,11 +102,12 @@ pub const AOFEntry = extern struct {
     }
 };
 
-pub fn IteratorType(comptime File: type) type {
+pub fn IteratorType(comptime IO: type) type {
     return struct {
         const Iterator = @This();
 
-        file: File,
+        io: *IO,
+        file_descriptor: IO.fd_t,
         size: u64,
         offset: u64 = 0,
 
@@ -116,10 +117,8 @@ pub fn IteratorType(comptime File: type) type {
         pub fn next(it: *Iterator, target: *AOFEntry) !?*AOFEntry {
             if (it.offset >= it.size) return null;
 
-            try it.file.seekTo(it.offset);
-
             const buf = std.mem.asBytes(target);
-            const bytes_read = try it.file.readAll(buf);
+            const bytes_read = try it.io.read_blocking(it.file_descriptor, buf, it.offset);
 
             // size_disk relies on information that was stored on disk, so further verify we have
             // read at least the minimum permissible.
@@ -161,7 +160,7 @@ pub fn IteratorType(comptime File: type) type {
         }
 
         pub fn close(it: *Iterator) void {
-            it.file.close();
+            it.io.close_blocking(it.file_descriptor);
         }
 
         /// Try skip ahead to the next entry in a potentially corrupted AOF file
@@ -171,10 +170,12 @@ pub fn IteratorType(comptime File: type) type {
             var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
             defer allocator.free(skip_buffer);
 
-            try it.file.seekTo(it.offset);
-
             while (it.offset < it.size) {
-                const bytes_read = try it.file.readAll(skip_buffer);
+                const bytes_read = try it.io.read_blocking(
+                    it.file_descriptor,
+                    skip_buffer,
+                    it.offset,
+                );
                 const offset = std.mem.indexOfPos(
                     u8,
                     skip_buffer[0..bytes_read],
@@ -197,174 +198,224 @@ pub fn IteratorType(comptime File: type) type {
 /// which make things trickier. If you want to compare AOFs between runs, the `debug`
 /// CLI command does it by hashing together all checksum_body, operation and timestamp
 /// fields.
-pub const AOF = struct {
-    file: std.fs.File,
-    last_checksum: ?u128 = null,
-    io: *IO,
+pub fn AOFType(comptime IO: type) type {
+    return struct {
+        const AOF = @This();
 
-    state: union(enum) {
-        /// Store the number of unflushed entries - that is, calls to write() without checkpoint()
-        /// to ensure we don't ever buffer more than the WAL can hold.
-        writing: struct { unflushed: u64 },
+        io: *IO,
+        file_descriptor: IO.fd_t,
+        last_checksum: ?u128 = null,
 
-        /// Keep an opaque pointer to the replica to workaround AOF being ?*AOF in Replica, and
-        /// @fieldParentPtr being cumbersome with that.
-        checkpoint: struct {
-            replica: *anyopaque,
-            replica_callback: *const fn (*anyopaque) void,
-            fsync_completion: IO.Completion,
-        },
-    } = .{ .writing = .{ .unflushed = 0 } },
+        state: union(enum) {
+            /// Store the number of unflushed entries - that is, calls to write() without
+            /// checkpoint() to ensure we don't ever buffer more than the WAL can hold.
+            writing: struct { unflushed: u64 },
 
-    /// Create an AOF in the dir_fd when given a file name. dir_fd must be opened read write
-    /// (except on Windows). This ensures everything (including the dir) is fsync'd appropriately.
-    /// Closing dir_fd is the responsibility of the caller.
-    pub fn init(dir_fd: std.posix.fd_t, relative_path: []const u8, io: *IO) !AOF {
-        assert(!std.fs.path.isAbsolute(relative_path));
-
-        const dir = std.fs.Dir{ .fd = dir_fd };
-        // Closing dir_fd is up to the caller.
-
-        const file = try dir.createFile(relative_path, .{
-            .read = true,
-            .truncate = false,
-            .exclusive = false,
-            .lock = .exclusive,
-        });
-
-        try file.sync();
-
-        // We cannot fsync the directory handle on Windows.
-        // We have no way to open a directory with write access.
-        if (builtin.os.tag != .windows) {
-            try std.posix.fsync(dir.fd);
-        }
-
-        try file.seekFromEnd(0);
-
-        return .{
-            .file = file,
-            .io = io,
-        };
-    }
-
-    /// If a message should be replayed when recovering the AOF. This allows skipping over things
-    /// like lookup_ and queries, that have no affect on the final state, but take up a lot of time
-    /// when replaying.
-    pub fn replay_message(header: *Header.Prepare) bool {
-        if (header.operation.vsr_reserved()) return false;
-        const state_machine_operation = header.operation.cast(StateMachine);
-        switch (state_machine_operation) {
-            .create_accounts, .create_transfers => return true,
-
-            // Pulses are replayed to handle pending transfer expiry.
-            .pulse => return true,
-
-            else => return false,
-        }
-    }
-
-    pub fn close(self: *AOF) void {
-        self.file.close();
-        self.file = undefined;
-    }
-
-    /// Write a message to disk, with standard blocking IO but using the OS's page cache. The AOF
-    /// borrows durability from the write ahead log: if the AOF hasn't been flushed, and the machine
-    /// loses power, the op is guaranteed to still be in the WAL.
-    pub fn write(self: *AOF, message: *const Message.Prepare) !void {
-        assert(self.state == .writing);
-        assert(self.state.writing.unflushed < constants.journal_slot_count);
-
-        var entry: AOFEntry align(constants.sector_size) = undefined;
-        entry.from_message(
-            message,
-            &self.last_checksum,
-        );
-
-        const size_disk = entry.size_disk();
-
-        const bytes = std.mem.asBytes(&entry);
-        try self.file.writeAll(bytes[0..size_disk]);
-
-        self.state.writing.unflushed += 1;
-    }
-
-    pub fn sync(self: *AOF) void {
-        assert(self.state == .writing);
-        assert(self.state.writing.unflushed <= constants.journal_slot_count);
-        self.state.writing.unflushed = 0;
-    }
-
-    pub fn checkpoint(self: *AOF, replica: *anyopaque, callback: *const fn (*anyopaque) void) void {
-        assert(self.state == .writing);
-        assert(self.state.writing.unflushed <= constants.journal_slot_count);
-
-        self.state = .{
-            .checkpoint = .{
-                .replica = replica,
-                .fsync_completion = undefined,
-                .replica_callback = callback,
+            /// Keep an opaque pointer to the replica to workaround AOF being ?*AOF in Replica, and
+            /// @fieldParentPtr being cumbersome with that.
+            checkpoint: struct {
+                replica: *anyopaque,
+                replica_callback: *const fn (*anyopaque) void,
+                fsync_completion: IO.Completion,
             },
-        };
+        } = .{ .writing = .{ .unflushed = 0 } },
+        size: usize = 0,
 
-        self.io.fsync(
-            *AOF,
-            self,
-            on_fsync,
-            &self.state.checkpoint.fsync_completion,
-            self.file.handle,
-        );
-    }
+        /// Create an AOF in the dir_fd when given a file name. dir_fd must be opened read write
+        /// (except on Windows). This ensures everything (including the dir) is fsync'd
+        /// appropriately. Closing dir_fd is the responsibility of the caller.
+        pub fn init(
+            io: *IO,
+            options: struct {
+                dir_fd: IO.fd_t,
+                relative_path: []const u8,
+            },
+        ) !AOF {
+            assert(!std.fs.path.isAbsolute(options.relative_path));
+            assert(IO != IOTest);
 
-    fn on_fsync(self: *AOF, completion: *IO.Completion, result: IO.FsyncError!void) void {
-        _ = completion;
-        _ = result catch @panic("aof fsync failure");
+            const dir = std.fs.Dir{
+                .fd = options.dir_fd,
+            };
+            // Closing dir_fd is up to the caller.
 
-        assert(self.state == .checkpoint);
-        const replica = self.state.checkpoint.replica;
-        const replica_callback = self.state.checkpoint.replica_callback;
-        self.state = .{ .writing = .{ .unflushed = 0 } };
+            const file = try dir.createFile(options.relative_path, .{
+                .read = true,
+                .truncate = false,
+                .exclusive = false,
+                .lock = .exclusive,
+            });
 
-        replica_callback(replica);
-    }
+            try file.sync();
 
-    pub const Iterator = IteratorType(std.fs.File);
+            // We cannot fsync the directory handle on Windows.
+            // We have no way to open a directory with write access.
+            if (builtin.os.tag != .windows) {
+                try std.posix.fsync(dir.fd);
+            }
 
-    /// Return an iterator into an AOF, to read entries one by one. This also validates
-    /// that both the header and body checksums of the read entry are valid, and that
-    /// all checksums chain correctly.
-    pub fn iterator(path: []const u8) !Iterator {
-        const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
-        errdefer file.close();
+            try file.seekFromEnd(0);
+            return AOF{
+                .io = io,
+                .file_descriptor = file.handle,
+            };
+        }
 
-        const size = (try file.stat()).size;
+        pub fn close(self: *AOF) void {
+            self.io.close_blocking(self.file_descriptor);
+        }
 
-        return Iterator{ .file = file, .size = size };
-    }
-};
+        /// Write a message to disk, with standard blocking IO but using the OS's page cache. The
+        /// AOF borrows durability from the write ahead log: if the AOF hasn't been flushed, and the
+        /// machine loses power, the op is guaranteed to still be in the WAL.
+        pub fn write(self: *AOF, message: *const Message.Prepare) !void {
+            assert(self.state == .writing);
+            assert(self.state.writing.unflushed < constants.journal_slot_count);
+
+            var entry: AOFEntry align(constants.sector_size) = undefined;
+            entry.from_message(
+                message,
+                &self.last_checksum,
+            );
+
+            const size_disk = entry.size_disk();
+            const bytes = std.mem.asBytes(&entry);
+
+            try self.io.write_blocking(self.file_descriptor, bytes[0..size_disk]);
+
+            self.size += size_disk;
+            self.state.writing.unflushed += 1;
+        }
+
+        pub fn sync(self: *AOF) void {
+            assert(self.state == .writing);
+            assert(self.state.writing.unflushed <= constants.journal_slot_count);
+            self.state.writing.unflushed = 0;
+        }
+
+        pub fn checkpoint(
+            self: *AOF,
+            replica: *anyopaque,
+            callback: *const fn (*anyopaque) void,
+        ) void {
+            assert(self.state == .writing);
+            assert(self.state.writing.unflushed <= constants.journal_slot_count);
+
+            self.state = .{
+                .checkpoint = .{
+                    .replica = replica,
+                    .fsync_completion = undefined,
+                    .replica_callback = callback,
+                },
+            };
+
+            self.io.fsync(
+                *AOF,
+                self,
+                on_fsync,
+                &self.state.checkpoint.fsync_completion,
+                self.file_descriptor,
+            );
+        }
+
+        fn on_fsync(self: *AOF, completion: *IO.Completion, result: IO.FsyncError!void) void {
+            _ = completion;
+            _ = result catch @panic("aof fsync failure");
+
+            assert(self.state == .checkpoint);
+            const replica = self.state.checkpoint.replica;
+            const replica_callback = self.state.checkpoint.replica_callback;
+            self.state = .{ .writing = .{ .unflushed = 0 } };
+
+            replica_callback(replica);
+        }
+
+        pub fn validate(self: *AOF, allocator: std.mem.Allocator, last_checksum: ?u128) !void {
+            assert(IO == IOTest);
+
+            var validation_target: AOFEntry = undefined;
+
+            var validation_checksums = std.AutoHashMap(u128, void).init(allocator);
+            defer validation_checksums.deinit();
+
+            var it = IteratorType(IOTest){
+                .file_descriptor = self.file_descriptor,
+                .io = self.io,
+                .size = self.size,
+            };
+
+            // The iterator only does simple chain validation, but we can have backtracking
+            // or duplicates, and still have a valid AOF. Handle this by keeping track of
+            // every checksum we've seen so far, and considering it OK as long as we've seen
+            // a parent.
+            it.validate_chain = false;
+
+            var last_entry: ?*AOFEntry = null;
+
+            while (try it.next(&validation_target)) |entry| {
+                const header = entry.header();
+
+                if (entry.header().op == 1) {
+                    // For op=1, put its parent in our list of seen checksums too.
+                    // This handles the case where it gets replayed, but we don't record
+                    // op=0 so the assert below would fail.
+                    // It's needed for simulator validation only (aof merge uses a
+                    // different method to walk down AOF entries).
+                    try validation_checksums.put(header.parent, {});
+                } else {
+                    // (Null due to state sync skipping commits.)
+                    stdx.maybe(validation_checksums.get(header.parent) == null);
+                }
+
+                try validation_checksums.put(header.checksum, {});
+
+                last_entry = entry;
+            }
+
+            if (last_checksum) |checksum| {
+                if (last_entry.?.header().checksum != checksum) {
+                    return error.ChecksumMismatch;
+                }
+                log.debug("validated all aof entries. last entry checksum {} matches " ++
+                    " supplied {}", .{ last_entry.?.header().checksum, checksum });
+            } else {
+                log.debug("validated present aof entries.", .{});
+            }
+        }
+
+        pub fn reset(self: *AOF) void {
+            assert(IO == IOTest);
+            self.state = .{ .writing = .{ .unflushed = 0 } };
+        }
+    };
+}
 
 pub const AOFReplayClient = struct {
+    const Storage = vsr.storage.StorageType(IOProd, Tracer);
+    const StateMachine = vsr.state_machine.StateMachineType(
+        Storage,
+        constants.state_machine_config,
+    );
+    const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+
     client: *Client,
-    io: *IO,
+    io: *IOProd,
     message_pool: *MessagePool,
     inflight_message: ?*Message.Request = null,
 
-    pub fn init(allocator: std.mem.Allocator, addresses: []std.net.Address) !AOFReplayClient {
+    pub fn init(
+        io: *IOProd,
+        allocator: std.mem.Allocator,
+        addresses: []std.net.Address,
+    ) !AOFReplayClient {
         assert(addresses.len > 0);
         assert(addresses.len <= constants.replicas_max);
-
-        var io = try allocator.create(IO);
-        errdefer allocator.destroy(io);
 
         var message_pool = try allocator.create(MessagePool);
         errdefer allocator.destroy(message_pool);
 
         var client = try allocator.create(Client);
         errdefer allocator.destroy(client);
-
-        io.* = try IO.init(32, 0);
-        errdefer io.deinit();
 
         message_pool.* = try MessagePool.init(allocator, .client);
         errdefer message_pool.deinit(allocator);
@@ -401,20 +452,18 @@ pub const AOFReplayClient = struct {
     pub fn deinit(self: *AOFReplayClient, allocator: std.mem.Allocator) void {
         self.client.deinit(allocator);
         self.message_pool.deinit(allocator);
-        self.io.deinit();
 
         allocator.destroy(self.client);
         allocator.destroy(self.message_pool);
-        allocator.destroy(self.io);
     }
 
-    pub fn replay(self: *AOFReplayClient, aof: *AOF.Iterator) !void {
+    pub fn replay(self: *AOFReplayClient, aof: *AOFIterator) !void {
         var target: AOFEntry = undefined;
 
         while (try aof.next(&target)) |entry| {
             // Skip replaying reserved messages and messages not marked for playback.
             const header = entry.header();
-            if (!AOF.replay_message(header)) continue;
+            if (!AOFReplayClient.replay_message(header)) continue;
 
             const message = self.client.get_message().build(.request);
             errdefer self.client.release_message(message.base());
@@ -448,6 +497,22 @@ pub const AOFReplayClient = struct {
         }
     }
 
+    /// If a message should be replayed when recovering the AOF. This allows skipping over things
+    /// like lookup_ and queries, that have no affect on the final state, but take up a lot of time
+    /// when replaying.
+    pub fn replay_message(header: *Header.Prepare) bool {
+        if (header.operation.vsr_reserved()) return false;
+        const state_machine_operation = header.operation.cast(StateMachine);
+        switch (state_machine_operation) {
+            .create_accounts, .create_transfers => return true,
+
+            // Pulses are replayed to handle pending transfer expiry.
+            .pulse => return true,
+
+            else => return false,
+        }
+    }
+
     fn register_callback(
         user_data: u128,
         result: *const vsr.RegisterResult,
@@ -472,26 +537,35 @@ pub const AOFReplayClient = struct {
     }
 };
 
+/// Return an iterator into an AOF, to read entries one by one. This also validates
+/// that both the header and body checksums of the read entry are valid, and that
+/// all checksums chain correctly.
+pub fn aof_iterator(io: *IOProd, path: []const u8) !AOFIterator {
+    const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
+    errdefer file.close();
+
+    const size = (try file.stat()).size;
+
+    return AOFIterator{ .io = io, .file_descriptor = file.handle, .size = size };
+}
+
 pub fn aof_merge(
+    io: *IOProd,
     allocator: std.mem.Allocator,
     input_paths: []const []const u8,
     output_path: []const u8,
 ) !void {
+    const AOF = AOFType(IOProd);
     const stdout = std.io.getStdOut().writer();
 
-    var aofs: [constants.members_max]AOF.Iterator = undefined;
+    var aofs: [constants.members_max]AOFIterator = undefined;
     var aof_count: usize = 0;
     defer for (aofs[0..aof_count]) |*it| it.close();
 
     assert(input_paths.len < aofs.len);
 
-    for (input_paths) |input_path| {
-        aofs[aof_count] = try AOF.iterator(input_path);
-        aof_count += 1;
-    }
-
     const EntryInfo = struct {
-        aof: *AOF.Iterator,
+        aof: *AOFIterator,
         index: u64,
         size: u64,
         checksum: u128,
@@ -507,13 +581,18 @@ pub fn aof_merge(
     var target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
-    var io = try IO.init(32, 0);
-    defer io.deinit();
-
-    const dir_fd = try IO.open_dir(std.fs.path.dirname(output_path) orelse ".");
+    const dir_fd = try IOProd.open_dir(std.fs.path.dirname(output_path) orelse ".");
     defer std.posix.close(dir_fd);
 
-    var output_aof = try AOF.init(dir_fd, std.fs.path.basename(output_path), &io);
+    for (input_paths) |input_path| {
+        aofs[aof_count] = try aof_iterator(io, input_path);
+        aof_count += 1;
+    }
+
+    var output_aof = try AOF.init(io, .{
+        .dir_fd = dir_fd,
+        .relative_path = std.fs.path.basename(output_path),
+    });
 
     // First, iterate all AOFs and build a mapping between parent checksums and where the entry is
     // located.
@@ -609,9 +688,8 @@ pub fn aof_merge(
         assert(current_parent != null);
         const entry = entries_by_parent.getPtr(current_parent.?) orelse unreachable;
 
-        try entry.aof.file.seekTo(entry.index);
         const buf = std.mem.asBytes(target)[0..entry.size];
-        const bytes_read = try entry.aof.file.readAll(buf);
+        const bytes_read = try io.read_blocking(entry.aof.file_descriptor, buf, entry.index);
 
         // None of these conditions should happen, but double check them to prevent any TOCTOUs
         if (bytes_read != target.size_disk()) {
@@ -641,7 +719,7 @@ pub fn aof_merge(
     // Validate the newly created output file
     try stdout.print("Validating Output {s}\n", .{output_path});
 
-    var it = try AOF.iterator(output_path);
+    var it = try aof_iterator(io, output_path);
     defer it.close();
 
     var first_checksum: ?u128 = null;
@@ -665,19 +743,24 @@ pub fn aof_merge(
 const testing = std.testing;
 
 test "aof write / read" {
+    const AOF = AOFType(IOProd);
+
     const aof_file = "test.aof";
     std.fs.cwd().deleteFile(aof_file) catch {};
     defer std.fs.cwd().deleteFile(aof_file) catch {};
 
     const allocator = std.testing.allocator;
 
-    var io = try IO.init(32, 0);
+    var io = try IOProd.init(32, 0);
     defer io.deinit();
 
-    const dir_fd = try IO.open_dir(".");
+    const dir_fd = try IOProd.open_dir(".");
     defer std.posix.close(dir_fd);
 
-    var aof = try AOF.init(dir_fd, aof_file, &io);
+    var aof = try AOF.init(&io, .{
+        .dir_fd = dir_fd,
+        .relative_path = std.fs.path.basename(aof_file),
+    });
 
     var message_pool = try MessagePool.init_capacity(allocator, 2);
     defer message_pool.deinit(allocator);
@@ -715,7 +798,7 @@ test "aof write / read" {
     try aof.write(demo_message);
     aof.close();
 
-    var it = try AOF.iterator(aof_file);
+    var it = try aof_iterator(&io, aof_file);
     defer it.close();
 
     const read_entry = (try it.next(target)).?;
@@ -819,18 +902,21 @@ pub fn main() !void {
     const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
+    var io = try IOProd.init(32, 0);
+    defer io.deinit();
+
     if (action != null and std.mem.eql(u8, action.?, "recover") and count == 4) {
-        var it = try AOF.iterator(paths[0]);
+        var it = try aof_iterator(&io, paths[0]);
         defer it.close();
 
         var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
         const addresses_parsed = try vsr.parse_addresses(addresses.?, &addresses_buffer);
-        var replay = try AOFReplayClient.init(allocator, addresses_parsed);
+        var replay = try AOFReplayClient.init(&io, allocator, addresses_parsed);
         defer replay.deinit(allocator);
 
         try replay.replay(&it);
     } else if (action != null and std.mem.eql(u8, action.?, "debug") and count == 3) {
-        var it = try AOF.iterator(paths[0]);
+        var it = try aof_iterator(&io, paths[0]);
         defer it.close();
 
         var data_checksum: [32]u8 = undefined;
@@ -839,7 +925,7 @@ pub fn main() !void {
         const stdout = std.io.getStdOut().writer();
         while (try it.next(target)) |entry| {
             const header = entry.header();
-            if (!AOF.replay_message(header)) continue;
+            if (!AOFReplayClient.replay_message(header)) continue;
 
             try stdout.print("{}\n", .{
                 header,
@@ -857,7 +943,7 @@ pub fn main() !void {
             .{@as(u128, @bitCast(data_checksum[0..@sizeOf(u128)].*))},
         );
     } else if (action != null and std.mem.eql(u8, action.?, "merge") and count >= 2) {
-        try aof_merge(allocator, paths[0 .. count - 2], "prepared.aof");
+        try aof_merge(&io, allocator, paths[0 .. count - 2], "prepared.aof");
     } else {
         std.io.getStdOut().writeAll(usage) catch std.posix.exit(1);
         std.posix.exit(1);
