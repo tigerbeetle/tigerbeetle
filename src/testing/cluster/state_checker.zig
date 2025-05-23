@@ -184,8 +184,8 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const commit_b = replica.commit_min;
 
             const header_b = replica.journal.header_with_op(replica.commit_min);
-            assert(header_b != null or replica.commit_min == replica.op_checkpoint());
-            assert(header_b == null or header_b.?.op == commit_b);
+            if (header_b == null) assert(replica.commit_min == replica.op_checkpoint());
+            if (header_b != null) assert(header_b.?.op == commit_b);
 
             const checksum_a = state_checker.commits.items[commit_a].header.checksum;
             // Even if we have header_b, if its op is commit_root_op, we can't trust it.
@@ -214,6 +214,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
                     assert(replica.op_checkpoint() == replica.commit_min);
                 }
 
+                assert(checksum_b == commit.header.checksum);
                 commit.replicas.set(replica_index);
 
                 assert(replica.commit_min < state_checker.commits.items.len);
