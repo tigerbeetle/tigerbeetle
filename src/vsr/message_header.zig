@@ -373,6 +373,10 @@ pub const Header = extern struct {
         checkpoint_op: u64,
 
         ping_timestamp_monotonic: u64,
+        //? dj: Positioning the field here is nice for alignment, but makes the upgrade more
+        //? complicated than if we just appended the field after release_count.
+        //? matklad: Indeed!
+        //? resolved.
         release_count: u16,
         route_padding: [6]u8 = [_]u8{0} ** 6,
         route: u64,
