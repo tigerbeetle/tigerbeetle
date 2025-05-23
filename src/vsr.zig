@@ -641,7 +641,7 @@ const FatalReason = enum(u8) {
     storage_size_exceeds_limit = 4,
     storage_size_would_exceed_limit = 5,
     forest_tables_count_would_exceed_limit = 6,
-    unknown_command = 7,
+    unknown_vsr_command = 7,
 
     fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);

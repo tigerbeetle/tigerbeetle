@@ -140,8 +140,8 @@ pub const MessageBuffer = struct {
         const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
         _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
             vsr.fatal(
-                .unknown_command,
-                "unknown command, crashing for safety " ++
+                .unknown_vsr_command,
+                "unknown VSR command, crashing for safety " ++
                     "(peer={} command={d} protocol={d} replica={d} release={})",
                 .{
                     buffer.peer,
