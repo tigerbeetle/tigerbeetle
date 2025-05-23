@@ -513,7 +513,7 @@ fn op_finalize(
 
             const slot = experiment % history_max;
             if (routing.history[slot].op != experiment) {
-                // Don't have data for both experiments yet.
+                // Don't have data for the other experiment yet.
                 return;
             }
 
@@ -524,12 +524,9 @@ fn op_finalize(
         }
         assert(cost_average != null);
 
-        if (reason == .evicted and replicated_fully_count == 2) {
-            // Already accounted for on .replicated_fully.
-            return;
-        }
-
-        if (reason == .evicted or replicated_fully_count == 2) {
+        if ((reason == .replicated_fully and replicated_fully_count == 2) or
+            (reason == .evicted and replicated_fully_count < 2))
+        {
             if (routing.b_cost == null or Cost.less(cost_average.?, routing.b_cost.?)) {
                 routing.b = route_b;
                 routing.b_cost = cost_average.?;
@@ -538,14 +535,12 @@ fn op_finalize(
     } else {
         const slot = op % history_max;
 
-        if (reason == .evicted and
-            routing.history[slot].present.count() == routing.replica_count)
+        if (reason == .replicated_fully or
+            (reason == .evicted and routing.history[slot].present.count() < routing.replica_count))
         {
-            // Already accounted for on .replicated_fully.
-            return;
+            const new = routing.history_cost(op);
+            routing.a_cost = if (routing.a_cost) |old| Cost.ewma_add(old, new) else new;
         }
-        const new = routing.history_cost(op);
-        routing.a_cost = if (routing.a_cost) |old| Cost.ewma_add(old, new) else new;
     }
 }
 
