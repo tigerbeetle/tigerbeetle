@@ -326,9 +326,9 @@ pub fn main() !void {
             const last_checksum = commits[commits.len - 1].header.checksum;
             for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
                 if (simulator.core.is_set(replica_index)) {
-                    try aof.validate(last_checksum);
+                    try aof.validate(gpa, last_checksum);
                 } else {
-                    try aof.validate(null);
+                    try aof.validate(gpa, null);
                 }
             }
         }
