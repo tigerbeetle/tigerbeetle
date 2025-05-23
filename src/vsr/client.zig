@@ -199,8 +199,9 @@ pub fn ClientType(
                     buffer.invalidate(.header_cluster);
                     return;
                 }
-                self.on_message(message);
-                if (self.evicted) break;
+                if (!self.evicted) {
+                    self.on_message(message);
+                }
             }
         }
 
