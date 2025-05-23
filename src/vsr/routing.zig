@@ -246,9 +246,9 @@ fn route_valid(routing: *const Routing, route: Route) bool {
         }
     }
 
-    const primary: u8 = @intCast(routing.view % routing.replica_count);
-    const primary_index = @divFloor(route.count(), 2);
-    if (route.get(primary_index) != primary) return false;
+    const primary_index: u8 = @intCast(routing.view % routing.replica_count);
+    const primary_position = @divFloor(route.count(), 2);
+    if (route.get(primary_position) != primary_index) return false;
 
     return true;
 }
@@ -260,11 +260,11 @@ fn route_view_default(view: u32, replica_count: u8) Route {
     }
 
     // Rotate primary to the midpoint;
-    const primary: u8 = @intCast(view % replica_count);
+    const primary_index: u8 = @intCast(view % replica_count);
     const midpoint = @divFloor(replica_count, 2);
-    const rotation = (replica_count + primary - midpoint) % replica_count;
+    const rotation = (replica_count + primary_index - midpoint) % replica_count;
     std.mem.rotate(u8, route.slice(), rotation);
-    assert(route.slice()[midpoint] == primary);
+    assert(route.slice()[midpoint] == primary_index);
 
     return route;
 }
@@ -276,11 +276,11 @@ fn route_random(prng: *stdx.PRNG, view: u32, replica_count: u8) Route {
     }
     prng.shuffle(u8, route.slice());
 
-    const primary: u8 = @intCast(view % replica_count);
-    const primary_index = std.mem.indexOfScalar(u8, route.slice(), primary).?;
+    const primary_index: u8 = @intCast(view % replica_count);
+    const primary_position = std.mem.indexOfScalar(u8, route.slice(), primary_index).?;
     std.mem.swap(
         u8,
-        &route.slice()[primary_index],
+        &route.slice()[primary_position],
         &route.slice()[@divFloor(replica_count, 2)],
     );
 
@@ -325,13 +325,13 @@ test route_encode {
             assert(route.count() == replica_count);
             assert(pool.count() == 0);
 
-            const primary = route.get(@divFloor(route.count(), 2));
+            const primary_index = route.get(@divFloor(route.count(), 2));
             var routing = Routing.init(.{
-                .replica = primary,
+                .replica = primary_index,
                 .replica_count = @intCast(replica_count),
                 .standby_count = 0,
             });
-            routing.view_change(primary);
+            routing.view_change(primary_index);
 
             const code = routing.route_encode(route);
             const route_decoded = routing.route_decode(code).?;
@@ -421,29 +421,29 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
     const route = routing.op_route(op);
     assert(routing.route_valid(route));
 
-    const primary: u8 = @intCast(routing.view % routing.replica_count);
-    const primary_index = @divFloor(route.count(), 2);
-    assert(route.get(primary_index) == primary);
+    const primary_index: u8 = @intCast(routing.view % routing.replica_count);
+    const primary_position = @divFloor(route.count(), 2);
+    assert(route.get(primary_position) == primary_index);
 
     var result: NextHop = .{};
 
     if (routing.replica < routing.replica_count) {
         // Normal replication: replicate to 0-2 other replicas using a dynamic route.
 
-        const replica_index = std.mem.indexOfScalar(u8, route.const_slice(), routing.replica).?;
+        const replica_position = std.mem.indexOfScalar(u8, route.const_slice(), routing.replica).?;
 
-        if (replica_index <= primary_index and replica_index > 0) {
-            result.append_assume_capacity(route.const_slice()[replica_index - 1]);
+        if (replica_position <= primary_position and replica_position > 0) {
+            result.append_assume_capacity(route.const_slice()[replica_position - 1]);
         }
-        if (replica_index >= primary_index and replica_index < routing.replica_count - 1) {
-            result.append_assume_capacity(route.const_slice()[replica_index + 1]);
+        if (replica_position >= primary_position and replica_position < routing.replica_count - 1) {
+            result.append_assume_capacity(route.const_slice()[replica_position + 1]);
         }
 
         assert(result.count() <= 2);
         assert((result.count() == 2) ==
-            (replica_index == primary_index and routing.replica_count >= 3));
+            (replica_position == primary_position and routing.replica_count >= 3));
         if (routing.standby_count > 0) {
-            if (replica_index == 0) {
+            if (replica_position == 0) {
                 const first_standby = routing.replica_count;
                 result.append_assume_capacity(first_standby);
             }
@@ -459,8 +459,7 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
 }
 
 pub fn op_prepare(routing: *Routing, op: u64, now: Instant) void {
-    const primary: u8 = @intCast(routing.view % routing.replica_count);
-    assert(primary == routing.replica);
+    assert(routing.primary());
     assert(op != 0); // Root ops is never prepared.
     const slot = op % history_max;
     if (routing.history[slot].op != 0) {
@@ -474,8 +473,7 @@ pub fn op_prepare(routing: *Routing, op: u64, now: Instant) void {
 }
 
 pub fn op_prepare_ok(routing: *Routing, op: u64, replica: u8, now: Instant) void {
-    const primary: u8 = @intCast(routing.view % routing.replica_count);
-    assert(primary == routing.replica);
+    assert(routing.primary());
     // Replicas can ack the root op after repair. While we can prevent replicas from sending such
     // prepare_ok that will make the protocol more complex. Instead, ignore op=0 here and treat it
     // as empty slot elsewhere.
@@ -495,8 +493,7 @@ fn op_finalize(
     op: u64,
     reason: enum { evicted, replicated_fully },
 ) void {
-    const primary: u8 = @intCast(routing.view % routing.replica_count);
-    assert(primary == routing.replica);
+    assert(routing.primary());
     assert(op != 0);
     assert(routing.history[op % history_max].op == op);
     assert(routing.history[op % history_max].present.count() <= routing.replica_count);
@@ -595,6 +592,11 @@ fn history_cost(routing: *const Routing, op: u64) Cost {
     return .{ .median = median, .maximum = maximum, .sum = sum };
 }
 
+fn primary(routing: *const Routing) bool {
+    const primary_index: u8 = @intCast(routing.view % routing.replica_count);
+    return routing.replica == primary_index;
+}
+
 test "Routing finds best route" {
     // This fuzzer arranges replicas into a "ring" physical topology according to a random
     // permutation, and checks that we are able to infer the permutation using our cost function.
@@ -655,12 +657,12 @@ test "Routing finds best route" {
             }
 
             const view = prng.range_inclusive(u32, 0, 32);
-            const primary = view % replica_count;
+            const primary_index = view % replica_count;
 
             return .{
                 .replica_count = replica_count,
                 .view = view,
-                .primary = @intCast(primary),
+                .primary = @intCast(primary_index),
                 .replicas = replicas,
                 .packet_simulator = packet_simulator,
                 .permutation = permuation,
