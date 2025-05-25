@@ -43,7 +43,6 @@
 ///! Integers are encoded in network byte order (big endian).
 ///!
 const std = @import("std");
-const builtin = @import("builtin");
 const stdx = @import("../../stdx.zig");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -1185,16 +1184,18 @@ const TestingTable = struct {
     }
 };
 
-pub const TestingBasicProperties = if (builtin.is_test) struct {
+pub const TestingBasicProperties = struct {
     pub fn random(options: struct {
         arena: std.mem.Allocator,
         prng: *stdx.PRNG,
+        default: Encoder.BasicProperties = .{},
     }) !Encoder.BasicProperties {
-        const ratio = stdx.PRNG.ratio;
+        const is_null = stdx.PRNG.ratio(5, 100);
         var properties: Encoder.BasicProperties = .{};
         inline for (std.meta.fields(Encoder.BasicProperties)) |field| {
-            const is_null = options.prng.chance(ratio(5, 100));
-            if (is_null) {
+            if (@field(options.default, field.name)) |default| {
+                @field(properties, field.name) = default;
+            } else if (options.prng.chance(is_null)) {
                 @field(properties, field.name) = null;
             } else switch (std.meta.Child(field.type)) {
                 []const u8 => {
@@ -1256,4 +1257,4 @@ pub const TestingBasicProperties = if (builtin.is_test) struct {
         }
         return true;
     }
-} else unreachable;
+};

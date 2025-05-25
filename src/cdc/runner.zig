@@ -1130,7 +1130,7 @@ const ProgressTrackerMessage = struct {
 };
 
 /// Message with the body in the JSON schema.
-const Message = struct {
+pub const Message = struct {
     pub const content_type = "application/json";
 
     pub const json_string_size_max = size: {
@@ -1190,7 +1190,7 @@ const Message = struct {
         timestamp: u64,
     },
 
-    fn init(event: *const tb.Event) Message {
+    pub fn init(event: *const tb.Event) Message {
         return .{
             .timestamp = event.timestamp,
             .type = event.type,

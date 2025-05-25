@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) !void {
         .run = b.step("run", "Run TigerBeetle"),
         .ci = b.step("ci", "Run the full suite of CI checks"),
         .scripts = b.step("scripts", "Free form automation scripts"),
+        .scripts_build = b.step("scripts:build", "Build automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
@@ -260,7 +261,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build scripts -- ci --language=java
-    const scripts = build_scripts(b, build_steps.scripts, .{
+    const scripts = build_scripts(b, .{
+        .scripts = build_steps.scripts,
+        .scripts_build = build_steps.scripts_build,
+    }, .{
         .vsr_options = vsr_options,
         .target = target,
     });
@@ -411,6 +415,7 @@ fn build_ci(
 
         devhub, // Things that run on known-good commit on main branch after merge.
         @"devhub-dry-run",
+        amqp,
         default, // smoke + test + building Zig parts of clients.
         all,
     };
@@ -457,6 +462,14 @@ fn build_ci(
             });
         }
     }
+    if (default or mode == .amqp) {
+        // Smoke test the AMQP integration.
+        build_ci_script(b, step_ci, options.scripts, &.{
+            "amqp",
+            "--transfer-count=100",
+        });
+    }
+
     if (all or mode == .aof) {
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
         hide_stderr(aof);
@@ -909,7 +922,6 @@ fn build_test_integration(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
-    integration_tests.root_module.addOptions("vsr_options", vsr_options);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
 
@@ -1061,25 +1073,32 @@ fn build_fuzz(
 
 fn build_scripts(
     b: *std.Build,
-    step_scripts: *std.Build.Step,
+    steps: struct {
+        scripts: *std.Build.Step,
+        scripts_build: *std.Build.Step,
+    },
     options: struct {
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
     },
 ) *std.Build.Step.Compile {
-    const scripts = b.addExecutable(.{
+    const scripts_exe = b.addExecutable(.{
         .name = "scripts",
         .root_source_file = b.path("src/scripts.zig"),
         .target = options.target,
         .optimize = .Debug,
     });
-    scripts.root_module.addOptions("vsr_options", options.vsr_options);
-    const scripts_run = b.addRunArtifact(scripts);
+    scripts_exe.root_module.addOptions("vsr_options", options.vsr_options);
+    steps.scripts_build.dependOn(
+        &b.addInstallArtifact(scripts_exe, .{}).step,
+    );
+
+    const scripts_run = b.addRunArtifact(scripts_exe);
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
-    step_scripts.dependOn(&scripts_run.step);
+    steps.scripts.dependOn(&scripts_run.step);
 
-    return scripts;
+    return scripts_exe;
 }
 
 fn build_vortex(
