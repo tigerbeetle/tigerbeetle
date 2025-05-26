@@ -56,8 +56,8 @@ const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
 
-const replica_ports_actual = [constants.replica_count]u16{ 4000, 4001, 4002 };
-const replica_ports_proxied = [constants.replica_count]u16{ 3000, 3001, 3002 };
+const replica_ports_actual = constants.replica_ports_actual;
+const replica_ports_proxied = constants.replica_ports_proxied;
 
 // Calculate replica addresses (comma-separated) for each replica. Because
 // we want replicas to communicate over the proxies, we use those ports
