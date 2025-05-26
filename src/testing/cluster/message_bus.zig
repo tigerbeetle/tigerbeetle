@@ -22,6 +22,8 @@ pub const MessageBus = struct {
     process: Process,
 
     buffer: ?MessageBuffer,
+    suspended: bool = false,
+    resume_scheduled: bool = false,
     /// The callback to be called when a message is received.
     on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
@@ -68,6 +70,15 @@ pub const MessageBus = struct {
     /// - `MessageType(command)` for any `command`.
     pub fn unref(bus: *MessageBus, message: anytype) void {
         bus.pool.unref(message);
+    }
+
+    pub fn resume_needed(bus: *MessageBus) bool {
+        return bus.suspended;
+    }
+
+    pub fn resume_receive(bus: *MessageBus) void {
+        bus.suspended = false;
+        bus.resume_scheduled = true;
     }
 
     pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {
