@@ -388,11 +388,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             var connections_suspended = bus.connections_suspended;
             bus.connections_suspended.reset();
 
-            while (connections_suspended.pop()) |connecton| {
-                assert(connecton.recv_buffer != null);
-                assert(connecton.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
-                assert(connecton.recv_buffer.?.has_message());
-                connecton.call_on_messages(bus);
+            while (connections_suspended.pop()) |connection| {
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.advance_size >= @sizeOf(vsr.Header));
+                assert(connection.recv_buffer.?.has_message());
+                connection.call_on_messages(bus);
             }
         }
 

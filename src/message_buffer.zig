@@ -1,6 +1,7 @@
 const stdx = @import("./stdx.zig");
 const std = @import("std");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 
 const vsr = @import("./vsr.zig");
 const MessagePool = @import("message_pool.zig").MessagePool;
@@ -57,6 +58,13 @@ pub const MessageBuffer = struct {
         assert(buffer.suspend_size <= buffer.process_size);
         assert(buffer.process_size <= buffer.advance_size);
         assert(buffer.advance_size <= buffer.receive_size);
+        if (buffer.invalid != null) {
+            assert(buffer.suspend_size == 0);
+            assert(buffer.process_size == 0);
+            assert(buffer.advance_size == 0);
+            assert(buffer.receive_size == 0);
+            assert(buffer.iterator_state == .idle);
+        }
     }
 
     pub fn init(pool: *MessagePool) MessageBuffer {
@@ -100,7 +108,7 @@ pub const MessageBuffer = struct {
     }
 
     /// Advances the parsing state machine.
-    /// Idempotent, but eagerly called whenever available_slice changes.
+    /// Idempotent, but eagerly called whenever receive_size or process_size change.
     fn advance(buffer: *MessageBuffer) void {
         if (buffer.invalid == null) buffer.advance_header();
         if (buffer.invalid == null) buffer.advance_body();
@@ -224,6 +232,8 @@ pub const MessageBuffer = struct {
     /// A call to next_header must be immediately followed by a call to consume_message
     /// or suspend_message.
     pub fn next_header(buffer: *MessageBuffer) ?Header {
+        maybe(buffer.invalid != null);
+
         switch (buffer.iterator_state) {
             .idle, .after_consume_suspend => {},
             else => unreachable,
@@ -231,6 +241,7 @@ pub const MessageBuffer = struct {
 
         const valid_unprocessed = buffer.advance_size - buffer.process_size;
         if (valid_unprocessed >= @sizeOf(Header)) {
+            assert(buffer.invalid == null);
             const header = buffer.copy_header();
             if (valid_unprocessed >= header.size) {
                 buffer.iterator_state = .after_peek;
@@ -260,12 +271,14 @@ pub const MessageBuffer = struct {
         buffer.advance_size -= (buffer.process_size - buffer.suspend_size);
         buffer.suspend_size = 0;
         buffer.process_size = 0;
-
-        const valid_size_idempotent = buffer.advance_size;
-        buffer.advance();
-        assert(buffer.advance_size == valid_size_idempotent);
-
         buffer.iterator_state = .idle;
+
+        // The purpose of tracking advance_size across iterations is to "cache" checksum validation.
+        // As a sanity check, assert that advance-after-back-shift is indeed a no-op.
+        const advance_size_idempotent = buffer.advance_size;
+        buffer.advance();
+        assert(buffer.advance_size == advance_size_idempotent);
+
         return null;
     }
 
@@ -315,18 +328,24 @@ pub const MessageBuffer = struct {
         assert(buffer.iterator_state == .after_peek);
         assert(buffer.advance_size - buffer.process_size >= header.size);
         assert(buffer.invalid == null);
-        defer buffer.iterator_state = .after_consume_suspend;
-
+        assert(header.size <= constants.message_size_max);
+        assert(std.mem.eql(
+            u8,
+            std.mem.asBytes(header),
+            buffer.message.buffer[buffer.process_size..][0..@sizeOf(Header)],
+        ));
         assert(buffer.suspend_size <= buffer.process_size);
+
+        defer buffer.iterator_state = .after_consume_suspend;
 
         if (buffer.suspend_size < buffer.process_size) {
             // Move from this:
             // |  bytes  |    hole     |    message    |     bytes    |
-            //           ^suspend_size ^process_size                 ^receive_size
+            //           ^suspend_size ^process_size                  ^receive_size
             //
             // To this:
             // | bytes |    message    |     hole      |     bytes    |
-            //                         ^suspend_size   ^process_size ^receive_size
+            //                         ^suspend_size   ^process_size  ^receive_size
             stdx.copy_left(
                 .inexact,
                 u8,
