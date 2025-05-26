@@ -904,7 +904,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         try shell.exec_options(
             .{
                 .stdin_slice =
-                \\FROM alpine:3.19
+                \\FROM alpine:latest
                 \\RUN apk add --no-cache tini
                 \\ARG TARGETARCH
                 \\COPY tigerbeetle-${TARGETARCH} /tigerbeetle
