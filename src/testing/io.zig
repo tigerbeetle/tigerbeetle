@@ -19,6 +19,11 @@ pub const IO = struct {
 
         /// Each bit of the fault map represents a sector that will fault consistently.
         fault_map: ?[]const u8 = null,
+
+        closed: bool = false,
+
+        // Maintained for appending to the end of the file via `write_blocking`.
+        offset: u32 = 0,
     };
 
     /// Options for fault injection during fuzz testing.
@@ -33,30 +38,23 @@ pub const IO = struct {
 
     const Queue = QueueType(Completion);
 
-    files: []const File,
+    files: []File,
 
-    // Maintained for appending to the end of the file via `write_blocking`.
-    files_offsets: []usize,
     options: Options,
     prng: stdx.PRNG,
 
     completed: Queue = Queue.init(.{ .name = "io_completed" }),
 
-    pub fn init(files: []const File, allocator: std.mem.Allocator, options: Options) !IO {
-        const files_offsets = try allocator.alloc(usize, files.len);
-        errdefer allocator.free(files_offsets);
-        @memset(files_offsets, 0);
-
+    pub fn init(files: []File, options: Options) !IO {
         return .{
             .options = options,
             .prng = stdx.PRNG.from_seed(options.seed),
             .files = files,
-            .files_offsets = files_offsets,
         };
     }
 
-    pub fn deinit(io: *IO, allocator: std.mem.Allocator) void {
-        allocator.free(io.files_offsets);
+    pub fn deinit(io: *IO) void {
+        for (io.files) |file| assert(file.closed);
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
@@ -260,34 +258,38 @@ pub const IO = struct {
             .fsync,
             .{ .fd = fd },
             struct {
-                fn do_operation(io: *IO, op: anytype) FsyncError!void {
-                    _ = io; // autofix
-                    _ = op; // autofix
-                }
+                fn do_operation(_: *IO, _: anytype) FsyncError!void {}
             },
         );
     }
 
-    pub fn write_blocking(self: *IO, fd: fd_t, source: []const u8) posix.WriteError!void {
+    pub fn aof_blocking_write_all(self: *IO, fd: fd_t, source: []const u8) posix.WriteError!void {
         assert(fd < self.files.len);
 
         const file_index = @as(u32, @intCast(fd));
-        const target = self.files[file_index].buffer;
-        const offset = self.files_offsets[file_index];
+        const file = &self.files[file_index];
+        const target = file.buffer;
+        const offset = file.offset;
 
         assert(offset + source.len <= target.len);
 
         stdx.copy_disjoint(.exact, u8, target[offset..][0..source.len], source);
 
-        self.files_offsets[file_index] += source.len;
+        file.offset += @as(u32, @intCast(source.len));
     }
 
-    pub fn close_blocking(_: *IO) void {}
+    pub const PReadError = posix.PReadError;
 
-    pub fn read_blocking(self: *IO, fd: fd_t, target: []u8, offset: u64) posix.PReadError!usize {
+    pub fn aof_blocking_close(self: *IO, fd: fd_t) void {
+        assert(fd < self.files.len);
+        self.files[fd].closed = true;
+    }
+
+    pub fn aof_blocking_pread_all(self: *IO, fd: fd_t, target: []u8, offset: u64) PReadError!usize {
         assert(fd < self.files.len);
 
-        const source = self.files[@as(u32, @intCast(fd))].buffer;
+        const file_index = @as(u32, @intCast(fd));
+        const source = self.files[file_index].buffer;
 
         assert(offset + target.len <= source.len);
 

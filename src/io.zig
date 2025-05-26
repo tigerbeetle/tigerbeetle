@@ -19,8 +19,6 @@ pub const DirectIO = enum {
     direct_io_disabled,
 };
 
-pub const fd_t = std.posix.fd_t;
-
 pub fn buffer_limit(buffer_len: usize) usize {
     // Linux limits how much may be written in a `pwrite()/pread()` call, which is `0x7ffff000` on
     // both 64-bit and 32-bit systems, due to using a signed C int as the return value, as well as

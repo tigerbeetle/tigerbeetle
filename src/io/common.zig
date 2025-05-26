@@ -104,17 +104,17 @@ pub fn setsockopt(fd: posix.socket_t, level: i32, option: u32, value: c_int) !vo
     try posix.setsockopt(fd, level, option, &std.mem.toBytes(value));
 }
 
-pub fn write_blocking(fd: posix.fd_t, buffer: []const u8) posix.WriteError!void {
+pub fn aof_blocking_write_all(fd: posix.fd_t, buffer: []const u8) posix.WriteError!void {
     const file = std.fs.File{ .handle = fd };
     return file.writeAll(buffer);
 }
 
-pub fn read_blocking(fd: posix.fd_t, buffer: []u8, offset: u64) posix.PReadError!usize {
+pub fn aof_blocking_pread_all(fd: posix.fd_t, buffer: []u8, offset: u64) posix.PReadError!usize {
     const file = std.fs.File{ .handle = fd };
     return file.preadAll(buffer, offset);
 }
 
-pub fn close_blocking(fd: posix.fd_t) void {
+pub fn aof_blocking_close(fd: posix.fd_t) void {
     const file = std.fs.File{ .handle = fd };
     file.close();
 }

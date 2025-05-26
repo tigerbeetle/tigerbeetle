@@ -5,6 +5,8 @@ const mem = std.mem;
 const log = std.log.scoped(.cluster);
 
 const stdx = @import("../stdx.zig");
+const Ratio = stdx.PRNG.Ratio;
+
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
 const ratio = stdx.PRNG.ratio;
@@ -375,14 +377,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer allocator.free(buffer);
 
                 aof_io_file[0] = .{ .buffer = buffer };
-                aof_io.* = try IO.init(aof_io_file, allocator, .{
+                aof_io.* = try IO.init(aof_io_file, .{
                     .seed = options.cluster.seed,
-                    .larger_than_logical_sector_read_fault_probability = ratio(
-                        0,
-                        100,
-                    ),
+                    .larger_than_logical_sector_read_fault_probability = Ratio.zero(),
                 });
-                errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit(allocator);
+                errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit();
 
                 aof.* = AOF{
                     .io = aof_io,
@@ -471,7 +470,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
 
-            for (cluster.aof_ios) |*io| io.deinit(cluster.allocator);
+            for (cluster.aofs) |*aof| aof.close();
+
+            for (cluster.aof_ios) |*io| io.deinit();
             cluster.allocator.free(cluster.aof_ios);
 
             for (cluster.aof_io_files) |*io_file| {
@@ -554,8 +555,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
                             replica.tick();
                             aof_io.run() catch |err| {
-                                log.err("{}: io.run() failed: error={}", .{ replica.replica, err });
-                                @panic("io.run() failed");
+                                std.debug.panic("{}: io.run() failed: error={}", .{
+                                    replica.replica,
+                                    err,
+                                });
                             };
 
                             // For performance, don't run every tick.

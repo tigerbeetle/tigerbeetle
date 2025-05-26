@@ -17,8 +17,8 @@ const log = std.log.scoped(.aof);
 const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
 
 const IOTest = @import("testing/io.zig").IO;
-const IOProd = @import("io.zig").IO;
-const AOFIterator = IteratorType(IOProd);
+const IO = @import("io.zig").IO;
+const AOFIterator = IteratorType(IO);
 
 pub const AOFEntry = extern struct {
     /// In case of extreme corruption, start each entry with a fixed random integer,
@@ -102,12 +102,12 @@ pub const AOFEntry = extern struct {
     }
 };
 
-pub fn IteratorType(comptime IO: type) type {
+pub fn IteratorType(comptime _IO: type) type {
     return struct {
         const Iterator = @This();
 
-        io: *IO,
-        file_descriptor: IO.fd_t,
+        io: *_IO,
+        file_descriptor: _IO.fd_t,
         size: u64,
         offset: u64 = 0,
 
@@ -118,7 +118,7 @@ pub fn IteratorType(comptime IO: type) type {
             if (it.offset >= it.size) return null;
 
             const buf = std.mem.asBytes(target);
-            const bytes_read = try it.io.read_blocking(it.file_descriptor, buf, it.offset);
+            const bytes_read = try it.io.aof_blocking_pread_all(it.file_descriptor, buf, it.offset);
 
             // size_disk relies on information that was stored on disk, so further verify we have
             // read at least the minimum permissible.
@@ -160,7 +160,7 @@ pub fn IteratorType(comptime IO: type) type {
         }
 
         pub fn close(it: *Iterator) void {
-            it.io.close_blocking(it.file_descriptor);
+            it.io.aof_blocking_close(it.file_descriptor);
         }
 
         /// Try skip ahead to the next entry in a potentially corrupted AOF file
@@ -171,7 +171,7 @@ pub fn IteratorType(comptime IO: type) type {
             defer allocator.free(skip_buffer);
 
             while (it.offset < it.size) {
-                const bytes_read = try it.io.read_blocking(
+                const bytes_read = try it.io.aof_blocking_pread_all(
                     it.file_descriptor,
                     skip_buffer,
                     it.offset,
@@ -198,12 +198,12 @@ pub fn IteratorType(comptime IO: type) type {
 /// which make things trickier. If you want to compare AOFs between runs, the `debug`
 /// CLI command does it by hashing together all checksum_body, operation and timestamp
 /// fields.
-pub fn AOFType(comptime IO: type) type {
+pub fn AOFType(comptime _IO: type) type {
     return struct {
         const AOF = @This();
 
-        io: *IO,
-        file_descriptor: IO.fd_t,
+        io: *_IO,
+        file_descriptor: _IO.fd_t,
         last_checksum: ?u128 = null,
 
         state: union(enum) {
@@ -216,7 +216,7 @@ pub fn AOFType(comptime IO: type) type {
             checkpoint: struct {
                 replica: *anyopaque,
                 replica_callback: *const fn (*anyopaque) void,
-                fsync_completion: IO.Completion,
+                fsync_completion: _IO.Completion,
             },
         } = .{ .writing = .{ .unflushed = 0 } },
         size: usize = 0,
@@ -225,14 +225,14 @@ pub fn AOFType(comptime IO: type) type {
         /// (except on Windows). This ensures everything (including the dir) is fsync'd
         /// appropriately. Closing dir_fd is the responsibility of the caller.
         pub fn init(
-            io: *IO,
+            io: *_IO,
             options: struct {
-                dir_fd: IO.fd_t,
+                dir_fd: _IO.fd_t,
                 relative_path: []const u8,
             },
         ) !AOF {
             assert(!std.fs.path.isAbsolute(options.relative_path));
-            assert(IO != IOTest);
+            assert(_IO != IOTest);
 
             const dir = std.fs.Dir{
                 .fd = options.dir_fd,
@@ -262,7 +262,7 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub fn close(self: *AOF) void {
-            self.io.close_blocking(self.file_descriptor);
+            self.io.aof_blocking_close(self.file_descriptor);
         }
 
         /// Write a message to disk, with standard blocking IO but using the OS's page cache. The
@@ -281,7 +281,7 @@ pub fn AOFType(comptime IO: type) type {
             const size_disk = entry.size_disk();
             const bytes = std.mem.asBytes(&entry);
 
-            try self.io.write_blocking(self.file_descriptor, bytes[0..size_disk]);
+            try self.io.aof_blocking_write_all(self.file_descriptor, bytes[0..size_disk]);
 
             self.size += size_disk;
             self.state.writing.unflushed += 1;
@@ -318,7 +318,7 @@ pub fn AOFType(comptime IO: type) type {
             );
         }
 
-        fn on_fsync(self: *AOF, completion: *IO.Completion, result: IO.FsyncError!void) void {
+        fn on_fsync(self: *AOF, completion: *_IO.Completion, result: _IO.FsyncError!void) void {
             _ = completion;
             _ = result catch @panic("aof fsync failure");
 
@@ -331,7 +331,7 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub fn validate(self: *AOF, allocator: std.mem.Allocator, last_checksum: ?u128) !void {
-            assert(IO == IOTest);
+            assert(_IO == IOTest);
 
             var validation_target: AOFEntry = undefined;
 
@@ -384,14 +384,14 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub fn reset(self: *AOF) void {
-            assert(IO == IOTest);
+            assert(_IO == IOTest);
             self.state = .{ .writing = .{ .unflushed = 0 } };
         }
     };
 }
 
 pub const AOFReplayClient = struct {
-    const Storage = vsr.storage.StorageType(IOProd, Tracer);
+    const Storage = vsr.storage.StorageType(IO, Tracer);
     const StateMachine = vsr.state_machine.StateMachineType(
         Storage,
         constants.state_machine_config,
@@ -399,12 +399,12 @@ pub const AOFReplayClient = struct {
     const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
 
     client: *Client,
-    io: *IOProd,
+    io: *IO,
     message_pool: *MessagePool,
     inflight_message: ?*Message.Request = null,
 
     pub fn init(
-        io: *IOProd,
+        io: *IO,
         allocator: std.mem.Allocator,
         addresses: []std.net.Address,
     ) !AOFReplayClient {
@@ -540,7 +540,7 @@ pub const AOFReplayClient = struct {
 /// Return an iterator into an AOF, to read entries one by one. This also validates
 /// that both the header and body checksums of the read entry are valid, and that
 /// all checksums chain correctly.
-pub fn aof_iterator(io: *IOProd, path: []const u8) !AOFIterator {
+pub fn aof_iterator(io: *IO, path: []const u8) !AOFIterator {
     const file = try std.fs.cwd().openFile(path, .{ .mode = .read_only });
     errdefer file.close();
 
@@ -550,12 +550,12 @@ pub fn aof_iterator(io: *IOProd, path: []const u8) !AOFIterator {
 }
 
 pub fn aof_merge(
-    io: *IOProd,
+    io: *IO,
     allocator: std.mem.Allocator,
     input_paths: []const []const u8,
     output_path: []const u8,
 ) !void {
-    const AOF = AOFType(IOProd);
+    const AOF = AOFType(IO);
     const stdout = std.io.getStdOut().writer();
 
     var aofs: [constants.members_max]AOFIterator = undefined;
@@ -581,7 +581,7 @@ pub fn aof_merge(
     var target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
-    const dir_fd = try IOProd.open_dir(std.fs.path.dirname(output_path) orelse ".");
+    const dir_fd = try IO.open_dir(std.fs.path.dirname(output_path) orelse ".");
     defer std.posix.close(dir_fd);
 
     for (input_paths) |input_path| {
@@ -689,7 +689,11 @@ pub fn aof_merge(
         const entry = entries_by_parent.getPtr(current_parent.?) orelse unreachable;
 
         const buf = std.mem.asBytes(target)[0..entry.size];
-        const bytes_read = try io.read_blocking(entry.aof.file_descriptor, buf, entry.index);
+        const bytes_read = try io.aof_blocking_pread_all(
+            entry.aof.file_descriptor,
+            buf,
+            entry.index,
+        );
 
         // None of these conditions should happen, but double check them to prevent any TOCTOUs
         if (bytes_read != target.size_disk()) {
@@ -743,7 +747,7 @@ pub fn aof_merge(
 const testing = std.testing;
 
 test "aof write / read" {
-    const AOF = AOFType(IOProd);
+    const AOF = AOFType(IO);
 
     const aof_file = "test.aof";
     std.fs.cwd().deleteFile(aof_file) catch {};
@@ -751,10 +755,10 @@ test "aof write / read" {
 
     const allocator = std.testing.allocator;
 
-    var io = try IOProd.init(32, 0);
+    var io = try IO.init(32, 0);
     defer io.deinit();
 
-    const dir_fd = try IOProd.open_dir(".");
+    const dir_fd = try IO.open_dir(".");
     defer std.posix.close(dir_fd);
 
     var aof = try AOF.init(&io, .{
@@ -902,7 +906,7 @@ pub fn main() !void {
     const target = try allocator.create(AOFEntry);
     defer allocator.destroy(target);
 
-    var io = try IOProd.init(32, 0);
+    var io = try IO.init(32, 0);
     defer io.deinit();
 
     if (action != null and std.mem.eql(u8, action.?, "recover") and count == 4) {
