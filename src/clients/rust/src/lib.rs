@@ -15,12 +15,17 @@ use std::future::Future;
 use std::os::raw::{c_char, c_void};
 use std::{mem, ptr};
 
+// The generated bindings.
+// These are not part of the public API but are re-exported hidden
+// so that the vortex driver can parse the TB protocol directly.
 #[allow(unused)]
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 #[rustfmt::skip]
-mod tb_client;
+#[doc(hidden)]
+pub mod tb_client;
+
 use tb_client as tbc;
 
 mod conversions;

@@ -24,6 +24,7 @@ const LanguageCI = .{
 };
 
 const LanguageCIVortex = .{
+    .rust = @import("../testing/vortex/rust_driver/ci.zig"),
     .java = @import("../testing/vortex/java_driver/ci.zig"),
 };
 
