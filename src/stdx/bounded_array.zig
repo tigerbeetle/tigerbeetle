@@ -58,30 +58,24 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             try array.inner.resize(len);
         }
 
-        pub inline fn add_one_assume_capacity(array: *BoundedArray) *T {
-            return array.inner.addOneAssumeCapacity();
-        }
+        pub fn insert_at(array: *BoundedArray, index: usize, item: T) ?void {
+            if (array.full()) return null;
+            assert(index <= array.inner.len);
 
-        pub fn insert_assume_capacity(self: *BoundedArray, index: usize, item: T) void {
-            assert(self.inner.len < buffer_capacity);
-            assert(index <= self.inner.len);
+            array.inner.len += 1;
 
-            self.inner.len += 1;
-
-            var slice_ = self.slice();
+            var slice_ = array.slice();
             stdx.copy_right(.exact, T, slice_[index + 1 ..], slice_[index .. slice_.len - 1]);
             slice_[index] = item;
         }
 
-        pub fn append(array: *BoundedArray, item: T) error{Overflow}!void {
-            return array.inner.append(item);
-        }
-
-        pub inline fn append_assume_capacity(array: *BoundedArray, item: T) void {
+        pub fn push(array: *BoundedArray, item: T) ?void {
+            if (array.full()) return null;
             array.inner.appendAssumeCapacity(item);
         }
 
-        pub inline fn append_slice_assume_capacity(array: *BoundedArray, items: []const T) void {
+        pub fn push_slice(array: *BoundedArray, items: []const T) ?void {
+            if (array.count() + items.len > array.capacity()) return null;
             array.inner.appendSliceAssumeCapacity(items);
         }
 
@@ -106,8 +100,8 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             array.inner.len = 0;
         }
 
-        pub inline fn pop(array: *BoundedArray) T {
-            return array.inner.pop();
+        pub inline fn pop(array: *BoundedArray) ?T {
+            return array.inner.popOrNull();
         }
 
         pub inline fn capacity(array: *BoundedArray) usize {
@@ -124,7 +118,7 @@ test "BoundedArray.insert_assume_capacity" {
     for (0..items_max) |len| {
         var list_base = BoundedArrayU64{};
         for (0..len) |i| {
-            list_base.append_assume_capacity(i);
+            list_base.push(i).?;
         }
 
         // Test an insert at every possible position (including an append).

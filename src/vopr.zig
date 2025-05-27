@@ -1495,7 +1495,7 @@ pub const Simulator = struct {
 
         var replica_releases = vsr.ReleaseList{};
         for (0..replica_releases_count) |i| {
-            replica_releases.append_assume_capacity(releases[i].release);
+            replica_releases.push(releases[i].release).?;
         }
 
         replica_storage.faulty = fault;
