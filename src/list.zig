@@ -197,7 +197,7 @@ test "DoublyLinkedList fuzz" {
                 const node = &nodes[node_free];
 
                 list.push(node);
-                list_model.append_assume_capacity(node.id);
+                list_model.push(node.id);
                 nodes_free.unset(node.id);
             },
             .pop => {

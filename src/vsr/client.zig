@@ -483,7 +483,7 @@ pub fn ClientType(
                 var round_trip_times_ns = stdx.BoundedArrayType(u64, constants.replicas_max){};
                 for (self.replica_round_trip_times_ns) |round_trip_time_ns| {
                     if (round_trip_time_ns) |rtt_ns| {
-                        round_trip_times_ns.append_assume_capacity(rtt_ns);
+                        round_trip_times_ns.push(rtt_ns);
                     }
                 }
                 std.mem.sort(u64, round_trip_times_ns.slice(), {}, std.sort.asc(u64));

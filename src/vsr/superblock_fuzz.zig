@@ -296,7 +296,7 @@ const Environment = struct {
         });
 
         var vsr_headers = vsr.Headers.Array{};
-        vsr_headers.append_assume_capacity(vsr.Header.Prepare.root(cluster));
+        vsr_headers.push(vsr.Header.Prepare.root(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -364,7 +364,7 @@ const Environment = struct {
         });
         vsr_head.set_checksum_body(&.{});
         vsr_head.set_checksum();
-        vsr_headers.append_assume_capacity(vsr_head);
+        vsr_headers.push(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{

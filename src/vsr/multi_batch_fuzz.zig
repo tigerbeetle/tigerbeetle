@@ -115,7 +115,7 @@ fn run_fuzz(options: struct {
 
         encoder.add(batch_size);
         expect_payload_size += batch_size;
-        batches.append_assume_capacity(batch_element_count);
+        batches.push(batch_element_count);
         expect_trailer_size = trailer_size_next;
     }
     assert(batches.count() > 0);

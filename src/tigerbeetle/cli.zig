@@ -933,8 +933,8 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         if (aof_file.capacity() < start.positional.path.len + 4) {
             vsr.fatal(.cli, "data file path is too long for --aof. use --aof-file", .{});
         }
-        aof_file.append_slice_assume_capacity(start.positional.path);
-        aof_file.append_slice_assume_capacity(".aof");
+        aof_file.push_slice(start.positional.path);
+        aof_file.push_slice(".aof");
 
         std.log.warn(
             "--aof is deprecated. consider switching to '--aof-file={s}'",
@@ -951,7 +951,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         if (aof_file.capacity() < start.positional.path.len) {
             vsr.fatal(.cli, "--aof-file path is too long", .{});
         }
-        aof_file.append_slice_assume_capacity(start_aof_file);
+        aof_file.push_slice(start_aof_file);
 
         break :blk aof_file;
     } else null;

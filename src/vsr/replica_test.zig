@@ -2065,7 +2065,7 @@ const TestContext = struct {
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
         var replica_indexes = stdx.BoundedArrayType(u8, constants.members_max){};
-        for (replica_processes.const_slice()) |p| replica_indexes.append_assume_capacity(p.replica);
+        for (replica_processes.const_slice()) |p| replica_indexes.push(p.replica);
         return TestReplicas{
             .context = t,
             .cluster = t.cluster,
@@ -2084,7 +2084,7 @@ const TestContext = struct {
         assert(index + count <= t.cluster.options.client_count);
 
         var client_indexes = stdx.BoundedArrayType(usize, constants.clients_max){};
-        for (index..index + count) |i| client_indexes.append_assume_capacity(i);
+        for (index..index + count) |i| client_indexes.push(i);
         return TestClients{
             .context = t,
             .cluster = t.cluster,
@@ -2145,45 +2145,45 @@ const TestContext = struct {
 
         var array = ProcessList{};
         switch (selector) {
-            .R0 => array.append_assume_capacity(.{ .replica = 0 }),
-            .R1 => array.append_assume_capacity(.{ .replica = 1 }),
-            .R2 => array.append_assume_capacity(.{ .replica = 2 }),
-            .R3 => array.append_assume_capacity(.{ .replica = 3 }),
-            .R4 => array.append_assume_capacity(.{ .replica = 4 }),
-            .R5 => array.append_assume_capacity(.{ .replica = 5 }),
-            .S0 => array.append_assume_capacity(.{ .replica = replica_count + 0 }),
-            .S1 => array.append_assume_capacity(.{ .replica = replica_count + 1 }),
-            .S2 => array.append_assume_capacity(.{ .replica = replica_count + 2 }),
-            .S3 => array.append_assume_capacity(.{ .replica = replica_count + 3 }),
-            .S4 => array.append_assume_capacity(.{ .replica = replica_count + 4 }),
-            .S5 => array.append_assume_capacity(.{ .replica = replica_count + 5 }),
+            .R0 => array.push(.{ .replica = 0 }),
+            .R1 => array.push(.{ .replica = 1 }),
+            .R2 => array.push(.{ .replica = 2 }),
+            .R3 => array.push(.{ .replica = 3 }),
+            .R4 => array.push(.{ .replica = 4 }),
+            .R5 => array.push(.{ .replica = 5 }),
+            .S0 => array.push(.{ .replica = replica_count + 0 }),
+            .S1 => array.push(.{ .replica = replica_count + 1 }),
+            .S2 => array.push(.{ .replica = replica_count + 2 }),
+            .S3 => array.push(.{ .replica = replica_count + 3 }),
+            .S4 => array.push(.{ .replica = replica_count + 4 }),
+            .S5 => array.push(.{ .replica = replica_count + 5 }),
             .A0 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 0) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 0) % replica_count) }),
             .B1 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 1) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 1) % replica_count) }),
             .B2 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 2) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 2) % replica_count) }),
             .B3 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 3) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 3) % replica_count) }),
             .B4 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 4) % replica_count) }),
             .B5 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
-            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].?.id }),
+                .push(.{ .replica = @intCast((view + 5) % replica_count) }),
+            .C0 => array.push(.{ .client = t.cluster.clients[0].?.id }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @intCast(i) });
+                        array.push(.{ .replica = @intCast(i) });
                     }
                 }
                 if (selector == .__ or selector == .S_) {
                     for (t.cluster.replicas[replica_count..], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @intCast(replica_count + i) });
+                        array.push(.{ .replica = @intCast(replica_count + i) });
                     }
                 }
                 if (selector == .__ or selector == .C_) {
                     for (t.cluster.clients) |*client| {
-                        array.append_assume_capacity(.{ .client = client.*.?.id });
+                        array.push(.{ .client = client.*.?.id });
                     }
                 }
             },
@@ -2232,7 +2232,7 @@ const TestReplicas = struct {
     pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
         var releases_bundled = vsr.ReleaseList{};
         for (releases_bundled_patch) |patch| {
-            releases_bundled.append_assume_capacity(vsr.Release.from(.{
+            releases_bundled.push(vsr.Release.from(.{
                 .major = 0,
                 .minor = 0,
                 .patch = patch,
@@ -2552,10 +2552,10 @@ const TestReplicas = struct {
             const process_a = Process{ .replica = a };
             for (peers.const_slice()) |process_b| {
                 if (direction == .bidirectional or direction == .outgoing) {
-                    paths.append_assume_capacity(.{ .source = process_a, .target = process_b });
+                    paths.push(.{ .source = process_a, .target = process_b });
                 }
                 if (direction == .bidirectional or direction == .incoming) {
-                    paths.append_assume_capacity(.{ .source = process_b, .target = process_a });
+                    paths.push(.{ .source = process_b, .target = process_a });
                 }
             }
         }

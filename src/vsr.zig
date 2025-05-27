@@ -1495,20 +1495,20 @@ const ViewChangeHeadersArray = struct {
     ) void {
         headers.command = command;
         headers.array.clear();
-        for (slice) |*header| headers.array.append_assume_capacity(header.*);
+        for (slice) |*header| headers.array.push(header.*);
         headers.verify();
     }
 
     pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Prepare) void {
         // We don't do comprehensive validation here — assume that verify() will be called
         // after any series of appends.
-        headers.array.append_assume_capacity(header.*);
+        headers.array.push(header.*);
     }
 
     pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
         assert(headers.command == .do_view_change);
         assert(headers.array.count() > 0);
-        headers.array.append_assume_capacity(Headers.dvc_blank(op));
+        headers.array.push(Headers.dvc_blank(op));
     }
 };
 

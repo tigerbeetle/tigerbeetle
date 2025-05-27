@@ -226,7 +226,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                             });
                         }
 
-                        repl.buffer.insert_assume_capacity(buffer_index, character);
+                        repl.buffer.insert_at(buffer_index, character);
                         buffer_index += 1;
                     },
                     .backspace => if (buffer_index > 0) {
@@ -361,9 +361,9 @@ pub fn ReplType(comptime MessageBus: type) type {
                         // Re-fill the buffer with prefix, current match and suffix. Set the
                         // buffer index where the current selected match ends.
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.slice());
-                        repl.buffer.append_slice_assume_capacity(current_completion);
-                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.slice());
+                        repl.buffer.push_slice(repl.completion.prefix.slice());
+                        repl.buffer.push_slice(current_completion);
+                        repl.buffer.push_slice(repl.completion.suffix.slice());
                         buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
                     .left, .ctrlb => if (buffer_index > 0) {
@@ -409,14 +409,12 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                         if (history_index == repl.history.count) {
                             repl.buffer_outside_history.clear();
-                            repl.buffer_outside_history.append_slice_assume_capacity(
-                                repl.buffer.const_slice(),
-                            );
+                            repl.buffer_outside_history.push_slice(repl.buffer.const_slice());
                         }
                         history_index = history_index_next;
 
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        repl.buffer.push_slice(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
                     .down, .ctrln => if (history_index < repl.history.count) {
@@ -453,7 +451,7 @@ pub fn ReplType(comptime MessageBus: type) type {
                         });
 
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        repl.buffer.push_slice(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
                     .altf, .ctrlright => {

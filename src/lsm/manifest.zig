@@ -612,8 +612,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                             }
 
                             switch (direction) {
-                                .descending => range.tables.insert_assume_capacity(0, table_next),
-                                .ascending => range.tables.append_assume_capacity(table_next),
+                                .descending => range.tables.insert_at(0, table_next),
+                                .ascending => range.tables.push(table_next),
                             }
                         } else {
                             break :inner;

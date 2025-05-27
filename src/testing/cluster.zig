@@ -438,9 +438,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
 
                 cluster.releases_bundled[replica_index].clear();
-                cluster.releases_bundled[replica_index].append_assume_capacity(
-                    options.cluster.releases[0].release,
-                );
+                cluster.releases_bundled[replica_index].push(options.cluster.releases[0].release);
 
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.

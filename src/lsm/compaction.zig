@@ -710,7 +710,7 @@ pub fn CompactionType(
                 const snapshot_max = snapshot_max_for_table_input(compaction.op_min);
                 assert(compaction.table_info_a.?.disk.table_info.snapshot_max >= snapshot_max);
 
-                compaction.manifest_entries.append_assume_capacity(.{
+                compaction.manifest_entries.push(.{
                     .operation = .move_to_level_b,
                     .table = compaction.table_info_a.?.disk.table_info.*,
                 });
@@ -1841,7 +1841,7 @@ pub fn CompactionType(
             assert(compaction.table_builder.state == .no_blocks);
             compaction.table_builder_index_block = null;
 
-            compaction.manifest_entries.append_assume_capacity(.{
+            compaction.manifest_entries.push(.{
                 .operation = .insert_to_level_b,
                 .table = table,
             });

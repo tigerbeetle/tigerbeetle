@@ -419,7 +419,7 @@ test "MessageBuffer fuzz" {
                 std.mem.asBytes(&header),
             );
             total_size += header.size;
-            headers.append_assume_capacity(header.frame_const().*);
+            headers.push(header.frame_const().*);
         }
 
         if (fault) {
