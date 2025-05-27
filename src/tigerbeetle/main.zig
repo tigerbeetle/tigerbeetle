@@ -418,7 +418,7 @@ const Command = struct {
         if (multiversion != null) multiversion.?.open_sync() catch {};
 
         var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
-        releases_bundled_baseline.append_assume_capacity(constants.config.process.release);
+        releases_bundled_baseline.push(constants.config.process.release);
 
         const releases_bundled = if (multiversion != null)
             &multiversion.?.releases_bundled

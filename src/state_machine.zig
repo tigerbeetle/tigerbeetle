@@ -1932,7 +1932,7 @@ pub fn StateMachineType(
 
             // Adding the condition for `debit_account_id = $account_id`.
             if (filter.flags.debits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                scan_conditions.push(scan_builder.scan_prefix(
                     .debit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
                     snapshot_latest,
@@ -1944,7 +1944,7 @@ pub fn StateMachineType(
 
             // Adding the condition for `credit_account_id = $account_id`.
             if (filter.flags.credits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                scan_conditions.push(scan_builder.scan_prefix(
                     .credit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
                     snapshot_latest,
@@ -1960,7 +1960,7 @@ pub fn StateMachineType(
                     // Creating an union `OR` with the `debit_account_id` and `credit_account_id`.
                     const accounts_merge = scan_builder.merge_union(scan_conditions.const_slice());
                     scan_conditions.clear();
-                    scan_conditions.append_assume_capacity(accounts_merge);
+                    scan_conditions.push(accounts_merge);
                 },
                 else => unreachable,
             }
@@ -1971,7 +1971,7 @@ pub fn StateMachineType(
             }) |filter_field| {
                 const filter_value = @field(filter, @tagName(filter_field));
                 if (filter_value != 0) {
-                    scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                    scan_conditions.push(scan_builder.scan_prefix(
                         filter_field,
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         snapshot_latest,
@@ -2251,7 +2251,7 @@ pub fn StateMachineType(
             var scan_conditions: stdx.BoundedArrayType(*Groove.ScanBuilder.Scan, indexes.len) = .{};
             inline for (indexes) |index| {
                 if (@field(filter, @tagName(index)) != 0) {
-                    scan_conditions.append_assume_capacity(groove.scan_builder.scan_prefix(
+                    scan_conditions.push(groove.scan_builder.scan_prefix(
                         std.enums.nameCast(std.meta.FieldEnum(Groove.IndexTrees), index),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         snapshot_latest,

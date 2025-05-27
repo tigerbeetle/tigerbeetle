@@ -246,11 +246,12 @@ pub const StatsD = struct {
                     assert(send_size > 0);
                     if (send_ready + send_size > packet_size_max) {
                         assert(send_ready > 0);
-
-                        send_sizes.append(send_ready) catch {
+                        if (send_sizes.full()) {
                             log.err("{}: insufficient packet count", .{self.replica});
                             break;
-                        };
+                        } else {
+                            send_sizes.push(send_ready);
+                        }
                         send_ready = send_size;
                     } else {
                         send_ready += send_size;
@@ -259,9 +260,11 @@ pub const StatsD = struct {
             }
         }
         if (send_ready > 0) {
-            send_sizes.append(send_ready) catch {
+            if (send_sizes.full()) {
                 log.err("{}: insufficient packet count", .{self.replica});
-            };
+            } else {
+                send_sizes.push(send_ready);
+            }
         }
 
         var send_offset: u32 = 0;

@@ -300,7 +300,7 @@ pub const ZipfianShuffled = struct {
         while (index < end_index) : (index += 1) {
             if (self.hot_items.count() < hot_items_count_max) {
                 const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
-                self.hot_items.insert_assume_capacity(pos_actual, index);
+                self.hot_items.insert_at(pos_actual, index);
             } else {
                 // NB: I believe this is biased as to which new items become hot items,
                 // but it probably doesn't matter for our purposes.
@@ -308,7 +308,7 @@ pub const ZipfianShuffled = struct {
                 if (pos_init < hot_items_count_max) {
                     self.hot_items.truncate(hot_items_count_max - 1);
                     const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
-                    self.hot_items.insert_assume_capacity(pos_actual, index);
+                    self.hot_items.insert_at(pos_actual, index);
                 }
             }
         }
