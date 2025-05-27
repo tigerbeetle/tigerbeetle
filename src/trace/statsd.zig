@@ -247,7 +247,7 @@ pub const StatsD = struct {
                     if (send_ready + send_size > packet_size_max) {
                         assert(send_ready > 0);
 
-                        send_sizes.append(send_ready) catch {
+                        send_sizes.push(send_ready) orelse {
                             log.err("{}: insufficient packet count", .{self.replica});
                             break;
                         };
@@ -259,7 +259,7 @@ pub const StatsD = struct {
             }
         }
         if (send_ready > 0) {
-            send_sizes.append(send_ready) catch {
+            send_sizes.push(send_ready) orelse {
                 log.err("{}: insufficient packet count", .{self.replica});
             };
         }
