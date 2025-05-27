@@ -3,12 +3,15 @@ library(sqldf)
 options(scipen=99999)
 
 
-df = read.csv("./baseline_sort.csv")
+df_std = read.csv("./baseline_sort.csv")
+df_radix = read.csv("./radix_sort.csv")
+
+df = rbind(df_std,df_radix)
 
 df = sqldf("SELECT * FROM df WHERe element_count > 0")
 
 
-ggplot(df, aes(x=table, y=cpu_cycles)) +
+ggplot(df, aes(x=table, y=cpu_cycles, color = name)) +
     geom_point() + 
     facet_grid(code ~ .)  + 
     theme_bw()

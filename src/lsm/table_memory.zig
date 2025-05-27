@@ -9,6 +9,221 @@ const binary_search = @import("binary_search.zig");
 const stdx = @import("../stdx.zig");
 const maybe = stdx.maybe;
 
+pub fn RadixSorter(comptime Key: type, comptime Value: type, comptime use_index: bool) type {
+    const RADIX_BITS = 8;
+    const RADIX_SIZE = 1 << RADIX_BITS;
+    const RADIX_LEVELS = ((@bitSizeOf(Key) - 1) / RADIX_BITS) + 1; // this is the max. iterations we need to do.
+    const RADIX_MASK = RADIX_SIZE - 1;
+    return struct {
+        pub fn count_frequency(
+            comptime T: type,
+            input: []const T,
+            comptime key_from_value: anytype,
+            histogram: anytype,
+        ) void {
+
+            // make copy of value
+            for (input) |*value| {
+                var key = key_from_value(value);
+                inline for (0..RADIX_LEVELS) |pass| {
+                    const partition: usize = @intCast(key & RADIX_MASK);
+                    histogram[pass][partition] += 1;
+                    key >>= RADIX_BITS;
+                }
+            }
+
+            //for (0..RADIX_LEVELS) |pass| {
+            //var sum: usize = 0;
+            //for (histogram[pass]) |value| {
+            //sum += value;
+            //}
+            //assert(sum == input.len);
+            //}
+        }
+
+        pub fn is_trivial(radix_frequencies: [RADIX_SIZE]u32, number_elements: usize) bool {
+            for (radix_frequencies) |freq| {
+                if (freq != 0) { // remove branch?
+                    return freq == number_elements;
+                }
+            }
+            //assert(number_elements == 0);
+            return true;
+        }
+
+        fn determine_shift_type(comptime bits: u16) type {
+            return std.meta.Int(
+                .unsigned,
+                bits,
+            );
+        }
+
+        // TODO: check heuristic, when is it worth it to optimize,
+        // - e.g. include histogram.
+        // - calculate
+        pub fn sort(
+            comptime T: type,
+            noalias input: []T,
+            noalias scratch_buffer: []T,
+            comptime lessThanFn: anytype,
+            comptime key_from_value: anytype,
+        ) bool {
+            var histogram: [RADIX_LEVELS][RADIX_SIZE]u32 = .{.{0} ** RADIX_SIZE} ** RADIX_LEVELS;
+            count_frequency(T, input, key_from_value, &histogram);
+
+            const KeyIndex = struct {
+                const Self = @This();
+                key: Key,
+                index: u32,
+                inline fn key_from_value_(self: *const Self) Key {
+                    return self.key;
+                }
+            };
+            // check for numer of passes.
+
+            // gain >= 8
+            // passes > 2
+
+            var required_passes: u16 = 0;
+            for (0..RADIX_LEVELS) |pass| {
+                required_passes += if (is_trivial(histogram[pass], input.len)) 0 else 1;
+            }
+
+            // it only is worht it if we have more than 2 passes
+
+            //const min_passes = true;
+            //const use_index_optimization: bool = ((@sizeOf(Value) / @sizeOf(KeyIndex) >= 2));
+            //const use_index_optimization: bool = true;
+            const min_passes = (required_passes > 2);
+            const use_index_optimization: bool = ((@sizeOf(Value) / @sizeOf(KeyIndex)) >= 8);
+
+            //if (min_passes and use_index_optimization) {
+            //std.debug.print("passes {} {} {}  \n", .{ required_passes, (2 * required_passes * @sizeOf(Value)), (2 * required_passes * @sizeOf(KeyIndex) + ((3) * @sizeOf(Value) + 2 * @sizeOf(KeyIndex))) });
+            //}
+
+            // TODO:
+            // - create histogram first than we know the actual passes.
+            // - then decide based on heuristic if the optimization makes sense.
+            // - follow the list has a pretty bad access pattern dependent loads so discount the optimization by some factor.
+
+            // r is actual passes
+            // normal radix: 2 * p * V
+            // optimization: 2 * p * KeyIndex + (3 V + 2 * keyIndex)
+
+            if (use_index and min_passes and use_index_optimization) {
+
+                // This is required to split the scratch buffer array in half.
+                assert((@sizeOf(Value) / @sizeOf(KeyIndex) >= 2));
+                // split the scratch_buffer in two and use it.
+                // create the key index pointer in the first scratch_buffer.
+                const half = scratch_buffer.len / 2;
+                // recast it.
+                // assert that length is same and key index is divisable by the orignal element.
+                const first_half: []KeyIndex = std.mem.bytesAsSlice(KeyIndex, std.mem.sliceAsBytes(scratch_buffer[0..half]));
+                const second_half: []KeyIndex = std.mem.bytesAsSlice(KeyIndex, std.mem.sliceAsBytes(scratch_buffer[half..]));
+
+                assert(first_half.len >= input.len);
+                assert(second_half.len >= input.len);
+                // Read V
+                // Write KI
+                // TODO: maybe use loop here?
+                for (input, 0..) |*value, i| {
+                    first_half[i] = .{ .key = key_from_value(value), .index = @intCast(i) };
+                }
+                radix_sort_unrolled(KeyIndex, first_half[0..input.len], second_half[0..input.len], lessThanFn, KeyIndex.key_from_value_, histogram);
+
+                // read V, write V, read K
+                const n = input.len;
+                var i: usize = 0;
+                while (i < n) : (i += 1) {
+                    // If this slot is already correct, continue.
+                    if (first_half[i].index == i) continue;
+
+                    // Start walking the current cycle.
+                    var k: usize = i;
+                    const tmp = input[k]; // save the value that belongs elsewhere
+
+                    while (true) {
+                        assert(first_half[k].index < n);
+                        const next = first_half[k].index; // original position of the next item
+
+                        if (next == i) break; // last hop in the cycle
+
+                        input[k] = input[next]; // move next item forward
+                        first_half[k].index = @intCast(k); // mark k as “done / identity”
+                        k = next; // advance within the cycle
+                    }
+
+                    // Drop the saved value into the final hole and mark it fixed.
+                    input[k] = tmp;
+                    first_half[k].index = @intCast(k);
+                }
+            } else {
+                radix_sort_unrolled(T, input, scratch_buffer, lessThanFn, key_from_value, histogram);
+            }
+            return use_index and min_passes and use_index_optimization;
+        }
+
+        pub fn radix_sort_unrolled(
+            comptime T: type,
+            noalias input: []T,
+            noalias scratch_buffer: []T,
+            comptime lessThanFn: anytype,
+            comptime key_from_value: anytype,
+            histogram: [RADIX_LEVELS][RADIX_SIZE]u32,
+        ) void {
+            // Non comparision sort.
+            _ = lessThanFn; // autofix
+            assert(input.len == scratch_buffer.len);
+
+            if (input.len == 0) return;
+
+            assert(std.math.isPowerOfTwo(RADIX_LEVELS));
+
+            const bits = std.math.log2(@bitSizeOf(Key));
+            const shift_type = determine_shift_type(bits);
+
+            var source = &input;
+            var target = &scratch_buffer;
+            var queue_ptrs: [RADIX_SIZE][*]T = undefined;
+            var trivial_passes: u32 = 0;
+
+            inline for (0..RADIX_LEVELS) |pass| {
+                const elements = if (is_trivial(histogram[pass], source.len)) 0 else source.len;
+                trivial_passes += if (elements == 0) 1 else 0;
+                const target_offset = if (elements == 0) 0 else queue_ptrs.len;
+                const shift: shift_type = @intCast(pass * RADIX_BITS);
+
+                var next_offset: u32 = 0;
+                for (0..target_offset) |i| {
+                    queue_ptrs[i] = target.*.ptr + next_offset;
+                    next_offset += histogram[pass][i]; // build prefix sum
+                }
+
+                // todo try batch wise
+                for (0..elements) |i_i| {
+                    const value = &source.*[i_i];
+                    const key: Key = key_from_value(value);
+                    const index: usize = @intCast((key >> shift) & RADIX_MASK);
+                    queue_ptrs[index][0] = value.*;
+                    queue_ptrs[index] += 1; // advance the pointer
+                }
+
+                // UGLY SWAP
+                // swap the input pointer and output pointer
+                if (elements == 0) {} else {
+                    const tmp_ref = source;
+                    source = target;
+                    target = tmp_ref;
+                }
+            }
+            if (trivial_passes % 2 != 0) {
+                std.mem.copyForwards(T, input, scratch_buffer);
+            }
+        }
+    };
+}
+
 const BenchmarkParams = struct {
     table: []const u8 = "",
     name: []const u8 = "",
@@ -52,6 +267,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
+        scratch: []Value,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
@@ -76,16 +292,21 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .name = name,
 
                 .values = undefined,
+                .scratch = undefined,
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            table.scratch = try allocator.alloc(Value, Table.value_count_max);
+            errdefer allocator.free(table.scratch);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
             allocator.free(table.values);
+            allocator.free(table.scratch);
         }
 
         pub fn reset(table: *TableMemory) void {
@@ -96,6 +317,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .scratch = table.scratch,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
@@ -148,7 +370,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const element_count = if (table.value_context.sorted) 0 else table.count();
             var bench_params = BenchmarkParams{
                 .table = table.name,
-                .name = "std.sort",
+                .name = "radix",
                 .code = "make_immutable",
                 .key_size = @sizeOf(Key),
                 .tuple_size = @sizeOf(Value),
@@ -175,6 +397,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .scratch = table.scratch,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
                 .name = table.name,
@@ -209,7 +432,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
             table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
+                sort_suffix_from_offset(
+                table_immutable.values[0..tables_combined_count],
+                table_immutable.scratch[0..tables_combined_count],
+                0,
+            );
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -236,7 +463,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const element_count = table.count() - table.mutability.mutable.suffix_offset;
             var bench_params = BenchmarkParams{
                 .table = table.name,
-                .name = "std.sort",
+                .name = "radix",
                 .code = "suffix_sort",
                 .key_size = @sizeOf(Key),
                 .tuple_size = @sizeOf(Value),
@@ -257,17 +484,30 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
             assert(offset <= table.count());
 
-            const target_count = sort_suffix_from_offset(table.values_used(), offset);
+            const target_count = sort_suffix_from_offset(table.values_used(), table.scratch[0..table.count()], offset);
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
         }
 
         /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
         /// returned count may be less than or equal to the original `values.len`.)
-        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
+        fn sort_suffix_from_offset(values: []Value, scratch: []Value, offset: u32) u32 {
             assert(offset <= values.len);
+            //.radix => |scratch_buffer| {
 
-            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+            //const slice_length: usize = values[offset..].len;
+
+            //const tmp = scratch_buffer[0..slice_length];
+
+            //assert(tmp.len == slice_length);
+
+            //radix_sort_unrolled(values[offset..], tmp);
+
+            //assert(std.sort.isSorted(Value, values[offset..], {}, sort_values_by_key_in_ascending_order));
+
+            //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+
+            _ = RadixSorter(Key, Value, true).sort(Value, values[offset..], scratch[offset..], sort_values_by_key_in_ascending_order, key_from_value);
 
             // Merge values with identical keys (last one wins) and collapse tombstones for
             // secondary indexes.
