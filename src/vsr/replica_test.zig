@@ -323,6 +323,68 @@ test "Cluster: recovery: recovering head: idle cluster" {
     try expectEqual(b.op_head(), 2);
 }
 
+test "Cluster: recovery: reformat unrecoverable replica" {
+    for ([_]u64{
+        // The cluster is still within the first checkpoint.
+        // The recovering replica just needs to load a SV and the it can repair.
+        5,
+        // The cluster is ahead of the initial checkpoint.
+        // The recovering replica needs to state sync via SV.
+        checkpoint_2,
+    }) |op_max| {
+        const t = try TestContext.init(.{ .replica_count = 3 });
+        defer t.deinit();
+
+        var c = t.clients(0, t.cluster.options.client_count);
+        var b = t.replica(.B1);
+
+        try c.request(op_max, op_max);
+
+        b.stop();
+        try b.open_reformat();
+        t.run();
+        try expectEqual(b.health(), .up);
+
+        try expectEqual(b.status(), .normal);
+        // +pipeline since the reformatted replica pulses noop requests.
+        try expectEqual(b.op_head(), op_max + constants.pipeline_prepare_queue_max);
+    }
+}
+
+test "Cluster: recovery: reformat unrecoverable replica: too many faults" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(0, t.cluster.options.client_count);
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    try c.request(3, 3);
+
+    b1.stop();
+    b2.stop();
+
+    // Restart A0 to force it out of normal mode.
+    // Otherwise it would just share a SV, repairing the recovering replicas.
+    a0.stop();
+    try a0.open();
+
+    try b1.open_reformat();
+    t.run();
+    try expectEqual(b1.health(), .reformatting);
+
+    try b2.open_reformat();
+    t.run();
+    try expectEqual(b1.health(), .reformatting);
+
+    t.run();
+
+    // There were too many faults, so the cluster (safely) remains unavailable.
+    try expectEqual(b1.health(), .reformatting);
+    try expectEqual(b1.health(), .reformatting);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
