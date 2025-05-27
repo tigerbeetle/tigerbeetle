@@ -1021,10 +1021,11 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         fn client_request_callback(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation_vsr: vsr.Operation,
             timestamp: u64,
             result: []u8,
         ) void {
+            const operation = operation_vsr.cast(StateMachine);
             const reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(result, .{
                 .element_size = StateMachine.result_size_bytes(operation),
             }) catch unreachable;

@@ -87,12 +87,7 @@ pub fn EchoClientType(
 
             switch (inflight.callback) {
                 .request => |callback| {
-                    callback(
-                        inflight.user_data,
-                        operation.cast(EchoClient.StateMachine),
-                        timestamp,
-                        reply.body_used(),
-                    );
+                    callback(inflight.user_data, operation, timestamp, reply.body_used());
                 },
                 .register => |callback| {
                     const result = vsr.RegisterResult{

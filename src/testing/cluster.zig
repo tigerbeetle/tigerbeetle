@@ -818,7 +818,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         /// See `on_reply`.
         fn request_callback(
             user_data: u128,
-            operation: StateMachine.Operation,
+            operation: vsr.Operation,
             timestamp: u64,
             result: []u8,
         ) void {

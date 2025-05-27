@@ -26,7 +26,7 @@ pub fn ClientType(
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
-                operation: StateMachine.Operation,
+                operation: vsr.Operation,
                 timestamp: u64,
                 results: []u8,
             ) void;
@@ -624,7 +624,7 @@ pub fn ClientType(
                 // NOTE: the callback is allowed to mutate `reply.body_used()` here.
                 inflight.callback.request(
                     inflight.user_data,
-                    inflight_vsr_operation.cast(StateMachine),
+                    inflight_vsr_operation,
                     reply.header.timestamp,
                     reply.body_used(),
                 );
