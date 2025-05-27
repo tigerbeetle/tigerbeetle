@@ -239,16 +239,10 @@ const Command = struct {
         });
         defer command.deinit(allocator);
 
-        var superblock = try SuperBlock.init(
-            allocator,
-            .{
-                .storage = &command.storage,
-                .storage_size_limit = data_file_size_min,
-            },
-        );
-        defer superblock.deinit(allocator);
-
-        try vsr.format(Storage, allocator, options, &command.storage, &superblock);
+        try vsr.format(Storage, allocator, options, .{
+            .storage = &command.storage,
+            .storage_size_limit = data_file_size_min,
+        });
 
         log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,

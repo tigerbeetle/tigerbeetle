@@ -325,12 +325,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             // Format each replica's storage (equivalent to "tigerbeetle format ...").
             for (storages, 0..) |*storage, replica_index| {
-                var superblock = try SuperBlock.init(allocator, .{
-                    .storage = storage,
-                    .storage_size_limit = options.cluster.storage_size_limit,
-                });
-                defer superblock.deinit(allocator);
-
                 try vsr.format(
                     Storage,
                     allocator,
@@ -341,8 +335,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .replica_count = options.cluster.replica_count,
                         .view = null,
                     },
-                    storage,
-                    &superblock,
+                    .{
+                        .storage = storage,
+                        .storage_size_limit = options.cluster.storage_size_limit,
+                    },
                 );
             }
 
