@@ -830,6 +830,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             release: vsr.Release,
             replica: u8,
             replica_count: u8,
+            /// Set to null during initial cluster formatting.
+            /// Set to the target view when constructing a new data file for a reformatted replica.
+            view: ?u32,
         };
 
         pub fn format(
@@ -845,6 +848,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
+            if (options.view) |view| {
+                assert(view > 1);
+                assert(options.replica < options.replica_count);
+            }
 
             const members = vsr.root_members(options.cluster);
             const replica_id = members[options.replica];

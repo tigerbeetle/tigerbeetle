@@ -583,6 +583,7 @@ const Environment = struct {
             .release = vsr.Release.minimum,
             .replica = replica,
             .replica_count = replica_count,
+            .view = null,
         });
         try env.tick_until_state_change(.superblock_format, .superblock_open);
 

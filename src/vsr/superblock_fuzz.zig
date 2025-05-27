@@ -292,6 +292,7 @@ const Environment = struct {
             .release = vsr.Release.minimum,
             .replica = replica,
             .replica_count = replica_count,
+            .view = null,
         });
 
         var vsr_headers = vsr.Headers.Array{};

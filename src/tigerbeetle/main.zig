@@ -82,6 +82,7 @@ pub fn main() !void {
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
+            .view = null,
         }),
         .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),

@@ -242,6 +242,7 @@ test "format" {
         .release = vsr.Release.minimum,
         .replica = replica,
         .replica_count = replica_count,
+        .view = null,
     }, &storage, &superblock);
 
     // Verify the superblock headers.
