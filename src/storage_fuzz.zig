@@ -64,12 +64,14 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         var storage_data_read: [storage_size]u8 align(sector_size) = undefined;
         @memset(&storage_data_read, 0);
 
-        var io = IO.init(&.{
+        var files: [1]IO.File = .{
             .{
                 .buffer = &storage_data_stored,
                 .fault_map = &fault_map.masks,
             },
-        }, .{
+        };
+
+        var io = try IO.init(&files, .{
             .seed = args.seed,
             .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });

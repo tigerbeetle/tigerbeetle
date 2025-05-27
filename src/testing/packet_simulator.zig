@@ -7,7 +7,6 @@ const fuzz = @import("./fuzz.zig");
 const ReadyQueueType = fuzz.ReadyQueueType;
 const stdx = @import("../stdx.zig");
 const Ratio = stdx.PRNG.Ratio;
-const ratio = stdx.PRNG.ratio;
 
 pub const PacketSimulatorOptions = struct {
     node_count: u8,
@@ -20,8 +19,8 @@ pub const PacketSimulatorOptions = struct {
     one_way_delay_mean: u64,
     one_way_delay_min: u64,
 
-    packet_loss_probability: Ratio = ratio(0, 100),
-    packet_replay_probability: Ratio = ratio(0, 100),
+    packet_loss_probability: Ratio = Ratio.zero(),
+    packet_replay_probability: Ratio = Ratio.zero(),
 
     /// How the partitions should be generated
     partition_mode: PartitionMode = .none,
@@ -29,10 +28,10 @@ pub const PacketSimulatorOptions = struct {
     partition_symmetry: PartitionSymmetry = .symmetric,
 
     /// Probability per tick that a partition will occur
-    partition_probability: Ratio = ratio(0, 100),
+    partition_probability: Ratio = Ratio.zero(),
 
     /// Probability per tick that a partition will resolve
-    unpartition_probability: Ratio = ratio(0, 100),
+    unpartition_probability: Ratio = Ratio.zero(),
 
     /// Minimum time a partition lasts
     partition_stability: u32 = 0,

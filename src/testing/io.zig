@@ -8,7 +8,6 @@ const constants = @import("../constants.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const Ratio = stdx.PRNG.Ratio;
-const ratio = stdx.PRNG.ratio;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {
@@ -33,7 +32,7 @@ pub const IO = struct {
 
         /// Chance out of 100 that a read larger than a logical sector
         /// will return an error.InputOutput.
-        larger_than_logical_sector_read_fault_probability: Ratio = ratio(0, 100),
+        larger_than_logical_sector_read_fault_probability: Ratio = Ratio.zero(),
     };
 
     const Queue = QueueType(Completion);

@@ -18,7 +18,7 @@ const Cluster = @import("../testing/cluster.zig").ClusterType(StateMachineType);
 const Release = @import("../testing/cluster.zig").Release;
 const LinkFilter = @import("../testing/cluster/network.zig").LinkFilter;
 const Network = @import("../testing/cluster/network.zig").Network;
-const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const slot_count = constants.journal_slot_count;
 const checkpoint_1 = vsr.Checkpoint.checkpoint_after(0);
@@ -1503,8 +1503,8 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
 
     // Disable new read/write faults so that we can use `storage.faults` to track repairs.
     // (That is, as the scrubber runs, the number of faults will monotonically decrease.)
-    b2_storage.options.read_fault_probability = ratio(0, 100);
-    b2_storage.options.write_fault_probability = ratio(0, 100);
+    b2_storage.options.read_fault_probability = Ratio.zero();
+    b2_storage.options.write_fault_probability = Ratio.zero();
 
     // Tick until B2's grid repair stops making progress.
     {
@@ -1938,7 +1938,7 @@ const TestContext = struct {
 
                 .path_maximum_capacity = 10,
                 .path_clog_duration_mean = 0,
-                .path_clog_probability = ratio(0, 100),
+                .path_clog_probability = Ratio.zero(),
                 .recorded_count_max = 16,
             },
             .storage = .{

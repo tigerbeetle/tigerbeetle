@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
@@ -1122,7 +1122,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .write_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
-        .crash_fault_probability = ratio(0, 100),
+        .crash_fault_probability = Ratio.zero(),
     }, fuzz_ops);
 
     log.info("Passed!", .{});
