@@ -259,6 +259,8 @@ pub const Operation = enum(u8) {
     pulse = 4,
     /// The value 5 is reserved for release-upgrade requests.
     upgrade = 5,
+    /// The value 6 is reserved for noop requests.
+    noop = 6,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.

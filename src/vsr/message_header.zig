@@ -602,6 +602,8 @@ pub const Header = extern struct {
                         if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
                             return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
                         }
+                    } else if (self.operation == .noop) {
+                        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";
                     }

@@ -5053,6 +5053,7 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
+                .noop => 0,
                 else => self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.op,
@@ -6767,6 +6768,7 @@ pub fn ReplicaType(
                         assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
+                .noop => {},
                 else => {
                     self.state_machine.prepare(
                         request.message.header.operation.cast(StateMachine),

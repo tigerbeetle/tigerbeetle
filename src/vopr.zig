@@ -737,10 +737,11 @@ pub const Simulator = struct {
         for (simulator.cluster.clients) |*client_maybe| {
             if (client_maybe.*) |client| {
                 if (client.request_inflight) |request| {
-                    // Registration isn't counted by requests_sent, so an operation=register may
-                    // still be in-flight. Any other requests should already be complete before
-                    // done() is called.
-                    assert(request.message.header.operation == .register);
+                    // Registration and reformatting (noop's) aren't counted by requests_sent, so an
+                    // operation=register|noop may still be in-flight. Any other requests should
+                    // already be complete before done() is called.
+                    assert(request.message.header.operation == .register or
+                        request.message.header.operation == .noop);
                     return "pending register request";
                 }
             }

@@ -361,7 +361,8 @@ pub fn ClientType(
             assert(message.header.request == 0);
 
             if (!constants.aof_recovery) {
-                assert(!message.header.operation.vsr_reserved());
+                assert(message.header.operation == .noop or
+                    !message.header.operation.vsr_reserved());
             }
 
             // TODO: Re-investigate this state for AOF as it currently traps.
