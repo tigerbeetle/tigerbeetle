@@ -2,8 +2,6 @@ const std = @import("std");
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const perf = @import("./perf_event.zig");
-
 const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
 const stdx = @import("../stdx.zig");
@@ -367,20 +365,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.count <= table.values.len);
             defer assert(table.value_context.sorted);
 
-            const element_count = if (table.value_context.sorted) 0 else table.count();
-            var bench_params = BenchmarkParams{
-                .table = table.name,
-                .name = "radix",
-                .code = "make_immutable",
-                .key_size = @sizeOf(Key),
-                .tuple_size = @sizeOf(Value),
-                .element_count = element_count,
-            };
-
-            var block = perf.PerfEventBlockType(BenchmarkParams).init(&bench_params, true);
-            block.set_scale(element_count);
             table.sort();
-            defer block.deinit();
 
             // If we have no values, then we can consider ourselves flushed right away.
             table.mutability = .{ .immutable = .{
@@ -459,20 +444,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn sort_suffix(table: *TableMemory) void {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
-
-            const element_count = table.count() - table.mutability.mutable.suffix_offset;
-            var bench_params = BenchmarkParams{
-                .table = table.name,
-                .name = "radix",
-                .code = "suffix_sort",
-                .key_size = @sizeOf(Key),
-                .tuple_size = @sizeOf(Value),
-                .element_count = element_count,
-            };
-
-            var block = perf.PerfEventBlockType(BenchmarkParams).init(&bench_params, true);
-            block.set_scale(element_count);
-            defer block.deinit();
 
             table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
 
