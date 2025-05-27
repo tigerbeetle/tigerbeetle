@@ -12,6 +12,7 @@ Documentation for (roughly) code in the `src/testing` directory.
     - `^`: recover
     - ` `: commit
     - `$`: sync
+    - `X`: reformat
     - `[`: checkpoint start
     - `]`: checkpoint done
 3. Role (according to the replica itself):
@@ -20,6 +21,7 @@ Documentation for (roughly) code in the `src/testing` directory.
     - `|`: standby
     - `~`: syncing
     - `#`: (crashed)
+    - `F`: (reformatting)
 4. Status:
     - The column (e.g. `.   ` vs `   .`) corresponds to the replica index. (This can help identify events' replicas at a quick glance.)
     - The symbol indicates the `replica.status`.
