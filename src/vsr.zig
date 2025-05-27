@@ -46,6 +46,7 @@ pub const multi_batch = @import("vsr/multi_batch.zig");
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
+pub const ReplicaReformatType = @import("vsr/replica_reformat.zig").ReplicaReformatType;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;

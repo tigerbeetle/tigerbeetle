@@ -27,7 +27,9 @@ pub const StateMachine =
     vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 pub const Grid = vsr.GridType(Storage);
 
+const Client = vsr.ClientType(StateMachine, MessageBus, Time);
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+const ReplicaReformat = vsr.ReplicaReformatType(StateMachine, MessageBus, Storage, Time);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
@@ -84,6 +86,7 @@ pub fn main() !void {
             .release = config.process.release,
             .view = null,
         }),
+        .recover => |*args| try Command.reformat(allocator, args),
         .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(arena.allocator(), args),
@@ -249,6 +252,67 @@ const Command = struct {
             options.cluster,
             options.replica_count,
         });
+    }
+
+    pub fn reformat(allocator: mem.Allocator, args: *const cli.Command.Recover) !void {
+        var command: Command = undefined;
+        try command.init(allocator, args.path, .{
+            .must_create = true,
+            .development = args.development,
+        });
+        defer command.deinit(allocator);
+
+        var message_pool = try MessagePool.init(allocator, .client);
+        defer message_pool.deinit(allocator);
+
+        var client = try Client.init(allocator, .{
+            .id = std.crypto.random.int(u128),
+            .cluster = args.cluster,
+            .replica_count = args.replica_count,
+            .time = .{},
+            .message_pool = &message_pool,
+            .message_bus_options = .{
+                .configuration = args.addresses.const_slice(),
+                .io = &command.io,
+                .clients_limit = null,
+            },
+            .eviction_callback = &reformat_client_eviction_callback,
+        });
+        defer client.deinit(allocator);
+
+        var reformatter = try ReplicaReformat.init(allocator, &client, .{
+            .format = .{
+                .cluster = args.cluster,
+                .replica = args.replica,
+                .replica_count = args.replica_count,
+                .release = config.process.release,
+                .view = null,
+            },
+            .superblock = .{
+                .storage = &command.storage,
+                .storage_size_limit = data_file_size_min,
+            },
+        });
+        defer reformatter.deinit(allocator);
+
+        reformatter.start();
+        while (reformatter.status() == null) {
+            client.tick();
+            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
+        switch (reformatter.status().?) {
+            .evicted => |reason| log.err("{}: evicted: {s}", .{ args.replica, @tagName(reason) }),
+            .failed => |err| log.err("{}: error: {s}", .{ args.replica, @errorName(err) }),
+            .success => log.info("{}: success", .{args.replica}),
+        }
+    }
+
+    fn reformat_client_eviction_callback(
+        client: *Client,
+        eviction: *const MessagePool.Message.Eviction,
+    ) void {
+        _ = client;
+        std.debug.panic("error: client evicted: {s}", .{@tagName(eviction.header.reason)});
     }
 
     pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {

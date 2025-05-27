@@ -40,6 +40,19 @@ const CLIArgs = union(enum) {
         },
     };
 
+    const Recover = struct {
+        cluster: u128,
+        addresses: []const u8,
+        replica: ?u8 = null,
+        replica_count: u8,
+        development: bool = false,
+        log_debug: bool = false,
+
+        positional: struct {
+            path: [:0]const u8,
+        },
+    };
+
     const Start = struct {
         // Stable CLI arguments.
         addresses: []const u8,
@@ -265,6 +278,7 @@ const CLIArgs = union(enum) {
     };
 
     format: Format,
+    recover: Recover,
     start: Start,
     version: Version,
     repl: Repl,
@@ -284,6 +298,9 @@ const CLIArgs = union(enum) {
         \\
         \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KiB|MiB|GiB>] <path>
         \\
+        \\  tigerbeetle recover --cluster=<integer> --addresses=<addresses>
+        \\                      --replica=<index> --replica-count=<integer> <path>
+        \\
         \\  tigerbeetle version [--verbose]
         \\
         \\  tigerbeetle repl --cluster=<integer> --addresses=<addresses>
@@ -295,6 +312,11 @@ const CLIArgs = union(enum) {
         \\             Each TigerBeetle replica must have its own data file.
         \\
         \\  start      Run a TigerBeetle replica from the data file at <path>.
+        \\
+        \\  recover    Create a TigerBeetle replica data file at <path> for recovery.
+        \\             Used when a replica's data file is completely lost.
+        \\             Replicas with recovered data files must sync with the cluster before
+        \\             they can participate in consensus.
         \\
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
@@ -338,7 +360,7 @@ const CLIArgs = union(enum) {
         \\        Print compile-time configuration along with the build version.
         \\
         \\  --development
-        \\        Allow the replica to format/start even when Direct IO is unavailable.
+        \\        Allow the replica to format/start/recover even when Direct IO is unavailable.
         \\        Additionally, use smaller cache sizes and batch size by default.
         \\
         \\        Since this shrinks the batch size, note that:
@@ -363,6 +385,9 @@ const CLIArgs = union(enum) {
         \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 0_0.tigerbeetle
         \\
         \\  tigerbeetle start --addresses='[::1]:3000,[::1]:3001,[::1]:3002' 0_0.tigerbeetle
+        \\
+        \\  tigerbeetle recover --cluster=0 --addresses=3003,3001,3002 \
+        \\                      --replica=1 --replica-count=3 0_1.tigerbeetle
         \\
         \\  tigerbeetle version --verbose
         \\
@@ -427,6 +452,16 @@ pub const Command = union(enum) {
 
     pub const Format = struct {
         cluster: u128,
+        replica: u8,
+        replica_count: u8,
+        development: bool,
+        path: [:0]const u8,
+        log_debug: bool,
+    };
+
+    pub const Recover = struct {
+        cluster: u128,
+        addresses: Addresses,
         replica: u8,
         replica_count: u8,
         development: bool,
@@ -573,6 +608,7 @@ pub const Command = union(enum) {
     };
 
     format: Format,
+    recover: Recover,
     start: Start,
     version: Version,
     repl: Repl,
@@ -589,6 +625,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
+        .recover => |recover| .{ .recover = parse_args_recover(recover) },
         .start => |start| .{ .start = parse_args_start(start) },
         .version => |version| .{ .version = parse_args_version(version) },
         .repl => |repl| .{ .repl = parse_args_repl(repl) },
@@ -664,6 +701,49 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
         .development = format.development,
         .path = format.positional.path,
         .log_debug = format.log_debug,
+    };
+}
+
+fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
+    if (recover.replica_count == 0) {
+        vsr.fatal(.cli, "--replica-count: value needs to be greater than zero", .{});
+    }
+    if (recover.replica_count > constants.replicas_max) {
+        vsr.fatal(.cli, "--replica-count: value is too large ({}), at most {} is allowed", .{
+            recover.replica_count,
+            constants.replicas_max,
+        });
+    }
+
+    if (recover.replica == null) {
+        vsr.fatal(.cli, "--replica: argument is required", .{});
+    }
+
+    if (recover.replica) |replica| {
+        if (replica >= recover.replica_count) {
+            vsr.fatal(.cli, "--replica: value is too large ({}), at most {} is allowed", .{
+                replica,
+                recover.replica_count - 1,
+            });
+        }
+
+        if (recover.replica_count == 1) {
+            vsr.fatal(.cli, "--replica-count: single replica doesn't support 'recover'", .{});
+        }
+    }
+
+    const replica = recover.replica.?;
+    assert(replica < constants.members_max);
+    assert(replica < recover.replica_count);
+
+    return .{
+        .cluster = recover.cluster,
+        .addresses = parse_addresses(recover.addresses, "--addresses", Command.Addresses),
+        .replica = replica,
+        .replica_count = recover.replica_count,
+        .development = recover.development,
+        .path = recover.positional.path,
+        .log_debug = recover.log_debug,
     };
 }
 
