@@ -143,6 +143,12 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
+        /// Forget about the given replica's progress, since its data file has been "lost".
+        pub fn remove(state_checker: *StateChecker, replica_index: u8) void {
+            state_checker.replica_head_max[replica_index] = .{ .view = 0, .op = 0 };
+            state_checker.commit_mins[replica_index] = 0;
+        }
+
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];

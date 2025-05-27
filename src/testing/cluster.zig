@@ -29,6 +29,7 @@ const vsr = @import("../vsr.zig");
 pub const ReplicaHealth = union(enum) {
     up: struct { paused: bool },
     down,
+    reformatting: struct { releases: vsr.ReleaseList },
 };
 
 pub const Release = struct {
@@ -65,6 +66,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
         pub const StateMachine = StateMachineType(Storage, constants.state_machine_config);
         pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+        pub const ReplicaReformat =
+            vsr.ReplicaReformatType(StateMachine, MessageBus, Storage, Time);
         pub const Client = vsr.ClientType(StateMachine, MessageBus, Time);
         pub const StateChecker = StateCheckerType(Client, Replica);
         pub const ManifestChecker = ManifestCheckerType(StateMachine.Forest);
@@ -76,6 +79,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             standby_count: u8,
             client_count: u8,
             storage_size_limit: u64,
+            reformats_max: u8,
             seed: u64,
             /// A monotonically-increasing list of releases.
             /// Initially:
@@ -127,9 +131,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_times: []Time,
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
+        replica_reformats: []?ReplicaReformat,
         replica_pipeline_requests_limit: u32,
         replica_count: u8,
         standby_count: u8,
+        reformat_count: u32 = 0,
 
         clients: []?Client,
         client_pools: []MessagePool,
@@ -177,6 +183,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 assert(release_a.release_client_min.value <= release_b.release_client_min.value);
             }
 
+            const client_count_total = options.cluster.client_count + options.cluster.reformats_max;
             const node_count = options.cluster.replica_count + options.cluster.standby_count;
 
             var prng = stdx.PRNG.from_seed(options.cluster.seed);
@@ -186,10 +193,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var network = try allocator.create(Network);
             errdefer allocator.destroy(network);
 
-            network.* = try Network.init(
-                allocator,
-                options.network,
-            );
+            var network_options = options.network;
+            network_options.client_count += options.cluster.reformats_max;
+            network.* = try Network.init(allocator, network_options);
             errdefer network.deinit();
 
             const storage_fault_atlas = try allocator.create(StorageFaultAtlas);
@@ -268,7 +274,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(replica_upgrades);
             @memset(replica_upgrades, null);
 
-            var client_pools = try allocator.alloc(MessagePool, options.cluster.client_count);
+            const replica_reformats =
+                try allocator.alloc(?ReplicaReformat, options.cluster.replica_count);
+            errdefer allocator.free(replica_reformats);
+            @memset(replica_reformats, null);
+
+            var client_pools = try allocator.alloc(MessagePool, client_count_total);
             errdefer allocator.free(client_pools);
 
             for (client_pools, 0..) |*pool, i| {
@@ -278,12 +289,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer for (client_pools) |*pool| pool.deinit(allocator);
 
             const client_eviction_reasons =
-                try allocator.alloc(?vsr.Header.Eviction.Reason, options.cluster.client_count);
+                try allocator.alloc(?vsr.Header.Eviction.Reason, client_count_total);
             errdefer allocator.free(client_eviction_reasons);
             @memset(client_eviction_reasons, null);
 
             const client_id_permutation = IdPermutation.generate(&prng);
-            var clients = try allocator.alloc(?Client, options.cluster.client_count);
+            var clients = try allocator.alloc(?Client, client_count_total);
             errdefer allocator.free(clients);
 
             for (clients, 0..) |*client, i| {
@@ -403,6 +414,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .replica_times = replica_times,
                 .replica_health = replica_health,
                 .replica_upgrades = replica_upgrades,
+                .replica_reformats = replica_reformats,
                 .replica_pipeline_requests_limit = pipeline_requests_limit,
                 .replica_count = options.cluster.replica_count,
                 .standby_count = options.cluster.standby_count,
@@ -462,6 +474,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 switch (cluster.replica_health[i]) {
                     .up => replica.deinit(cluster.allocator),
                     .down => {},
+                    .reformatting => cluster.replica_reformats[i].?.deinit(cluster.allocator),
                 }
             }
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
@@ -484,6 +497,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.client_eviction_reasons);
             cluster.allocator.free(cluster.client_pools);
             cluster.allocator.free(cluster.replicas);
+            cluster.allocator.free(cluster.replica_reformats);
             cluster.allocator.free(cluster.replica_upgrades);
             cluster.allocator.free(cluster.replica_health);
             cluster.allocator.free(cluster.replica_times);
@@ -540,13 +554,18 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.aof_ios,
                 cluster.replica_times,
                 cluster.replica_health,
-            ) |*storage, *replica, *aof_io, *time, *health| {
+                0..,
+            ) |*storage, *replica, *aof_io, *time, *health, replica_index| {
                 if (health.* == .up and health.*.up.paused) {
                     // Tick the time even in a paused state, to simulate VM migration.
                     time.tick();
                 } else {
                     storage.tick();
                     switch (health.*) {
+                        .reformatting => {
+                            cluster.tick_reformat(@intCast(replica_index));
+                            time.tick();
+                        },
                         .up => |up| {
                             assert(!up.paused);
 
@@ -574,6 +593,29 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         },
                     }
                 }
+            }
+        }
+
+        fn tick_reformat(cluster: *Cluster, replica_index: u8) void {
+            assert(cluster.replica_health[replica_index] == .reformatting);
+
+            const reformat = &cluster.replica_reformats[replica_index].?;
+            const result = reformat.status() orelse return;
+
+            switch (result) {
+                .failed => unreachable,
+                .evicted => {},
+                .success => {
+                    assert(cluster.replica_health[replica_index] == .reformatting);
+
+                    const releases =
+                        cluster.replica_health[replica_index].reformatting.releases;
+
+                    reformat.deinit(cluster.allocator);
+                    cluster.replica_reformats[replica_index] = null;
+                    cluster.replica_health[replica_index] = .down;
+                    cluster.replica_restart(replica_index, &releases) catch unreachable;
+                },
             }
         }
 
@@ -763,6 +805,53 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
         }
 
+        pub fn replica_reformat(
+            cluster: *Cluster,
+            replica_index: u8,
+            releases_bundled: *const vsr.ReleaseList,
+        ) !void {
+            assert(cluster.reformat_count < cluster.options.reformats_max);
+            assert(cluster.replica_health[replica_index] == .down);
+            assert(cluster.replica_reformats[replica_index] == null);
+            assert(replica_index < cluster.options.replica_count);
+
+            cluster.replica_health[replica_index] = .{
+                .reformatting = .{ .releases = releases_bundled.* },
+            };
+            cluster.log_replica(.reformat, replica_index);
+            cluster.state_checker.remove(replica_index);
+            cluster.reformat_count += 1;
+
+            const storage = &cluster.storages[replica_index];
+            const storage_options = storage.options;
+            storage.deinit(cluster.allocator);
+            storage.* = try Storage.init(
+                cluster.allocator,
+                cluster.options.storage_size_limit,
+                storage_options,
+            );
+
+            const client_index = cluster.options.client_count + cluster.reformat_count;
+            cluster.replica_reformats[replica_index] = try ReplicaReformat.init(
+                cluster.allocator,
+                &cluster.clients[client_index].?,
+                .{
+                    .format = .{
+                        .cluster = cluster.options.cluster_id,
+                        .release = cluster.options.releases[0].release,
+                        .replica = @intCast(replica_index),
+                        .replica_count = cluster.options.replica_count,
+                        .view = null,
+                    },
+                    .superblock = .{
+                        .storage = storage,
+                        .storage_size_limit = cluster.options.storage_size_limit,
+                    },
+                },
+            );
+            cluster.replica_reformats[replica_index].?.start();
+        }
+
         pub fn register(cluster: *Cluster, client_index: usize) void {
             const client = &cluster.clients[client_index].?;
             client.register(register_callback, undefined);
@@ -947,6 +1036,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             event: enum(u8) {
                 crash = '!',
                 recover = '^',
+                reformat = 'X',
                 commit = ' ',
                 sync = '$',
                 checkpoint_commenced = '[',
@@ -957,19 +1047,20 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const replica = &cluster.replicas[replica_index];
 
             var statuses = [_]u8{' '} ** constants.members_max;
-            if (cluster.replica_health[replica_index] == .down) {
-                statuses[replica_index] = '#';
-            } else {
-                statuses[replica_index] = switch (replica.status) {
+            statuses[replica_index] = switch (cluster.replica_health[replica_index]) {
+                .reformatting => ' ',
+                .down => '#',
+                .up => switch (replica.status) {
                     .normal => @as(u8, '.'),
                     .view_change => @as(u8, 'v'),
                     .recovering => @as(u8, 'r'),
                     .recovering_head => @as(u8, 'h'),
-                };
-            }
+                },
+            };
 
             const role: u8 = role: {
                 if (cluster.replica_health[replica_index] == .down) break :role '#';
+                if (cluster.replica_health[replica_index] == .reformatting) break :role 'F';
                 if (replica.syncing != .idle) break :role '~';
                 if (replica.standby()) break :role '|';
                 if (replica.primary_index(replica.view) == replica.replica) break :role '/';
