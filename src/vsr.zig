@@ -257,7 +257,7 @@ pub const Operation = enum(u8) {
     reconfigure = 3,
     /// The value 4 is reserved for pulse request.
     pulse = 4,
-    /// The value 5 is is reserved for release-upgrade requests.
+    /// The value 5 is reserved for release-upgrade requests.
     upgrade = 5,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.

@@ -618,7 +618,7 @@ pub const Simulator = struct {
         /// Minimum time a replica is up until it is crashed again.
         replica_restart_stability: u32,
 
-        // A replcia premaritally missing from the cluster, used in performance mode.
+        // A replica permanently missing from the cluster, used in performance mode.
         replica_missing: ?u8 = null,
 
         replica_pause_probability: Ratio,

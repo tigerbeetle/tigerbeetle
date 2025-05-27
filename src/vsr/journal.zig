@@ -1248,7 +1248,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// 1. has a valid checksum
         /// 2. has the correct cluster
         /// 3. is in the correct slot (op % slot_count)
-        /// 4. has command=reserved or command=prepare
+        /// 4. has command=prepare
+        /// 5. may or may not have operation=reserved
         fn recover_slots(journal: *Journal) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const log_view = replica.superblock.working.vsr_state.log_view;
