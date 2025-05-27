@@ -15,6 +15,14 @@ const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 pub const ScopeCloseMode = enum { persist, discard };
 
+const BenchmarkParams = struct {
+    name: []const u8 = "",
+    code: []const u8 = "",
+    element_count: usize,
+    key_size: usize,
+    tuple_size: usize,
+};
+
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
 /// Since we ensure and assert that a query snapshot never exactly matches

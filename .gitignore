@@ -10,6 +10,7 @@ zig-out/
 tools/
 # By convention, logs from simulator use .vopr extension.
 *.vopr
+*.csv
 
 # Death to .DS_Store
 .DS_Store
