@@ -958,7 +958,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.client_eviction_requests_cancelled +=
                 @intFromBool(client.request_inflight != null and
-                client.request_inflight.?.message.header.operation != .register);
+                client.request_inflight.?.message.header.operation != .register and
+                client.request_inflight.?.message.header.operation != .noop);
         }
 
         fn on_replica_event(replica: *const Replica, event: vsr.ReplicaEvent) void {
