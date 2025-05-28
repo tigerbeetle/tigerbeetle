@@ -467,7 +467,7 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     });
     tigerbeetle.root_module.addImport("vsr", options.vsr_module);
     tigerbeetle.root_module.addOptions("vsr_options", options.vsr_options);
-    tigerbeetle.root_module.strip = options.mode == .ReleaseSafe;
+    tigerbeetle.root_module.strip = false; //options.mode == .ReleaseSafe;
     // Ensure that we get stack traces even in release builds.
     tigerbeetle.root_module.omit_frame_pointer = false;
     return tigerbeetle;

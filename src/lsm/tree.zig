@@ -561,16 +561,16 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
                 // The immutable table wasn't flushed because there is enough room left over for the
                 // mutable table's values, allowing us to skip some compaction work.
-                var benchmark_params = BenchmarkParams{
-                .version = "merge (256)",
-                .name = tree.config.name,
-                .part = "absorb",
-                .key_size = @sizeOf(Key),
-                .elements = tree.table_mutable.count(),
-                };
-                var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
-                perf.set_scale(tree.table_mutable.count());
-                defer perf.deinit();
+                //var benchmark_params = BenchmarkParams{
+                //.version = "merge (256)",
+                //.name = tree.config.name,
+                //.part = "absorb",
+                //.key_size = @sizeOf(Key),
+                //.elements = tree.table_mutable.count(),
+                //};
+                //var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
+                //perf.set_scale(tree.table_mutable.count());
+                //defer perf.deinit();
                 tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
 
                 assert(tree.table_mutable.value_context.count == 0);
