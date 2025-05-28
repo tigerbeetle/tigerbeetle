@@ -1486,6 +1486,11 @@ fn build_ruby_client(
         mode: Mode,
     },
 ) void {
+    const tb_client_header_zig = b.addModule("tb_client_header", .{
+        .root_source_file = b.path("src/clients/c/tb_client_header.zig"),
+    });
+    tb_client_header_zig.addImport("vsr", options.vsr_module);
+
     inline for (platforms) |platform| {
         // if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
         if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
@@ -1504,6 +1509,9 @@ fn build_ruby_client(
             .target = resolved_target,
             .optimize = options.mode,
         });
+
+        shared_lib.root_module.addImport("tb_client_header", tb_client_header_zig);
+        shared_lib.addIncludePath(options.tb_client_header.dirname());
 
         // TODO: Remove hardcoding link to Ruby library
         if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {
