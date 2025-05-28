@@ -32,8 +32,8 @@ process: std.process.Child,
 pub fn init(
     gpa: std.mem.Allocator,
     options: struct {
+        development: bool,
         prebuilt: ?[]const u8 = null,
-        development: bool = true,
     },
 ) !TmpTigerBeetle {
     const shell = try Shell.create(gpa);
@@ -91,7 +91,7 @@ pub fn init(
         "{tigerbeetle} start --development={development} --addresses=0 {data_file}",
         .{
             .tigerbeetle = tigerbeetle_exe,
-            .development = @intFromBool(options.development),
+            .development = if (options.development) "true" else "false",
             .data_file = data_file,
         },
     );

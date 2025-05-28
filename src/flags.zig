@@ -495,15 +495,16 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
 }
 
 fn parse_value_bool(flag: []const u8, value: [:0]const u8) bool {
-    const Bool = enum {
-        true,
-        false,
-        @"1",
-        @"0",
-    };
-    return switch (parse_value_enum(Bool, flag, value)) {
-        .true, .@"1" => true,
-        .false, .@"0" => false,
+    return switch (parse_value_enum(
+        enum {
+            true,
+            false,
+        },
+        flag,
+        value,
+    )) {
+        .true => true,
+        .false => false,
     };
 }
 
@@ -1053,29 +1054,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--boolean=1" }, snap(@src(),
-        \\stdout:
-        \\int: 0
-        \\size: 0
-        \\boolean: true
-        \\path: not-set
-        \\optional: null
-        \\choice: marlowe
-        \\
-    ));
-
     try t.check(&.{ "values", "--boolean=false" }, snap(@src(),
-        \\stdout:
-        \\int: 0
-        \\size: 0
-        \\boolean: false
-        \\path: not-set
-        \\optional: null
-        \\choice: marlowe
-        \\
-    ));
-
-    try t.check(&.{ "values", "--boolean=0" }, snap(@src(),
         \\stdout:
         \\int: 0
         \\size: 0
@@ -1089,7 +1068,7 @@ test "flags" {
     try t.check(&.{ "values", "--boolean=foo" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --boolean: expected one of 'true', 'false', '1', or '0', but found 'foo'
+        \\error: --boolean: expected one of 'true' or 'false', but found 'foo'
         \\
     ));
 

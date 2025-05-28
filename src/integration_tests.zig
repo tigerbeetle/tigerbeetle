@@ -36,6 +36,7 @@ test "repl integration" {
             errdefer shell.destroy();
 
             var tmp_beetle = try TmpTigerBeetle.init(std.testing.allocator, .{
+                .development = true,
                 .prebuilt = tigerbeetle,
             });
             errdefer tmp_beetle.deinit(std.testing.allocator);
