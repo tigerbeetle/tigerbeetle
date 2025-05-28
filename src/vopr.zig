@@ -1052,8 +1052,8 @@ pub const Simulator = struct {
             for (simulator.cluster.replicas) |replica| {
                 // Replicas should be able to repair using any other replica in the core.
                 if (replica.standby()) continue;
-                if (simulator.cluster.replica_health[replica.replica] == .reformatting) continue;
-                if (!simulator.core.is_set(replica.replica) or
+                if (simulator.cluster.replica_health[replica.replica] == .reformatting or
+                    !simulator.core.is_set(replica.replica) or
                     !replica.journal.has_prepare(&header))
                 {
                     replicas_missing_op.set(replica.replica);
