@@ -520,6 +520,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
             // of pacing.
             if (last_beat) {
+                var timer = std.time.Timer.start() catch unreachable;
                 inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
 
@@ -531,6 +532,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     // Ensure tables haven't overflowed.
                     tree.manifest.assert_level_table_counts();
                 }
+
+                const duration = timer.lap();
+                std.debug.print("swap all tables took {}  ms\n", .{duration / std.time.ns_per_ms});
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.
@@ -768,9 +772,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             const half_bar_ops = @divExact(constants.lsm_compaction_ops, 2);
             const pipeline_half_bars =
                 stdx.div_ceil(
-                constants.pipeline_prepare_queue_max,
-                half_bar_ops,
-            );
+                    constants.pipeline_prepare_queue_max,
+                    half_bar_ops,
+                );
 
             // Maximum number of blocks released within a single half-bar by compaction.
             const compaction_blocks_released_half_bar_max = blocks: {
@@ -779,7 +783,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     blocks +=
                         stdx.div_ceil(constants.lsm_levels, 2) *
                         (compaction_input_tables_max *
-                        (1 + tree_info.Tree.Table.layout.data_block_count_max));
+                            (1 + tree_info.Tree.Table.layout.data_block_count_max));
                 }
                 break :blocks blocks;
             };
