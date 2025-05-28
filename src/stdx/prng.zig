@@ -32,6 +32,10 @@ pub const Ratio = struct {
     // Invariant: denominator ≠ 0.
     denominator: u64,
 
+    pub fn zero() Ratio {
+        return .{ .numerator = 0, .denominator = 1 };
+    }
+
     pub fn format(
         r: Ratio,
         comptime fmt: []const u8,

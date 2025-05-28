@@ -8,6 +8,7 @@ const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
@@ -905,8 +906,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .read_latency_mean = prng.range_inclusive(u64, 0, 20),
         .write_latency_min = 0,
         .write_latency_mean = prng.range_inclusive(u64, 0, 20),
-        .read_fault_probability = ratio(0, 100),
-        .write_fault_probability = ratio(0, 100),
+        .read_fault_probability = Ratio.zero(),
+        .write_fault_probability = Ratio.zero(),
         .fault_atlas = &storage_fault_atlas,
     };
 

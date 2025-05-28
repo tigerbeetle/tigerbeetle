@@ -5,13 +5,16 @@ const mem = std.mem;
 const log = std.log.scoped(.cluster);
 
 const stdx = @import("../stdx.zig");
+const Ratio = stdx.PRNG.Ratio;
+
 const constants = @import("../constants.zig");
 const message_pool = @import("../message_pool.zig");
 const ratio = stdx.PRNG.ratio;
 const MessagePool = message_pool.MessagePool;
 const Message = MessagePool.Message;
+const IO = @import("io.zig").IO;
 
-const AOF = @import("aof.zig").AOF;
+const AOF = @import("../aof.zig").AOFType(IO);
 const Time = @import("time.zig").Time;
 const IdPermutation = @import("id.zig").IdPermutation;
 
@@ -113,7 +116,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         network: *Network,
         storages: []Storage,
         storage_fault_atlas: *StorageFaultAtlas,
+
         aofs: []AOF,
+        aof_ios: []IO,
+        aof_io_files: [][1]IO.File,
+
         /// NB: includes both active replicas and standbys.
         replicas: []Replica,
         replica_pools: []MessagePool,
@@ -222,15 +229,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     replica_index >= vsr.quorums(options.cluster.replica_count).view_change;
             }
             errdefer for (storages) |*storage| storage.deinit(allocator);
-
-            const aofs = try allocator.alloc(AOF, node_count);
-            errdefer allocator.free(aofs);
-
-            for (aofs, 0..) |*aof, i| {
-                errdefer for (aofs[0..i]) |*a| a.deinit(allocator);
-                aof.* = try AOF.init(allocator);
-            }
-            errdefer for (aofs) |*aof| aof.deinit(allocator);
 
             var replica_pools = try allocator.alloc(MessagePool, node_count);
             errdefer allocator.free(replica_pools);
@@ -355,6 +353,43 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var cluster = try allocator.create(Cluster);
             errdefer allocator.destroy(cluster);
 
+            cluster.aofs = try allocator.alloc(AOF, node_count);
+            errdefer allocator.free(cluster.aofs);
+
+            cluster.aof_io_files = try allocator.alloc([1]IO.File, node_count);
+            errdefer allocator.free(cluster.aof_io_files);
+
+            cluster.aof_ios = try allocator.alloc(IO, node_count);
+            errdefer allocator.free(cluster.aof_ios);
+
+            for (
+                cluster.aofs,
+                cluster.aof_ios,
+                cluster.aof_io_files,
+                0..,
+            ) |*aof, *aof_io, *aof_io_file, i| {
+                const buffer = try allocator.alignedAlloc(
+                    u8,
+                    constants.sector_size,
+                    // Arbitrary value.
+                    32 * 1024 * 1024,
+                );
+                errdefer allocator.free(buffer);
+
+                aof_io_file[0] = .{ .buffer = buffer };
+                aof_io.* = try IO.init(aof_io_file, .{
+                    .seed = options.cluster.seed,
+                    .larger_than_logical_sector_read_fault_probability = Ratio.zero(),
+                });
+                errdefer for (cluster.aof_ios[0..i]) |*io| io.deinit();
+
+                aof.* = AOF{
+                    .io = aof_io,
+                    .file_descriptor = 0,
+                };
+                errdefer for (cluster.aofs[0..i]) |*aof_| aof_.deinit(allocator);
+            }
+
             cluster.* = Cluster{
                 .allocator = allocator,
                 .prng = prng,
@@ -362,7 +397,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .callbacks = options.callbacks,
                 .network = network,
                 .storages = storages,
-                .aofs = aofs,
+                .aofs = cluster.aofs,
+                .aof_ios = cluster.aof_ios,
+                .aof_io_files = cluster.aof_io_files,
                 .storage_fault_atlas = storage_fault_atlas,
                 .replicas = replicas,
                 .replica_pools = replica_pools,
@@ -432,7 +469,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             }
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
-            for (cluster.aofs) |*aof| aof.deinit(cluster.allocator);
+
+            for (cluster.aofs) |*aof| aof.close();
+
+            for (cluster.aof_ios) |*io| io.deinit();
+            cluster.allocator.free(cluster.aof_ios);
+
+            for (cluster.aof_io_files) |*io_file| {
+                for (io_file) |file| cluster.allocator.free(file.buffer);
+            }
+            cluster.allocator.free(cluster.aof_io_files);
 
             cluster.storage_fault_atlas.deinit(cluster.allocator);
             cluster.grid_checker.deinit(); // (Storage references this.)
@@ -494,9 +540,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (
                 cluster.storages,
                 cluster.replicas,
+                cluster.aof_ios,
                 cluster.replica_times,
                 cluster.replica_health,
-            ) |*storage, *replica, *time, *health| {
+            ) |*storage, *replica, *aof_io, *time, *health| {
                 if (health.* == .up and health.*.up.paused) {
                     // Tick the time even in a paused state, to simulate VM migration.
                     time.tick();
@@ -505,7 +552,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     switch (health.*) {
                         .up => |up| {
                             assert(!up.paused);
+
                             replica.tick();
+                            aof_io.run() catch |err| {
+                                std.debug.panic("{}: io.run() failed: error={}", .{
+                                    replica.replica,
+                                    err,
+                                });
+                            };
 
                             // For performance, don't run every tick.
                             if (cluster.prng.chance(ratio(1, 100))) {
@@ -607,7 +661,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
             cluster.aofs[replica_index].reset();
-
+            cluster.aof_ios[replica_index].reset();
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,

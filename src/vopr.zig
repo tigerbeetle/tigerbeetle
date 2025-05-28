@@ -226,7 +226,7 @@ pub fn main() !void {
         }
 
         // Warm-up the cluster before performance testing to get past the initial view change.
-        simulator.options.request_probability = ratio(0, 100);
+        simulator.options.request_probability = Ratio.zero();
         for (0..500) |_| simulator.tick();
         simulator.options.request_probability = options.request_probability;
     }
@@ -326,9 +326,9 @@ pub fn main() !void {
             const last_checksum = commits[commits.len - 1].header.checksum;
             for (simulator.cluster.aofs, 0..) |*aof, replica_index| {
                 if (simulator.core.is_set(replica_index)) {
-                    try aof.validate(last_checksum);
+                    try aof.validate(gpa, last_checksum);
                 } else {
-                    try aof.validate(null);
+                    try aof.validate(gpa, null);
                 }
             }
         }
@@ -533,16 +533,16 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .one_way_delay_mean = 5,
         .one_way_delay_min = 0,
-        .packet_loss_probability = ratio(0, 100),
+        .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
         .path_clog_duration_mean = 200,
-        .path_clog_probability = ratio(0, 100),
-        .packet_replay_probability = ratio(0, 100),
+        .path_clog_probability = Ratio.zero(),
+        .packet_replay_probability = Ratio.zero(),
 
         .partition_mode = .none,
         .partition_symmetry = .symmetric,
-        .partition_probability = ratio(0, 100),
-        .unpartition_probability = ratio(0, 100),
+        .partition_probability = Ratio.zero(),
+        .unpartition_probability = Ratio.zero(),
         .partition_stability = 100,
         .unpartition_stability = 10,
     };
@@ -553,10 +553,10 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .read_latency_mean = 0,
         .write_latency_min = 0,
         .write_latency_mean = 0,
-        .read_fault_probability = ratio(0, 100),
-        .write_fault_probability = ratio(0, 100),
-        .write_misdirect_probability = ratio(0, 100),
-        .crash_fault_probability = ratio(0, 100),
+        .read_fault_probability = Ratio.zero(),
+        .write_fault_probability = Ratio.zero(),
+        .write_misdirect_probability = Ratio.zero(),
+        .crash_fault_probability = Ratio.zero(),
     };
     const storage_fault_atlas: Cluster.StorageFaultAtlas.Options = .{
         .faulty_superblock = false,
@@ -580,22 +580,22 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
         .storage = storage_options,
         .storage_fault_atlas = storage_fault_atlas,
         .workload = workload_options,
-        .replica_crash_probability = ratio(0, 100),
+        .replica_crash_probability = Ratio.zero(),
         .replica_crash_stability = 500,
-        .replica_restart_probability = ratio(0, 100),
+        .replica_restart_probability = Ratio.zero(),
         .replica_restart_stability = 500,
 
-        .replica_pause_probability = ratio(0, 100),
+        .replica_pause_probability = Ratio.zero(),
         .replica_pause_stability = 500,
-        .replica_unpause_probability = ratio(0, 100),
+        .replica_unpause_probability = Ratio.zero(),
         .replica_unpause_stability = 500,
 
-        .replica_release_advance_probability = ratio(0, 100),
-        .replica_release_catchup_probability = ratio(0, 100),
+        .replica_release_advance_probability = Ratio.zero(),
+        .replica_release_catchup_probability = Ratio.zero(),
 
         .requests_max = constants.journal_slot_count * 8,
         .request_probability = ratio(100, 100),
-        .request_idle_on_probability = ratio(0, 100),
+        .request_idle_on_probability = Ratio.zero(),
         .request_idle_off_probability = ratio(100, 100),
     };
 }
@@ -858,11 +858,11 @@ pub const Simulator = struct {
         }
 
         simulator.cluster.network.transition_to_liveness_mode(simulator.core);
-        simulator.options.replica_crash_probability = ratio(0, 100);
-        simulator.options.replica_restart_probability = ratio(0, 100);
-        simulator.options.replica_pause_probability = ratio(0, 100);
-        simulator.options.replica_release_advance_probability = ratio(0, 100);
-        simulator.options.replica_release_catchup_probability = ratio(0, 100);
+        simulator.options.replica_crash_probability = Ratio.zero();
+        simulator.options.replica_restart_probability = Ratio.zero();
+        simulator.options.replica_pause_probability = Ratio.zero();
+        simulator.options.replica_release_advance_probability = Ratio.zero();
+        simulator.options.replica_release_catchup_probability = Ratio.zero();
     }
 
     // If a primary ends up being outside of a core, and is only partially connected to the core,

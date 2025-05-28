@@ -19,7 +19,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const Tracer = vsr.trace.TracerType(Time);
 pub const Storage = vsr.storage.StorageType(IO, Tracer);
-const AOF = vsr.aof.AOF;
+const AOF = vsr.aof.AOFType(IO);
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -284,7 +284,10 @@ const Command = struct {
             defer allocator.free(aof_path);
             std.log.info("{s}", .{aof_path});
 
-            break :blk try AOF.init(command.dir_fd, aof_path, &command.io);
+            break :blk try AOF.init(&command.io, .{
+                .dir_fd = command.dir_fd,
+                .relative_path = aof_path,
+            });
         } else null;
         defer if (aof != null) aof.?.close();
 

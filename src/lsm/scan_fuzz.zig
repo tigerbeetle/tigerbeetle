@@ -950,7 +950,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
             .read_latency_mean = 0,
             .write_latency_min = 0,
             .write_latency_mean = 0,
-            .crash_fault_probability = ratio(0, 100),
+            .crash_fault_probability = Ratio.zero(),
         },
     );
     defer storage.deinit(gpa);

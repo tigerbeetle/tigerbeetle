@@ -29,7 +29,6 @@ const panic = std.debug.panic;
 const math = std.math;
 const mem = std.mem;
 const Ratio = stdx.PRNG.Ratio;
-const ratio = stdx.PRNG.ratio;
 
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
@@ -68,16 +67,16 @@ pub const Storage = struct {
 
         /// Chance out of 100 that a read will corrupt a sector, if the target memory is within
         /// a faulty area of this replica.
-        read_fault_probability: Ratio = ratio(0, 100),
+        read_fault_probability: Ratio = Ratio.zero(),
         /// Chance out of 100 that a write will corrupt a sector, if the target memory is within
         /// a faulty area of this replica.
-        write_fault_probability: Ratio = ratio(0, 100),
+        write_fault_probability: Ratio = Ratio.zero(),
         /// Chance out of 100 that a write will misdirect to the wrong sector, if the target memory
         /// is within a faulty area of this replica.
-        write_misdirect_probability: Ratio = ratio(0, 100),
+        write_misdirect_probability: Ratio = Ratio.zero(),
         /// Chance out of 100 that a crash will corrupt a sector of a pending write's target,
         /// if the target memory is within a faulty area of this replica.
-        crash_fault_probability: Ratio = ratio(0, 100),
+        crash_fault_probability: Ratio = Ratio.zero(),
 
         /// Enable/disable automatic read/write faults.
         /// Does not impact crash faults or manual faults.
@@ -915,10 +914,10 @@ pub const Storage = struct {
     }
 
     pub fn transition_to_liveness_mode(storage: *Storage) void {
-        storage.options.read_fault_probability = ratio(0, 100);
-        storage.options.write_fault_probability = ratio(0, 100);
-        storage.options.write_misdirect_probability = ratio(0, 100);
-        storage.options.crash_fault_probability = ratio(0, 100);
+        storage.options.read_fault_probability = Ratio.zero();
+        storage.options.write_fault_probability = Ratio.zero();
+        storage.options.write_misdirect_probability = Ratio.zero();
+        storage.options.crash_fault_probability = Ratio.zero();
     }
 };
 

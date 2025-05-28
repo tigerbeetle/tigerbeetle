@@ -1440,6 +1440,20 @@ pub const IO = struct {
             return os.windows.unexpectedError(err);
         }
     }
+
+    pub const PReadError = posix.PReadError;
+
+    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
+        return common.aof_blocking_write_all(fd, buffer);
+    }
+
+    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(fd, buffer, offset);
+    }
+
+    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(fd);
+    }
 };
 
 // TODO: use posix.getsockoptError when fixed for windows in stdlib.
