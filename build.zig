@@ -1487,7 +1487,8 @@ fn build_ruby_client(
     },
 ) void {
     inline for (platforms) |platform| {
-        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
+        // if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
+        if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
             continue;
         }
 
@@ -1505,10 +1506,15 @@ fn build_ruby_client(
         });
 
         // TODO: Remove hardcoding link to Ruby library
-        shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0" });
-        shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0/x86_64-linux" });
-        shared_lib.addLibraryPath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/lib" });
-        shared_lib.linkSystemLibrary("ruby");
+        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {
+            shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0" });
+            shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0/x86_64-linux" });
+        } else if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {
+            shared_lib.addIncludePath(.{ .cwd_relative = "/Users/tj/.asdf/installs/ruby/3.5-dev/include/ruby-3.5.0+1" });
+            shared_lib.addIncludePath(.{ .cwd_relative = "/Users/tj/.asdf/installs/ruby/3.5-dev/include/ruby-3.5.0+1/arm64-darwin24" });
+        }
+
+        shared_lib.linker_allow_shlib_undefined = true;
 
         shared_lib.linkLibC();
 
