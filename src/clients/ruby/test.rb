@@ -4,6 +4,24 @@
 require "bundler/setup"
 require "tigerbeetle"
 
+require "securerandom"
+
+# make conversions easier
+class String
+  def from_uuid_to_int
+    self.gsub("-", "").to_i(16)
+  end
+end
+
+class Integer
+  def to_uuid
+    hex = self.to_s(16).rjust(32, "0")
+    [hex[0..7], hex[8..11], hex[12..15], hex[16..19], hex[20..31]].join("-")
+  end
+end
+
+# Constants from TigerBeetle C Bindings
+
 TB_ACCOUNT_FLAGS = {
   LINKED: 1 << 0,
   DEBITS_MUST_NOT_EXCEED_CREDITS: 1 << 1,
@@ -20,21 +38,6 @@ TB_ACCOUNT_FLAGS.each do |const, expected|
   raise "AccountFlag::#{const} expected #{expected} got #{actual}"
 end
 
-# typedef struct tb_account_t {
-#     tb_uint128_t id;
-#     tb_uint128_t debits_pending;
-#     tb_uint128_t debits_posted;
-#     tb_uint128_t credits_pending;
-#     tb_uint128_t credits_posted;
-#     tb_uint128_t user_data_128;
-#     uint64_t user_data_64;
-#     uint32_t user_data_32;
-#     uint32_t reserved;
-#     uint32_t ledger;
-#     uint16_t code;
-#     uint16_t flags;
-#     uint64_t timestamp;
-# } tb_account_t;
 
 TB_TRANSFER_FLAGS = {
   LINKED: 1 << 0,
@@ -53,22 +56,6 @@ TB_TRANSFER_FLAGS.each do |const, expected|
 
   raise "TransferFlags::#{const} expected #{expected} got #{actual}"
 end
-
-# typedef struct tb_transfer_t {
-#     tb_uint128_t id;
-#     tb_uint128_t debit_account_id;
-#     tb_uint128_t credit_account_id;
-#     tb_uint128_t amount;
-#     tb_uint128_t pending_id;
-#     tb_uint128_t user_data_128;
-#     uint64_t user_data_64;
-#     uint32_t user_data_32;
-#     uint32_t timeout;
-#     uint32_t ledger;
-#     uint16_t code;
-#     uint16_t flags;
-#     uint64_t timestamp;
-# } tb_transfer_t;
 
 TB_CREATE_ACCOUNT_RESULT = {
   OK: 0,
@@ -427,3 +414,151 @@ end
 #     void (*callback)(TB_LOG_LEVEL, const uint8_t*, uint32_t),
 #     bool debug
 # );
+#
+
+# typedef struct tb_account_t {
+#     tb_uint128_t id;
+#     tb_uint128_t debits_pending;
+#     tb_uint128_t debits_posted;
+#     tb_uint128_t credits_pending;
+#     tb_uint128_t credits_posted;
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint32_t reserved;
+#     uint32_t ledger;
+#     uint16_t code;
+#     uint16_t flags;
+#     uint64_t timestamp;
+# } tb_account_t;
+
+def test_account
+  account_id = SecureRandom.uuid_v7
+  debits_pending = 1000
+  debits_posted = 2000
+  credits_pending = 3000
+  credits_posted = 4000
+  user_data_128 = SecureRandom.uuid_v7
+  user_data_64 = 5000
+  user_data_32 = 6000
+  ledger = 1
+  code = 1234
+  account = TigerBeetle::Bindings::Account.new(
+    id: account_id.from_uuid_to_int,
+    debits_pending:,
+    debits_posted:,
+    credits_pending:,
+    credits_posted:,
+    user_data_128: user_data_128.from_uuid_to_int,
+    user_data_64:,
+    user_data_32:,
+    ledger:,
+    code:,
+  )
+  if account.id.to_uuid != account_id
+    raise "Account ID mismatch: expected #{account_id}, got #{account.id.to_uuid}"
+  end
+  if account.debits_pending != debits_pending
+    raise "Debits pending mismatch: expected #{debits_pending}, got #{account.debits_pending}"
+  end
+  if account.debits_posted != debits_posted
+    raise "Debits posted mismatch: expected #{debits_posted}, got #{account.debits_posted}"
+  end
+  if account.credits_pending != credits_pending
+    raise "Credits pending mismatch: expected #{credits_pending}, got #{account.credits_pending}"
+  end
+  if account.credits_posted != credits_posted
+    raise "Credits posted mismatch: expected #{credits_posted}, got #{account.credits_posted}"
+  end
+  if account.user_data_128.to_uuid != user_data_128
+    raise "User data 128 mismatch: expected #{user_data_128}, got #{account.user_data_128.to_uuid}"
+  end
+  if account.user_data_64 != user_data_64
+    raise "User data 64 mismatch: expected #{user_data_64}, got #{account.user_data_64}"
+  end
+  if account.user_data_32 != user_data_32
+    raise "User data 32 mismatch: expected #{user_data_32}, got #{account.user_data_32}"
+  end
+  if account.ledger != ledger
+    raise "Ledger mismatch: expected #{ledger}, got #{account.ledger}"
+  end
+  if account.code != code
+    raise "Code mismatch: expected #{code}, got #{account.code}"
+  end
+end
+test_account
+
+# typedef struct tb_transfer_t {
+#     tb_uint128_t id;
+#     tb_uint128_t debit_account_id;
+#     tb_uint128_t credit_account_id;
+#     tb_uint128_t amount;
+#     tb_uint128_t pending_id;
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint32_t timeout;
+#     uint32_t ledger;
+#     uint16_t code;
+#     uint16_t flags;
+#     uint64_t timestamp;
+# } tb_transfer_t;
+def test_transfer
+  transfer_id = SecureRandom.uuid_v7
+  debit_account_id = SecureRandom.uuid_v7
+  credit_account_id = SecureRandom.uuid_v7
+  amount = 1000
+  pending_id = SecureRandom.uuid_v7
+  user_data_128 = SecureRandom.uuid_v7
+  user_data_64 = 5000
+  user_data_32 = 6000
+  ledger = 1
+  code = 1234
+  transfer = TigerBeetle::Bindings::Transfer.new(
+    id: transfer_id.from_uuid_to_int,
+    debit_account_id: debit_account_id.from_uuid_to_int,
+    credit_account_id: credit_account_id.from_uuid_to_int,
+    amount:,
+    pending_id: pending_id.from_uuid_to_int,
+    user_data_128: user_data_128.from_uuid_to_int,
+    user_data_64:,
+    user_data_32:,
+    ledger:,
+    code:,
+  )
+  if transfer.id.to_uuid != transfer_id
+    raise "Account ID mismatch: expected #{transfer_id}, got #{transfer.id.to_uuid}"
+  end
+  if transfer.debit_account_id.to_uuid != debit_account_id
+    raise "Debit account ID mismatch: expected #{debit_account_id}, got #{transfer.debit_account_id.to_uuid}"
+  end
+  if transfer.credit_account_id.to_uuid != credit_account_id
+    raise "Credit account ID mismatch: expected #{credit_account_id}, got #{transfer.credit_account_id.to_uuid}"
+  end
+  if transfer.amount != amount
+    raise "Amount mismatch: expected #{amount}, got #{transfer.amount}"
+  end
+  if transfer.pending_id.to_uuid != pending_id
+    raise "Pending ID mismatch: expected #{pending_id}, got #{transfer.pending_id.to_uuid}"
+  end
+  if transfer.user_data_128.to_uuid != user_data_128
+    raise "User data 128 mismatch: expected #{user_data_128}, got #{transfer.user_data_128.to_uuid}"
+  end
+  if transfer.user_data_64 != user_data_64
+    raise "User data 64 mismatch: expected #{user_data_64}, got #{transfer.user_data_64}"
+  end
+  if transfer.user_data_32 != user_data_32
+    raise "User data 32 mismatch: expected #{user_data_32}, got #{transfer.user_data_32}"
+  end
+  if transfer.ledger != ledger
+    raise "Ledger mismatch: expected #{ledger}, got #{transfer.ledger}"
+  end
+  if transfer.code != code
+    raise "Code mismatch: expected #{code}, got #{transfer.code}"
+  end
+end
+test_transfer
+
+
+puts "*"* 80
+puts "  SUCCESS: All TigerBeetle constants match expected values\n"
