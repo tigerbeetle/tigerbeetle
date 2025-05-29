@@ -11,17 +11,11 @@ pub const ConnectOptions = struct {
     password: []const u8,
     vhost: []const u8,
     locale: ?[]const u8 = null,
-    //? dj: Maybe call this heartbeat_seconds? Otherwise unit is unclear.
-    //? resolved.
     heartbeat_seconds: ?u16 = null,
     properties: ConnectionProperties = ConnectionProperties.default,
 };
 
 pub const ConnectionProperties = struct {
-    //? dj: I don't see any reason for these fields to be optional.
-    //? batiati: We always provide those fields, but still following
-    //? the AMQP spec that assume they are optionals.
-    //? resolved.
     product: []const u8,
     version: []const u8,
     platform: []const u8,

@@ -22,11 +22,6 @@ const tb = vsr.tigerbeetle;
 
 pub const amqp = @import("amqp.zig");
 
-//? dj: I'm not sure where the best place to put this is, but could we add some info level logging
-//? to periodically print the status -- that is, the timestamp of the message that we most recently
-//? pushed into rabbitmq?
-//? batiati: Added to the metrics.
-//? resolved.
 /// CDC processor targeting an AMQP 0.9.1 compliant server (e.g., RabbitMQ).
 /// Producer: TigerBeetle `get_change_events` operation.
 /// Consumer: AMQP publisher.
@@ -41,42 +36,11 @@ pub const Runner = struct {
     const constants = struct {
         const tick_ms = vsr.constants.tick_ms;
         const idle_interval_ns: u63 = 1 * std.time.ns_per_s;
-        //? dj: Maybe derive a amqp_reply_timeout_ticks constant here rather than doing so inline
-        //? later.
-        //? resolved.
         const reply_timeout_ticks = @divExact(
             30 * std.time.ms_per_s,
             constants.tick_ms,
         );
         const app_id = "tigerbeetle";
-        //? dj: It's tempting to put the cluster identifier in these queue names...
-        //? If that would be too verbose though, could we encode the cluster in these queue's
-        //? headers somehow, such that if there are multiple instances of the tigerbeetle AMCQ
-        //? interface running for different clusters attached to the same RabbitMQ that we notice
-        //? this and panic?
-        //?
-        //? ...Ah wait, this is pretty much already what the locker queue does, isn't it?
-        //?
-        //? But maybe it still makes sense to store the cluster id in the progress tracker queue
-        //? somehow -- otherwise you might start CDC for cluster A, then stop it, then start CDC for
-        //? cluster B, and miss messages since it uses A's progress.
-        //?
-        //? Additionally, should we store our release number? (In case it is useful in the future
-        //? for upgrading our "protocol" (e.g. of how we use these queues, not the AMQP version).)
-        //?
-        //? batiati: Great idea!
-        //? I also removed the option for user-defined progress queues, since it's now derived
-        //? from the cluster ID. Originally, this was meant to support multiple CDC jobs, but using
-        //? the cluster ID turned out to be a better solution.
-        //?
-        //? > ...Ah wait, this is pretty much already what the locker queue does, isn't it?
-        //? The locker queue prevents two instances of the CDC job (same cluster) running at
-        //? the same time. But we're fine with jobs from different clusters, even if publishing
-        //? to the same exchange, since they have different progress queues.
-        //?
-        //? Also we don't want the exchange as part of the identifier, so the user can change it
-        //? without risking starting from the beginning.
-        //? resolved.
         const progress_tracker_queue = "tigerbeetle.internal.progress";
         const locker_queue = "tigerbeetle.internal.locker";
         const event_count_max: u32 = Client.StateMachine.operation_result_max(
@@ -179,9 +143,6 @@ pub const Runner = struct {
     ) !void {
         assert(options.addresses.len > 0);
 
-        //? dj: Where these inner assertions apply to the default value as well, it would be
-        //? clearer to move them out of the branch (after the constant is assigned).
-        //? resolved.
         const idle_interval_ns: u63 = if (options.idle_interval_ms) |value|
             @intCast(@as(u64, value) * std.time.ns_per_ms)
         else
@@ -325,14 +286,6 @@ pub const Runner = struct {
     ///   The queue name is generated to be unique based on the `cluster_id`.
     fn recover(self: *Runner) void {
         assert(self.connected.amqp);
-        //? dj: Maybe change this to:
-        //?
-        //?     assert(self.state == .unknown);
-        //?
-        //?     const recovery_mode = self.state.unknown;
-        //?
-        //? ... to drop a level of nesting.
-        //? resolved.
         assert(self.state == .unknown);
         const recovery_mode = self.state.unknown;
         const timestamp_override: ?u64 = switch (recovery_mode) {
@@ -340,20 +293,6 @@ pub const Runner = struct {
             .override => |timestamp| timestamp,
         };
 
-        //? dj: Even though there is no need to validate it, could we do so anyway just
-        //? to remove dimensionality?
-        //? Though if not, this could be refactored to push the branch down:
-        //?     self.state = .{
-        //?         .recovering = .{
-        //?             .timestamp_last = timestamp_override,
-        //?             .phase = if (is_default_exchange)
-        //?                 .declare_locker_queue
-        //?             else
-        //?                 .validate_exchange,
-        //?         },
-        //?     };
-        //? batiati: No, we can't validate the default exchange. But good call on the refactor!
-        //? resolved.
         const is_default_exchange = self.publish_exchange.len == 0;
         self.state = .{
             .recovering = .{
@@ -385,9 +324,6 @@ pub const Runner = struct {
                                 "amqp_client",
                                 context,
                             ));
-                            //? dj: Instead of a single-branch switch, we can reduce the indentation
-                            //? level via `const recovering = &runner.state.recovering;`.
-                            //? resolved.
                             assert(runner.state == .recovering);
                             const recovering = &runner.state.recovering;
                             assert(recovering.phase == .validate_exchange);
@@ -577,12 +513,6 @@ pub const Runner = struct {
             },
             // Sending a `nack` with `requeue=true`, so the message remains in the progress
             // tracking queue in case we restart and need to recover again.
-            //? dj: If this CDC process crashes after the get_message finishes but before we send
-            //? our nack, is our progress lost?
-            //? batiati: The AMQP protocol is designed to be non-chatty, so sending any command
-            //? other than "nack" implicitly acts as an "ack".
-            //? However, if the TCP connection is closed, the message is not acknowledged.
-            //? resolved.
             .nack_progress_message => |message| {
                 assert(self.state.recovering.timestamp_last != null);
                 assert(TimestampRange.valid(self.state.recovering.timestamp_last.?));
@@ -654,8 +584,6 @@ pub const Runner = struct {
     /// The "Producer" fetches events from TigerBeetle (`get_change_events` operation) into a buffer
     /// to be consumed by the "Consumer".
     fn produce(self: *Runner) void {
-        //? dj: Per tigerstyle, split compound assertions (for readability + precision).
-        //? resolved.
         assert(self.connected.vsr);
         assert(self.connected.amqp);
         assert(self.state == .last);
@@ -665,16 +593,6 @@ pub const Runner = struct {
         assert(self.state.last.producer_timestamp > self.state.last.consumer_timestamp);
         switch (self.producer) {
             .idle => {
-                //? dj: producer_begin returns false if there is already a buffer in the producing
-                //? state. I'm not really clear why in that case we can't just keep appending to the
-                //? same producing buffer.
-                //? batiati: If there's a buffer in the producing state, we are waiting `get_events`
-                //? to finish. So we'll produce again (in the next buffer) when it's done.
-                //? dj: In that case, wouldn't `self.producer` be `.request`, not `.idle`?
-                //? batiati: I'm not sure why I replied to your first comment like that :-).
-                //? So, `producer_begin()` now asserts `self.find(.producing) == null` instead of
-                //? returning null. Added more assertions here and `consume()`.
-                //? resolved.
                 if (!self.buffer.producer_begin()) {
                     // No free buffers (they must be `ready` and `consuming`).
                     // The running consumer will resume the producer once it finishes.
@@ -762,10 +680,6 @@ pub const Runner = struct {
         const target: []tb.ChangeEvent = runner.buffer.get_producer_buffer();
         assert(source.len <= target.len);
 
-        //? dj: Why is this copy_left instead of copy_disjoint? `source` is owned by the vsr.Client
-        //? whereas `target` is owned by us, right?
-        //? batiati: good catch!!!
-        //? resolved.
         stdx.copy_disjoint(
             .inexact,
             tb.ChangeEvent,
@@ -939,10 +853,6 @@ pub const Runner = struct {
     }
 
     pub fn tick(self: *Runner) void {
-        //? dj: Could we instead assert that the client is not evicted? I think since we don't pass
-        //? an eviction callback to the vsr client that we would panic on eviction anyway.
-        //? batiati: That's true! (Initially I considered handling eviction).
-        //? resolved.
         assert(!self.vsr_client.evicted);
         self.vsr_client.tick();
         self.amqp_client.tick();
@@ -970,8 +880,6 @@ const Metrics = struct {
         ) void {
             const duration_ms: u64 = @divFloor(metrics.timer.read(), std.time.ns_per_ms);
 
-            //? dj: Slightly more concise:
-            //? resolved.
             metrics.duration_min_ms =
                 @min(duration_ms, metrics.duration_min_ms orelse std.math.maxInt(u64));
             metrics.duration_max_ms = @max(duration_ms, metrics.duration_max_ms orelse 0);
@@ -987,8 +895,6 @@ const Metrics = struct {
     flush_timeout_ticks: u64,
 
     fn tick(self: *Metrics) void {
-        //? dj: This is a bit more precise.
-        //? resolved.
         assert(self.flush_ticks < self.flush_timeout_ticks);
         self.flush_ticks += 1;
         if (self.flush_ticks == self.flush_timeout_ticks) {
@@ -1080,31 +986,12 @@ const DualBuffer = struct {
     }
 
     pub fn deinit(self: *DualBuffer, allocator: std.mem.Allocator) void {
-        //? dj: Free in reverse order.
-        //? resolved.
         allocator.free(self.buffer_2.buffer);
         allocator.free(self.buffer_1.buffer);
     }
 
     pub fn producer_begin(self: *DualBuffer) bool {
         self.assert_state();
-        //? dj: What do you think of adding a helper function like:
-        //?     fn find(self, state: TagName(State)) ?Buffer {
-        //?         self.assert_state();
-        //?         for (self.buffers()) |buffer| {
-        //?             if (buffer.state == state) return buffer;
-        //?         }
-        //?     }
-        //? Then this (and consumer_begin()) can be simplified:
-        //?     if (self.find(.producing)) return false;
-        //?     const buffer = self.find(.free) orelse return;
-        //?     buffer.state = .producing;
-        //?     return true;
-        //? And {producer,consumer}_finish() can be simplified as well:
-        //?     self.find(.producing).?.state = ...;
-        //? And this could replace `get_{producer,consumer}_buffer` entirely (or they could call it,
-        //? but they would just be one line functions so maybe just remove them).
-        //? resolved.
         // Already producing.
         assert(self.find(.producing) == null);
         const buffer = self.find(.free) orelse
@@ -1161,10 +1048,6 @@ const DualBuffer = struct {
         if (self.buffer_2.state == state) return &self.buffer_2;
         return null;
     }
-    //? dj: Hmm, without the `inline` this would be unsafe since we are returning a pointer to data
-    //? on our stack. Does the `inline` make it safe? I guess if it works then its okay...
-    //? batiati: Hum... we don't need this function anymore!
-    //? resolved.
 
     fn assert_state(self: *const DualBuffer) void {
         // Two buffers: one can be producing while the other is consuming,
@@ -1240,8 +1123,6 @@ const ProgressTrackerMessage = struct {
             }
         }
         fatal(
-        //? dj: Is the leading space intentional?
-        //? resolved.
             \\Invalid progress tracker message.
             \\Use `--timestamp-last` to restore a valid initial timestamp.
         , .{});

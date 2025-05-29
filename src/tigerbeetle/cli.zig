@@ -271,13 +271,6 @@ const CLIArgs = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
-    //? dj: Could we name the subcommand "amqp" instead?:
-    //? - We might add support for other CDC protocols or versions in the future.
-    //?   In the former case they would probably take different flags so it would simplify flag
-    //?   validation if they were separate subcommands.
-    //? - So many of "cdc"'s flags start with the prefix `amqp_`.. if the subcommand was called
-    //?   "amqp" then we could reasonably omit that.
-    //? resolved.
     amqp: AMQP,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,

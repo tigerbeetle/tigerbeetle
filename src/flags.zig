@@ -494,12 +494,6 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     };
 }
 
-//? dj: I've considered adding this before, and for the same reason you did! It makes scripting
-//? easier when you can just substitute in a boolean rather than adding/removing a flag dynamically.
-//? Though, I wonder if we should just use `true`/`false` (rather than additionally `1`/`0`).
-//? Also makes it more clear what the "type" is at the "call site".
-//? batiati: I was thinking of environment variables that usually are 1 or 0.
-//? resolved.
 fn parse_value_bool(flag: []const u8, value: [:0]const u8) bool {
     return switch (parse_value_enum(
         enum {

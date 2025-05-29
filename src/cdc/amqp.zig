@@ -38,26 +38,7 @@ pub const frame_min_size = protocol.frame_min_size;
 /// - Limited consumer capabilities.
 /// - Implements only the methods required by TigerBeetle.
 /// - No error handling: **CAN PANIC**.
-//? dj: I take it this is a design decision rather than TODO? i.e. the idea is that on any crash you
-//? would just restart the TB AMQP bridge since it is stateless anyway? Which errors is this
-//? referring to?
-//? batiati: We intentionally don't handle AMQP protocol errors such as `channel_close` replies for
-//? "soft errors" (e.g., invalid exchanges, misconfigurations, quotas) or `connection_close`
-//? replies for "hard errors" (e.g., malformed messages, unexpected methods arguments).
-//? The rationale is that we'd abort anyway, and we don't usually do graceful shutdowns.
-//? I am not sure if network errors should be handled (currently they panic). We could implement
-//? retry logic with backoff instead; however, we would need to support multiple addresses for
-//? RabbitMQ clusters, and round-robin them on reconnection attempts.
-//? Alternatively, this logic could be managed by the operator, resolving the preferred/reachable
-//? address when restarting the CDC job (this step is already necessary for DNS support).
-//? Beyond improving error messages, how far do you think we should go in terms of error handling?
-//? dj: I think what you described makes sense... if there are certain errors which we want to
-//? handle more gracefully in the future, then we can always change it then. But I think this is a
-//? sensible place to start.
-//? resolved.
 pub const Client = struct {
-    //? dj: Maybe turn channel into a enum(u16) since we only use the two channels.
-    //? resolved.
     pub const Callback = *const fn (self: *Client) void;
     pub const GetMessagePropertiesCallback = *const fn (
         self: *Client,
@@ -284,17 +265,11 @@ pub const Client = struct {
         assert(self.action == .connect);
         const connection_options = self.action.connect.options;
 
-        //? dj: Maybe add a new state enum to the action so that we can verify that the reply
-        //? methods that we receive are what we expect and in the right order.
-        //? resolved.
         switch (reply) {
             .connection_start => |args| {
                 assert(self.action.connect.phase == .handshake);
 
                 log.info("Connection start received:", .{});
-                //? dj: Should we assert the version numbers (or anything else here) to make sure we
-                //? are talking to a compatible server?
-                //? resolved.
                 log.info("version {}.{}", .{ args.version_major, args.version_minor });
                 log.info("locales {s}", .{args.locales});
                 log.info("mechanisms {s}", .{args.mechanisms});
@@ -354,8 +329,6 @@ pub const Client = struct {
                 log.info("channel_max {}", .{args.channel_max});
                 log.info("frame_max {}", .{args.frame_max});
                 log.info("heartbeat {}", .{args.heartbeat});
-                //? dj: Can we assert anything about these parameters as a sanity-check?
-                //? resolved.
                 // Zero indicates no specified limit.
                 assert(args.frame_max == 0 or args.frame_max >= frame_min_size);
                 maybe(args.channel_max == 0);
@@ -413,19 +386,12 @@ pub const Client = struct {
                 self.action = .none;
                 callback(self);
             },
-            //? dj: It would be useful in this case to log which unexpected method we received.
-            //? resolved.
             else => fatal(
                 "Unexpected AMQP method received during connection: {s}",
                 .{@tagName(reply)},
             ),
         }
     }
-    //? dj: Can we add some state so that we can check that commit is paired with select?
-    //? batiati: I'd rather let it for the AMQP server to validate (it will close the channel
-    //? with an error code).
-    //? batiati: Tx methods removed as we shifted to confirm mode.
-    //? resolved.
 
     pub fn exchange_declare(
         self: *Client,
@@ -494,8 +460,6 @@ pub const Client = struct {
     }
 
     /// Enqueue a message to be sent by `publish_send()`.
-    //? dj: There is no function called publish_flush. I assume you mean publish_send?
-    //? resolved.
     pub fn publish_enqueue(self: *Client, options: BasicPublishOptions) void {
         assert(self.awaiter == .none);
         if (self.action == .none) self.action = .{ .publish_enqueue = .{} };
@@ -527,10 +491,6 @@ pub const Client = struct {
         options.properties.encode(encoder);
         encoder.finish_frame(.header);
 
-        //? dj: Could we move the finish_header() call up here so that it isn't in both branches?
-        //? Also, an `else` might be more readable here than an early return, since the branches are
-        //? quite symmetrical.
-        //? resolved.
         if (options.body) |body| {
             // 3. Body frame (optional) — contains the message payload.
             //    This could be split into N frames, but we only support single-frame bodies.
@@ -956,11 +916,6 @@ pub const Client = struct {
     ) Decoder.Error!void {
         assert(frame_header.type == .header);
         maybe(header.body_size == 0);
-        //? dj: Maybe just turn this into an if-else statement, rather than a switch with a fall
-        //? through.
-        //? batiati: I use this pattern as a poor's man `if let`, otherwise acessing the
-        //? payload would be more verbose. But not strong opinion here.
-        //? resolved.
         if (self.awaiter == .await_content_header) {
             const awaiter = self.awaiter.await_content_header;
             if (frame_header.channel == awaiter.channel) {
@@ -1122,8 +1077,6 @@ const ReceiveBuffer = struct {
 
     fn end_decode(self: *ReceiveBuffer, processed_last_index: usize) []u8 {
         maybe(processed_last_index == 0);
-        //? dj: Simplify to `assert(self.state == .decoding)`?
-        //? resolved.
         assert(self.state == .decoding);
         const decoding_state = self.state.decoding;
         if (processed_last_index == decoding_state.size) {
@@ -1136,9 +1089,6 @@ const ReceiveBuffer = struct {
         assert(processed_last_index < decoding_state.size);
         const remaining = self.buffer[processed_last_index..decoding_state.size];
         assert(remaining.len < self.buffer.len);
-        //? dj: If processed_index_last is zero, then I think this copy_left will panic.
-        //? batiati: sure, because they start at the same address, so it's a no-op.
-        //? resolved.
         if (processed_last_index > 0) {
             stdx.copy_left(.inexact, u8, self.buffer, remaining);
         }
@@ -1483,9 +1433,6 @@ test "amqp: Confirms" {
     try testing.expect(confirms.state.idle.sequence == 11);
 }
 
-//? dj: Add snapshot test which just compares hash(read(spec.zig)), to guard against manual
-//? modifications to the auto-generated file.
-//? resolved.
 test "amqp: spec" {
     // Sanity check to ensure the spec hasn't been manually modified.
     // Checking the hash to avoid downloading the XML from external sources during CI.
