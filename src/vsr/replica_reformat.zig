@@ -6,6 +6,10 @@
 //!    `tigerbeetle format`'s output *except* that `vsr_state.view == client.view + 2` (where
 //!    `client.view` is the view number of the client at the end of committing the requests).
 //! 3. The recovery process exits. Now running `tigerbeetle start` as normal will work.
+//!
+//! The `pipeline_prepare_queue_max` committed requests ensure that if the newly recovered replica
+//! nacks uncommitted ops via a DVC message, it is nacking ops which were definitely not received by
+//! the previous version of the replica.
 const std = @import("std");
 const assert = std.debug.assert;
 

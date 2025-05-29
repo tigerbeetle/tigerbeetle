@@ -7957,6 +7957,16 @@ pub fn ReplicaType(
             assert(!self.journal.has_prepare(message.header));
             assert(message.header.op > self.commit_min);
 
+            if (self.release.value < message.header.release.value and
+                self.replica == message.header.replica)
+            {
+                // Don't replica messages on a newer release than us if we were the one who
+                // originally sent it. This can happen if our release backtracked due to being
+                // reformatted.
+                log.warn("{}: replicate: ignoring prepare from newer release", .{self.replica});
+                return;
+            }
+
             if (self.replicate_options.star) {
                 if (self.status == .normal and self.primary()) {
                     self.send_message_to_other_replicas_and_standbys(message.base());
