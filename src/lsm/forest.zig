@@ -22,6 +22,13 @@ const compaction_block_count_bar_max = @import("compaction.zig").compaction_bloc
 const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 const compaction_input_tables_max = @import("compaction.zig").compaction_tables_input_max;
 
+const perf_event = @import("./perf_event.zig");
+const BenchmarkParams = struct {
+    version: []const u8 = "",
+    name: []const u8 = "",
+    part: []const u8 = "",
+};
+
 /// The maximum number of tables for the forest as a whole. This is set a bit backwards due to how
 /// the code is structured: a single tree should be able to use all the tables in the forest, so the
 /// table_count_max of the forest is equal to the table_count_max of a single tree.
@@ -518,10 +525,19 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             }
 
             // Swap the mutable and immutable tables; this must happen on the last beat, regardless
-            // of pacing.
             if (last_beat) {
+                var benchmark_params = BenchmarkParams{
+                    .version = "swapall",
+                    .name = "forest",
+                    .part = "swap",
+                };
+                var count: u64 = 0;
+                var perf = perf_event.PerfEventBlockType(BenchmarkParams).init(&benchmark_params, true);
+                defer perf.deinit();
+                var timer = std.time.Timer.start() catch unreachable;
                 inline for (comptime std.enums.values(TreeID)) |tree_id| {
                     const tree = tree_for_id(forest, tree_id);
+                    count += tree.table_mutable.count();
 
                     log.debug("swap_mutable_and_immutable({s})", .{tree.config.name});
                     tree.swap_mutable_and_immutable(
@@ -531,6 +547,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     // Ensure tables haven't overflowed.
                     tree.manifest.assert_level_table_counts();
                 }
+
+                perf.set_scale(count);
+                const duration = timer.lap();
+                std.debug.print("swap all tables took {}  ms\n", .{duration / std.time.ns_per_ms});
             }
 
             // On the last beat of the bar, make sure that manifest log compaction is finished.
