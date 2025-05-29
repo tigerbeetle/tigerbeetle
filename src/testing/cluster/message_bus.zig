@@ -52,6 +52,7 @@ pub const MessageBus = struct {
     pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
         bus.buffer.?.deinit(bus.pool);
         bus.buffer = null;
+        bus.resume_scheduled = false;
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
     }
