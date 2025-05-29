@@ -1479,7 +1479,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         assert(!journal.prepare_inhabited[index]);
 
                         if (torn_slots.count() < constants.journal_iops_write_max) {
-                            torn_slots.append_assume_capacity(slot);
+                            torn_slots.push(slot).?;
                         } else {
                             log.warn("{}: torn_prepares: not truncating, found >{} " ++
                                 "torn prepares!", .{

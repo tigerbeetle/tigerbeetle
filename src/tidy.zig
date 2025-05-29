@@ -477,7 +477,7 @@ fn tidy_long_functions(
             last_function.is_innermost = false;
         }
 
-        function_stack.append_assume_capacity(innermost_function);
+        function_stack.push(innermost_function).?;
     }
 
     if (function_stack.count() > 0) {
