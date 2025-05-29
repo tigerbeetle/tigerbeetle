@@ -23,7 +23,7 @@ const tb = vsr.tigerbeetle;
 pub const amqp = @import("amqp.zig");
 
 /// CDC processor targeting an AMQP 0.9.1 compliant server (e.g., RabbitMQ).
-/// Producer: TigerBeetle `get_events` operation.
+/// Producer: TigerBeetle `get_change_events` operation.
 /// Consumer: AMQP publisher.
 /// Both consumer and producer run concurrently using `io_uring`.
 /// See `DualBuffer` for more details.
@@ -44,7 +44,7 @@ pub const Runner = struct {
         const progress_tracker_queue = "tigerbeetle.internal.progress";
         const locker_queue = "tigerbeetle.internal.locker";
         const event_count_max: u32 = Client.StateMachine.operation_result_max(
-            .get_events,
+            .get_change_events,
             vsr.constants.message_body_size_max,
         );
     };
@@ -464,7 +464,7 @@ pub const Runner = struct {
                                         assert(!result.has_body);
                                         assert(result.delivery_tag > 0);
                                         // Recovering from a valid timestamp is crucial,
-                                        // otherwise `get_events` may return empty results
+                                        // otherwise `get_change_events` may return empty results
                                         // due to invalid filters.
                                         const progress_tracker = try ProgressTrackerMessage.parse(
                                             result.properties.headers,
@@ -581,7 +581,7 @@ pub const Runner = struct {
         );
     }
 
-    /// The "Producer" fetches events from TigerBeetle (`get_events` operation) into a buffer
+    /// The "Producer" fetches events from TigerBeetle (`get_change_events` operation) into a buffer
     /// to be consumed by the "Consumer".
     fn produce(self: *Runner) void {
         assert(self.connected.vsr);
@@ -621,7 +621,7 @@ pub const Runner = struct {
             .idle => unreachable,
             // Submitting the request through the VSR client.
             .request => {
-                const filter: tb.EventFilter = .{
+                const filter: tb.ChangeEventsFilter = .{
                     .limit = self.event_count_max,
                     .timestamp_min = self.state.last.producer_timestamp,
                     .timestamp_max = 0,
@@ -630,7 +630,7 @@ pub const Runner = struct {
                 self.vsr_client.request(
                     &produce_request_callback,
                     @intFromPtr(self),
-                    .get_events,
+                    .get_change_events,
                     std.mem.asBytes(&filter),
                 );
             },
@@ -671,18 +671,18 @@ pub const Runner = struct {
         timestamp: u64,
         result: []u8,
     ) void {
-        assert(operation == .get_events);
+        assert(operation == .get_change_events);
         assert(timestamp != 0);
         const runner: *Runner = @ptrFromInt(@as(usize, @intCast(context)));
         assert(runner.producer == .request);
 
-        const source: []const tb.Event = stdx.bytes_as_slice(.exact, tb.Event, result);
-        const target: []tb.Event = runner.buffer.get_producer_buffer();
+        const source: []const tb.ChangeEvent = stdx.bytes_as_slice(.exact, tb.ChangeEvent, result);
+        const target: []tb.ChangeEvent = runner.buffer.get_producer_buffer();
         assert(source.len <= target.len);
 
         stdx.copy_disjoint(
             .inexact,
-            tb.Event,
+            tb.ChangeEvent,
             target,
             source,
         );
@@ -767,7 +767,7 @@ pub const Runner = struct {
             // just a single queue, e.g. a fault during tx.commit can result in a sub-set of the
             // transaction's publishes appearing in the queue after a broker restart.
             .publish => {
-                const events: []const tb.Event = self.buffer.get_consumer_buffer();
+                const events: []const tb.ChangeEvent = self.buffer.get_consumer_buffer();
                 assert(events.len > 0);
                 for (events) |*event| {
                     const message = Message.init(event);
@@ -951,7 +951,7 @@ const DualBuffer = struct {
     };
 
     const Buffer = struct {
-        buffer: []tb.Event,
+        buffer: []tb.ChangeEvent,
         state: union(State) {
             free,
             producing,
@@ -967,10 +967,10 @@ const DualBuffer = struct {
         assert(event_count > 0);
         assert(event_count <= Runner.constants.event_count_max);
 
-        const buffer_1 = try allocator.alloc(tb.Event, event_count);
+        const buffer_1 = try allocator.alloc(tb.ChangeEvent, event_count);
         errdefer allocator.free(buffer_1);
 
-        const buffer_2 = try allocator.alloc(tb.Event, event_count);
+        const buffer_2 = try allocator.alloc(tb.ChangeEvent, event_count);
         errdefer allocator.free(buffer_2);
 
         return .{
@@ -1001,7 +1001,7 @@ const DualBuffer = struct {
         return true;
     }
 
-    pub fn get_producer_buffer(self: *DualBuffer) []tb.Event {
+    pub fn get_producer_buffer(self: *DualBuffer) []tb.ChangeEvent {
         self.assert_state();
         const buffer = self.find(.producing).?;
         return buffer.buffer;
@@ -1025,7 +1025,7 @@ const DualBuffer = struct {
         return true;
     }
 
-    pub fn get_consumer_buffer(self: *DualBuffer) []const tb.Event {
+    pub fn get_consumer_buffer(self: *DualBuffer) []const tb.ChangeEvent {
         self.assert_state();
         const buffer = self.find(.consuming).?;
         return buffer.buffer[0..buffer.state.consuming];
@@ -1149,7 +1149,7 @@ pub const Message = struct {
     };
 
     timestamp: u64,
-    type: tb.EventType,
+    type: tb.ChangeEventType,
     ledger: u32,
     transfer: struct {
         id: u128,
@@ -1190,7 +1190,7 @@ pub const Message = struct {
         timestamp: u64,
     },
 
-    pub fn init(event: *const tb.Event) Message {
+    pub fn init(event: *const tb.ChangeEvent) Message {
         return .{
             .timestamp = event.timestamp,
             .type = event.type,
@@ -1281,7 +1281,7 @@ pub const Message = struct {
                 .Int => std.math.maxInt(field.type),
                 .Enum => max: {
                     var name: []const u8 = "";
-                    for (std.enums.values(tb.EventType)) |tag| {
+                    for (std.enums.values(tb.ChangeEventType)) |tag| {
                         if (@tagName(tag).len > name.len) {
                             name = @tagName(tag);
                         }

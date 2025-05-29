@@ -239,7 +239,7 @@ fn request(
             try decode_array(Event, env, array, buffer);
             break :blk .{ packet, std.mem.sliceAsBytes(buffer) };
         },
-        .pulse, .get_events => unreachable,
+        .pulse, .get_change_events => unreachable,
     };
 
     packet.* = .{
@@ -309,7 +309,7 @@ fn on_completion(
                     packet.data = reply_buffer.ptr;
                     packet.data_size = @intCast(reply_buffer.len);
                 },
-                .pulse, .get_events => unreachable,
+                .pulse, .get_change_events => unreachable,
             }
         },
         .client_evicted,
@@ -389,7 +389,7 @@ fn on_completion_js(
                 else => unreachable, // all other packet status' handled in previous callback.
             }
         },
-        .pulse, .get_events => unreachable,
+        .pulse, .get_change_events => unreachable,
     };
 
     // Parse Result array out of packet data, freeing it in the process.

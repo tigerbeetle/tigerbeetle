@@ -156,7 +156,7 @@ pub const AccountingAuditor = struct {
     };
 
     pub const ChangesTracker = struct {
-        const EnumArray = std.EnumArray(tb.EventType, u32);
+        const EnumArray = std.EnumArray(tb.ChangeEventType, u32);
         const Counter = struct {
             /// The number of events recorded.
             count: EnumArray,
@@ -318,7 +318,7 @@ pub const AccountingAuditor = struct {
     pending_expiries: PendingExpiryQueue,
 
     /// Records the number of events in a given timestamp span.
-    /// Used to validate the `get_events` results.
+    /// Used to validate the `get_change_events` results.
     changes_tracker: ChangesTracker,
 
     /// Track the expected result of the in-flight request for each client.
@@ -780,11 +780,11 @@ pub const AccountingAuditor = struct {
         return null;
     }
 
-    pub fn on_get_events(
+    pub fn on_get_change_events(
         self: *AccountingAuditor,
         timestamp: u64,
-        filter: tb.EventFilter,
-        results: []const tb.Event,
+        filter: tb.ChangeEventsFilter,
+        results: []const tb.ChangeEvent,
     ) void {
         _ = timestamp;
         const filter_valid = filter.limit != 0 and

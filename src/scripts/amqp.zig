@@ -449,13 +449,13 @@ fn run_cdc_test(
     var expiry_pending_count: u32 = 0;
     var timestamp_previous: u64 = 0;
     while (count < options.transfer_count + expiry_count) {
-        const events: []tb.Event = events: {
+        const events: []tb.ChangeEvent = events: {
             for (0..10) |attempt| {
                 if (attempt > 0) {
                     // Waiting for events:
                     std.time.sleep(500 * std.time.ns_per_ms);
                 }
-                const events = try vsr_context.get_events(timestamp_previous + 1);
+                const events = try vsr_context.get_change_events(timestamp_previous + 1);
                 if (events.len > 0) break :events events;
             }
             try testing.expect(false);
@@ -514,9 +514,9 @@ fn run_cdc_test(
     // No more events.
     assert(expiry_pending_count == 0);
     try testing.expectEqualSlices(
-        tb.Event,
+        tb.ChangeEvent,
         &.{},
-        try vsr_context.get_events(timestamp_previous + 1),
+        try vsr_context.get_change_events(timestamp_previous + 1),
     );
     try testing.expectEqual(@as(?AmqpContext.Message, null), amqp_context.get_message(.{
         .queue = queue,
@@ -704,7 +704,7 @@ const VSRContext = struct {
     io: vsr.io.IO,
     message_pool: MessagePool,
     busy: bool,
-    buffer: []tb.Event,
+    buffer: []tb.ChangeEvent,
     results: ?usize,
 
     pub fn init(self: *VSRContext, gpa: std.mem.Allocator, port: u16) !void {
@@ -737,9 +737,9 @@ const VSRContext = struct {
         self.client.register(register_callback, @intFromPtr(self));
         self.wait();
 
-        self.buffer = try gpa.alloc(tb.Event, StateMachine.operation_result_max(
-            .get_events,
-            @divFloor(StateMachine.constants.message_body_size_max, @sizeOf(tb.Event)),
+        self.buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
+            .get_change_events,
+            @divFloor(StateMachine.constants.message_body_size_max, @sizeOf(tb.ChangeEvent)),
         ));
         errdefer gpa.free(self.buffer);
         assert(!self.busy);
@@ -753,12 +753,12 @@ const VSRContext = struct {
         self.io.deinit();
     }
 
-    pub fn get_events(self: *VSRContext, timestamp_min: u64) ![]tb.Event {
+    pub fn get_change_events(self: *VSRContext, timestamp_min: u64) ![]tb.ChangeEvent {
         assert(!self.busy);
         assert(self.results == null);
         defer self.results = null;
 
-        const filter: tb.EventFilter = .{
+        const filter: tb.ChangeEventsFilter = .{
             .limit = std.math.maxInt(u32),
             .timestamp_min = timestamp_min,
             .timestamp_max = 0,
@@ -767,7 +767,7 @@ const VSRContext = struct {
         self.client.request(
             &request_callback,
             @intFromPtr(self),
-            .get_events,
+            .get_change_events,
             std.mem.asBytes(&filter),
         );
         self.wait();
@@ -803,7 +803,7 @@ const VSRContext = struct {
         result: []u8,
     ) void {
         _ = timestamp;
-        assert(operation == .get_events);
+        assert(operation == .get_change_events);
 
         const self: *VSRContext = @ptrFromInt(@as(usize, @intCast(user_data)));
         assert(self.busy);
@@ -811,14 +811,14 @@ const VSRContext = struct {
 
         const events = stdx.bytes_as_slice(
             .exact,
-            tb.Event,
+            tb.ChangeEvent,
             result,
         );
         assert(events.len <= self.buffer.len);
         self.results = events.len;
         stdx.copy_disjoint(
             .inexact,
-            tb.Event,
+            tb.ChangeEvent,
             self.buffer,
             events,
         );
@@ -943,7 +943,7 @@ fn try_execute(
     cmd_args: anytype,
 ) ![]const u8 {
     var exec_result: ?std.process.Child.RunResult = null;
-    const attempt_max = 5;
+    const attempt_max = 15;
     for (0..attempt_max) |attempt| {
         if (attempt > 0) std.time.sleep(1 * std.time.ns_per_s);
         exec_result = try shell.exec_raw(cmd, cmd_args);

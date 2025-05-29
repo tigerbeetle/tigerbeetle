@@ -14,7 +14,7 @@ from .lib import c_uint128, dataclass, tbclient, validate_uint
 
 class Operation(enum.IntEnum):
     PULSE = 128
-    GET_EVENTS = 137
+    GET_CHANGE_EVENTS = 137
     CREATE_ACCOUNTS = 138
     CREATE_TRANSFERS = 139
     LOOKUP_ACCOUNTS = 140

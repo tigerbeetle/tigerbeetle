@@ -560,7 +560,7 @@ pub const AccountFilterFlags = packed struct(u32) {
     }
 };
 
-pub const EventType = enum(u8) {
+pub const ChangeEventType = enum(u8) {
     single_phase = 0,
     two_phase_pending = 1,
     two_phase_posted = 2,
@@ -568,7 +568,7 @@ pub const EventType = enum(u8) {
     two_phase_expired = 4,
 };
 
-pub const Event = extern struct {
+pub const ChangeEvent = extern struct {
     transfer_id: u128,
     transfer_amount: u128,
     transfer_pending_id: u128,
@@ -580,7 +580,7 @@ pub const Event = extern struct {
     transfer_flags: TransferFlags,
 
     ledger: u32,
-    type: EventType,
+    type: ChangeEventType,
     reserved: [39]u8 = [_]u8{0} ** 39,
 
     debit_account_id: u128,
@@ -611,22 +611,22 @@ pub const Event = extern struct {
     credit_account_timestamp: u64,
 
     comptime {
-        assert(stdx.no_padding(Event));
+        assert(stdx.no_padding(ChangeEvent));
         // Each event has the size of one transfer + 2 accounts.
-        assert(@sizeOf(Event) == @sizeOf(Transfer) + (2 * @sizeOf(Account)));
-        assert(@alignOf(Event) == 16);
+        assert(@sizeOf(ChangeEvent) == @sizeOf(Transfer) + (2 * @sizeOf(Account)));
+        assert(@alignOf(ChangeEvent) == 16);
     }
 };
 
-pub const EventFilter = extern struct {
+pub const ChangeEventsFilter = extern struct {
     timestamp_min: u64,
     timestamp_max: u64,
     limit: u32,
     reserved: [44]u8 = [_]u8{0} ** 44,
 
     comptime {
-        assert(stdx.no_padding(EventFilter));
-        assert(@sizeOf(EventFilter) == 64);
+        assert(stdx.no_padding(ChangeEventsFilter));
+        assert(@sizeOf(ChangeEventsFilter) == 64);
     }
 };
 

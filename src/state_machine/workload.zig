@@ -185,7 +185,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
         get_account_balances = @intFromEnum(Operation.get_account_balances),
         query_accounts = @intFromEnum(Operation.query_accounts),
         query_transfers = @intFromEnum(Operation.query_transfers),
-        get_events = @intFromEnum(Operation.get_events),
+        get_change_events = @intFromEnum(Operation.get_change_events),
 
         deprecated_create_accounts = @intFromEnum(Operation.deprecated_create_accounts),
         deprecated_create_transfers = @intFromEnum(Operation.deprecated_create_transfers),
@@ -495,7 +495,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             action_comptime,
                             batchable,
                         ),
-                        .get_events => self.build_get_events_filter(
+                        .get_change_events => self.build_get_change_events_filter(
                             client_index,
                             batchable,
                         ),
@@ -566,7 +566,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         .get_account_balances => 0,
                         .query_accounts => 0,
                         .query_transfers => 0,
-                        .get_events => 0,
+                        .get_change_events => 0,
                         else => unreachable,
                     };
                 }
@@ -667,10 +667,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     stdx.bytes_as_slice(.exact, tb.QueryFilter, request_body),
                     stdx.bytes_as_slice(.exact, tb.Transfer, reply_body),
                 ),
-                .get_events => self.on_get_events(
+                .get_change_events => self.on_get_change_events(
                     timestamp,
-                    stdx.bytes_as_slice(.exact, tb.EventFilter, request_body),
-                    stdx.bytes_as_slice(.exact, tb.Event, reply_body),
+                    stdx.bytes_as_slice(.exact, tb.ChangeEventsFilter, request_body),
+                    stdx.bytes_as_slice(.exact, tb.ChangeEvent, reply_body),
                 ),
                 //Not handled by the client.
                 .pulse => unreachable,
@@ -1073,10 +1073,10 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             return 1;
         }
 
-        fn build_get_events_filter(
+        fn build_get_change_events_filter(
             self: *Workload,
             client_index: usize,
-            body: []tb.EventFilter,
+            body: []tb.ChangeEventsFilter,
         ) usize {
             _ = client_index;
             assert(body.len == 1);
@@ -1118,7 +1118,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             })) {
                 .exact => snapshot.count_total(),
                 .batch_max => AccountingStateMachine.operation_result_max(
-                    .get_events,
+                    .get_change_events,
                     self.options.batch_size_limit,
                 ),
                 .int_max => std.math.maxInt(u32),
@@ -1295,7 +1295,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_get_account_balances,
                 .deprecated_query_accounts,
                 .deprecated_query_transfers,
-                .get_events,
+                .get_change_events,
                 => 1,
             };
             const batch_span = switch (action) {
@@ -1317,7 +1317,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_get_account_balances,
                 .deprecated_query_accounts,
                 .deprecated_query_transfers,
-                .get_events,
+                .get_change_events,
                 => 0,
             };
 
@@ -1787,14 +1787,14 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             }
         }
 
-        fn on_get_events(
+        fn on_get_change_events(
             self: *Workload,
             timestamp: u64,
-            body: []const tb.EventFilter,
-            results: []const tb.Event,
+            body: []const tb.ChangeEventsFilter,
+            results: []const tb.ChangeEvent,
         ) void {
             assert(body.len == 1);
-            self.auditor.on_get_events(timestamp, body[0], results);
+            self.auditor.on_get_change_events(timestamp, body[0], results);
 
             for (results) |*result| {
                 assert(stdx.zeroed(&result.reserved));
@@ -1860,7 +1860,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             assert(checksum_expect == checksum_actual);
         }
 
-        fn validate_get_event_checksum(event: *const tb.Event) void {
+        fn validate_get_event_checksum(event: *const tb.ChangeEvent) void {
             const transfer: tb.Transfer = .{
                 .id = event.transfer_id,
                 .debit_account_id = event.debit_account_id,
@@ -1974,7 +1974,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .client_count = options.client_count,
                     .transfers_pending_max = 256,
                     .changes_events_max = StateMachine.operation_event_max(
-                        .get_events,
+                        .get_change_events,
                         options.batch_size_limit,
                     ),
                     .in_flight_max = options.in_flight_max,
@@ -1999,7 +1999,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                     .get_account_balances = prng.range_inclusive(u64, 1, 20),
                     .query_accounts = prng.range_inclusive(u64, 1, 20),
                     .query_transfers = prng.range_inclusive(u64, 1, 20),
-                    .get_events = prng.range_inclusive(u64, 1, 20),
+                    .get_change_events = prng.range_inclusive(u64, 1, 20),
 
                     .deprecated_create_accounts = prng.range_inclusive(u64, 1, 10),
                     .deprecated_create_transfers = prng.range_inclusive(u64, 1, 100),

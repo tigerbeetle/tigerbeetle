@@ -41,7 +41,9 @@ const CreateTransferResult = tb.CreateTransferResult;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
-const EventFilter = tb.EventFilter;
+const ChangeEventsFilter = tb.ChangeEventsFilter;
+const ChangeEvent = tb.ChangeEvent;
+const ChangeEventType = tb.ChangeEventType;
 
 pub const tree_ids = struct {
     pub const Account = .{
@@ -453,7 +455,7 @@ pub fn StateMachineType(
             deprecated_query_accounts = config.vsr_operations_reserved + 7,
             deprecated_query_transfers = config.vsr_operations_reserved + 8,
 
-            get_events = config.vsr_operations_reserved + 9,
+            get_change_events = config.vsr_operations_reserved + 9,
 
             create_accounts = config.vsr_operations_reserved + 10,
             create_transfers = config.vsr_operations_reserved + 11,
@@ -483,7 +485,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountFilter,
                 .query_accounts => QueryFilter,
                 .query_transfers => QueryFilter,
-                .get_events => EventFilter,
+                .get_change_events => ChangeEventsFilter,
 
                 .deprecated_create_accounts => Account,
                 .deprecated_create_transfers => Transfer,
@@ -507,7 +509,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountBalance,
                 .query_accounts => Account,
                 .query_transfers => Transfer,
-                .get_events => tb.Event,
+                .get_change_events => ChangeEvent,
 
                 .deprecated_create_accounts => CreateAccountsResult,
                 .deprecated_create_transfers => CreateTransfersResult,
@@ -550,7 +552,7 @@ pub fn StateMachineType(
                 .get_account_balances => false,
                 .query_accounts => false,
                 .query_transfers => false,
-                .get_events => false,
+                .get_change_events => false,
 
                 .deprecated_create_accounts => true,
                 .deprecated_create_transfers => true,
@@ -579,7 +581,7 @@ pub fn StateMachineType(
                 .query_transfers,
                 => true,
 
-                .get_events => false,
+                .get_change_events => false,
 
                 .deprecated_create_accounts,
                 .deprecated_create_transfers,
@@ -717,7 +719,7 @@ pub fn StateMachineType(
                 .deprecated_get_account_balances,
                 .deprecated_query_accounts,
                 .deprecated_query_transfers,
-                .get_events,
+                .get_change_events,
                 => |operation_comptime| count: {
                     // For queries, each event produces up to `limit` events.
                     comptime assert(!StateMachine.operation_is_batchable(operation_comptime));
@@ -842,7 +844,7 @@ pub fn StateMachineType(
             get_account_balances: TimingSummary = .{},
             query_accounts: TimingSummary = .{},
             query_transfers: TimingSummary = .{},
-            get_events: TimingSummary = .{},
+            get_change_events: TimingSummary = .{},
 
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
@@ -931,8 +933,8 @@ pub fn StateMachineType(
                     .deprecated_query_transfers,
                     => .query_transfers,
 
-                    .get_events,
-                    => .get_events,
+                    .get_change_events,
+                    => .get_change_events,
 
                     .pulse => comptime unreachable,
                 };
@@ -1011,7 +1013,7 @@ pub fn StateMachineType(
                     .get_account_balances,
                     .query_accounts,
                     .query_transfers,
-                    .get_events,
+                    .get_change_events,
 
                     .deprecated_get_account_transfers,
                     .deprecated_get_account_balances,
@@ -1036,7 +1038,7 @@ pub fn StateMachineType(
                         .query_transfers,
                         .deprecated_query_transfers,
                         => @sizeOf(Transfer),
-                        .get_events => @sizeOf(AccountEvent),
+                        .get_change_events => @sizeOf(AccountEvent),
                         else => comptime unreachable,
                     };
                     buffer_size_max = @max(
@@ -1253,7 +1255,7 @@ pub fn StateMachineType(
                 .get_account_balances => 0,
                 .query_accounts => 0,
                 .query_transfers => 0,
-                .get_events => 0,
+                .get_change_events => 0,
 
                 .deprecated_create_accounts => @divExact(batch.len, @sizeOf(Account)),
                 .deprecated_create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
@@ -1333,7 +1335,7 @@ pub fn StateMachineType(
                 .get_account_balances => self.prefetch_get_account_balances(),
                 .query_accounts => self.prefetch_query_accounts(),
                 .query_transfers => self.prefetch_query_transfers(),
-                .get_events => self.prefetch_get_events(),
+                .get_change_events => self.prefetch_get_change_events(),
 
                 .deprecated_create_accounts => self.prefetch_create_accounts(),
                 .deprecated_create_transfers => self.prefetch_create_transfers(),
@@ -2279,7 +2281,7 @@ pub fn StateMachineType(
                         return self.prefetch_query_transfers_scan(filter_next);
                     }
                 },
-                .get_events => {},
+                .get_change_events => {},
 
                 .deprecated_get_account_transfers,
                 .deprecated_get_account_balances,
@@ -2293,24 +2295,27 @@ pub fn StateMachineType(
             self.prefetch_finish();
         }
 
-        fn prefetch_get_events(self: *StateMachine) void {
+        fn prefetch_get_change_events(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
-            const filter: *const EventFilter = self.get_prefetch_event_filter();
-            self.prefetch_get_events_scan(filter);
+            const filter: *const ChangeEventsFilter = self.get_prefetch_event_filter();
+            self.prefetch_get_change_events_scan(filter);
         }
 
-        fn prefetch_get_events_scan(self: *StateMachine, filter: *const EventFilter) void {
+        fn prefetch_get_change_events_scan(
+            self: *StateMachine,
+            filter: *const ChangeEventsFilter,
+        ) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
-            log.debug("{?}: prefetch_get_events_scan: {}", .{
+            log.debug("{?}: prefetch_get_change_events_scan: {}", .{
                 self.forest.grid.superblock.replica_index,
                 filter,
             });
@@ -2330,8 +2335,8 @@ pub fn StateMachineType(
                 //   required, so the limit is simply `message_body_size_max / result_size`.
                 // - In `get_account_balances`, one object is prefetched per each event (the query
                 //   filter).
-                // - In `get_events` and `expire_pending_transfers`, objects are prefetched per
-                //   scanned result.
+                // - In `get_change_events` and `expire_pending_transfers`, objects are prefetched
+                //   per scanned result.
                 // We could either:
                 // - Calculate the number of prefetches based on the event/reply size, as is done
                 //   for `create_*` and `lookup_*` operations;
@@ -2366,26 +2371,26 @@ pub fn StateMachineType(
                 assert(scan_buffer.len >= limit);
                 scan_lookup.read(
                     scan_buffer[0..limit],
-                    &prefetch_get_events_scan_callback,
+                    &prefetch_get_change_events_scan_callback,
                 );
                 return;
             }
 
             // TODO(batiati): Improve the way we do validations on the state machine.
-            log.info("invalid filter for prefetch_get_events_scan: {any}", .{filter});
+            log.info("invalid filter for prefetch_get_change_events_scan: {any}", .{filter});
             self.forest.grid.on_next_tick(
                 &prefetch_scan_next_tick_callback,
                 &self.scan_lookup_next_tick,
             );
         }
 
-        fn prefetch_get_events_scan_callback(
+        fn prefetch_get_change_events_scan_callback(
             scan_lookup: *AccountEventsScanLookup,
             results: []const AccountEvent,
         ) void {
             const self: *StateMachine = ScanLookup.parent(.account_events, scan_lookup);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             assert(self.scan_lookup_results.items.len == 0);
 
@@ -2414,45 +2419,45 @@ pub fn StateMachineType(
                 }
             }
             self.forest.grooves.accounts.prefetch(
-                prefetch_get_events_callback_accounts,
+                prefetch_get_change_events_callback_accounts,
                 self.prefetch_context.get(.accounts),
             );
         }
 
-        fn prefetch_get_events_callback_accounts(
+        fn prefetch_get_change_events_callback_accounts(
             completion: *AccountsGroove.PrefetchContext,
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
             self.prefetch_context = .null;
 
             self.forest.grooves.transfers.prefetch(
-                prefetch_get_events_callback_transfers,
+                prefetch_get_change_events_callback_transfers,
                 self.prefetch_context.get(.transfers),
             );
         }
 
-        fn prefetch_get_events_callback_transfers(
+        fn prefetch_get_change_events_callback_transfers(
             completion: *TransfersGroove.PrefetchContext,
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
         }
 
         /// Returns the `EventFilter` from the prefetch input buffer.
-        fn get_prefetch_event_filter(self: *StateMachine) *const EventFilter {
+        fn get_prefetch_event_filter(self: *StateMachine) *const ChangeEventsFilter {
             assert(self.prefetch_input != null);
             assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
 
             // Operations not encoded as multi-batch must have only a single filter.
             assert(self.scan_lookup_results.items.len == 0);
-            const filter: *const EventFilter = @alignCast(std.mem.bytesAsValue(
-                EventFilter,
+            const filter: *const ChangeEventsFilter = @alignCast(std.mem.bytesAsValue(
+                ChangeEventsFilter,
                 self.prefetch_input.?,
             ));
             return filter;
@@ -2460,7 +2465,7 @@ pub fn StateMachineType(
 
         fn get_scan_from_event_filter(
             self: *StateMachine,
-            filter: *const EventFilter,
+            filter: *const ChangeEventsFilter,
         ) ?*AccountEventsScanLookup {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
@@ -2668,8 +2673,8 @@ pub fn StateMachineType(
                     message_body_used,
                     output_buffer,
                 ),
-                .get_events => self.execute_query(
-                    .get_events,
+                .get_change_events => self.execute_query(
+                    .get_change_events,
                     message_body_used,
                     output_buffer,
                 ),
@@ -2848,7 +2853,7 @@ pub fn StateMachineType(
             assert(result_size % result_count == 0);
             assert(result_size <= self.scan_lookup_buffer.len);
             const bytes_written: usize = switch (operation) {
-                .get_events => self.execute_get_events(
+                .get_change_events => self.execute_get_change_events(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
@@ -3348,7 +3353,7 @@ pub fn StateMachineType(
             return scan_buffer.len;
         }
 
-        fn execute_get_events(
+        fn execute_get_change_events(
             self: *StateMachine,
             batch: []const u8,
             scan_buffer: []const u8,
@@ -3361,7 +3366,7 @@ pub fn StateMachineType(
                 AccountEvent,
                 scan_buffer,
             );
-            const output_slice = stdx.bytes_as_slice(.inexact, tb.Event, output_buffer);
+            const output_slice = stdx.bytes_as_slice(.inexact, ChangeEvent, output_buffer);
             var output_count: u32 = 0;
 
             for (scan_results) |*result| {
@@ -3389,7 +3394,7 @@ pub fn StateMachineType(
                 assert(dr_account.ledger == result.ledger);
                 assert(cr_account.ledger == result.ledger);
 
-                const event_type: tb.EventType = event_type: {
+                const event_type: ChangeEventType = event_type: {
                     switch (result.transfer_pending_status) {
                         .none => {
                             assert(transfer.timestamp == result.timestamp);
@@ -3471,7 +3476,7 @@ pub fn StateMachineType(
                 output_count += 1;
             }
 
-            return output_count * @sizeOf(tb.Event);
+            return output_count * @sizeOf(ChangeEvent);
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
@@ -5181,8 +5186,8 @@ const TestAction = union(enum) {
     query_transfers: TestQueryTransfers,
     query_transfers_result: u128,
 
-    get_events: TestGetEventFilter,
-    get_events_result: TestGetEventResult,
+    get_change_events: TestGetChangeEventsFilter,
+    get_change_events_result: TestGetChangeEventsResult,
 };
 
 const TestCreateAccount = struct {
@@ -5317,25 +5322,34 @@ const TestQueryFilter = struct {
     flags_reversed: ?enum { REV } = null,
 };
 
-const TestGetEventFilter = struct {
+const TestGetChangeEventsFilter = struct {
     timestamp_min_transfer_id: ?u128 = null,
     timestamp_max_transfer_id: ?u128 = null,
     limit: u32,
 };
 
-const TestGetEventResult = struct {
+const TestGetChangeEventsResult = struct {
+    const Balance = struct {
+        account_id: u128,
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+        closed: ?enum { CLSD } = null,
+    };
+
     event_type: ?enum { PEN, POS, VOI, EXP } = null,
     timestamp_transfer: ?u128 = null,
     amount: u128,
     transfer_pending_id: ?u128 = null,
-    dr_account: TestEventBalanceResult,
-    cr_account: TestEventBalanceResult,
+    dr_account: Balance,
+    cr_account: Balance,
 
     fn match(
-        self: *const TestGetEventResult,
+        self: *const TestGetChangeEventsResult,
         accounts: *std.AutoHashMap(u128, Account),
         transfers: *std.AutoHashMap(u128, Transfer),
-        event: *const tb.Event,
+        event: *const ChangeEvent,
     ) bool {
         if (self.timestamp_transfer) |id| {
             const transfer = transfers.get(id).?;
@@ -5344,7 +5358,7 @@ const TestGetEventResult = struct {
             if (!match_transfer(event, &transfer)) return false;
         }
         if (self.event_type) |event_type| {
-            const expected: tb.EventType = switch (event_type) {
+            const expected: ChangeEventType = switch (event_type) {
                 .PEN => .two_phase_pending,
                 .POS => .two_phase_posted,
                 .VOI => .two_phase_voided,
@@ -5394,7 +5408,7 @@ const TestGetEventResult = struct {
         return true;
     }
 
-    fn match_transfer(event: *const tb.Event, transfer: *const tb.Transfer) bool {
+    fn match_transfer(event: *const ChangeEvent, transfer: *const tb.Transfer) bool {
         if (event.transfer_timestamp != transfer.timestamp) return false;
         if (event.transfer_id != transfer.id) return false;
         if (event.transfer_amount != transfer.amount and
@@ -5411,15 +5425,6 @@ const TestGetEventResult = struct {
             @as(u16, @bitCast(event.transfer_flags))) return false;
         return true;
     }
-};
-
-const TestEventBalanceResult = struct {
-    account_id: u128,
-    debits_pending: u128,
-    debits_posted: u128,
-    credits_pending: u128,
-    credits_posted: u128,
-    closed: ?enum { CLSD } = null,
 };
 
 // Operations that share the same input.
@@ -5736,9 +5741,9 @@ fn check(test_table: []const u8) !void {
                 assert(operation.? == .query_transfers);
                 try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
             },
-            .get_events => |f| {
-                assert(operation == null or operation.? == .get_events);
-                operation = .get_events;
+            .get_change_events => |f| {
+                assert(operation == null or operation.? == .get_change_events);
+                operation = .get_change_events;
                 const timestamp_min = if (f.timestamp_min_transfer_id) |id|
                     transfers.get(id).?.timestamp
                 else
@@ -5748,15 +5753,15 @@ fn check(test_table: []const u8) !void {
                 else
                     0;
 
-                const event = EventFilter{
+                const event = ChangeEventsFilter{
                     .timestamp_min = timestamp_min,
                     .timestamp_max = timestamp_max,
                     .limit = f.limit,
                 };
                 try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_events_result => |*t| {
-                assert(operation.? == .get_events);
+            .get_change_events_result => |*t| {
+                assert(operation.? == .get_change_events);
                 try reply.appendSlice(std.mem.asBytes(t));
             },
             .commit => |commit_operation| {
@@ -5800,15 +5805,15 @@ fn check(test_table: []const u8) !void {
                             stdx.bytes_as_slice(.exact, Result, reply_actual),
                         );
                     },
-                    .get_events => {
+                    .get_change_events => {
                         const results_actual = stdx.bytes_as_slice(
                             .exact,
-                            tb.Event,
+                            ChangeEvent,
                             reply_actual,
                         );
                         const results_expected = stdx.bytes_as_slice(
                             .exact,
-                            TestGetEventResult,
+                            TestGetChangeEventsResult,
                             reply.items,
                         );
                         try testing.expectEqual(results_actual.len, results_expected.len);
@@ -7598,7 +7603,7 @@ test "query_transfers" {
     );
 }
 
-test "get_events" {
+test "get_change_events" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
@@ -7623,20 +7628,20 @@ test "get_events" {
         \\ commit create_transfers
 
         // Check the events.
-        \\ get_events _ T6 5
-        \\ get_events_result   _  T1 10  _ D1  0 10  0  0 _ C2  0  0  0 10 _
-        \\ get_events_result PEN  T2 11  _ D1 11 10  0  0 _ C2  0  0 11 10 _
-        \\ get_events_result PEN  T3 12  _ D1 23 10  0  0 _ C2  0  0 23 10 _
-        \\ get_events_result PEN  T4 13  _ D1 36 10  0  0 _ C2  0  0 36 10 _
-        \\ get_events_result PEN  T5 14  _ D1 50 10  0  0 _ C2  0  0 50 10 _
-        \\ commit get_events
+        \\ get_change_events _ T6 5
+        \\ get_change_events_result   _  T1 10  _ D1  0 10  0  0 _ C2  0  0  0 10 _
+        \\ get_change_events_result PEN  T2 11  _ D1 11 10  0  0 _ C2  0  0 11 10 _
+        \\ get_change_events_result PEN  T3 12  _ D1 23 10  0  0 _ C2  0  0 23 10 _
+        \\ get_change_events_result PEN  T4 13  _ D1 36 10  0  0 _ C2  0  0 36 10 _
+        \\ get_change_events_result PEN  T5 14  _ D1 50 10  0  0 _ C2  0  0 50 10 _
+        \\ commit get_change_events
         \\
-        \\ get_events T6 _ -0
-        \\ get_events_result PEN  T6  0  _ D1 50 10  0  0 _ C3  0  0  0  0 CLSD
-        \\ get_events_result EXP   _ 12 T3 D1 38 10  0  0 _ C2  0  0 38 10 _
-        \\ get_events_result POS T14 13 T4 D1 25 23  0  0 _ C2  0  0 25 23 _
-        \\ get_events_result VOI T15 14 T5 D1 11 23  0  0 _ C2  0  0 11 23 _
-        \\ commit get_events
+        \\ get_change_events T6 _ -0
+        \\ get_change_events_result PEN  T6  0  _ D1 50 10  0  0 _ C3  0  0  0  0 CLSD
+        \\ get_change_events_result EXP   _ 12 T3 D1 38 10  0  0 _ C2  0  0 38 10 _
+        \\ get_change_events_result POS T14 13 T4 D1 25 23  0  0 _ C2  0  0 25 23 _
+        \\ get_change_events_result VOI T15 14 T5 D1 11 23  0  0 _ C2  0  0 11 23 _
+        \\ commit get_change_events
     );
 }
 

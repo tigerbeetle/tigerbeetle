@@ -1200,7 +1200,7 @@ internal enum TBOperation : byte
 {
     Pulse = 128,
 
-    GetEvents = 137,
+    GetChangeEvents = 137,
 
     CreateAccounts = 138,
 

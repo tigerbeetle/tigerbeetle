@@ -123,7 +123,7 @@ fn build_batch(
         .lookup_accounts, .lookup_transfers => build_lookup(prng, buffer),
         .get_account_transfers, .get_account_balances => build_account_filter(prng, buffer),
         .query_accounts, .query_transfers => build_query_filter(prng, buffer),
-        .get_events => build_get_events_filter(prng, buffer),
+        .get_change_events => build_get_change_events_filter(prng, buffer),
 
         // No payload, `create_*` require compaction to be hooked up.
         .deprecated_create_accounts, .deprecated_create_transfers => 0,
@@ -225,11 +225,11 @@ fn build_query_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
     return @sizeOf(tb.QueryFilter);
 }
 
-fn build_get_events_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
-    const filter: *tb.EventFilter = filter: {
+fn build_get_change_events_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
+    const filter: *tb.ChangeEventsFilter = filter: {
         const slice = stdx.bytes_as_slice(
             .inexact,
-            tb.EventFilter,
+            tb.ChangeEventsFilter,
             buffer,
         );
         if (slice.len == 0) return 0;
@@ -247,7 +247,7 @@ fn build_get_events_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
         .reserved = reserved,
     };
 
-    return @sizeOf(tb.EventFilter);
+    return @sizeOf(tb.ChangeEventsFilter);
 }
 
 test "int_edge_biased" {
