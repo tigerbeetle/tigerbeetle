@@ -568,6 +568,15 @@ pub const ChangeEventType = enum(u8) {
     two_phase_expired = 4,
 };
 
+//? dj: Do you think AccountEvent or TransferEvent would be a better name?
+//? Just Event on its own seems a little too generic. In particular we already use "event" to refer
+//? to generic state machine events.
+//? batiati: Agreed. The name `AccountEvent` is overloaded since it's already used for the groove
+//? object (which has a different layout). `TransferEvent` isn't precise either.
+//? We could rename the groove instead, but overall, I like the symmetry `get_events` -> `Event`.
+//? Should we rename `get_events` maybe?
+//? dj: Good point.. What about "mutation" or "transition" or "delta"?
+//? resolved.
 pub const ChangeEvent = extern struct {
     transfer_id: u128,
     transfer_amount: u128,

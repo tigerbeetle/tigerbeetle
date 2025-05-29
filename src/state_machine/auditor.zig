@@ -236,6 +236,9 @@ pub const AccountingAuditor = struct {
                         assert(transfer.timestamp > self.current.timestamp_max);
                         self.current.timestamp_max = transfer.timestamp;
                     }
+                    //? dj: Can we assert that this timestamp only increases? (And likewise for the
+                    //? expiry.)
+                    //? resolved.
 
                     if (transfer.flags.pending) {
                         self.current.count.getPtr(.two_phase_pending).* += 1;

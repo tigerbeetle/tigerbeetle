@@ -455,6 +455,8 @@ pub fn StateMachineType(
             deprecated_query_accounts = config.vsr_operations_reserved + 7,
             deprecated_query_transfers = config.vsr_operations_reserved + 8,
 
+            //? dj: It is sort of exported now.
+            //? resolved.
             get_change_events = config.vsr_operations_reserved + 9,
 
             create_accounts = config.vsr_operations_reserved + 10,
@@ -3359,6 +3361,10 @@ pub fn StateMachineType(
             scan_buffer: []const u8,
             output_buffer: []u8,
         ) usize {
+            //? dj: Can we assert batch's length or nothing else?
+            //? batiati: We could, but all other `execute_*` that doesn't need the input
+            //? just ignores it, as it was already validated by the input_valid.
+            //? resolved.
             _ = batch;
 
             const scan_results: []const AccountEvent = stdx.bytes_as_slice(
