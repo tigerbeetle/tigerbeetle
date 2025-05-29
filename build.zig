@@ -1492,8 +1492,8 @@ fn build_ruby_client(
     tb_client_header_zig.addImport("vsr", options.vsr_module);
 
     inline for (platforms) |platform| {
-        // if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
-        if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
+        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
+            // if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
             continue;
         }
 
