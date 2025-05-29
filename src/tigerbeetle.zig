@@ -560,6 +560,76 @@ pub const AccountFilterFlags = packed struct(u32) {
     }
 };
 
+pub const ChangeEventType = enum(u8) {
+    single_phase = 0,
+    two_phase_pending = 1,
+    two_phase_posted = 2,
+    two_phase_voided = 3,
+    two_phase_expired = 4,
+};
+
+pub const ChangeEvent = extern struct {
+    transfer_id: u128,
+    transfer_amount: u128,
+    transfer_pending_id: u128,
+    transfer_user_data_128: u128,
+    transfer_user_data_64: u64,
+    transfer_user_data_32: u32,
+    transfer_timeout: u32,
+    transfer_code: u16,
+    transfer_flags: TransferFlags,
+
+    ledger: u32,
+    type: ChangeEventType,
+    reserved: [39]u8 = [_]u8{0} ** 39,
+
+    debit_account_id: u128,
+    debit_account_debits_pending: u128,
+    debit_account_debits_posted: u128,
+    debit_account_credits_pending: u128,
+    debit_account_credits_posted: u128,
+    debit_account_user_data_128: u128,
+    debit_account_user_data_64: u64,
+    debit_account_user_data_32: u32,
+    debit_account_code: u16,
+    debit_account_flags: AccountFlags,
+
+    credit_account_id: u128,
+    credit_account_debits_pending: u128,
+    credit_account_debits_posted: u128,
+    credit_account_credits_pending: u128,
+    credit_account_credits_posted: u128,
+    credit_account_user_data_128: u128,
+    credit_account_user_data_64: u64,
+    credit_account_user_data_32: u32,
+    credit_account_code: u16,
+    credit_account_flags: AccountFlags,
+
+    timestamp: u64,
+    transfer_timestamp: u64,
+    debit_account_timestamp: u64,
+    credit_account_timestamp: u64,
+
+    comptime {
+        assert(stdx.no_padding(ChangeEvent));
+        // Each event has the size of one transfer + 2 accounts.
+        assert(@sizeOf(ChangeEvent) == @sizeOf(Transfer) + (2 * @sizeOf(Account)));
+        assert(@alignOf(ChangeEvent) == 16);
+    }
+};
+
+pub const ChangeEventsFilter = extern struct {
+    timestamp_min: u64,
+    timestamp_max: u64,
+    limit: u32,
+    reserved: [44]u8 = [_]u8{0} ** 44,
+
+    comptime {
+        assert(stdx.no_padding(ChangeEventsFilter));
+        assert(@sizeOf(ChangeEventsFilter) == 64);
+    }
+};
+
 comptime {
     const target = builtin.target;
 

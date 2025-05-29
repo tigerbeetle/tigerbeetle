@@ -911,7 +911,7 @@ export type AccountBalance = {
 
 export enum Operation {
   pulse = 128,
-  get_events = 137,
+  get_change_events = 137,
   create_accounts = 138,
   create_transfers = 139,
   lookup_accounts = 140,

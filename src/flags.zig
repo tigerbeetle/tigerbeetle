@@ -302,10 +302,10 @@ fn parse_flag(comptime T: type, flag: []const u8, arg: [:0]const u8) T {
     assert(flag[0] == '-' and flag[1] == '-');
 
     if (T == bool) {
-        if (!std.mem.eql(u8, arg, flag)) {
-            fatal("{s}: argument does not require a value in '{s}'", .{ flag, arg });
+        if (std.mem.eql(u8, arg, flag)) {
+            // Bool argument may not have a value.
+            return true;
         }
-        return true;
     }
 
     const value = parse_flag_split_value(flag, arg);
@@ -333,7 +333,6 @@ fn parse_flag_split_value(flag: []const u8, arg: [:0]const u8) [:0]const u8 {
 }
 
 fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
-    comptime assert(T != bool);
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
     assert(value.len > 0);
 
@@ -343,6 +342,7 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     };
 
     if (V == []const u8 or V == [:0]const u8) return value;
+    if (V == bool) return parse_value_bool(flag, value);
     if (@typeInfo(V) == .Int) return parse_value_int(V, flag, value);
     if (@typeInfo(V) == .Enum) return parse_value_enum(V, flag, value);
     if (@hasDecl(V, "parse_flag_value")) {
@@ -491,6 +491,20 @@ fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
                 .{ flag, value },
             ),
         }
+    };
+}
+
+fn parse_value_bool(flag: []const u8, value: [:0]const u8) bool {
+    return switch (parse_value_enum(
+        enum {
+            true,
+            false,
+        },
+        flag,
+        value,
+    )) {
+        .true => true,
+        .false => false,
     };
 }
 
@@ -871,7 +885,7 @@ test "flags" {
     try t.check(&.{ "prefix", "--optx" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --opt: argument does not require a value in '--optx'
+        \\error: --opt: expected value separator '=', but found 'x' in '--optx'
         \\
     ));
 
@@ -1030,9 +1044,31 @@ test "flags" {
     ));
 
     try t.check(&.{ "values", "--boolean=true" }, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 0
+        \\boolean: true
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
+        \\
+    ));
+
+    try t.check(&.{ "values", "--boolean=false" }, snap(@src(),
+        \\stdout:
+        \\int: 0
+        \\size: 0
+        \\boolean: false
+        \\path: not-set
+        \\optional: null
+        \\choice: marlowe
+        \\
+    ));
+
+    try t.check(&.{ "values", "--boolean=foo" }, snap(@src(),
         \\status: 1
         \\stderr:
-        \\error: --boolean: argument does not require a value in '--boolean=true'
+        \\error: --boolean: expected one of 'true' or 'false', but found 'foo'
         \\
     ));
 

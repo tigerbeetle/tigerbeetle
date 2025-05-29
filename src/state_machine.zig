@@ -41,6 +41,9 @@ const CreateTransferResult = tb.CreateTransferResult;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
+const ChangeEventsFilter = tb.ChangeEventsFilter;
+const ChangeEvent = tb.ChangeEvent;
+const ChangeEventType = tb.ChangeEventType;
 
 pub const tree_ids = struct {
     pub const Account = .{
@@ -434,11 +437,7 @@ pub fn StateMachineType(
             Storage,
         );
 
-        const EventsScanLookup = ScanLookupType(
-            AccountEventsGroove,
-            AccountEventsGroove.ScanBuilder.Scan,
-            Storage,
-        );
+        const AccountEventsScanLookup = AccountEventsScanLookupType(AccountEventsGroove, Storage);
 
         // Looking to make backwards incompatible changes here? Make sure to check release.zig for
         // `release_triple_client_min`.
@@ -456,7 +455,7 @@ pub fn StateMachineType(
             deprecated_query_accounts = config.vsr_operations_reserved + 7,
             deprecated_query_transfers = config.vsr_operations_reserved + 8,
 
-            get_events = config.vsr_operations_reserved + 9, // Operation not yet exported.
+            get_change_events = config.vsr_operations_reserved + 9,
 
             create_accounts = config.vsr_operations_reserved + 10,
             create_transfers = config.vsr_operations_reserved + 11,
@@ -486,7 +485,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountFilter,
                 .query_accounts => QueryFilter,
                 .query_transfers => QueryFilter,
-                .get_events => void,
+                .get_change_events => ChangeEventsFilter,
 
                 .deprecated_create_accounts => Account,
                 .deprecated_create_transfers => Transfer,
@@ -510,7 +509,7 @@ pub fn StateMachineType(
                 .get_account_balances => AccountBalance,
                 .query_accounts => Account,
                 .query_transfers => Transfer,
-                .get_events => AccountEvent,
+                .get_change_events => ChangeEvent,
 
                 .deprecated_create_accounts => CreateAccountsResult,
                 .deprecated_create_transfers => CreateTransfersResult,
@@ -553,7 +552,7 @@ pub fn StateMachineType(
                 .get_account_balances => false,
                 .query_accounts => false,
                 .query_transfers => false,
-                .get_events => false,
+                .get_change_events => false,
 
                 .deprecated_create_accounts => true,
                 .deprecated_create_transfers => true,
@@ -570,7 +569,7 @@ pub fn StateMachineType(
         /// Inline function so that `operation` can be known at comptime.
         pub inline fn operation_is_multi_batch(operation: Operation) bool {
             return switch (operation) {
-                .pulse, .get_events => false,
+                .pulse => false,
 
                 .create_accounts,
                 .create_transfers,
@@ -581,6 +580,8 @@ pub fn StateMachineType(
                 .query_accounts,
                 .query_transfers,
                 => true,
+
+                .get_change_events => false,
 
                 .deprecated_create_accounts,
                 .deprecated_create_transfers,
@@ -718,6 +719,7 @@ pub fn StateMachineType(
                 .deprecated_get_account_balances,
                 .deprecated_query_accounts,
                 .deprecated_query_transfers,
+                .get_change_events,
                 => |operation_comptime| count: {
                     // For queries, each event produces up to `limit` events.
                     comptime assert(!StateMachine.operation_is_batchable(operation_comptime));
@@ -738,10 +740,6 @@ pub fn StateMachineType(
                         constants.message_body_size_max,
                     ));
                 },
-                .get_events => operation_result_max(
-                    .get_events,
-                    constants.message_body_size_max,
-                ),
             };
         }
 
@@ -796,7 +794,7 @@ pub fn StateMachineType(
             accounts: AccountsScanLookup,
             account_balances: AccountBalancesScanLookup,
             expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
-            events: EventsScanLookup,
+            account_events: AccountEventsScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -846,6 +844,7 @@ pub fn StateMachineType(
             get_account_balances: TimingSummary = .{},
             query_accounts: TimingSummary = .{},
             query_transfers: TimingSummary = .{},
+            get_change_events: TimingSummary = .{},
 
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
@@ -905,28 +904,39 @@ pub fn StateMachineType(
                     .create_accounts,
                     .deprecated_create_accounts,
                     => .create_accounts,
+
                     .create_transfers,
                     .deprecated_create_transfers,
                     => .create_transfers,
+
                     .lookup_accounts,
                     .deprecated_lookup_accounts,
                     => .lookup_accounts,
+
                     .lookup_transfers,
                     .deprecated_lookup_transfers,
                     => .lookup_transfers,
+
                     .get_account_transfers,
                     .deprecated_get_account_transfers,
                     => .get_account_transfers,
+
                     .get_account_balances,
                     .deprecated_get_account_balances,
                     => .get_account_balances,
+
                     .query_accounts,
                     .deprecated_query_accounts,
                     => .query_accounts,
+
                     .query_transfers,
                     .deprecated_query_transfers,
                     => .query_transfers,
-                    else => comptime unreachable,
+
+                    .get_change_events,
+                    => .get_change_events,
+
+                    .pulse => comptime unreachable,
                 };
             }
         };
@@ -1003,7 +1013,7 @@ pub fn StateMachineType(
                     .get_account_balances,
                     .query_accounts,
                     .query_transfers,
-                    .get_events,
+                    .get_change_events,
 
                     .deprecated_get_account_transfers,
                     .deprecated_get_account_balances,
@@ -1028,7 +1038,7 @@ pub fn StateMachineType(
                         .query_transfers,
                         .deprecated_query_transfers,
                         => @sizeOf(Transfer),
-                        .get_events => @sizeOf(AccountEvent),
+                        .get_change_events => @sizeOf(AccountEvent),
                         else => comptime unreachable,
                     };
                     buffer_size_max = @max(
@@ -1164,9 +1174,7 @@ pub fn StateMachineType(
             assert(batch.len <= self.batch_size_limit);
             maybe(batch.len == 0);
             switch (operation) {
-                .pulse,
-                .get_events,
-                => return batch.len == 0,
+                .pulse => return batch.len == 0,
                 inline else => |operation_comptime| {
                     const event_size = event_size_bytes(operation_comptime);
                     assert(event_size > 0);
@@ -1247,7 +1255,7 @@ pub fn StateMachineType(
                 .get_account_balances => 0,
                 .query_accounts => 0,
                 .query_transfers => 0,
-                .get_events => 0,
+                .get_change_events => 0,
 
                 .deprecated_create_accounts => @divExact(batch.len, @sizeOf(Account)),
                 .deprecated_create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
@@ -1278,7 +1286,6 @@ pub fn StateMachineType(
             // NB: This function should never accept `client_release` as an argument.
             // Any public API changes must be introduced explicitly as a new `operation` number.
             assert(op > 0);
-            assert(op != 0);
             assert(self.prefetch_operation == null);
             assert(self.prefetch_input == null);
             assert(self.prefetch_callback == null);
@@ -1328,7 +1335,7 @@ pub fn StateMachineType(
                 .get_account_balances => self.prefetch_get_account_balances(),
                 .query_accounts => self.prefetch_query_accounts(),
                 .query_transfers => self.prefetch_query_transfers(),
-                .get_events => self.prefetch_get_events(),
+                .get_change_events => self.prefetch_get_change_events(),
 
                 .deprecated_create_accounts => self.prefetch_create_accounts(),
                 .deprecated_create_transfers => self.prefetch_create_transfers(),
@@ -1394,7 +1401,7 @@ pub fn StateMachineType(
             {
                 // Looking for transfers with the same timestamp.
                 for (accounts) |*a| {
-                    self.forest.grooves.transfers.prefetch_exists_enqueue(a.timestamp);
+                    self.forest.grooves.transfers.prefetch_enqueue_by_timestamp(a.timestamp);
                 }
 
                 self.forest.grooves.transfers.prefetch(
@@ -1479,7 +1486,7 @@ pub fn StateMachineType(
                 // This logic could be in the loop above, but we choose to iterate again,
                 // avoiding an extra comparison in the more common case of non-imported batches.
                 for (transfers) |*t| {
-                    self.forest.grooves.accounts.prefetch_exists_enqueue(t.timestamp);
+                    self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(t.timestamp);
                 }
             }
 
@@ -2274,61 +2281,116 @@ pub fn StateMachineType(
                         return self.prefetch_query_transfers_scan(filter_next);
                     }
                 },
+                .get_change_events => {},
+
                 .deprecated_get_account_transfers,
                 .deprecated_get_account_balances,
                 .deprecated_query_accounts,
                 .deprecated_query_transfers,
                 => {},
-                else => unreachable,
+
+                else => unreachable, // Not query operations.
             }
 
             self.prefetch_finish();
         }
 
-        fn prefetch_get_events(self: *StateMachine) void {
+        fn prefetch_get_change_events(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
+            assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
 
-            const groove: *AccountEventsGroove = &self.forest.grooves.account_events;
-            const scan = groove.scan_builder.scan_timestamp(
-                self.forest.scan_buffer_pool.acquire_assume_capacity(),
-                snapshot_latest,
-                TimestampRange.all(),
-                .ascending,
-            );
-            assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+            const filter: *const ChangeEventsFilter = self.get_prefetch_event_filter();
+            self.prefetch_get_change_events_scan(filter);
+        }
 
-            const scan_buffer = stdx.bytes_as_slice(
-                .inexact,
-                AccountEvent,
-                self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
-            );
-            const scan_lookup = self.scan_lookup.get(.events);
-            scan_lookup.* = EventsScanLookup.init(
-                groove,
-                scan,
-            );
+        fn prefetch_get_change_events_scan(
+            self: *StateMachine,
+            filter: *const ChangeEventsFilter,
+        ) void {
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation.? == .get_change_events);
+            assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
+            maybe(self.scan_lookup_results.items.len > 0);
 
-            const limit = operation_result_max(
-                .get_events,
-                self.batch_size_limit,
-            );
-            assert(scan_buffer.len >= limit);
-            scan_lookup.read(
-                scan_buffer[0..limit],
-                &prefetch_get_events_scan_callback,
+            log.debug("{?}: prefetch_get_change_events_scan: {}", .{
+                self.forest.grid.superblock.replica_index,
+                filter,
+            });
+
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+            if (self.get_scan_from_event_filter(filter)) |scan_lookup| {
+                assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
+
+                const scan_buffer = stdx.bytes_as_slice(
+                    .inexact,
+                    AccountEvent,
+                    self.scan_lookup_buffer[self.scan_lookup_buffer_index..],
+                );
+
+                // TODO: For queries, the number of available prefetches may need to be considered:
+                // - In cases like `query_accounts` and `query_transfers`, no prefetching is
+                //   required, so the limit is simply `message_body_size_max / result_size`.
+                // - In `get_account_balances`, one object is prefetched per each event (the query
+                //   filter).
+                // - In `get_change_events` and `expire_pending_transfers`, objects are prefetched
+                //   per scanned result.
+                // We could either:
+                // - Calculate the number of prefetches based on the event/reply size, as is done
+                //   for `create_*` and `lookup_*` operations;
+                // - Or, make the `operation_{event,result}_max(...)` functions aware of the number
+                //   of prefetches.
+                const limit_max: u32 = limit_max: {
+                    const result_max = operation_result_max(
+                        self.prefetch_operation.?,
+                        self.batch_size_limit,
+                    );
+                    // Also constrained by the maximum number of available prefetches.
+                    const prefetch_transfers = @max(
+                        operation_event_max(.lookup_transfers, self.batch_size_limit),
+                        operation_event_max(.deprecated_lookup_transfers, self.batch_size_limit),
+                    );
+                    const prefetch_accounts = @max(
+                        operation_event_max(.lookup_accounts, self.batch_size_limit),
+                        operation_event_max(.deprecated_lookup_accounts, self.batch_size_limit),
+                    );
+
+                    break :limit_max @min(
+                        result_max,
+                        prefetch_transfers,
+                        // Each event == 2 accounts.
+                        @divFloor(prefetch_accounts, 2),
+                    );
+                };
+
+                // Limiting the buffer size according to the query limit.
+                // TODO: Prevent clients from setting the limit larger than the buffer size.
+                const limit = @min(filter.limit, limit_max);
+                assert(scan_buffer.len >= limit);
+                scan_lookup.read(
+                    scan_buffer[0..limit],
+                    &prefetch_get_change_events_scan_callback,
+                );
+                return;
+            }
+
+            // TODO(batiati): Improve the way we do validations on the state machine.
+            log.info("invalid filter for prefetch_get_change_events_scan: {any}", .{filter});
+            self.forest.grid.on_next_tick(
+                &prefetch_scan_next_tick_callback,
+                &self.scan_lookup_next_tick,
             );
         }
 
-        fn prefetch_get_events_scan_callback(
-            scan_lookup: *EventsScanLookup,
+        fn prefetch_get_change_events_scan_callback(
+            scan_lookup: *AccountEventsScanLookup,
             results: []const AccountEvent,
         ) void {
-            const self: *StateMachine = ScanLookup.parent(.events, scan_lookup);
+            const self: *StateMachine = ScanLookup.parent(.account_events, scan_lookup);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation.? == .get_events);
+            assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             assert(self.scan_lookup_results.items.len == 0);
 
@@ -2339,7 +2401,106 @@ pub fn StateMachineType(
             self.forest.grooves.account_events.scan_builder.reset();
             self.scan_lookup = .null;
 
+            if (results.len == 0) return self.prefetch_finish();
+
+            for (results) |result| {
+                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
+                    result.dr_account_timestamp,
+                );
+                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
+                    result.cr_account_timestamp,
+                );
+                if (result.transfer_pending_status == .expired) {
+                    // For expiry events, the timestamp isn't associated with any transfer.
+                    // Instead, the original pending transfer is prefetched.
+                    self.forest.grooves.transfers.prefetch_enqueue(result.transfer_pending_id);
+                } else {
+                    self.forest.grooves.transfers.prefetch_enqueue_by_timestamp(result.timestamp);
+                }
+            }
+            self.forest.grooves.accounts.prefetch(
+                prefetch_get_change_events_callback_accounts,
+                self.prefetch_context.get(.accounts),
+            );
+        }
+
+        fn prefetch_get_change_events_callback_accounts(
+            completion: *AccountsGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation.? == .get_change_events);
+            self.prefetch_context = .null;
+
+            self.forest.grooves.transfers.prefetch(
+                prefetch_get_change_events_callback_transfers,
+                self.prefetch_context.get(.transfers),
+            );
+        }
+
+        fn prefetch_get_change_events_callback_transfers(
+            completion: *TransfersGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation.? == .get_change_events);
+
+            self.prefetch_context = .null;
             self.prefetch_finish();
+        }
+
+        /// Returns the `EventFilter` from the prefetch input buffer.
+        fn get_prefetch_event_filter(self: *StateMachine) *const ChangeEventsFilter {
+            assert(self.prefetch_input != null);
+            assert(self.scan_lookup_buffer_index <= self.scan_lookup_buffer.len);
+
+            // Operations not encoded as multi-batch must have only a single filter.
+            assert(self.scan_lookup_results.items.len == 0);
+            const filter: *const ChangeEventsFilter = @alignCast(std.mem.bytesAsValue(
+                ChangeEventsFilter,
+                self.prefetch_input.?,
+            ));
+            return filter;
+        }
+
+        fn get_scan_from_event_filter(
+            self: *StateMachine,
+            filter: *const ChangeEventsFilter,
+        ) ?*AccountEventsScanLookup {
+            assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
+
+            const filter_valid =
+                (filter.timestamp_min == 0 or TimestampRange.valid(filter.timestamp_min)) and
+                (filter.timestamp_max == 0 or TimestampRange.valid(filter.timestamp_max)) and
+                (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max) and
+                filter.limit != 0 and
+                stdx.zeroed(&filter.reserved);
+
+            if (!filter_valid) return null;
+
+            // CDC is always in ascending order.
+            const timestamp_range: TimestampRange = .{
+                .min = if (filter.timestamp_min == 0)
+                    TimestampRange.timestamp_min
+                else
+                    filter.timestamp_min,
+
+                .max = if (filter.timestamp_max == 0)
+                    TimestampRange.timestamp_max
+                else
+                    filter.timestamp_max,
+            };
+            assert(timestamp_range.min <= timestamp_range.max);
+
+            const scan_lookup: *AccountEventsScanLookup = self.scan_lookup.get(.account_events);
+            scan_lookup.init(
+                &self.forest.grooves.account_events.objects,
+                self.forest.scan_buffer_pool.acquire_assume_capacity(),
+                snapshot_latest,
+                timestamp_range,
+            );
+
+            return scan_lookup;
         }
 
         fn prefetch_expire_pending_transfers(self: *StateMachine) void {
@@ -2348,8 +2509,7 @@ pub fn StateMachineType(
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            assert(self.prefetch_timestamp >= TimestampRange.timestamp_min);
-            assert(self.prefetch_timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(self.prefetch_timestamp));
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
@@ -2513,8 +2673,8 @@ pub fn StateMachineType(
                     message_body_used,
                     output_buffer,
                 ),
-                .get_events => self.execute_query(
-                    .get_events,
+                .get_change_events => self.execute_query(
+                    .get_change_events,
                     message_body_used,
                     output_buffer,
                 ),
@@ -2542,7 +2702,7 @@ pub fn StateMachineType(
 
             @setEvalBranchQuota(10_000);
             switch (operation) {
-                .pulse, .get_events => {},
+                .pulse => {},
                 inline else => |operation_comptime| {
                     const event_size: u32 = event_size_bytes(operation_comptime);
                     const batch_count: u32 = batch_count: {
@@ -2693,6 +2853,12 @@ pub fn StateMachineType(
             assert(result_size % result_count == 0);
             assert(result_size <= self.scan_lookup_buffer.len);
             const bytes_written: usize = switch (operation) {
+                .get_change_events => self.execute_get_change_events(
+                    message_body_used,
+                    self.scan_lookup_buffer[0..result_size],
+                    output_buffer,
+                ),
+
                 .deprecated_get_account_transfers => self.execute_get_account_transfers(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
@@ -2709,11 +2875,6 @@ pub fn StateMachineType(
                     output_buffer,
                 ),
                 .deprecated_query_accounts => self.execute_query_accounts(
-                    message_body_used,
-                    self.scan_lookup_buffer[0..result_size],
-                    output_buffer,
-                ),
-                .get_events => self.execute_get_events(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
@@ -2944,9 +3105,7 @@ pub fn StateMachineType(
                     }
 
                     if (event.flags.imported) {
-                        if (event.timestamp < TimestampRange.timestamp_min or
-                            event.timestamp > TimestampRange.timestamp_max)
-                        {
+                        if (!TimestampRange.valid(event.timestamp)) {
                             break :blk .imported_event_timestamp_out_of_range;
                         }
                         if (event.timestamp >= timestamp) {
@@ -2957,8 +3116,7 @@ pub fn StateMachineType(
                         event.timestamp = timestamp - events.len + index + 1;
                     }
 
-                    assert(event.timestamp >= TimestampRange.timestamp_min);
-                    assert(event.timestamp <= TimestampRange.timestamp_max);
+                    assert(TimestampRange.valid(event.timestamp));
 
                     break :blk switch (operation) {
                         .deprecated_create_accounts,
@@ -3195,22 +3353,130 @@ pub fn StateMachineType(
             return scan_buffer.len;
         }
 
-        fn execute_get_events(
+        fn execute_get_change_events(
             self: *StateMachine,
             batch: []const u8,
             scan_buffer: []const u8,
             output_buffer: []u8,
         ) usize {
-            _ = self;
             _ = batch;
-            assert(scan_buffer.len <= output_buffer.len);
-            stdx.copy_disjoint(
-                .inexact,
-                u8,
-                output_buffer,
+
+            const scan_results: []const AccountEvent = stdx.bytes_as_slice(
+                .exact,
+                AccountEvent,
                 scan_buffer,
             );
-            return scan_buffer.len;
+            const output_slice = stdx.bytes_as_slice(.inexact, ChangeEvent, output_buffer);
+            var output_count: u32 = 0;
+
+            for (scan_results) |*result| {
+                assert(TimestampRange.valid(result.timestamp));
+                assert(result.dr_account_id != result.cr_account_id);
+
+                // Getting the transfer by `timestamp`,
+                // except for expiries where there is no transfer associated with the timestamp.
+                const transfer: Transfer = switch (result.transfer_pending_status) {
+                    .none,
+                    .pending,
+                    .posted,
+                    .voided,
+                    => switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
+                        .found_object => |t| t,
+                        .found_orphaned_id, .not_found => unreachable,
+                    },
+                    .expired => self.get_transfer(result.transfer_pending_id).?,
+                };
+                const dr_account = self.get_account(result.dr_account_id).?;
+                const cr_account = self.get_account(result.cr_account_id).?;
+                assert(transfer.debit_account_id == dr_account.id);
+                assert(transfer.credit_account_id == cr_account.id);
+                assert(transfer.ledger == result.ledger);
+                assert(dr_account.ledger == result.ledger);
+                assert(cr_account.ledger == result.ledger);
+
+                const event_type: ChangeEventType = event_type: {
+                    switch (result.transfer_pending_status) {
+                        .none => {
+                            assert(transfer.timestamp == result.timestamp);
+                            assert(!transfer.flags.pending);
+                            assert(!transfer.flags.post_pending_transfer);
+                            assert(!transfer.flags.void_pending_transfer);
+                            assert(transfer.pending_id == 0);
+                            break :event_type .single_phase;
+                        },
+                        .pending => {
+                            assert(transfer.timestamp == result.timestamp);
+                            assert(transfer.flags.pending);
+                            assert(transfer.pending_id == 0);
+                            break :event_type .two_phase_pending;
+                        },
+                        .posted => {
+                            assert(transfer.timestamp == result.timestamp);
+                            assert(transfer.flags.post_pending_transfer);
+                            assert(transfer.pending_id == result.transfer_pending_id);
+                            break :event_type .two_phase_posted;
+                        },
+                        .voided => {
+                            assert(transfer.timestamp == result.timestamp);
+                            assert(transfer.flags.void_pending_transfer);
+                            assert(transfer.pending_id == result.transfer_pending_id);
+                            break :event_type .two_phase_voided;
+                        },
+                        .expired => {
+                            assert(transfer.flags.pending);
+                            assert(transfer.id == result.transfer_pending_id);
+                            assert(transfer.timeout > 0);
+                            assert(transfer.timestamp < result.timestamp);
+                            break :event_type .two_phase_expired;
+                        },
+                    }
+                };
+
+                output_slice[output_count] = .{
+                    .transfer_id = transfer.id,
+                    .transfer_amount = result.amount,
+                    .transfer_pending_id = transfer.pending_id,
+                    .transfer_user_data_128 = transfer.user_data_128,
+                    .transfer_user_data_64 = transfer.user_data_64,
+                    .transfer_user_data_32 = transfer.user_data_32,
+                    .transfer_timeout = transfer.timeout,
+
+                    .ledger = result.ledger,
+                    .transfer_code = transfer.code,
+                    .transfer_flags = transfer.flags,
+                    .type = event_type,
+
+                    .debit_account_id = dr_account.id,
+                    .debit_account_debits_pending = result.dr_debits_pending,
+                    .debit_account_debits_posted = result.dr_debits_posted,
+                    .debit_account_credits_pending = result.dr_credits_pending,
+                    .debit_account_credits_posted = result.dr_credits_posted,
+                    .debit_account_user_data_128 = dr_account.user_data_128,
+                    .debit_account_user_data_64 = dr_account.user_data_64,
+                    .debit_account_user_data_32 = dr_account.user_data_32,
+                    .debit_account_code = dr_account.code,
+                    .debit_account_flags = dr_account.flags,
+
+                    .credit_account_id = cr_account.id,
+                    .credit_account_debits_pending = result.cr_debits_pending,
+                    .credit_account_debits_posted = result.cr_debits_posted,
+                    .credit_account_credits_pending = result.cr_credits_pending,
+                    .credit_account_credits_posted = result.cr_credits_posted,
+                    .credit_account_user_data_128 = cr_account.user_data_128,
+                    .credit_account_user_data_64 = cr_account.user_data_64,
+                    .credit_account_user_data_32 = cr_account.user_data_32,
+                    .credit_account_code = cr_account.code,
+                    .credit_account_flags = cr_account.flags,
+
+                    .timestamp = result.timestamp,
+                    .transfer_timestamp = transfer.timestamp,
+                    .debit_account_timestamp = dr_account.timestamp,
+                    .credit_account_timestamp = cr_account.timestamp,
+                };
+                output_count += 1;
+            }
+
+            return output_count * @sizeOf(ChangeEvent);
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
@@ -4035,8 +4301,7 @@ pub fn StateMachineType(
                 assert(p.timeout > 0);
 
                 const event_timestamp = timestamp - transfers_pending.len + index + 1;
-                assert(event_timestamp >= TimestampRange.timestamp_min);
-                assert(event_timestamp <= TimestampRange.timestamp_max);
+                assert(TimestampRange.valid(event_timestamp));
                 assert(self.commit_timestamp < event_timestamp);
                 defer self.commit_timestamp = event_timestamp;
 
@@ -4435,8 +4700,7 @@ fn ExpirePendingTransfersType(
             },
         ) *ScanRange {
             assert(self.phase == .idle);
-            assert(filter.expires_at_max >= TimestampRange.timestamp_min and
-                filter.expires_at_max <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(filter.expires_at_max));
             maybe(filter.expires_at_max != TimestampRange.timestamp_min and
                 filter.expires_at_max != TimestampRange.timestamp_max and
                 self.pulse_next_timestamp > filter.expires_at_max);
@@ -4523,6 +4787,100 @@ fn ExpirePendingTransfersType(
         inline fn timestamp_from_value(context: *Context, value: *const Value) u64 {
             _ = context;
             return value.timestamp;
+        }
+    };
+}
+
+/// Iterates directly over the `ScanTree` since this query doesn't use secondary indexes.
+/// No additional lookups are necessary, as the `ScanTree` iteration already yields the
+/// object values.
+fn AccountEventsScanLookupType(
+    comptime AccountEventsGroove: type,
+    comptime Storage: type,
+) type {
+    const ScanTreeType = @import("lsm/scan_tree.zig").ScanTreeType;
+
+    return struct {
+        const AccountEventsLookup = @This();
+        const AccountEvent = AccountEventsGroove.ObjectTree.Table.Value;
+        const ScanTree = ScanTreeType(
+            void,
+            AccountEventsGroove.ObjectTree,
+            Storage,
+        );
+
+        pub const Callback = *const fn (*AccountEventsLookup, []const AccountEvent) void;
+
+        scan_tree: ScanTree,
+        state: union(enum) {
+            idle,
+            scan: struct {
+                buffer: []AccountEvent,
+                callback: Callback,
+                buffer_produced_len: usize,
+            },
+            finished,
+        },
+
+        fn init(
+            self: *AccountEventsLookup,
+            tree: *AccountEventsGroove.ObjectTree,
+            scan_buffer: *const ScanBuffer,
+            snapshot: u64,
+            timestamp_range: TimestampRange,
+        ) void {
+            self.* = .{
+                .scan_tree = ScanTree.init(
+                    tree,
+                    scan_buffer,
+                    snapshot,
+                    timestamp_range.min,
+                    timestamp_range.max,
+                    .ascending,
+                ),
+                .state = .idle,
+            };
+        }
+
+        fn read(
+            self: *AccountEventsLookup,
+            buffer: []AccountEvent,
+            callback: Callback,
+        ) void {
+            assert(self.state == .idle);
+            assert(self.scan_tree.state == .idle);
+            assert(buffer.len > 0);
+
+            self.state = .{
+                .scan = .{
+                    .buffer = buffer,
+                    .callback = callback,
+                    .buffer_produced_len = 0,
+                },
+            };
+            self.scan_tree.read({}, &scan_read_callback);
+        }
+
+        fn scan_read_callback(_: void, scan_tree: *ScanTree) void {
+            const self: *AccountEventsLookup = @fieldParentPtr("scan_tree", scan_tree);
+            assert(self.state == .scan);
+
+            while (scan_tree.next() catch |err| switch (err) {
+                error.ReadAgain => {
+                    self.scan_tree.read({}, &scan_read_callback);
+                    return;
+                },
+            }) |object| {
+                assert(self.state.scan.buffer_produced_len < self.state.scan.buffer.len);
+                self.state.scan.buffer[self.state.scan.buffer_produced_len] = object;
+                self.state.scan.buffer_produced_len += 1;
+                if (self.state.scan.buffer_produced_len == self.state.scan.buffer.len) break;
+            }
+
+            const callback = self.state.scan.callback;
+            const results = self.state.scan.buffer[0..self.state.scan.buffer_produced_len];
+            self.state = .finished;
+            callback(self, results);
         }
     };
 }
@@ -4828,8 +5186,8 @@ const TestAction = union(enum) {
     query_transfers: TestQueryTransfers,
     query_transfers_result: u128,
 
-    get_events,
-    get_events_result: TestEventResult,
+    get_change_events: TestGetChangeEventsFilter,
+    get_change_events_result: TestGetChangeEventsResult,
 };
 
 const TestCreateAccount = struct {
@@ -4964,90 +5322,109 @@ const TestQueryFilter = struct {
     flags_reversed: ?enum { REV } = null,
 };
 
-const TestEventResult = struct {
+const TestGetChangeEventsFilter = struct {
+    timestamp_min_transfer_id: ?u128 = null,
+    timestamp_max_transfer_id: ?u128 = null,
+    limit: u32,
+};
+
+const TestGetChangeEventsResult = struct {
+    const Balance = struct {
+        account_id: u128,
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+        closed: ?enum { CLSD } = null,
+    };
+
     event_type: ?enum { PEN, POS, VOI, EXP } = null,
     timestamp_transfer: ?u128 = null,
-    amount_requested: u128,
     amount: u128,
     transfer_pending_id: ?u128 = null,
-    account_1: TestEventAccountBalanceResult,
-    account_2: TestEventAccountBalanceResult,
+    dr_account: Balance,
+    cr_account: Balance,
 
     fn match(
-        self: *const TestEventResult,
+        self: *const TestGetChangeEventsResult,
         accounts: *std.AutoHashMap(u128, Account),
         transfers: *std.AutoHashMap(u128, Transfer),
-        event: *const TestContext.AccountEvent,
+        event: *const ChangeEvent,
     ) bool {
         if (self.timestamp_transfer) |id| {
             const transfer = transfers.get(id).?;
-            if (transfer.timestamp != event.timestamp) return false;
-            if (@as(u16, @bitCast(transfer.flags)) !=
-                @as(u16, @bitCast(event.transfer_flags))) return false;
+            if (event.type == .two_phase_expired) return false;
+            if (event.timestamp != transfer.timestamp) return false;
+            if (!match_transfer(event, &transfer)) return false;
         }
-        if (self.event_type) |event_type| switch (event_type) {
-            .PEN => if (event.transfer_pending_status != .pending) return false,
-            .POS => if (event.transfer_pending_status != .posted) return false,
-            .VOI => if (event.transfer_pending_status != .voided) return false,
-            .EXP => if (event.transfer_pending_status != .expired) return false,
+        if (self.event_type) |event_type| {
+            const expected: ChangeEventType = switch (event_type) {
+                .PEN => .two_phase_pending,
+                .POS => .two_phase_posted,
+                .VOI => .two_phase_voided,
+                .EXP => .two_phase_expired,
+            };
+            if (event.type != expected) return false;
         } else {
-            if (event.transfer_pending_status != .none) return false;
+            if (event.type != .single_phase) return false;
         }
-        if (self.amount_requested != event.amount_requested) return false;
-        if (self.amount != event.amount) return false;
-        if (self.transfer_pending_id orelse 0 != event.transfer_pending_id) return false;
+        if (event.transfer_amount != self.amount) return false;
         if (self.transfer_pending_id) |transfer_pending_id| {
-            const transfer_pending = transfers.get(transfer_pending_id).?;
-            if (@as(u16, @bitCast(transfer_pending.flags)) !=
-                @as(u16, @bitCast(event.transfer_pending_flags))) return false;
-            if (event.transfer_pending_status == .expired) {
-                assert(transfer_pending.timeout_ns() <= event.timestamp);
+            switch (event.type) {
+                .two_phase_pending, .single_phase => return false,
+                .two_phase_posted, .two_phase_voided => {
+                    if (event.transfer_pending_id != transfer_pending_id) return false;
+                },
+                .two_phase_expired => {
+                    const transfer = transfers.get(transfer_pending_id).?;
+                    if (transfer.timeout == 0) return false;
+                    if (event.timestamp <
+                        transfer.timestamp + transfer.timeout_ns()) return false;
+                    if (!match_transfer(event, &transfer)) return false;
+                },
             }
         }
 
-        for (&[_]TestEventAccountBalanceResult{ self.account_1, self.account_2 }) |account_event| {
-            switch (account_event) {
-                .DR => |balance| {
-                    const account = accounts.get(balance.account_id).?;
-                    if (account.ledger != event.ledger) return false;
-                    if (balance.account_id != event.dr_account_id) return false;
-                    if (account.timestamp != event.dr_account_timestamp) return false;
-                    if (balance.debits_pending != event.dr_debits_pending) return false;
-                    if (balance.debits_posted != event.dr_debits_posted) return false;
-                    if (balance.credits_pending != event.dr_credits_pending) return false;
-                    if (balance.credits_posted != event.dr_credits_posted) return false;
-                    if ((balance.closed == .CLSD) != event.dr_account_flags.closed) return false;
-                },
-                .CR => |balance| {
-                    const account = accounts.get(balance.account_id).?;
-                    if (account.ledger != event.ledger) return false;
-                    if (balance.account_id != event.cr_account_id) return false;
-                    if (account.timestamp != event.cr_account_timestamp) return false;
-                    if (balance.debits_pending != event.cr_debits_pending) return false;
-                    if (balance.debits_posted != event.cr_debits_posted) return false;
-                    if (balance.credits_pending != event.cr_credits_pending) return false;
-                    if (balance.credits_posted != event.cr_credits_posted) return false;
-                    if ((balance.closed == .CLSD) != event.cr_account_flags.closed) return false;
-                },
-            }
-        }
+        const dr_account = accounts.get(self.dr_account.account_id).?;
+        if (dr_account.ledger != event.ledger) return false;
+        if (self.dr_account.account_id != event.debit_account_id) return false;
+        if (dr_account.timestamp != event.debit_account_timestamp) return false;
+        if (self.dr_account.debits_pending != event.debit_account_debits_pending) return false;
+        if (self.dr_account.debits_posted != event.debit_account_debits_posted) return false;
+        if (self.dr_account.credits_pending != event.debit_account_credits_pending) return false;
+        if (self.dr_account.credits_posted != event.debit_account_credits_posted) return false;
+        if ((self.dr_account.closed == .CLSD) != event.debit_account_flags.closed) return false;
+
+        const cr_account = accounts.get(self.cr_account.account_id).?;
+        if (cr_account.ledger != event.ledger) return false;
+        if (self.cr_account.account_id != event.credit_account_id) return false;
+        if (cr_account.timestamp != event.credit_account_timestamp) return false;
+        if (self.cr_account.debits_pending != event.credit_account_debits_pending) return false;
+        if (self.cr_account.debits_posted != event.credit_account_debits_posted) return false;
+        if (self.cr_account.credits_pending != event.credit_account_credits_pending) return false;
+        if (self.cr_account.credits_posted != event.credit_account_credits_posted) return false;
+        if ((self.cr_account.closed == .CLSD) != event.credit_account_flags.closed) return false;
 
         return true;
     }
-};
 
-const TestEventAccountBalanceResult = union(enum) {
-    DR: TestEventBalanceResult,
-    CR: TestEventBalanceResult,
-};
-
-const TestEventBalanceResult = struct {
-    account_id: u128,
-    debits_pending: u128,
-    debits_posted: u128,
-    credits_pending: u128,
-    credits_posted: u128,
-    closed: ?enum { CLSD } = null,
+    fn match_transfer(event: *const ChangeEvent, transfer: *const tb.Transfer) bool {
+        if (event.transfer_timestamp != transfer.timestamp) return false;
+        if (event.transfer_id != transfer.id) return false;
+        if (event.transfer_amount != transfer.amount and
+            // The in-memory model keeps the `AMOUNT_MAX`.
+            transfer.amount != std.math.maxInt(u128)) return false;
+        if (event.transfer_pending_id != transfer.pending_id) return false;
+        if (event.transfer_user_data_128 != transfer.user_data_128) return false;
+        if (event.transfer_user_data_64 != transfer.user_data_64) return false;
+        if (event.transfer_user_data_32 != transfer.user_data_32) return false;
+        if (event.transfer_code != transfer.code) return false;
+        if (event.ledger != transfer.ledger) return false;
+        if (event.ledger != transfer.ledger) return false;
+        if (@as(u16, @bitCast(transfer.flags)) !=
+            @as(u16, @bitCast(event.transfer_flags))) return false;
+        return true;
+    }
 };
 
 // Operations that share the same input.
@@ -5364,12 +5741,27 @@ fn check(test_table: []const u8) !void {
                 assert(operation.? == .query_transfers);
                 try reply.appendSlice(std.mem.asBytes(&transfers.get(id).?));
             },
-            .get_events => {
-                assert(operation == null or operation.? == .get_events);
-                operation = .get_events;
+            .get_change_events => |f| {
+                assert(operation == null or operation.? == .get_change_events);
+                operation = .get_change_events;
+                const timestamp_min = if (f.timestamp_min_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
+                const timestamp_max = if (f.timestamp_max_transfer_id) |id|
+                    transfers.get(id).?.timestamp
+                else
+                    0;
+
+                const event = ChangeEventsFilter{
+                    .timestamp_min = timestamp_min,
+                    .timestamp_max = timestamp_max,
+                    .limit = f.limit,
+                };
+                try request.appendSlice(std.mem.asBytes(&event));
             },
-            .get_events_result => |*t| {
-                assert(operation.? == .get_events);
+            .get_change_events_result => |*t| {
+                assert(operation.? == .get_change_events);
                 try reply.appendSlice(std.mem.asBytes(t));
             },
             .commit => |commit_operation| {
@@ -5413,15 +5805,15 @@ fn check(test_table: []const u8) !void {
                             stdx.bytes_as_slice(.exact, Result, reply_actual),
                         );
                     },
-                    .get_events => {
+                    .get_change_events => {
                         const results_actual = stdx.bytes_as_slice(
                             .exact,
-                            TestContext.AccountEvent,
+                            ChangeEvent,
                             reply_actual,
                         );
                         const results_expected = stdx.bytes_as_slice(
                             .exact,
-                            TestEventResult,
+                            TestGetChangeEventsResult,
                             reply.items,
                         );
                         try testing.expectEqual(results_actual.len, results_expected.len);
@@ -7211,7 +7603,7 @@ test "query_transfers" {
     );
 }
 
-test "get_events" {
+test "get_change_events" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
@@ -7236,17 +7628,20 @@ test "get_events" {
         \\ commit create_transfers
 
         // Check the events.
-        \\ get_events
-        \\ get_events_result   _  T1 10 10  _ DR A1  0 10  0  0 _ CR A2  0  0  0 10 _
-        \\ get_events_result PEN  T2 11 11  _ DR A1 11 10  0  0 _ CR A2  0  0 11 10 _
-        \\ get_events_result PEN  T3 12 12  _ DR A1 23 10  0  0 _ CR A2  0  0 23 10 _
-        \\ get_events_result PEN  T4 13 13  _ DR A1 36 10  0  0 _ CR A2  0  0 36 10 _
-        \\ get_events_result PEN  T5 14 14  _ DR A1 50 10  0  0 _ CR A2  0  0 50 10 _
-        \\ get_events_result PEN  T6  0  0  _ DR A1 50 10  0  0 _ CR A3  0  0  0  0 CLSD
-        \\ get_events_result EXP   _  0 12 T3 DR A1 38 10  0  0 _ CR A2  0  0 38 10 _
-        \\ get_events_result POS T14 -0 13 T4 DR A1 25 23  0  0 _ CR A2  0  0 25 23 _
-        \\ get_events_result VOI T15  0 14 T5 DR A1 11 23  0  0 _ CR A2  0  0 11 23 _
-        \\ commit get_events
+        \\ get_change_events _ T6 5
+        \\ get_change_events_result   _  T1 10  _ D1  0 10  0  0 _ C2  0  0  0 10 _
+        \\ get_change_events_result PEN  T2 11  _ D1 11 10  0  0 _ C2  0  0 11 10 _
+        \\ get_change_events_result PEN  T3 12  _ D1 23 10  0  0 _ C2  0  0 23 10 _
+        \\ get_change_events_result PEN  T4 13  _ D1 36 10  0  0 _ C2  0  0 36 10 _
+        \\ get_change_events_result PEN  T5 14  _ D1 50 10  0  0 _ C2  0  0 50 10 _
+        \\ commit get_change_events
+        \\
+        \\ get_change_events T6 _ -0
+        \\ get_change_events_result PEN  T6  0  _ D1 50 10  0  0 _ C3  0  0  0  0 CLSD
+        \\ get_change_events_result EXP   _ 12 T3 D1 38 10  0  0 _ C2  0  0 38 10 _
+        \\ get_change_events_result POS T14 13 T4 D1 25 23  0  0 _ C2  0  0 25 23 _
+        \\ get_change_events_result VOI T15 14 T5 D1 11 23  0  0 _ C2  0  0 11 23 _
+        \\ commit get_change_events
     );
 }
 

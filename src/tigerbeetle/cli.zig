@@ -248,6 +248,22 @@ const CLIArgs = union(enum) {
         },
     };
 
+    // CDC connector for AMQP targets.
+    const AMQP = struct {
+        addresses: []const u8,
+        cluster: u128,
+        host: []const u8,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8 = null,
+        publish_routing_key: ?[]const u8 = null,
+        event_count_max: ?u32 = null,
+        idle_interval_ms: ?u32 = null,
+        timestamp_last: ?u64 = null,
+        verbose: bool = false,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -255,6 +271,7 @@ const CLIArgs = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: AMQP,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -282,6 +299,8 @@ const CLIArgs = union(enum) {
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
         \\  repl       Enter the TigerBeetle client REPL.
+        \\
+        \\  amqp       CDC connector for AMQP targets.
         \\
         \\Options:
         \\
@@ -337,17 +356,21 @@ const CLIArgs = union(enum) {
         \\  tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
         \\  tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
         \\
-        \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
-        \\  tigerbeetle start --addresses=3003,3001,3002 0_1.tigerbeetle
-        \\  tigerbeetle start --addresses=3003,3001,3002 0_2.tigerbeetle
+        \\  tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
+        \\  tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
+        \\  tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
         \\
         \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 0_0.tigerbeetle
         \\
-        \\  tigerbeetle start --addresses='[::1]:3003,[::1]:3001,[::1]:3002'  0_0.tigerbeetle
+        \\  tigerbeetle start --addresses='[::1]:3000,[::1]:3001,[::1]:3002' 0_0.tigerbeetle
         \\
         \\  tigerbeetle version --verbose
         \\
-        \\  tigerbeetle repl --addresses=3003,3002,3001 --cluster=0
+        \\  tigerbeetle repl --addresses=3000,3001,3002 --cluster=0
+        \\
+        \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster=0 \
+        \\      --host=127.0.0.1 --vhost=/ --user=guest --password=guest \
+        \\      --publish-exchange=my_exhange_name
         \\
     , .{
         .default_address = constants.address,
@@ -534,6 +557,21 @@ pub const Command = union(enum) {
         log_debug: bool,
     };
 
+    pub const AMQP = struct {
+        addresses: Addresses,
+        cluster: u128,
+        host: std.net.Address,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8,
+        publish_routing_key: ?[]const u8,
+        event_count_max: ?u32,
+        idle_interval_ms: ?u32,
+        timestamp_last: ?u64,
+        log_debug: bool,
+    };
+
     format: Format,
     start: Start,
     version: Version,
@@ -541,6 +579,7 @@ pub const Command = union(enum) {
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: AMQP,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -556,6 +595,7 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
         .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
+        .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
     };
 }
 
@@ -999,6 +1039,38 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
     };
 }
 
+fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
+    const addresses = parse_addresses(amqp.addresses, "--addresses", Command.Addresses);
+    const host = parse_address_and_port(
+        amqp.host,
+        "--host",
+        vsr.cdc.amqp.tcp_port_default,
+    );
+
+    if (amqp.publish_exchange == null and amqp.publish_routing_key == null) {
+        vsr.fatal(
+            .cli,
+            "--publish-exchange and --publish-routing-key cannot both be empty.",
+            .{},
+        );
+    }
+
+    return .{
+        .addresses = addresses,
+        .cluster = amqp.cluster,
+        .host = host,
+        .user = amqp.user,
+        .password = amqp.password,
+        .vhost = amqp.vhost,
+        .publish_exchange = amqp.publish_exchange,
+        .publish_routing_key = amqp.publish_routing_key,
+        .event_count_max = amqp.event_count_max,
+        .idle_interval_ms = amqp.idle_interval_ms,
+        .timestamp_last = amqp.timestamp_last,
+        .log_debug = amqp.verbose,
+    };
+}
+
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(
     raw_addresses: []const u8,
@@ -1031,6 +1103,27 @@ fn parse_addresses(
     assert(addresses_parsed.len <= result.capacity());
     result.resize(addresses_parsed.len) catch unreachable;
     return result;
+}
+
+fn parse_address_and_port(
+    raw_address: []const u8,
+    comptime flag: []const u8,
+    port_default: u16,
+) std.net.Address {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+
+    const address = vsr.parse_address_and_port(.{
+        .string = raw_address,
+        .port_default = port_default,
+    }) catch |err| switch (err) {
+        error.AddressHasMoreThanOneColon => {
+            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
+        },
+        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
+    };
+    return address;
 }
 
 /// Given a limit like `10GiB`, a SetAssociativeCache and T return the largest `value_count_max`

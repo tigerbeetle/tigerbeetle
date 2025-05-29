@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const math = std.math;
 const mem = std.mem;
 
@@ -177,16 +178,16 @@ pub fn GrooveType(
     @setEvalBranchQuota(64_000);
 
     const has_id = @hasField(Object, "id");
-    comptime if (has_id) assert(std.meta.fieldInfo(Object, .id).type == u128);
+    comptime if (has_id) assert(std.meta.FieldType(Object, .id) == u128);
     comptime if (groove_options.orphaned_ids) assert(has_id);
 
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
+    assert(std.meta.FieldType(Object, .timestamp) == u64);
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
     const primary_field = if (has_id) "id" else "timestamp";
-    const PrimaryKey = @TypeOf(@field(@as(Object, undefined), primary_field));
+    const PrimaryKey = if (has_id) u128 else u64;
 
     // Generate index LSM trees from the struct fields.
     for (std.meta.fields(Object)) |field| {
@@ -462,7 +463,7 @@ pub fn GrooveType(
 
     const TimestampSet = struct {
         const TimestampSet = @This();
-        const Found = enum { found, not_found };
+        const Found = union(enum) { found: u128, not_found };
         const Map = std.AutoHashMapUnmanaged(u64, Found);
 
         map: Map,
@@ -520,18 +521,36 @@ pub fn GrooveType(
         const Grid = GridType(Storage);
         const ManifestLog = ManifestLogType(Storage);
 
+        const LookupBy = enum {
+            /// Either `id` or `timestamp` for objects without the id field.
+            /// This is the same key used by the object cache map.
+            primary_key,
+
+            /// Lookup by `timestamp` in an object where the object cache map is indexed by `id`.
+            /// In this case, the `timestamp` is also indexed to support indirect lookups such as
+            /// `exists()` and `get_by_timestamp()`.
+            /// Invariant: `has_id` is true.
+            timestamp,
+        };
+
         const PrefetchKey = union(enum) {
-            id: PrimaryKey,
+            id: if (has_id) u128 else void,
             timestamp: u64,
         };
-        const PrefetchDestination = enum { objects_cache, timestamps };
+
         const PrefetchKeys = std.AutoHashMapUnmanaged(
             PrefetchKey,
             struct {
                 level: u8,
-                destination: PrefetchDestination,
+                lookup_by: LookupBy,
             },
         );
+
+        const LookupResult = union(enum) {
+            found_object: Object,
+            found_orphaned_id,
+            not_found,
+        };
 
         pub const ScanBuilder = if (has_scan) ScanBuilderType(Groove, Storage) else void;
 
@@ -745,11 +764,7 @@ pub fn GrooveType(
             };
         }
 
-        pub fn get(groove: *const Groove, key: PrimaryKey) union(enum) {
-            found_object: Object,
-            found_orphaned_id,
-            not_found,
-        } {
+        pub fn get(groove: *const Groove, key: PrimaryKey) LookupResult {
             if (groove.objects_cache.get(key)) |object| {
                 if (object.timestamp == 0) {
                     assert(has_id);
@@ -763,14 +778,28 @@ pub fn GrooveType(
             return .not_found;
         }
 
+        /// Looks up an object by `timestamp`.
+        /// Use `get()` for objects that don't have the `id` field.
+        /// The timestamp must have been passed to `prefetch_enqueue_by_timestamp`.
+        pub fn get_by_timestamp(groove: *const Groove, timestamp: u64) LookupResult {
+            // Only applicable to objects with an `id` field.
+            // Use `get` if the object is already keyed by timestamp.
+            comptime assert(has_id);
+            assert(TimestampRange.valid(timestamp));
+
+            return switch (groove.timestamps.get(timestamp)) {
+                .found => |id| groove.get(id),
+                .not_found => .not_found,
+            };
+        }
+
         /// Returns whether an object with this timestamp exists or not.
         /// The timestamp to be checked must have been passed to `prefetch_exists_enqueue`.
         pub fn exists(groove: *const Groove, timestamp: u64) bool {
             // Only applicable to objects with an `id` field.
             // Use `get` if the object is already keyed by timestamp.
             comptime assert(has_id);
-            assert(timestamp >= TimestampRange.timestamp_min);
-            assert(timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(timestamp));
 
             return groove.timestamps.get(timestamp) == .found;
         }
@@ -795,23 +824,19 @@ pub fn GrooveType(
         /// We tolerate duplicate IDs enqueued by the state machine.
         /// For example, if all unique operations require the same two dependencies.
         pub fn prefetch_enqueue(groove: *Groove, key: PrimaryKey) void {
-            // No need to check again if the key is already present.
-            if (groove.prefetch_keys.contains(.{ .id = key })) return;
+            if (groove.objects_cache.has(key)) return;
 
             if (has_id) {
+                // No need to check again if the key is already present.
+                if (groove.prefetch_keys.contains(.{ .id = key })) return;
                 if (!groove.ids.key_range_contains(groove.prefetch_snapshot.?, key)) return;
-
-                if (groove.objects_cache.has(key)) {
-                    return;
-                }
 
                 groove.prefetch_from_memory_by_id(key);
             } else {
-                if (groove.objects_cache.has(key)) {
-                    return;
-                }
+                if (groove.prefetch_keys.contains(.{ .timestamp = key })) return;
+                if (!groove.objects.key_range_contains(groove.prefetch_snapshot.?, key)) return;
 
-                groove.prefetch_from_memory_by_timestamp(key, .objects_cache);
+                groove.prefetch_from_memory_by_timestamp(key, .primary_key);
             }
         }
 
@@ -820,7 +845,7 @@ pub fn GrooveType(
         /// likely a no-op since timestamps are strictly increasing and the table should already
         /// be sorted, except for objects that are frequently updated (e.g., accounts).
         /// We tolerate duplicate timestamps enqueued by the state machine.
-        pub fn prefetch_exists_enqueue(
+        pub fn prefetch_enqueue_by_timestamp(
             groove: *Groove,
             timestamp: u64,
         ) void {
@@ -830,9 +855,7 @@ pub fn GrooveType(
 
             // Instead of asserting, we allow and ignore invalid timestamps (most likely zero),
             // so the prefetch step does not need to verify the data's validity.
-            const timestamp_valid = timestamp >= TimestampRange.timestamp_min and
-                timestamp <= TimestampRange.timestamp_max;
-            if (!timestamp_valid) return;
+            if (!TimestampRange.valid(timestamp)) return;
 
             // No need to check again if the key is already present or enqueued for prefetching.
             if (groove.timestamps.has(timestamp) or
@@ -843,17 +866,18 @@ pub fn GrooveType(
             groove.objects.table_mutable.sort();
             if (groove.objects.table_mutable.get(timestamp)) |object| {
                 assert(object.timestamp == timestamp);
-                groove.timestamps.set(timestamp, .found);
+                groove.timestamps.set(timestamp, .{ .found = object.id });
                 return;
             }
 
-            groove.prefetch_from_memory_by_timestamp(timestamp, .timestamps);
+            groove.prefetch_from_memory_by_timestamp(timestamp, .timestamp);
         }
 
         /// This function attempts to prefetch a value for the given id from the IdTree's
         /// table blocks in the grid cache.
         /// If found in the IdTree, we attempt to prefetch a value for the timestamp.
-        fn prefetch_from_memory_by_id(groove: *Groove, id: PrimaryKey) void {
+        fn prefetch_from_memory_by_id(groove: *Groove, id: u128) void {
+            comptime assert(has_id);
             switch (groove.ids.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 id,
@@ -873,18 +897,34 @@ pub fn GrooveType(
                             }),
                         );
                     } else {
+                        if (groove.prefetch_keys.get(.{
+                            .timestamp = id_tree_value.timestamp,
+                        })) |prefetch_entry| {
+                            // We don't want duplicate keys when prefetching the same object
+                            // multiple times, but the `contains(.id)` check performed during
+                            // `prefetch_enqueue()` may return false if:
+
+                            // 1. The `IdTree` is already in memory (but not the `ObjectTree`),
+                            // so we inserted the `.timestamp` rather than the `.id`.
+                            maybe(prefetch_entry.lookup_by == .primary_key);
+
+                            // 2. The same object was enqueued for prefetch by both `.id`
+                            // and `.timestamp`.
+                            maybe(prefetch_entry.lookup_by == .timestamp);
+                            return;
+                        }
                         groove.prefetch_from_memory_by_timestamp(
                             id_tree_value.timestamp,
-                            .objects_cache,
+                            .primary_key,
                         );
                     }
                 },
                 .possible => |level| {
-                    groove.prefetch_keys.putAssumeCapacity(
+                    groove.prefetch_keys.putAssumeCapacityNoClobber(
                         .{ .id = id },
                         .{
                             .level = level,
-                            .destination = .objects_cache,
+                            .lookup_by = .primary_key,
                         },
                     );
                 },
@@ -896,38 +936,38 @@ pub fn GrooveType(
         fn prefetch_from_memory_by_timestamp(
             groove: *Groove,
             timestamp: u64,
-            destination: PrefetchDestination,
+            lookup_by: LookupBy,
         ) void {
-            assert(timestamp >= TimestampRange.timestamp_min);
-            assert(timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(timestamp));
+            assert(lookup_by == .primary_key or has_id);
 
             switch (groove.objects.lookup_from_levels_cache(
                 groove.prefetch_snapshot.?,
                 timestamp,
             )) {
-                .negative => switch (destination) {
-                    .objects_cache => {},
-                    .timestamps => if (has_id)
+                .negative => switch (lookup_by) {
+                    .primary_key => {},
+                    .timestamp => if (has_id)
                         groove.timestamps.set(timestamp, .not_found)
                     else
                         unreachable,
                 },
                 .positive => |object| {
                     assert(!ObjectTreeHelper.tombstone(object));
-                    switch (destination) {
-                        .objects_cache => groove.objects_cache.upsert(object),
-                        .timestamps => if (has_id)
-                            groove.timestamps.set(object.timestamp, .found)
-                        else
-                            unreachable,
+                    switch (lookup_by) {
+                        .primary_key => groove.objects_cache.upsert(object),
+                        .timestamp => if (has_id) {
+                            groove.objects_cache.upsert(object);
+                            groove.timestamps.set(object.timestamp, .{ .found = object.id });
+                        } else unreachable,
                     }
                 },
                 .possible => |level| {
-                    groove.prefetch_keys.putAssumeCapacity(
+                    groove.prefetch_keys.putAssumeCapacityNoClobber(
                         .{ .timestamp = timestamp },
                         .{
                             .level = level,
-                            .destination = destination,
+                            .lookup_by = lookup_by,
                         },
                     );
                 },
@@ -1070,7 +1110,7 @@ pub fn GrooveType(
             lookup: LookupContext = undefined,
             current: ?struct {
                 key: PrefetchKey,
-                destination: PrefetchDestination,
+                lookup_by: LookupBy,
             } = null,
 
             fn lookup_start_next(worker: *PrefetchWorker) void {
@@ -1089,24 +1129,22 @@ pub fn GrooveType(
 
                 worker.current = .{
                     .key = prefetch_entry.key_ptr.*,
-                    .destination = prefetch_entry.value_ptr.destination,
+                    .lookup_by = prefetch_entry.value_ptr.lookup_by,
                 };
 
                 // prefetch_enqueue() ensures that the tree's cache is checked before queueing the
                 // object for prefetching. If not in the LSM tree's cache, the object must be read
                 // from disk and added to the auxiliary prefetch_objects hash map.
                 switch (prefetch_entry.key_ptr.*) {
-                    .id => |id| {
-                        if (has_id) {
-                            worker.context.groove.ids.lookup_from_levels_storage(.{
-                                .callback = lookup_id_callback,
-                                .context = worker.lookup.get(.id),
-                                .snapshot = worker.context.snapshot,
-                                .key = id,
-                                .level_min = prefetch_entry.value_ptr.level,
-                            });
-                        } else unreachable;
-                    },
+                    .id => |id| if (has_id) {
+                        worker.context.groove.ids.lookup_from_levels_storage(.{
+                            .callback = lookup_id_callback,
+                            .context = worker.lookup.get(.id),
+                            .snapshot = worker.context.snapshot,
+                            .key = id,
+                            .level_min = prefetch_entry.value_ptr.level,
+                        });
+                    } else unreachable,
                     .timestamp => |timestamp| {
                         worker.context.groove.objects.lookup_from_levels_storage(.{
                             .callback = lookup_object_callback,
@@ -1127,7 +1165,7 @@ pub fn GrooveType(
                 worker.lookup = undefined;
                 assert(worker.current != null);
                 assert(worker.current.?.key == .id);
-                assert(worker.current.?.destination == .objects_cache);
+                assert(worker.current.?.lookup_by == .primary_key);
 
                 if (result) |id_tree_value| {
                     if (groove_options.orphaned_ids and
@@ -1153,8 +1191,7 @@ pub fn GrooveType(
             }
 
             fn lookup_by_timestamp(worker: *PrefetchWorker, timestamp: u64) void {
-                assert(timestamp >= TimestampRange.timestamp_min);
-                assert(timestamp <= TimestampRange.timestamp_max);
+                assert(TimestampRange.valid(timestamp));
                 assert(worker.current != null);
 
                 switch (worker.context.groove.objects.lookup_from_levels_cache(
@@ -1193,29 +1230,32 @@ pub fn GrooveType(
                 if (result) |object| {
                     assert(!ObjectTreeHelper.tombstone(object));
                     switch (entry.key) {
-                        .id => |key| {
-                            assert((if (has_id) object.id else object.timestamp) == key);
-                            assert(entry.destination == .objects_cache);
-                        },
+                        .id => |key| if (has_id) {
+                            assert(object.id == key);
+                            assert(entry.lookup_by == .primary_key);
+                        } else unreachable,
                         .timestamp => |timestamp| {
                             assert(object.timestamp == timestamp);
-                            assert(entry.destination == .objects_cache or
-                                entry.destination == .timestamps);
+                            assert(entry.lookup_by == .primary_key or
+                                entry.lookup_by == .timestamp);
                         },
                     }
 
-                    switch (entry.destination) {
-                        .objects_cache => worker.context.groove.objects_cache.upsert(object),
-                        .timestamps => if (has_id) worker.context.groove.timestamps.set(
-                            object.timestamp,
-                            .found,
-                        ) else unreachable,
+                    switch (entry.lookup_by) {
+                        .primary_key => worker.context.groove.objects_cache.upsert(object),
+                        .timestamp => if (has_id) {
+                            worker.context.groove.objects_cache.upsert(object);
+                            worker.context.groove.timestamps.set(
+                                object.timestamp,
+                                .{ .found = object.id },
+                            );
+                        } else unreachable,
                     }
-                } else switch (entry.destination) {
+                } else switch (entry.lookup_by) {
                     // If the object wasn't found, it should've been prefetched by timestamp,
                     // or handled by `lookup_id_callback`.
-                    .objects_cache => assert(!has_id),
-                    .timestamps => if (has_id) worker.context.groove.timestamps.set(
+                    .primary_key => assert(!has_id),
+                    .timestamp => if (has_id) worker.context.groove.timestamps.set(
                         entry.key.timestamp,
                         .not_found,
                     ) else unreachable,
@@ -1228,8 +1268,7 @@ pub fn GrooveType(
         /// Insert the value into the objects tree and associated index trees. It's up to the
         /// caller to ensure it doesn't already exist.
         pub fn insert(groove: *Groove, object: *const Object) void {
-            assert(object.timestamp >= TimestampRange.timestamp_min);
-            assert(object.timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(object.timestamp));
 
             if (ObjectsCache != void) {
                 assert(!groove.objects_cache.has(@field(object, primary_field)));
@@ -1273,8 +1312,7 @@ pub fn GrooveType(
 
             if (has_id) assert(old.id == new.id);
             assert(old.timestamp == new.timestamp);
-            assert(new.timestamp >= TimestampRange.timestamp_min);
-            assert(new.timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(new.timestamp));
 
             // The ID can't change, so no need to update the ID tree. Update the object tree entry
             // if any of the fields (even ignored) are different. We assume the caller will pass in
@@ -1330,8 +1368,7 @@ pub fn GrooveType(
             assert(false);
 
             const object = groove.objects_cache.get(key).?;
-            assert(object.timestamp >= TimestampRange.timestamp_min);
-            assert(object.timestamp <= TimestampRange.timestamp_max);
+            assert(TimestampRange.valid(object.timestamp));
 
             // TODO: should update the timestamp and id range, see `key_range_update`.
             groove.objects.remove(object);

@@ -7,6 +7,7 @@ const log = std.log.scoped(.vsr);
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
 // Note that we don't promise any stability of these interfaces yet.
+pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
@@ -31,6 +32,7 @@ pub const lsm = .{
     .forest = @import("lsm/forest.zig"),
     .schema = @import("lsm/schema.zig"),
     .composite_key = @import("lsm/composite_key.zig"),
+    .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
     .snaptest = @import("testing/snaptest.zig"),
@@ -635,7 +637,7 @@ pub const UpgradeRequest = extern struct {
 
 /// To ease investigation of accidents, assign a separate exit status for each fatal condition.
 /// This is a process-global set.
-const FatalReason = enum(u8) {
+pub const FatalReason = enum(u8) {
     cli = 1,
     no_space_left = 2,
     manifest_node_pool_exhausted = 3,
@@ -644,7 +646,7 @@ const FatalReason = enum(u8) {
     forest_tables_count_would_exceed_limit = 6,
     unknown_vsr_command = 7,
 
-    fn exit_status(reason: FatalReason) u8 {
+    pub fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);
     }
 };
@@ -855,32 +857,45 @@ pub fn parse_addresses(
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        out_buffer[index] = try parse_address_and_port(raw_address);
+        out_buffer[index] = try parse_address_and_port(.{
+            .string = raw_address,
+            .port_default = constants.port,
+        });
     }
     assert(index == address_count);
 
     return out_buffer[0..address_count];
 }
 
-pub fn parse_address_and_port(string: []const u8) !std.net.Address {
-    assert(string.len > 0);
+pub fn parse_address_and_port(
+    options: struct {
+        string: []const u8,
+        port_default: u16,
+    },
+) !std.net.Address {
+    assert(options.string.len > 0);
+    assert(options.port_default > 0);
 
-    if (std.mem.lastIndexOfAny(u8, string, ":.]")) |split| {
-        if (string[split] == ':') {
+    if (std.mem.lastIndexOfAny(u8, options.string, ":.]")) |split| {
+        if (options.string[split] == ':') {
             return parse_address(
-                string[0..split],
-                std.fmt.parseUnsigned(u16, string[split + 1 ..], 10) catch |err| switch (err) {
+                options.string[0..split],
+                std.fmt.parseUnsigned(
+                    u16,
+                    options.string[split + 1 ..],
+                    10,
+                ) catch |err| switch (err) {
                     error.Overflow => return error.PortOverflow,
                     error.InvalidCharacter => return error.PortInvalid,
                 },
             );
         } else {
-            return parse_address(string, constants.port);
+            return parse_address(options.string, options.port_default);
         }
     } else {
         return std.net.Address.parseIp4(
             constants.address,
-            std.fmt.parseUnsigned(u16, string, 10) catch |err| switch (err) {
+            std.fmt.parseUnsigned(u16, options.string, 10) catch |err| switch (err) {
                 error.Overflow => return error.PortOverflow,
                 error.InvalidCharacter => return error.AddressInvalid,
             },
