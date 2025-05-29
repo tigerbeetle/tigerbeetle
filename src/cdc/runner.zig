@@ -667,10 +667,11 @@ pub const Runner = struct {
 
     fn produce_request_callback(
         context: u128,
-        operation: StateMachine.Operation,
+        operation_vsr: vsr.Operation,
         timestamp: u64,
         result: []u8,
     ) void {
+        const operation = operation_vsr.cast(Client.StateMachine);
         assert(operation == .get_change_events);
         assert(timestamp != 0);
         const runner: *Runner = @ptrFromInt(@as(usize, @intCast(context)));
