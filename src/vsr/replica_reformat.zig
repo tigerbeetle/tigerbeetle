@@ -1,10 +1,19 @@
+//! Replica recovery: Format a data file to replace one which was permanently lost.
+//!
+//! 1. The recovery process send `pipeline_prepare_queue_max` requests (1 register + many noops) to
+//!    the cluster.
+//! 2. Once those have committed, it creates the new data file. The data file is identical to
+//!    `tigerbeetle format`'s output *except* that `vsr_state.view == client.view + 2` (where
+//!    `client.view` is the view number of the client at the end of committing the requests).
+//! 3. The recovery process exits. Now running `tigerbeetle start` as normal will work.
 const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-
 const format = @import("./replica_format.zig").format;
+
+const log = std.log.scoped(.reformat);
 
 pub fn ReplicaReformatType(
     comptime StateMachine: type,
@@ -24,7 +33,6 @@ pub fn ReplicaReformatType(
         };
 
         const Result = union(enum) {
-            evicted: vsr.Header.Eviction.Reason,
             failed: anyerror,
             success,
         };
@@ -74,12 +82,19 @@ pub fn ReplicaReformatType(
             const reformat: *ReplicaReformat = @ptrFromInt(@as(usize, @intCast(user_data)));
             assert(reformat.requests_done == 0);
 
+            log.debug("{}: register", .{reformat.options.format.replica});
+
             reformat.requests_done += 1;
             reformat.client_request();
         }
 
         fn client_request(reformat: *ReplicaReformat) void {
             assert(reformat.requests_done < constants.pipeline_prepare_queue_max);
+
+            log.debug("{}: request start={}", .{
+                reformat.options.format.replica,
+                reformat.requests_done,
+            });
 
             const message = reformat.client.get_message().build(.request);
             errdefer reformat.client.release_message(message.base());
@@ -111,6 +126,11 @@ pub fn ReplicaReformatType(
             assert(reformat.requests_done > 0);
             assert(reformat.requests_done < constants.pipeline_prepare_queue_max);
             assert(results.len == 0);
+
+            log.debug("{}: request done={}", .{
+                reformat.options.format.replica,
+                reformat.requests_done,
+            });
 
             reformat.requests_done += 1;
             if (reformat.requests_done == constants.pipeline_prepare_queue_max) {

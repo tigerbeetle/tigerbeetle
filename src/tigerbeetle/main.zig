@@ -301,7 +301,6 @@ const Command = struct {
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
         switch (reformatter.status().?) {
-            .evicted => |reason| log.err("{}: evicted: {s}", .{ args.replica, @tagName(reason) }),
             .failed => |err| log.err("{}: error: {s}", .{ args.replica, @errorName(err) }),
             .success => log.info("{}: success", .{args.replica}),
         }

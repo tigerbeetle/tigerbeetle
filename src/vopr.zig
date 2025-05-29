@@ -832,6 +832,8 @@ pub const Simulator = struct {
             log.warn("no liveness, {} blocks are not available in core", .{blocks});
         } else if (simulator.core_missing_reply()) |header| {
             log.warn("no liveness, reply op={} is not available in core", .{header.op});
+        } else if (simulator.core_reformat_evicted()) {
+            log.warn("no liveness, one or more reformat clients was evicted", .{});
         } else {
             return true;
         }
@@ -1233,6 +1235,26 @@ pub const Simulator = struct {
         }
 
         return null;
+    }
+
+    /// The cluster was unable to upgrade because one or more of its reformat clients were evicted.
+    /// This is not strictly related to the core -- an upgrade requires all (non-standby) replicas.
+    pub fn core_reformat_evicted(simulator: *const Simulator) bool {
+        assert(simulator.core.count() > 0);
+
+        const eviction_reasons = simulator.cluster.client_eviction_reasons;
+        const eviction_reasons_reformats =
+            eviction_reasons[simulator.cluster.options.client_count..];
+        assert(eviction_reasons_reformats.len == simulator.cluster.options.reformats_max);
+
+        for (eviction_reasons_reformats) |reason_or_null| {
+            if (reason_or_null) |reason| {
+                log.err("reformat evicted with {s}", .{@tagName(reason)});
+                assert(reason == .no_session);
+                return true;
+            }
+        }
+        return false;
     }
 
     fn core_release_max(simulator: *const Simulator) vsr.Release {

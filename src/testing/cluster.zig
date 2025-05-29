@@ -601,22 +601,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             const reformat = &cluster.replica_reformats[replica_index].?;
             const result = reformat.status() orelse return;
+            assert(result == .success);
 
-            switch (result) {
-                .failed => unreachable,
-                .evicted => {},
-                .success => {
-                    assert(cluster.replica_health[replica_index] == .reformatting);
-
-                    const releases =
-                        cluster.replica_health[replica_index].reformatting.releases;
-
-                    reformat.deinit(cluster.allocator);
-                    cluster.replica_reformats[replica_index] = null;
-                    cluster.replica_health[replica_index] = .down;
-                    cluster.replica_restart(replica_index, &releases) catch unreachable;
-                },
-            }
+            const releases = cluster.replica_health[replica_index].reformatting.releases;
+            reformat.deinit(cluster.allocator);
+            cluster.replica_reformats[replica_index] = null;
+            cluster.replica_health[replica_index] = .down;
+            cluster.replica_restart(replica_index, &releases) catch unreachable;
         }
 
         pub fn replica_pause(cluster: *Cluster, replica_index: u8) void {
