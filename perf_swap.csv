@@ -1,0 +1,43 @@
+2025-05-29 05:52:09.062Z info(io): opening block device "samsung"...
+2025-05-29 05:52:09.162Z info(main): multiversioning: upgrades disabled for development (0.0.1) release.
+2025-05-29 05:52:09.162Z info(main): release=0.0.1
+2025-05-29 05:52:09.162Z info(main): release_client_min=0.0.1
+2025-05-29 05:52:09.162Z info(main): releases_bundled={ 0.0.1 }
+2025-05-29 05:52:09.162Z info(main): git_commit=196a6bc2576121574fc501177d664659a0e6de28
+2025-05-29 05:52:11.717Z info(replica): superblock release=0.0.1
+2025-05-29 05:52:12.013Z info(replica): 0: transition_to_normal_from_recovering_status: view=1 primary
+2025-05-29 05:52:12.013Z info(main): 0: Allocated 19128MiB during replica init
+2025-05-29 05:52:12.013Z info(main): 0: Grid cache: 16384MiB, LSM-tree manifests: 128MiB
+2025-05-29 05:52:12.013Z info(main): 0: cluster=0: listening on 127.0.0.1:33295
+2025-05-29 05:52:12.013Z warning(mlock): Unable to lock pages in memory (memory would exceed RLIMIT_MEMLOCK) - kernel swap would otherwise bypass TigerBeetle's storage fault tolerance. 
+2025-05-29 05:52:12.013Z warning(main): If this is a production replica, consider either running the replica with CAP_IPC_LOCK privilege, increasing the MEMLOCK process limit, or disabling swap system-wide.
+2025-05-29 05:52:12.013Z warning(main): a cluster id of 0 is reserved for testing and benchmarking, do not use in production
+2025-05-29 05:52:12.016Z info: Benchmark running against { 127.0.0.1:33295 }
+2025-05-29 05:52:12.016Z info(benchmark): Benchmark seed = 42
+2025-05-29 05:52:12.016Z info(benchmark): Account distribution: uniform
+2025-05-29 05:52:12.112Z info(message_bus): 102431421688609405937532663425040087832: on_connect: connected to=0
+2025-05-29 05:52:12.607Z info(message_bus): 0: set_and_verify_peer connection from client=102431421688609405937532663425040087832
+2025-05-29 05:52:12.616Z warning(client): 102431421688609405937532663425040087832: on_reply: slow request, request=0 size=512 register time=600ms
+swap all tables took 25  ms
+version,name,part,wall_time,cpu_cycles,k_cycles,instructions,cache_references,cache_misses,branch_misses,ipc,GHZ,CPUs,maxrss_mb,scale
+swapall,forest,swap,0.03,43.43,0.17,174.35,1.28,0.12,0.03,4.01,5.45,1.02,19132,3206324
+copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 258087 to table_immutable 16378
+ swap all tables took 35  ms
+version,name,part,wall_time,cpu_cycles,k_cycles,instructions,cache_references,cache_misses,branch_misses,ipc,GHZ,CPUs,maxrss_mb,scale
+swapall,forest,swap,0.04,52.14,0.24,183.56,4.58,0.53,0.00,3.52,5.45,1.01,19133,3664711
+copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 0 to table_immutable 16378
+ copy from table_mutable 258138 to table_immutable 16378
+ swap all tables took 34  ms
+version,name,part,wall_time,cpu_cycles,k_cycles,instructions,cache_references,cache_misses,branch_misses,ipc,GHZ,CPUs,maxrss_mb,scale
+swapall,forest,swap,0.04,52.41,0.26,183.09,4.65,0.58,0.00,3.49,5.49,1.00,19133,3664762
