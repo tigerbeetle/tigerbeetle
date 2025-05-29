@@ -600,14 +600,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(cluster.replica_health[replica_index] == .reformatting);
 
             const reformat = &cluster.replica_reformats[replica_index].?;
-            const result = reformat.status() orelse return;
-            assert(result == .success);
+            const result = reformat.done() orelse return;
+            assert(result == .ok);
 
             const releases = cluster.replica_health[replica_index].reformatting.releases;
             reformat.deinit(cluster.allocator);
             cluster.replica_reformats[replica_index] = null;
             cluster.replica_health[replica_index] = .down;
             cluster.replica_restart(replica_index, &releases) catch unreachable;
+            cluster.state_checker.reformat(replica_index);
         }
 
         pub fn replica_pause(cluster: *Cluster, replica_index: u8) void {
@@ -810,8 +811,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .reformatting = .{ .releases = releases_bundled.* },
             };
             cluster.log_replica(.reformat, replica_index);
-            cluster.state_checker.remove(replica_index);
-            cluster.reformat_count += 1;
 
             const storage = &cluster.storages[replica_index];
             const storage_options = storage.options;
@@ -823,6 +822,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             );
 
             const client_index = cluster.options.client_count + cluster.reformat_count;
+            cluster.reformat_count += 1;
             cluster.replica_reformats[replica_index] = try ReplicaReformat.init(
                 cluster.allocator,
                 &cluster.clients[client_index].?,

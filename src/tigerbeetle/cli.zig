@@ -43,7 +43,7 @@ const CLIArgs = union(enum) {
     const Recover = struct {
         cluster: u128,
         addresses: []const u8,
-        replica: ?u8 = null,
+        replica: u8,
         replica_count: u8,
         development: bool = false,
         log_debug: bool = false,
@@ -715,24 +715,17 @@ fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
         });
     }
 
-    if (recover.replica == null) {
-        vsr.fatal(.cli, "--replica: argument is required", .{});
+    if (recover.replica >= recover.replica_count) {
+        vsr.fatal(.cli, "--replica: value is too large ({}), at most {} is allowed", .{
+            recover.replica,
+            recover.replica_count - 1,
+        });
+    }
+    if (recover.replica_count <= 2) {
+        vsr.fatal(.cli, "--replica-count: 1- or 2- replica clusters don't support 'recover'", .{});
     }
 
-    if (recover.replica) |replica| {
-        if (replica >= recover.replica_count) {
-            vsr.fatal(.cli, "--replica: value is too large ({}), at most {} is allowed", .{
-                replica,
-                recover.replica_count - 1,
-            });
-        }
-
-        if (recover.replica_count == 1) {
-            vsr.fatal(.cli, "--replica-count: single replica doesn't support 'recover'", .{});
-        }
-    }
-
-    const replica = recover.replica.?;
+    const replica = recover.replica;
     assert(replica < constants.members_max);
     assert(replica < recover.replica_count);
 

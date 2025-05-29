@@ -177,6 +177,7 @@ const Command = struct {
     io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
+    data_file_path: [:0]const u8,
 
     fn init(
         command: *Command,
@@ -220,6 +221,8 @@ const Command = struct {
 
         command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
         errdefer allocator.free(command.self_exe_path);
+
+        command.data_file_path = path;
     }
 
     fn deinit(command: *Command, allocator: mem.Allocator) void {
@@ -242,10 +245,13 @@ const Command = struct {
         });
         defer command.deinit(allocator);
 
-        try vsr.format(Storage, allocator, options, .{
+        vsr.format(Storage, allocator, options, .{
             .storage = &command.storage,
             .storage_size_limit = data_file_size_min,
-        });
+        }) catch |err| {
+            std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
+            return err;
+        };
 
         log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,
@@ -266,7 +272,7 @@ const Command = struct {
         defer message_pool.deinit(allocator);
 
         var client = try Client.init(allocator, .{
-            .id = std.crypto.random.int(u128),
+            .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
             .time = .{},
@@ -296,13 +302,17 @@ const Command = struct {
         defer reformatter.deinit(allocator);
 
         reformatter.start();
-        while (reformatter.status() == null) {
+        while (reformatter.done() == null) {
             client.tick();
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
-        switch (reformatter.status().?) {
-            .failed => |err| log.err("{}: error: {s}", .{ args.replica, @errorName(err) }),
-            .success => log.info("{}: success", .{args.replica}),
+        switch (reformatter.done().?) {
+            .failed => |err| {
+                log.err("{}: error: {s}", .{ args.replica, @errorName(err) });
+                std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
+                return err;
+            },
+            .ok => log.info("{}: success", .{args.replica}),
         }
     }
 

@@ -143,8 +143,21 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
-        /// Forget about the given replica's progress, since its data file has been "lost".
-        pub fn remove(state_checker: *StateChecker, replica_index: u8) void {
+        /// Verify that the cluster has advanced since the replica was lost.
+        /// Then forget about the given replica's progress, since its data file has been "lost".
+        pub fn reformat(state_checker: *StateChecker, replica_index: u8) void {
+            const reformat_state = state_checker.replica_head_max[replica_index];
+            var commit_advanced: bool = false;
+            for (
+                state_checker.commit_mins[0..state_checker.replica_head_max.len],
+                0..,
+            ) |commit_min, i| {
+                if (i != replica_index) {
+                    commit_advanced = commit_advanced or reformat_state.op < commit_min;
+                }
+            }
+            assert(commit_advanced);
+
             state_checker.replica_head_max[replica_index] = .{ .view = 0, .op = 0 };
             state_checker.commit_mins[replica_index] = 0;
         }

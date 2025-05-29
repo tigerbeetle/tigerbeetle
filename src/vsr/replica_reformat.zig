@@ -10,6 +10,15 @@
 //! The `pipeline_prepare_queue_max` committed requests ensure that if the newly recovered replica
 //! nacks uncommitted ops via a DVC message, it is nacking ops which were definitely not received by
 //! the previous version of the replica.
+//!
+//! The +2 is because:
+//! - We don't want to join in the same view, since the replica might have participated in it before
+//!   being lost, and we can't remember any promises we made.
+//! - Likewise, we don't want to go to view + 1 -- if we were the first to collect a SVC quorum
+//!   before being lost, we might have sent a DVC. Since we don't remember, we must skip past
+//!   `view + 11 to ensure that we don't send a different DVC. (We have the invariant that if a
+//!   replica sends a DVC for a given view, then all DVC's it sends for that view will be
+//!   identical.)
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -38,7 +47,7 @@ pub fn ReplicaReformatType(
 
         const Result = union(enum) {
             failed: anyerror,
-            success,
+            ok,
         };
 
         allocator: std.mem.Allocator,
@@ -67,15 +76,15 @@ pub fn ReplicaReformatType(
             _ = reformat;
             _ = allocator;
         }
-
-        pub fn status(reformat: *const ReplicaReformat) ?Result {
+        pub fn done(reformat: *const ReplicaReformat) ?Result {
             assert(reformat.requests_done <= constants.pipeline_prepare_queue_max);
             return reformat.result;
         }
 
         pub fn start(reformat: *ReplicaReformat) void {
             assert(reformat.requests_done == 0);
-            reformat.client.register(client_register_callback, @intFromPtr(reformat));
+            const user_data = @intFromPtr(reformat);
+            reformat.client.register(client_register_callback, user_data);
         }
 
         fn client_register_callback(
@@ -110,7 +119,7 @@ pub fn ReplicaReformatType(
                 .command = .request,
                 .release = reformat.client.release,
                 .operation = .noop,
-                .size = @intCast(@sizeOf(vsr.Header)),
+                .size = @sizeOf(vsr.Header),
             };
 
             const user_data = @intFromPtr(reformat);
@@ -149,7 +158,7 @@ pub fn ReplicaReformatType(
                     reformat.result = .{ .failed = err };
                     return;
                 };
-                reformat.result = .success;
+                reformat.result = .ok;
             } else {
                 reformat.client_request();
             }

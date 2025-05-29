@@ -388,7 +388,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
-        .reformats_max = 8,
+        .reformats_max = replica_count + 2, // Arbitrary reformat limit.
 
         .state_machine = switch (state_machine) {
             .testing => .{
@@ -1505,6 +1505,7 @@ pub const Simulator = struct {
         if (fault) {
             const reformat_random =
                 !replica.standby() and
+                simulator.cluster.reformat_count < simulator.cluster.options.reformats_max and
                 simulator.prng.chance(simulator.options.replica_reformat_probability);
             if (reformat_random) {
                 log.debug("{}: reformat replica", .{replica.replica});
