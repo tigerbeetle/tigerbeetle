@@ -937,6 +937,16 @@ pub const Duration = struct {
     pub fn milliseconds(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_ms);
     }
+
+    pub fn min(lhs: Duration, rhs: Duration) Duration {
+        return .{ .ns = @min(lhs.ns, rhs.ns) };
+    }
+
+    pub const sort = struct {
+        pub fn asc(ctx: void, lhs: Duration, rhs: Duration) bool {
+            return std.sort.asc(u64)(ctx, lhs.ns, rhs.ns);
+        }
+    };
 };
 
 test "Instant/Duration" {

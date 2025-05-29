@@ -1015,7 +1015,7 @@ test "Cluster: view-change: nack older view" {
     b1.pass(.R_, .outgoing, .start_view);
     a0.drop_all(.R_, .bidirectional);
     b2.pass(.R_, .incoming, .prepare);
-    b2.filter(.R_, .incoming, struct {
+    b2.drop_fn(.R_, .incoming, struct {
         fn drop_message(message: *const Message) bool {
             const header = message.header.into(.prepare) orelse return false;
             return header.op < checkpoint_1_trigger + 3;
@@ -1031,7 +1031,7 @@ test "Cluster: view-change: nack older view" {
 
     a0.pass_all(.R_, .bidirectional);
     b2.pass_all(.R_, .bidirectional);
-    b2.filter(.R_, .incoming, null);
+    b2.drop_fn(.R_, .incoming, null);
     b1.drop_all(.R_, .bidirectional);
 
     try c.request(checkpoint_1_trigger + 3, checkpoint_1_trigger + 3);
@@ -1294,19 +1294,25 @@ test "Cluster: sync: checkpoint from a newer view" {
         t.replica(.R_).drop(.R_, .incoming, .prepare);
         t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
         t.replica(.R_).drop(.R_, .incoming, .start_view_change);
+
+        // Force b1 to sync, rather than repair, by making op=checkpoint_1 - 1 unavailable.
+        b1.stop();
+        b1.corrupt(.{ .wal_prepare = (checkpoint_1 - 1) % slot_count });
+        try b1.open();
         b1.pass(.A0, .incoming, .prepare);
-        b1.filter(.A0, .incoming, struct {
-            // Force b1 to sync, rather than repair.
+        b1.drop_fn(.A0, .incoming, struct {
             fn drop_message(message: *const Message) bool {
                 const header = message.header.into(.prepare) orelse return false;
-                return header.op == checkpoint_1;
+                return header.op == checkpoint_1 - 1;
             }
         }.drop_message);
+
         try c.request(checkpoint_1 + 1, checkpoint_1 - 1);
+
         try expectEqual(a0.op_head(), checkpoint_1 + 1);
         try expectEqual(b1.op_head(), checkpoint_1 + 1);
         try expectEqual(a0.commit(), checkpoint_1 - 1);
-        try expectEqual(b1.commit(), checkpoint_1 - 1);
+        try expectEqual(b1.commit(), checkpoint_1 - 2);
     }
 
     {
@@ -2420,7 +2426,7 @@ const TestReplicas = struct {
         for (paths.const_slice()) |path| t.cluster.network.link_filter(path).remove(command);
     }
 
-    pub fn filter(
+    pub fn drop_fn(
         t: *const TestReplicas,
         peer: ProcessSelector,
         direction: LinkDirection,
