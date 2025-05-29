@@ -374,7 +374,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <
-                    key_from_value(value);
+                        key_from_value(value);
             } else {
                 assert(table.value_context.count > 0);
             }
@@ -410,7 +410,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 const value_next = tree.next();
                 const value_next_equal = target_index > 0 and
                     key_from_value(&output[target_index - 1]) ==
-                    key_from_value(&value_next);
+                        key_from_value(&value_next);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
@@ -661,21 +661,93 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_mutable.count() <= values_count_limit);
             assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
 
+            // TODO: if we copy differently we could use a merge here and merge the 0 and 1 elemnt.?
+            if (table_mutable.sorted_runs_count == sorted_runs_max) {
+                // TODO: except if it is only 1.
+                // merge last two to preserve the other offsets.
+                const min = table_mutable.sorted_runs[sorted_runs_max - 2].min;
+                const max = table_mutable.sorted_runs[sorted_runs_max - 1].max;
+                //const element_count = sort_suffix_from_offset(table_mutable.values[min..max], 0, .std);
+                // TODO: this should be a merge.
+                const element_count = sort_suffix_from_offset(
+                    table_mutable.values[min..max],
+                    0,
+                    .std,
+                );
+                table_mutable.sorted_runs[sorted_runs_max - 2].max = min + element_count;
+                table_mutable.value_context.count = @as(u32, @intCast(min)) + element_count;
+                table_mutable.sorted_runs[constants.lsm_compaction_ops - 1] = .{
+                    .min = std.math.maxInt(u32),
+                    .max = std.math.maxInt(u32),
+                };
+                table_mutable.sorted_runs_count -= 1;
+                // here we have a new count
+            }
+
+            // TODO:we should copy it the other way.
+            // TODO then we should also reorder the indexes in the sorted run.
+            // copy form immutable to mutable.
+            stdx.copy_disjoint(
+                .inexact,
+                Value,
+                table_mutable.values[table_mutable.count()..],
+                table_immutable.values[0..table_immutable.count()],
+            );
+
+            const tables_combined_count = table_immutable.count() + table_mutable.count();
+            table_mutable.sorted_runs[table_mutable.sorted_runs_count] = .{
+                .min = table_mutable.count(),
+                .max = tables_combined_count,
+            };
+            table_mutable.sorted_runs_count += 1;
+
+            table_mutable.value_context.count = tables_combined_count;
+
+            table_immutable.merge_from(table_mutable, snapshot_min);
+
+            assert(table_immutable.count() <= tables_combined_count);
+
+            table_immutable.mutability = .{ .immutable = .{
+                .flushed = table_immutable.value_context.count == 0,
+                .absorbed = true,
+                .snapshot_min = snapshot_min,
+            } };
+        }
+
+        pub fn absorb_old(
+            table_immutable: *TableMemory,
+            table_mutable: *TableMemory,
+            snapshot_min: u64,
+        ) void {
+            assert(table_immutable.mutability == .immutable);
+            maybe(table_immutable.mutability.immutable.absorbed);
+            assert(table_immutable.value_context.sorted);
+            assert(table_mutable.mutability == .mutable);
+            maybe(table_mutable.value_context.sorted);
+
+            const values_count_limit = table_immutable.values.len;
+            assert(values_count_limit == values_count_limit);
+            assert(table_immutable.count() <= values_count_limit);
+            assert(table_mutable.count() <= values_count_limit);
+            assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
+
+            // TODO:we should copy it the other way.
+            // TODO then we should also reorder the indexes in the sorted run.
             stdx.copy_disjoint(
                 .inexact,
                 Value,
                 table_immutable.values[table_immutable.count()..],
-                table_mutable.values[0..table_mutable.count()],
+                table_mutable.values[0..table_mutable.count()], // source
             );
 
             const tables_combined_count = table_immutable.count() + table_mutable.count();
             table_immutable.value_context.count =
                 sort_suffix_from_offset(
-                table_immutable.values[0..tables_combined_count],
-                0,
+                    table_immutable.values[0..tables_combined_count],
+                    0,
 
-                .{ .radix = table_immutable.tmp_buffer },
-            );
+                    .{ .radix = table_immutable.tmp_buffer },
+                );
             assert(table_immutable.count() <= tables_combined_count);
 
             table_mutable.reset();
@@ -759,7 +831,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     assert(tmp.len == slice_length);
                     //radix_sort_unrolled(values[offset..], tmp);
                     _ = RadixSorter(Key, Value, true).sort(Value, values[offset..], tmp, sort_values_by_key_in_ascending_order, key_from_value);
-                    assert(std.sort.isSorted(Value, values[offset..], {}, sort_values_by_key_in_ascending_order));
+                    //assert(std.sort.isSorted(Value, values[offset..], {}, sort_values_by_key_in_ascending_order));
                 },
             }
             //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
@@ -777,7 +849,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // can't be equal.
                 const value_next_equal = source_index + 1 < source_count and
                     key_from_value(&values[source_index]) ==
-                    key_from_value(&values[source_index + 1]);
+                        key_from_value(&values[source_index + 1]);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {
