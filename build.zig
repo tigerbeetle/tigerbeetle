@@ -1487,8 +1487,8 @@ fn build_ruby_client(
     },
 ) void {
     inline for (platforms) |platform| {
-        // if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
-        if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
+        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
+            // if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
             continue;
         }
 
