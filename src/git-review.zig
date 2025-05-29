@@ -191,8 +191,6 @@ fn review_new(shell: *Shell) !void {
         \\
         \\Use this for review cover letter, if needed, or to leave review-wide comments.
         \\
-        //? (Added a trailing newline for the generated file.)
-        //? resolved.
     ;
     try shell.cwd.writeFile(.{ .sub_path = "REVIEW.md", .data = summary });
 

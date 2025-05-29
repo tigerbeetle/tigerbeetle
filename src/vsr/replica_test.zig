@@ -1294,20 +1294,11 @@ test "Cluster: sync: checkpoint from a newer view" {
         t.replica(.R_).drop(.R_, .incoming, .prepare);
         t.replica(.R_).drop(.R_, .incoming, .prepare_ok);
         t.replica(.R_).drop(.R_, .incoming, .start_view_change);
-        //? dj: Maybe move this line down to immediately before the filter, to make it clear that we
-        //? aren't allowing all incoming prepares.
-        //? resolved.
 
         // Force b1 to sync, rather than repair, by making op=checkpoint_1 - 1 unavailable.
         b1.stop();
         b1.corrupt(.{ .wal_prepare = (checkpoint_1 - 1) % slot_count });
         try b1.open();
-        //? dj: I just realized that "filter" is probably not the best name for this function
-        //? because conventionally a filter callback would return true when it wants to keep a
-        //? message, not drop a message.
-        //?
-        //? matklad: yeah, not sure what I was thinking there, fixed!
-        //? resolved.
         b1.pass(.A0, .incoming, .prepare);
         b1.drop_fn(.A0, .incoming, struct {
             fn drop_message(message: *const Message) bool {
