@@ -1,4 +1,5 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 const ruby = @cImport(@cInclude("ruby.h"));
 
@@ -308,4 +309,43 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             return 0;
         }
     };
+}
+
+pub fn to_ruby_module(module: ruby.VALUE, comptime ZigType: type, comptime ruby_name: []const u8) void {
+    const ruby_enum = ruby.rb_define_module_under(module, ruby_name.ptr);
+    switch (@typeInfo(ZigType)) {
+        .Enum => |enum_info| {
+            inline for (enum_info.fields) |field| {
+                if (comptime skip_field(field.name)) {
+                    continue;
+                }
+                const enum_value = @field(ZigType, field.name);
+                const ruby_value = @intFromEnum(enum_value);
+
+                const ruby_const_name = to_upper_case(field.name);
+
+                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
+            }
+        },
+        .Struct => |struct_info| {
+            const layout = struct_info.layout;
+            assert(layout == .@"packed");
+
+            inline for (struct_info.fields, 0..) |field, i| {
+                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
+                    continue;
+                }
+                const ruby_const_name = to_upper_case(field.name);
+                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
+            }
+        },
+        else => @compileError("Invalid conversion to enum: " ++ ZigType),
+    }
+}
+
+fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
+    var result: [input.len + 1:0]u8 = undefined;
+    _ = std.ascii.upperString(result[0..input.len], input);
+    result[input.len] = 0; // null terminator
+    return result;
 }
