@@ -13,6 +13,47 @@ fn skip_field(comptime field_name: []const u8) bool {
     return false;
 }
 
+pub fn rb_int_to_u128(value: ruby.VALUE) u128 {
+    if (!ruby.RB_INTEGER_TYPE_P(value)) {
+        ruby.rb_raise(ruby.rb_eTypeError, "expected Integer");
+        return 0;
+    }
+
+    if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
+        ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
+        return 0;
+    }
+
+    var result: u128 = 0;
+    const overflow = ruby.rb_integer_pack(value, // val: the Ruby VALUE
+        &result, // words: pointer to output buffer
+        1, // numwords: we want 1 chunk of 16 bytes
+        @sizeOf(u128), // wordsize: 16 bytes
+        0, // nails: 0 (no nail bits)
+        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
+    );
+
+    if (overflow == 2) {
+        ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
+        return 0;
+    }
+
+    return result;
+}
+
+pub fn u128_to_rb_int(value: u128) ruby.VALUE {
+    if (value == 0) {
+        return ruby.UINT2NUM(0);
+    }
+
+    return ruby.rb_integer_unpack(&value, // ruby value
+        1, // numwords: we want 1 chunk of 16 bytes
+        @sizeOf(u128), // wordsize: 16 bytes
+        0, // nails: 0 (no nail bits)
+        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
+    );
+}
+
 pub fn to_ruby_class(comptime ZigType: type) type {
     if (@typeInfo(ZigType) != .Struct) {
         @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
@@ -150,7 +191,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             return switch (T) {
                 u8, u16, u32 => ruby.UINT2NUM(value),
                 u64 => ruby.ULONG2NUM(value),
-                u128 => convert_u128_to_ruby(value),
+                u128 => u128_to_rb_int(value),
                 else => @compileError("Unsupported integer size: " ++ @typeName(T)),
             };
         }
@@ -196,7 +237,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
                 u16 => @intCast(ruby.NUM2UINT(value)),
                 u32 => ruby.NUM2UINT(value),
                 u64 => @intCast(ruby.NUM2ULONG(value)),
-                u128 => convert_ruby_int_to_u128(value),
+                u128 => rb_int_to_u128(value),
                 else => @compileError("Unsupported integer type: " ++ @typeName(T)),
             };
         }
@@ -229,47 +270,6 @@ pub fn to_ruby_class(comptime ZigType: type) type {
                     @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
                 },
             };
-        }
-
-        fn convert_ruby_int_to_u128(value: ruby.VALUE) u128 {
-            if (!ruby.RB_INTEGER_TYPE_P(value)) {
-                ruby.rb_raise(ruby.rb_eTypeError, "expected Integer");
-                return 0;
-            }
-
-            if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
-                ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
-                return 0;
-            }
-
-            var result: u128 = 0;
-            const overflow = ruby.rb_integer_pack(value, // val: the Ruby VALUE
-                &result, // words: pointer to output buffer
-                1, // numwords: we want 1 chunk of 16 bytes
-                @sizeOf(u128), // wordsize: 16 bytes
-                0, // nails: 0 (no nail bits)
-                ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-            );
-
-            if (overflow == 2) {
-                ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
-                return 0;
-            }
-
-            return result;
-        }
-
-        fn convert_u128_to_ruby(value: u128) ruby.VALUE {
-            if (value == 0) {
-                return ruby.UINT2NUM(0);
-            }
-
-            return ruby.rb_integer_unpack(&value, // ruby value
-                1, // numwords: we want 1 chunk of 16 bytes
-                @sizeOf(u128), // wordsize: 16 bytes
-                0, // nails: 0 (no nail bits)
-                ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-            );
         }
 
         fn initialize(argc: c_int, argv: [*]ruby.VALUE, self: ruby.VALUE) callconv(.C) ruby.VALUE {

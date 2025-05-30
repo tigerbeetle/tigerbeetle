@@ -1,6 +1,7 @@
 const std = @import("std");
 const vsr = @import("vsr");
-const exports = vsr.tb_client.exports;
+const tb_client = vsr.tb_client;
+const exports = tb_client.exports;
 const assert = std.debug.assert;
 
 const converter = @import("converter.zig");
