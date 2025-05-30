@@ -307,6 +307,7 @@ const Environment = struct {
                 .replica_id = env.members[replica],
                 .members = env.members,
                 .replica_count = replica_count,
+                .view = 0,
             }),
             .vsr_headers = vsr_headers,
         });
