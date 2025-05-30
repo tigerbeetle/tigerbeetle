@@ -80,7 +80,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             return @sizeOf(ZigType);
         }
 
-        const rb_data_type = ruby.rb_data_type_t{
+        pub const rb_data_type = ruby.rb_data_type_t{
             .wrap_struct_name = &type_name[0],
             .function = .{
                 .dmark = null,
