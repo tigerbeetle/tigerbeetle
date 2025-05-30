@@ -1032,6 +1032,7 @@ fn build_vopr(
         // When running without a SEED, default to release.
         .optimize = if (b.args == null) .ReleaseSafe else options.mode,
     });
+    vopr.stack_size = 4 * MiB;
     vopr.root_module.addOptions("vsr_options", options.vsr_options);
     vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
     // Ensure that we get stack traces even in release builds.
@@ -1062,6 +1063,7 @@ fn build_fuzz(
         .target = options.target,
         .optimize = options.mode,
     });
+    fuzz_exe.stack_size = 4 * MiB;
     fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
     fuzz_exe.root_module.omit_frame_pointer = false;
     steps.fuzz_build.dependOn(print_or_install(b, fuzz_exe, options.print_exe));
@@ -2059,3 +2061,5 @@ fn fetch(b: *std.Build, options: struct {
     }
     return result;
 }
+
+const MiB = 1024 * 1024;
