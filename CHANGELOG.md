@@ -3,6 +3,84 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.43
+
+Released: 2025-05-30
+
+This release includes the `tigerbeetle recover` subcommand, which can be used to _safely_ recover a
+replica that is permanantly lost.
+
+Additionally, it includes Change Data Capture (CDC) support to stream TigerBeetle state to Advanced
+Message Queuing Protocol (AMQP) targets, such as RabbitMQ and other compatible brokers.
+
+Check out the [documentation](https://docs.tigerbeetle.com/operating/) to learn about how to use
+CDC and `tigerbeetle recover`!
+
+
+### Safety And Performance
+
+- [#2996](https://github.com/tigerbeetle/tigerbeetle/pull/2996)
+
+  Add the `tigerbeetle recover` subcommand, to safely recover a replica that is permanantly lost
+  (e.g. if the SSD fails).
+
+  Earlier, the only way to recover a permanantly lost replica was using the `tigerbeetle format`
+  command. Howerver, this was unsafe, as a newly-formatted replica may nack prepares which its
+  previous incarnation acked -- a correctness bug.
+
+- [#2880](https://github.com/tigerbeetle/tigerbeetle/pull/2880)
+
+  Implement an adaptive replication routing protocol to handle changes in network topology.
+
+  To select the best route, primary uses outcome-focused explore-exploit approach. Every once in a
+  while, the primary tries an alternative route, and replaces the current route if the alternative
+  provides better replication latency.
+
+- [#2970](https://github.com/tigerbeetle/tigerbeetle/pull/2970),
+  [#3002](https://github.com/tigerbeetle/tigerbeetle/pull/3002)
+
+  Replica pulls messages from the MessageBus, as opposed to the MessageBus pushing messages.
+
+  Earlier, replicas had to process _every_ message that the bus pushed. This could lead to messages
+  being dropped due to lack of available disk read/write IOPs. Now, a replica can "suspend" certain
+  messages and return to them later when it has enough IOPs.
+
+### Features
+
+- [#2917](https://github.com/tigerbeetle/tigerbeetle/pull/2917)
+
+  CDC support to stream TigerBeetle state to AMQP targets, such as RabbitMQ and other compatible
+  brokers.
+
+  We implement the AMQP 0.9.1 specification instead of AMQP 1.0 as it is simpler and more widely
+  supported (e.g., RabbitMQ only recently added native AMQP 1.0 support).
+
+### Internals
+
+- [#2982](https://github.com/tigerbeetle/tigerbeetle/pull/2982)
+
+  Unify the production and testing AOF code paths to make sure the production AOF is rigorously
+  fuzzed by the VOPR.
+
+- [#2991](https://github.com/tigerbeetle/tigerbeetle/pull/2991)
+
+  Reduce code duplication while erasing IO callbacks' type.
+
+- [#2998](https://github.com/tigerbeetle/tigerbeetle/pull/2998)
+
+  Track debug build times on DevHub.
+
+- [#2987](https://github.com/tigerbeetle/tigerbeetle/pull/2987),
+  [#2988](https://github.com/tigerbeetle/tigerbeetle/pull/2988),
+  [#2997](https://github.com/tigerbeetle/tigerbeetle/pull/2997),
+  [#2999](https://github.com/tigerbeetle/tigerbeetle/pull/2999)
+
+  Miscellaneous improvements and fixes to CI and release.
+
+### TigerTracks 🎧
+
+- [16 CARRIAGES](https://open.spotify.com/track/6XXxKsu3RJeN3ZvbMYrgQW?si=aa3fcce771d542ac)
+
 ## TigerBeetle 0.16.42
 
 Released: 2025-05-23
