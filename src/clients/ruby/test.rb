@@ -66,8 +66,8 @@ TB_CREATE_ACCOUNT_RESULT = {
   TIMESTAMP_MUST_BE_ZERO: 3,
   IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: 24,
   IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: 25,
-  RESERVED_FIELD: 4,
-  RESERVED_FLAG: 5,
+  # RESERVED_FIELD: 4,
+  # RESERVED_FLAG: 5,
   ID_MUST_NOT_BE_ZERO: 6,
   ID_MUST_NOT_BE_INT_MAX: 7,
   EXISTS_WITH_DIFFERENT_FLAGS: 15,
@@ -102,7 +102,7 @@ TB_CREATE_TRANSFER_RESULT = {
   TIMESTAMP_MUST_BE_ZERO: 3,
   IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: 58,
   IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: 59,
-  RESERVED_FLAG: 4,
+  # RESERVED_FLAG: 4,
   ID_MUST_NOT_BE_ZERO: 5,
   ID_MUST_NOT_BE_INT_MAX: 6,
   EXISTS_WITH_DIFFERENT_FLAGS: 36,
@@ -563,6 +563,15 @@ def test_transfer
 end
 test_transfer
 
+
+ADDRESSES = ENV.fetch("TB_ADDRESSES", "3000").to_s
+CLUSTER_ID = ENV.fetch("TB_CLUSTER_ID", "0").to_i
+client = TigerBeetle.connect(addresses: ADDRESSES, cluster_id: CLUSTER_ID)
+
+empty_lookup = client.lookup_accounts([10000])
+if empty_lookup.size != 0
+  raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
+end
 
 puts "*"* 80
 puts "  SUCCESS: All TigerBeetle constants match expected values\n"

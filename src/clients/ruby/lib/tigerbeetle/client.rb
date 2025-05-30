@@ -7,24 +7,19 @@ module TigerBeetle
   class Client
     def initialize(addresses: "3000", cluster_id: 0)
       @addresses = addresses.to_s
-      @cluster_id = cluster_id.to_s
+      @cluster_id = cluster_id.to_i
       @client = Bindings::Client.new
-      @queue = Thread::Queue.new
     end
 
     def connect
-      @client.init(addresses: @addresses, cluster_id: @cluster_id)
+      @client.init(@addresses, @cluster_id)
     end
 
     # CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
     def create_accounts(*accounts)
       accounts = array_wrap(accounts)
 
-      client.submit(Bindings::Operation::CREATE_ACCOUNTS, accounts, @queue)
-
-      @queue.pop(false, timeout: 5).tap do |result|
-        yield(result) if block_given?
-      end
+      client.submit(Bindings::Operation::CREATE_ACCOUNTS, accounts)
     end
 
     # CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
@@ -32,19 +27,11 @@ module TigerBeetle
     end
 
     # LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
-    # @param account_ids [Array, Integer|String] The account IDs to look up.
+    # @param account_ids [Array, Integer] The account IDs to look up.
     def lookup_accounts(account_ids)
-      account_ids = array_wrap(account_ids).map(&:to_s)
+      account_ids = array_wrap(account_ids)
 
-      client.submit(Bindings::Operation::LOOKUP_ACCOUNTS, account_ids, @queue)
-
-      Timeout.timeout(5) do
-        @queue.pop.tap do |result|
-          puts "HERE HERE HERE"
-          puts result
-          yield(result) if block_given?
-        end
-      end
+      client.submit(Bindings::Operation::LOOKUP_ACCOUNTS, account_ids)
     end
 
     # LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
@@ -56,7 +43,8 @@ module TigerBeetle
     end
 
     # GetAccountBalances(filter types.AccountFilter) ([]types.AccountBalance, error)
-    def get_account_balances(filter) end
+    def get_account_balances(filter)
+    end
 
     # QueryAccounts(filter types.QueryFilter) ([]types.Account, error)
     def query_accounts(filter)
