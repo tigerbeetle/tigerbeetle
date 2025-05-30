@@ -24,7 +24,6 @@ pub fn format(
     var superblock = try SuperBlock.init(allocator, superblock_options);
     defer superblock.deinit(allocator);
 
-
     var replica_format = ReplicaFormat{};
 
     try replica_format.format_wal(allocator, options.cluster, storage);
