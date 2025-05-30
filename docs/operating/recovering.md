@@ -3,6 +3,8 @@
 If a replica's data file is permanently lost (for example, if the SSD fails) then a new data file
 must be reformatted to restore the cluster.
 
+//? matklad: explain _why_ format should not be used.
+//? resolved.
 The `tigerbeetle format` command must **not** be used for this purpose. The issue is that
 `tigerbeetle format` would create a replica that believes that any operation that it hasn't seen can
 be safely nack'd -- unaware of the promises it made which were lost with the old data file This

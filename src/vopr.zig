@@ -388,6 +388,8 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .seed = prng.int(u64),
         .releases = &releases,
         .client_release = releases[0].release,
+        //? matklad: maybe replicas_max + 2 would be clearer as to the intention?
+        //? resolved.
         .reformats_max = replica_count + 2, // Arbitrary reformat limit.
 
         .state_machine = switch (state_machine) {

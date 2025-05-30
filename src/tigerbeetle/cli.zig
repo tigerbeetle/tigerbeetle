@@ -43,6 +43,8 @@ const CLIArgs = union(enum) {
     const Recover = struct {
         cluster: u128,
         addresses: []const u8,
+        //? matklad: can be just u8?
+        //? resolved.
         replica: u8,
         replica_count: u8,
         development: bool = false,
@@ -721,6 +723,8 @@ fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
             recover.replica_count - 1,
         });
     }
+    //? matklad: maybe <= 2? You can't recover two-replica cluster.
+    //? resolved.
     if (recover.replica_count <= 2) {
         vsr.fatal(.cli, "--replica-count: 1- or 2- replica clusters don't support 'recover'", .{});
     }

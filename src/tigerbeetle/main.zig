@@ -307,6 +307,8 @@ const Command = struct {
             try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
         switch (reformatter.done().?) {
+            //? matklad: need to return an error here, or manually exit with non-zero status.
+            //? resolved.
             .failed => |err| {
                 log.err("{}: error: {s}", .{ args.replica, @errorName(err) });
                 std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};

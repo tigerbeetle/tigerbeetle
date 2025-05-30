@@ -2071,6 +2071,9 @@ const TestContext = struct {
             .replicas = replica_indexes,
         };
     }
+    //? matklad: maybe use an options struct with defaults here? So that the callsite looks like
+    //? t.clients(.{})
+    //? resolved.
     pub fn clients(
         t: *TestContext,
         options: struct {

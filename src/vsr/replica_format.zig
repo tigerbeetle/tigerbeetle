@@ -24,6 +24,12 @@ pub fn format(
     var superblock = try SuperBlock.init(allocator, superblock_options);
     defer superblock.deinit(allocator);
 
+    //? matklad: semi-unrelated, but maybe remove the data file in errdefer?
+    //? It wasn't really important until reformat, but, with reformat, if it fails
+    //? halfway through, it's not clear whethere its safe to resatrt or not.
+    //? dj: Agreed, though it is the next layer up (in `main.zig`) since Storage doesn't support
+    //? file deletion.
+    //? resolved.
     var replica_format = ReplicaFormat{};
 
     try replica_format.format_wal(allocator, options.cluster, storage);

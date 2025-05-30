@@ -7,10 +7,14 @@
 //!    `client.view` is the view number of the client at the end of committing the requests).
 //! 3. The recovery process exits. Now running `tigerbeetle start` as normal will work.
 //!
+//? matklad: emplain why this would be enough.
+//? resolved.
 //! The `pipeline_prepare_queue_max` committed requests ensure that if the newly recovered replica
 //! nacks uncommitted ops via a DVC message, it is nacking ops which were definitely not received by
 //! the previous version of the replica.
 //!
+//? matklad: explain +2, feels important enough to not bury in git blame.
+//? resolved.
 //! The +2 is because:
 //! - We don't want to join in the same view, since the replica might have participated in it before
 //!   being lost, and we can't remember any promises we made.
@@ -47,6 +51,8 @@ pub fn ReplicaReformatType(
 
         const Result = union(enum) {
             failed: anyerror,
+            //? matklad: alternative name: ok, like we use elsewhere.
+            //? resolved.
             ok,
         };
 
@@ -76,6 +82,8 @@ pub fn ReplicaReformatType(
             _ = reformat;
             _ = allocator;
         }
+        //? matklad: alternative name: done, to work with if (refromat.done()) |result|.
+        //? resolved.
         pub fn done(reformat: *const ReplicaReformat) ?Result {
             assert(reformat.requests_done <= constants.pipeline_prepare_queue_max);
             return reformat.result;
@@ -149,6 +157,20 @@ pub fn ReplicaReformatType(
             if (reformat.requests_done == constants.pipeline_prepare_queue_max) {
                 // +2 since we might have sent a DVC as part of +1 before we crashed.
                 reformat.options.format.view = reformat.client.view + 2;
+                //? matklad: Hm, this synchorneous call at the end of async callback chain still
+                //? feels weird to me. Maybe punt it to the caller? That is, we still have async
+                //? api with fn status() // fn done(), but we require the caller to call format
+                //? themselves? That way, we won't have to thread options&allocator&error.
+                //?
+                //? Maybe we don't even need `ReplicaREformatType` struct, and can add a helper
+                //? method directly to client? I don't like that that way the reformatting logic
+                //? will be split between the client and main, but, also, it's not like there's a
+                //? lot of logic there, so perhaps that's better? Your call!
+                //?
+                //? dj: I agree that it is weird, but I like having the recovery logic all together
+                //? like this. Since the `recovery` process is quite simple I think the
+                //? async-then-sync is tolerable.
+                //? resolved.
                 format(
                     Storage,
                     reformat.allocator,
