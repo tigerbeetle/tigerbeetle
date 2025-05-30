@@ -55,7 +55,7 @@ pub fn u128_to_rb_int(value: u128) ruby.VALUE {
     );
 }
 
-pub fn to_ruby_class(comptime ZigType: type) type {
+pub fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
     if (@typeInfo(ZigType) != .Struct) {
         @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
     }
@@ -64,6 +64,22 @@ pub fn to_ruby_class(comptime ZigType: type) type {
         const Self = @This();
         const type_info = @typeInfo(ZigType);
         const type_name = @typeName(ZigType) ++ "\x00";
+        const rb_class_name = ruby_name ++ "\x00";
+
+        pub const rb_data_type = ruby.rb_data_type_t{
+            .wrap_struct_name = &type_name[0],
+            .function = .{
+                .dmark = null,
+                .dfree = free_fn,
+                .dsize = size_fn,
+            },
+            .data = null,
+            .flags = ruby.RUBY_TYPED_FREE_IMMEDIATELY,
+        };
+
+        pub fn get_rb_data_type_ptr() *const ruby.rb_data_type_t {
+            return &rb_data_type;
+        }
 
         fn alloc_fn(self: ruby.VALUE) callconv(.C) ruby.VALUE {
             return ruby.rb_data_typed_object_zalloc(self, @sizeOf(ZigType), &rb_data_type);
@@ -79,17 +95,6 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             _ = ptr;
             return @sizeOf(ZigType);
         }
-
-        const rb_data_type = ruby.rb_data_type_t{
-            .wrap_struct_name = &type_name[0],
-            .function = .{
-                .dmark = null,
-                .dfree = free_fn,
-                .dsize = size_fn,
-            },
-            .data = null,
-            .flags = ruby.RUBY_TYPED_FREE_IMMEDIATELY,
-        };
 
         fn convert_to_ruby_hash(self: ruby.VALUE) callconv(.C) ruby.VALUE {
             const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
@@ -112,7 +117,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             return hash;
         }
 
-        pub fn init_methods(class: ruby.VALUE) void {
+        pub fn init_methods(parent: ruby.VALUE) void {
             const method_defs: []const MethodDef = blk: {
                 if (@typeInfo(ZigType) != .Struct) {
                     @compileError("Expected a struct type for Ruby class conversion, got: " ++ @typeInfo(ZigType));
@@ -132,12 +137,12 @@ pub fn to_ruby_class(comptime ZigType: type) type {
 
                     defs[i] = MethodDef{
                         .name = &getter_name[0],
-                        .func = @ptrCast(&makeGetter(field.name)),
+                        .func = @ptrCast(&make_getter_fn(field.name)),
                         .argc = 0,
                     };
                     defs[i + 1] = MethodDef{
                         .name = &setter_name[0],
-                        .func = @ptrCast(&makeSetter(field.name)),
+                        .func = @ptrCast(&make_setter_fn(field.name)),
                         .argc = 1,
                     };
                     i += 2;
@@ -146,6 +151,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
                 break :blk defs[0..i];
             };
 
+            const class = ruby.rb_define_class_under(parent, &rb_class_name[0], ruby.rb_cObject);
             ruby.rb_define_alloc_func(class, alloc_fn);
             ruby.rb_define_method(class, "initialize", @ptrCast(&initialize), -1);
             ruby.rb_define_method(class, "to_h", @ptrCast(&convert_to_ruby_hash), 0);
@@ -162,7 +168,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             argc: c_int,
         };
 
-        fn makeGetter(comptime field_name: []const u8) fn (ruby.VALUE) callconv(.C) ruby.VALUE {
+        fn make_getter_fn(comptime field_name: []const u8) fn (ruby.VALUE) callconv(.C) ruby.VALUE {
             return struct {
                 fn get(self: ruby.VALUE) callconv(.C) ruby.VALUE {
                     const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
@@ -172,8 +178,7 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             }.get;
         }
 
-        // Generate setter for a specific field
-        fn makeSetter(comptime field_name: []const u8) fn (ruby.VALUE, ruby.VALUE) callconv(.C) ruby.VALUE {
+        fn make_setter_fn(comptime field_name: []const u8) fn (ruby.VALUE, ruby.VALUE) callconv(.C) ruby.VALUE {
             return struct {
                 fn set(self: ruby.VALUE, value: ruby.VALUE) callconv(.C) ruby.VALUE {
                     const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
@@ -311,36 +316,50 @@ pub fn to_ruby_class(comptime ZigType: type) type {
     };
 }
 
-pub fn to_ruby_module(module: ruby.VALUE, comptime ZigType: type, comptime ruby_name: []const u8) void {
-    const ruby_enum = ruby.rb_define_module_under(module, ruby_name.ptr);
-    switch (@typeInfo(ZigType)) {
-        .Enum => |enum_info| {
-            inline for (enum_info.fields) |field| {
-                if (comptime skip_field(field.name)) {
-                    continue;
-                }
-                const enum_value = @field(ZigType, field.name);
-                const ruby_value = @intFromEnum(enum_value);
-
-                const ruby_const_name = to_upper_case(field.name);
-
-                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
-            }
-        },
-        .Struct => |struct_info| {
-            const layout = struct_info.layout;
-            assert(layout == .@"packed");
-
-            inline for (struct_info.fields, 0..) |field, i| {
-                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
-                    continue;
-                }
-                const ruby_const_name = to_upper_case(field.name);
-                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
-            }
-        },
-        else => @compileError("Invalid conversion to enum: " ++ ZigType),
+pub fn to_ruby_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
+    if (@typeInfo(ZigType) != .Enum and @typeInfo(ZigType) != .Struct) {
+        @compileError("Expected an enum or struct type for Ruby module conversion, got: " ++ @typeInfo(ZigType));
     }
+
+    return struct {
+        const Self = @This();
+        const class_name = ruby_name ++ "\x00";
+
+        pub fn init_methods(module: ruby.VALUE) void {
+            const ruby_enum = ruby.rb_define_module_under(module, &class_name[0]);
+
+            switch (@typeInfo(ZigType)) {
+                .Enum => |enum_info| {
+                    inline for (enum_info.fields) |field| {
+                        if (comptime skip_field(field.name)) {
+                            continue;
+                        }
+                        const enum_value = @field(ZigType, field.name);
+                        const ruby_value = @intFromEnum(enum_value);
+
+                        const ruby_const_name = to_upper_case(field.name);
+
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
+                    }
+                },
+                .Struct => |struct_info| {
+                    const layout = struct_info.layout;
+                    if (layout != .@"packed") {
+                        @compileError("Only packed structs can be converted to Ruby enums: " ++ @typeName(ZigType));
+                    }
+
+                    inline for (struct_info.fields, 0..) |field, i| {
+                        if (comptime skip_field(field.name)) {
+                            continue;
+                        }
+                        const ruby_const_name = to_upper_case(field.name);
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
+                    }
+                },
+                else => @compileError("Invalid conversion to enum: " ++ ZigType),
+            }
+        }
+    };
 }
 
 fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
