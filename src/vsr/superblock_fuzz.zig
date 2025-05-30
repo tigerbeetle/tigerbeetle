@@ -55,10 +55,10 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
         .replica_index = 0,
         .seed = prng.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
-        .read_latency_min = 0,
-        .read_latency_mean = 0,
-        .write_latency_min = 0,
-        .write_latency_mean = 0,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = .{ .ns = 0 },
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = .{ .ns = 0 },
         // Storage will never inject more faults than the superblock is able to recover from,
         // so a 100% fault probability is allowed.
         .read_fault_probability = ratio(
