@@ -485,6 +485,10 @@ def test_account
   if account.code != code
     raise "Code mismatch: expected #{code}, got #{account.code}"
   end
+
+  if account.respond_to?(:reserved) || account.respond_to?(:reserved=)
+    raise "Account struct should not have reserved field, but it does"
+  end
 end
 test_account
 

@@ -2,6 +2,17 @@ const std = @import("std");
 
 const ruby = @cImport(@cInclude("ruby.h"));
 
+const SKIP_PREFIXES = [_][]const u8{ "reserved", "opaque", "deprecated" };
+
+fn skip_field(comptime field_name: []const u8) bool {
+    inline for (SKIP_PREFIXES) |prefix| {
+        if (comptime std.mem.startsWith(u8, field_name, prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 pub fn to_ruby_class(comptime ZigType: type) type {
     if (@typeInfo(ZigType) != .Struct) {
         @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
@@ -43,13 +54,17 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             const hash: ruby.VALUE = ruby.rb_hash_new();
 
             inline for (type_info.Struct.fields) |field| {
+                if (comptime skip_field(field.name)) {
+                    continue;
+                }
                 const field_value = @field(wrapper.*, field.name);
-                const key_str = ruby.rb_str_new_cstr(field.name ++ "\x00");
-                const key = ruby.rb_intern(ruby.RSTRING_PTR(key_str));
+                const field_name_cstr = field.name ++ "\x00";
+                const key_id = ruby.rb_intern(&field_name_cstr[0]);
+                const key_symbol = ruby.ID2SYM(key_id); // Convert ID to symbol
 
                 const value = zigToRuby(@TypeOf(field_value), field_value);
 
-                _ = ruby.rb_hash_aset(hash, key, value);
+                _ = ruby.rb_hash_aset(hash, key_symbol, value);
             }
 
             return hash;
@@ -64,23 +79,29 @@ pub fn to_ruby_class(comptime ZigType: type) type {
                 const fields = type_info.Struct.fields;
                 var defs: [fields.len * 2]MethodDef = undefined;
 
-                inline for (fields, 0..) |field, i| {
+                comptime var i = 0;
+                inline for (fields) |field| {
+                    if (comptime skip_field(field.name)) {
+                        continue;
+                    }
+
                     const getter_name = field.name ++ "\x00";
                     const setter_name = field.name ++ "=\x00";
 
-                    defs[i * 2] = MethodDef{
+                    defs[i] = MethodDef{
                         .name = &getter_name[0],
                         .func = @ptrCast(&makeGetter(field.name)),
                         .argc = 0,
                     };
-                    defs[i * 2 + 1] = MethodDef{
+                    defs[i + 1] = MethodDef{
                         .name = &setter_name[0],
                         .func = @ptrCast(&makeSetter(field.name)),
                         .argc = 1,
                     };
+                    i += 2;
                 }
 
-                break :blk defs[0..];
+                break :blk defs[0..i];
             };
 
             ruby.rb_define_alloc_func(class, alloc_fn);
@@ -121,63 +142,91 @@ pub fn to_ruby_class(comptime ZigType: type) type {
             }.set;
         }
 
+        fn uintToRuby(comptime T: type, value: T) ruby.VALUE {
+            if (@typeInfo(T) != .Int) {
+                @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+            }
+
+            return switch (T) {
+                u8, u16, u32 => ruby.UINT2NUM(value),
+                u64 => ruby.ULONG2NUM(value),
+                u128 => convert_u128_to_ruby(value),
+                else => @compileError("Unsupported integer size: " ++ @typeName(T)),
+            };
+        }
+
         // Condensed type conversion helpers
         fn zigToRuby(comptime T: type, value: T) ruby.VALUE {
             return switch (@typeInfo(T)) {
-                .Int => {
-                    return switch (T) {
-                        u8, u16, u32 => ruby.UINT2NUM(value),
-                        u64 => ruby.ULONG2NUM(value),
-                        u128 => convert_u128_to_ruby(value),
-                        else => @compileError("Unsupported integer size: " ++ @typeName(T)),
+                .Int => uintToRuby(T, value),
+                .Enum => |info| {
+                    const tag_type = info.tag_type;
+                    return switch (@typeInfo(tag_type)) {
+                        .Int => {
+                            const int_value = @intFromEnum(value);
+                            return uintToRuby(tag_type, int_value);
+                        },
+                        else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
                     };
                 },
-                else => {
-                    // TODO dig dig deeper for more complex types
-                    return ruby.Qnil;
+                .Struct => |info| {
+                    if (info.layout == .@"packed") {
+                        if (info.backing_integer) |backing_type| {
+                            const int_value: backing_type = @bitCast(value);
+                            return uintToRuby(backing_type, int_value);
+                        } else {
+                            @compileError("Packed struct has no backing integer type");
+                        }
+                    }
+                    @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
                 },
+                else => {
+                    @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
+                },
+            };
+        }
+
+        fn rubyToUint(comptime T: type, value: ruby.VALUE) T {
+            if (@typeInfo(T) != .Int) {
+                @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+            }
+
+            return switch (T) {
+                u8 => @intCast(ruby.NUM2UINT(value)),
+                u16 => @intCast(ruby.NUM2UINT(value)),
+                u32 => ruby.NUM2UINT(value),
+                u64 => @intCast(ruby.NUM2ULONG(value)),
+                u128 => convert_ruby_int_to_u128(value),
+                else => @compileError("Unsupported integer type: " ++ @typeName(T)),
             };
         }
 
         fn rubyToZig(comptime T: type, value: ruby.VALUE) T {
             return switch (@typeInfo(T)) {
-                .Int => {
-                    return switch (T) {
-                        u8 => {
-                            const val = ruby.NUM2UINT(value);
-                            if (val > std.math.maxInt(u8)) {
-                                ruby.rb_raise(ruby.rb_eRangeError, "integer %lu too big for u8 (max: %u)", val, @as(c_uint, std.math.maxInt(u8)));
-                                return 0;
-                            }
-                            return @as(u8, @intCast(val));
+                .Int => rubyToUint(T, value),
+                .Enum => |info| {
+                    const tag_type = info.tag_type;
+                    return switch (@typeInfo(tag_type)) {
+                        .Int => {
+                            const int_value = rubyToUint(tag_type, value);
+                            return @enumFromInt(int_value);
                         },
-                        u16 => {
-                            const val = ruby.NUM2UINT(value);
-                            if (val > std.math.maxInt(u16)) {
-                                ruby.rb_raise(ruby.rb_eRangeError, "integer %lu too big for u16 (max: %u)", val, @as(c_uint, std.math.maxInt(u16)));
-                                return 0;
-                            }
-                            return @as(u16, @intCast(val));
-                        },
-                        u32 => {
-                            const val = ruby.NUM2UINT(value);
-                            if (val > std.math.maxInt(u32)) {
-                                ruby.rb_raise(ruby.rb_eRangeError, "integer %lu too big for u32 (max: %lu)", val, @as(c_ulong, std.math.maxInt(u32)));
-                                return 0;
-                            }
-                            return @as(u32, @intCast(val));
-                        },
-                        u64 => {
-                            // NUM2ULONG is used for 64-bit integers in Ruby
-                            return @as(u64, @intCast(ruby.NUM2ULONG(value)));
-                        },
-                        u128 => convert_ruby_int_to_u128(value),
-                        else => @compileError("Unsupported integer type: " ++ @typeName(T)),
+                        else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
                     };
                 },
+                .Struct => |info| {
+                    if (info.layout == .@"packed") {
+                        if (info.backing_integer) |backing_type| {
+                            const int_value = rubyToUint(backing_type, value);
+                            return @bitCast(int_value);
+                        } else {
+                            @compileError("Packed struct has no backing integer type");
+                        }
+                    }
+                    @compileLog("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+                },
                 else => {
-                    // TODO dig deeper
-                    return undefined;
+                    @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
                 },
             };
         }

@@ -19,7 +19,7 @@ const ruby = @cImport(@cInclude("ruby.h"));
 const mappings_vsr = .{
     .{ exports.tb_operation, "Operation" },
     .{ exports.tb_packet_status, "PacketStatus" },
-    .{ exports.tb_packet_t, "Packet" },
+    // .{ exports.tb_packet_t, "Packet" }, // Not used in Ruby bindings, so not included.
     .{ exports.tb_client_t, "Client" },
     .{ exports.tb_init_status, "InitStatus" },
     .{ exports.tb_client_status, "ClientStatus" },
