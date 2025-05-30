@@ -56,54 +56,15 @@ export fn initialize_ruby_client() callconv(.C) void {
 
         switch (@typeInfo(ZigType)) {
             .Enum => {
-                convert_enum_to_ruby_const(m_bindings, ZigType, ruby_name);
+                converter.to_ruby_module(m_bindings, ZigType, ruby_name);
             },
             .Struct => |info| switch (info.layout) {
-                .@"packed" => convert_enum_to_ruby_const(m_bindings, ZigType, ruby_name),
+                .@"packed" => converter.to_ruby_module(m_bindings, ZigType, ruby_name),
                 .@"extern" => convert_struct_to_ruby_class(m_bindings, ZigType, ruby_name),
                 else => @compileError("Unsupported struct: " ++ info),
             },
             else => @compileError("Unsupported Zig type for Ruby mapping: " ++ @typeInfo(ZigType)),
         }
-    }
-}
-
-fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
-    var result: [input.len + 1:0]u8 = undefined;
-    _ = std.ascii.upperString(result[0..input.len], input);
-    result[input.len] = 0; // null terminator
-    return result;
-}
-
-fn convert_enum_to_ruby_const(module: ruby.VALUE, comptime ZigType: type, comptime ruby_name: []const u8) void {
-    const ruby_enum = ruby.rb_define_module_under(module, ruby_name.ptr);
-    switch (@typeInfo(ZigType)) {
-        .Enum => |enum_info| {
-            inline for (enum_info.fields) |field| {
-                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
-                    continue;
-                }
-                const enum_value = @field(ZigType, field.name);
-                const ruby_value = @intFromEnum(enum_value);
-
-                const ruby_const_name = to_upper_case(field.name);
-
-                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
-            }
-        },
-        .Struct => |struct_info| {
-            const layout = struct_info.layout;
-            assert(layout == .@"packed");
-
-            inline for (struct_info.fields, 0..) |field, i| {
-                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
-                    continue;
-                }
-                const ruby_const_name = to_upper_case(field.name);
-                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
-            }
-        },
-        else => @compileError("Invalid conversion to enum: " ++ ZigType),
     }
 }
 
@@ -116,4 +77,75 @@ fn convert_struct_to_ruby_class(module: ruby.VALUE, comptime ZigType: type, comp
 
     const c_struct = comptime converter.to_ruby_class(ZigType);
     c_struct.init_methods(rb_class);
+
+    if (ZigType == exports.tb_client_t) {
+        const client_struct = init_client_fn(c_struct.rb_data_type);
+        _ = ruby.rb_define_method(rb_class, "init", client_struct.init, -1);
+    }
+}
+
+fn init_client_fn(rb_type: ruby.rb_data_type_t) type {
+    return struct {
+        fn init(argc: c_int, argv: [*]ruby.VALUE, self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            var kwargs = ruby.Qnil;
+            ruby.rb_scan_args(argc, argv, ":", &kwargs);
+
+            if (ruby.NIL_P(kwargs)) {
+                ruby.rb_raise(ruby.rb_eArgError, "Expected arguments: { addresses: String, cluster_id: Integer }");
+                return ruby.Qnil;
+            }
+
+            const rb_addresses = ruby.rb_hash_aref(kwargs, ruby.rb_intern("addresses"));
+            if (ruby.NIL_P(rb_addresses)) {
+                ruby.rb_raise(ruby.rb_eArgError, "Missing required argument: addresses");
+                return ruby.Qnil;
+            }
+            const rb_cluster_id = ruby.rb_hash_aref(kwargs, ruby.rb_intern("cluster_id"));
+            if (ruby.NIL_P(rb_cluster_id)) {
+                ruby.rb_raise(ruby.rb_eArgError, "Missing required argument: cluster_id");
+                return ruby.Qnil;
+            }
+            ruby.Check_Type(rb_addresses, ruby.T_STRING);
+            ruby.Check_Type(rb_cluster_id, ruby.T_FIXNUM);
+
+            const cluster_id = converter.rb_int_to_u128(rb_cluster_id);
+
+            // Get the pointer to the client struct from the Ruby object
+            const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_type)));
+
+            // Convert cluster_id to [16]u8 array
+            var cluster_id_bytes: [16]u8 = undefined;
+            std.mem.writeInt(u128, &cluster_id_bytes, cluster_id, .little);
+
+            // TODO: We need to handle the async callback properly
+            // For now, let's use a dummy callback for synchronous init
+            const completion_ctx: usize = 0;
+            const completion_callback: exports.tb_completion_t = null;
+
+            const status = exports.init(
+                client,
+                &cluster_id_bytes,
+                @ptrCast(ruby.RSTRING_PTR(rb_addresses)),
+                @intCast(ruby.RSTRING_LEN(rb_addresses)),
+                completion_ctx,
+                completion_callback,
+            );
+
+            if (status != .success) {
+                const error_msg = switch (status) {
+                    .unexpected => "Unexpected error",
+                    .out_of_memory => "Out of memory",
+                    .address_invalid => "Invalid address",
+                    .address_limit_exceeded => "Address limit exceeded",
+                    .system_resources => "System resources error",
+                    .network_subsystem => "Network subsystem error",
+                    else => "Unknown error",
+                };
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to initialize client: %s", error_msg);
+                return ruby.Qnil;
+            }
+
+            return self; // Return self to allow method chaining.
+        }
+    };
 }
