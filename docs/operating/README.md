@@ -9,4 +9,6 @@ in the harshest conditions, there's certainly a preferred way to handle one!
 - [Cluster](./cluster.md) specifies the overall cluster requirements and recommendations.
 - [Deploying](./deploying/) spells out deployment process and its variations.
 - [Upgrading](./upgrading.md) explains how to move to a newer TigerBeetle version without downtime.
+- [Recovering](./recovering.md) explains how to repair the cluster when a replica is permanently
+  lost.
 - [Change Data Capture](./cdc.md) explains how to stream data out of TigerBeetle.

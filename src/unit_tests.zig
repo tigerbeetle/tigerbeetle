@@ -84,6 +84,7 @@ comptime {
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
+    _ = @import("vsr/replica_reformat.zig");
     _ = @import("vsr/replica_test.zig");
     _ = @import("vsr/routing.zig");
     _ = @import("vsr/superblock.zig");

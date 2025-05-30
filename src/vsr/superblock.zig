@@ -160,6 +160,7 @@ pub const SuperBlockHeader = extern struct {
             members: vsr.Members,
             replica_count: u8,
             release: vsr.Release,
+            view: u32,
         }) VSRState {
             return .{
                 .checkpoint = .{
@@ -195,7 +196,7 @@ pub const SuperBlockHeader = extern struct {
                 .sync_op_min = 0,
                 .sync_op_max = 0,
                 .log_view = 0,
-                .view = 0,
+                .view = options.view,
             };
         }
 
@@ -830,6 +831,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             release: vsr.Release,
             replica: u8,
             replica_count: u8,
+            /// Set to null during initial cluster formatting.
+            /// Set to the target view when constructing a new data file for a reformatted replica.
+            view: ?u32,
         };
 
         pub fn format(
@@ -845,6 +849,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
+            if (options.view) |view| {
+                assert(view > 1);
+                assert(options.replica < options.replica_count);
+            }
 
             const members = vsr.root_members(options.cluster);
             const replica_id = members[options.replica];
@@ -915,6 +923,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica_id = replica_id,
                     .members = members,
                     .replica_count = options.replica_count,
+                    .view = options.view orelse 0,
                 }),
                 .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
@@ -1364,7 +1373,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.checkpoint.header.op == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
-                    assert(working.vsr_state.view == 0);
+                    maybe(working.vsr_state.view == 0); // On reformat view≠0.
                     assert(working.vsr_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);

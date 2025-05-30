@@ -429,7 +429,7 @@ pub fn AOFType(comptime IO: type) type {
 
             fn replay_callback(
                 user_data: u128,
-                operation: StateMachine.Operation,
+                operation: vsr.Operation,
                 timestamp: u64,
                 result: []u8,
             ) void {

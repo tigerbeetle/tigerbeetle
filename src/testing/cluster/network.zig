@@ -386,14 +386,14 @@ pub const MessageSummary = struct {
             total_count += message_summary.count;
             total_size += message_summary.size;
             if (message_summary.count > 0) {
-                try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+                try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
                     @tagName(command),
                     message_summary.count,
                     std.fmt.fmtIntSizeBin(message_summary.size),
                 });
             }
         }
-        try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+        try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
             "total",
             total_count,
             std.fmt.fmtIntSizeBin(total_size),

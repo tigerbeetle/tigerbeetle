@@ -411,7 +411,7 @@ pub const Header = extern struct {
         epoch: u32 = 0,
         // NB: unlike every other message, pings and pongs use on disk view, rather than in-memory
         // view, to avoid disrupting clock synchronization while the view is being updated.
-        view: u32 = 0,
+        view: u32,
         release: vsr.Release,
         protocol: u16 = vsr.Version,
         command: Command,
@@ -602,6 +602,8 @@ pub const Header = extern struct {
                         if (self.size != @sizeOf(Header) + @sizeOf(vsr.ReconfigurationRequest)) {
                             return "size != @sizeOf(Header) + @sizeOf(ReconfigurationRequest)";
                         }
+                    } else if (self.operation == .noop) {
+                        if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
                     } else if (@intFromEnum(self.operation) < constants.vsr_operations_reserved) {
                         return "operation is reserved";
                     }

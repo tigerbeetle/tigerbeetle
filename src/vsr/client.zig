@@ -26,7 +26,7 @@ pub fn ClientType(
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
-                operation: StateMachine.Operation,
+                operation: vsr.Operation,
                 timestamp: u64,
                 results: []u8,
             ) void;
@@ -361,7 +361,8 @@ pub fn ClientType(
             assert(message.header.request == 0);
 
             if (!constants.aof_recovery) {
-                assert(!message.header.operation.vsr_reserved());
+                assert(message.header.operation == .noop or
+                    !message.header.operation.vsr_reserved());
             }
 
             // TODO: Re-investigate this state for AOF as it currently traps.
@@ -623,7 +624,7 @@ pub fn ClientType(
                 // NOTE: the callback is allowed to mutate `reply.body_used()` here.
                 inflight.callback.request(
                     inflight.user_data,
-                    inflight_vsr_operation.cast(StateMachine),
+                    inflight_vsr_operation,
                     reply.header.timestamp,
                     reply.body_used(),
                 );

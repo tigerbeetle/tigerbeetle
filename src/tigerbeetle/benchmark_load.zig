@@ -755,10 +755,11 @@ const Benchmark = struct {
 
     fn request_complete(
         user_data: u128,
-        operation: StateMachine.Operation,
+        operation_vsr: vsr.Operation,
         timestamp: u64,
         result: []u8,
     ) void {
+        const operation = operation_vsr.cast(StateMachine);
         const context: RequestContext = @bitCast(user_data);
         const client = context.client_index;
         const b: *Benchmark = context.benchmark;

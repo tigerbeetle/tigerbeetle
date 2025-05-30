@@ -46,6 +46,7 @@ pub const multi_batch = @import("vsr/multi_batch.zig");
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
+pub const ReplicaReformatType = @import("vsr/replica_reformat.zig").ReplicaReformatType;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;
@@ -257,8 +258,10 @@ pub const Operation = enum(u8) {
     reconfigure = 3,
     /// The value 4 is reserved for pulse request.
     pulse = 4,
-    /// The value 5 is is reserved for release-upgrade requests.
+    /// The value 5 is reserved for release-upgrade requests.
     upgrade = 5,
+    /// The value 6 is reserved for noop requests.
+    noop = 6,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.

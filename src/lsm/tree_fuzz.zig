@@ -251,6 +251,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 .release = vsr.Release.minimum,
                 .replica = replica,
                 .replica_count = replica_count,
+                .view = null,
             });
 
             env.tick_until_state_change(.superblock_format, .superblock_open);

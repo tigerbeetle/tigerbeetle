@@ -798,11 +798,12 @@ const VSRContext = struct {
 
     fn request_callback(
         user_data: u128,
-        operation: StateMachine.Operation,
+        operation_vsr: vsr.Operation,
         timestamp: u64,
         result: []u8,
     ) void {
         _ = timestamp;
+        const operation = operation_vsr.cast(StateMachine);
         assert(operation == .get_change_events);
 
         const self: *VSRContext = @ptrFromInt(@as(usize, @intCast(user_data)));

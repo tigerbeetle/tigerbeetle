@@ -737,13 +737,14 @@ pub fn ContextType(
 
         fn client_result_callback(
             raw_user_data: u128,
-            operation: StateMachine.Operation,
+            operation_vsr: vsr.Operation,
             timestamp: u64,
             reply: []const u8,
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
             const packet_list: *Packet = user_data.packet;
+            const operation = operation_vsr.cast(Client.StateMachine);
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);

@@ -64,7 +64,7 @@ test "Cluster: smoke" {
     const t = try TestContext.init(.{ .replica_count = 1 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 }
@@ -73,7 +73,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt right of head)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     t.replica(.R_).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 2 });
 
@@ -94,7 +94,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt left of head, 3/3 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.R_).stop();
     t.replica(.R_).corrupt(.{ .wal_prepare = 1 });
@@ -112,7 +112,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt root)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 0 });
     try t.replica(.R0).open();
@@ -129,7 +129,7 @@ test "Cluster: recovery: WAL prepare corruption (R=3, corrupt checkpoint…head)
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     // Trigger the first checkpoint.
     try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
     t.replica(.R0).stop();
@@ -153,7 +153,7 @@ test "Cluster: recovery: WAL prepare corruption (R=1, corrupt between checkpoint
     const t = try TestContext.init(.{ .replica_count = 1 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_prepare = 1 });
@@ -170,7 +170,7 @@ test "Cluster: recovery: WAL header corruption (R=1)" {
     const t = try TestContext.init(.{ .replica_count = 1 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 1 });
@@ -190,7 +190,7 @@ test "Cluster: recovery: WAL torn prepare, standby with intact prepare (R=1 S=1)
     });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.R0).stop();
     t.replica(.R0).corrupt(.{ .wal_header = 2 });
@@ -204,7 +204,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     // Checkpoint to ensure that the replicas will actually use the grid to recover.
     // All replicas must be at the same commit to ensure grid repair won't fail and
@@ -254,7 +254,7 @@ test "Cluster: recovery: recovering_head, outdated start view" {
     });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var a = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -304,7 +304,7 @@ test "Cluster: recovery: recovering head: idle cluster" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var b = t.replica(.B1);
 
     try c.request(2, 2);
@@ -323,11 +323,73 @@ test "Cluster: recovery: recovering head: idle cluster" {
     try expectEqual(b.op_head(), 2);
 }
 
+test "Cluster: recovery: reformat unrecoverable replica" {
+    for ([_]u64{
+        // The cluster is still within the first checkpoint.
+        // The recovering replica just needs to load a SV and then it can repair.
+        5,
+        // The cluster is ahead of the initial checkpoint.
+        // The recovering replica needs to state sync via SV.
+        checkpoint_2,
+    }) |op_max| {
+        const t = try TestContext.init(.{ .replica_count = 3 });
+        defer t.deinit();
+
+        var c = t.clients(.{});
+        var b = t.replica(.B1);
+
+        try c.request(op_max, op_max);
+
+        b.stop();
+        try b.open_reformat();
+        t.run();
+        try expectEqual(b.health(), .up);
+
+        try expectEqual(b.status(), .normal);
+        // +pipeline since the reformatted replica pulses noop requests.
+        try expectEqual(b.op_head(), op_max + constants.pipeline_prepare_queue_max);
+    }
+}
+
+test "Cluster: recovery: reformat unrecoverable replica: too many faults" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{});
+    var a0 = t.replica(.A0);
+    var b1 = t.replica(.B1);
+    var b2 = t.replica(.B2);
+
+    try c.request(3, 3);
+
+    b1.stop();
+    b2.stop();
+
+    // Restart A0 to force it out of normal mode.
+    // Otherwise it would just share a SV, repairing the recovering replicas.
+    a0.stop();
+    try a0.open();
+
+    try b1.open_reformat();
+    t.run();
+    try expectEqual(b1.health(), .reformatting);
+
+    try b2.open_reformat();
+    t.run();
+    try expectEqual(b1.health(), .reformatting);
+
+    t.run();
+
+    // There were too many faults, so the cluster (safely) remains unavailable.
+    try expectEqual(b1.health(), .reformatting);
+    try expectEqual(b1.health(), .reformatting);
+}
+
 test "Cluster: network: partition 2-1 (isolate backup, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .bidirectional);
     try c.request(3, 3);
@@ -340,7 +402,7 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, send-only)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .incoming);
     try c.request(3, 3);
@@ -353,7 +415,7 @@ test "Cluster: network: partition 2-1 (isolate backup, asymmetric, receive-only)
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     t.replica(.B2).drop_all(.__, .outgoing);
     try c.request(3, 3);
@@ -372,7 +434,7 @@ test "Cluster: network: partition 1-2 (isolate primary, symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
 
     const p = t.replica(.A0);
@@ -389,7 +451,7 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, send-only)" 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(1, 1);
     t.replica(.A0).drop_all(.B1, .incoming);
     t.replica(.A0).drop_all(.B2, .incoming);
@@ -404,7 +466,7 @@ test "Cluster: network: partition 1-2 (isolate primary, asymmetric, receive-only
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(1, 1);
     t.replica(.A0).drop_all(.B1, .outgoing);
     t.replica(.A0).drop_all(.B2, .outgoing);
@@ -416,7 +478,7 @@ test "Cluster: network: partition client-primary (symmetric)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
@@ -429,7 +491,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .incoming);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
@@ -442,7 +504,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .outgoing);
     // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
@@ -455,7 +517,7 @@ test "Cluster: network: partition flexible quorum" {
     const t = try TestContext.init(.{ .replica_count = 4 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.run();
     t.replica(.B2).stop();
@@ -471,7 +533,7 @@ test "Cluster: network: primary no clock sync" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(3, 3);
     const a0 = t.replica(.A0);
     try expectEqual(a0.role(), .primary);
@@ -493,7 +555,7 @@ test "Cluster: repair: partition 2-1, then backup fast-forward 1 checkpoint" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(3, 3);
     try expectEqual(t.replica(.R_).commit(), 3);
 
@@ -525,7 +587,7 @@ test "Cluster: repair: view-change, new-primary lagging behind checkpoint, forfe
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     try expectEqual(t.replica(.R_).commit(), 2);
 
@@ -583,7 +645,7 @@ test "Cluster: repair: crash, corrupt committed pipeline op, repair it, view-cha
     });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
 
     var a0 = t.replica(.A0);
@@ -628,7 +690,7 @@ test "Cluster: repair: corrupt reply" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     try expectEqual(t.replica(.R_).commit(), 2);
 
@@ -659,7 +721,7 @@ test "Cluster: repair: ack committed prepare" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     try expectEqual(t.replica(.R_).commit(), 2);
 
@@ -734,7 +796,7 @@ test "Cluster: repair: primary checkpoint, backup crash before checkpoint, prima
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var p = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -770,7 +832,7 @@ test "Cluster: view-change: DVC, 1+1/2 faulty header stall, 2+1/3 faulty header 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     try expectEqual(t.replica(.R_).commit(), 2);
 
@@ -805,7 +867,7 @@ test "Cluster: view-change: DVC, 2/3 faulty header stall" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.replica(.R0).stop();
     try c.request(3, 3);
@@ -829,7 +891,7 @@ test "Cluster: view-change: duel of the primaries" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(2, 2);
     try expectEqual(t.replica(.R_).commit(), 2);
 
@@ -879,7 +941,7 @@ test "Cluster: view_change: lagging replica advances checkpoint during view chan
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -948,7 +1010,7 @@ test "Cluster: view-change: primary with dirty log" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -995,7 +1057,7 @@ test "Cluster: view-change: nack older view" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_1_trigger, checkpoint_1_trigger);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger);
 
@@ -1055,7 +1117,7 @@ test "Cluster: sync: partition, lag, sync (transition from idle)" {
         const t = try TestContext.init(.{ .replica_count = 3 });
         defer t.deinit();
 
-        var c = t.clients(0, t.cluster.clients.len);
+        var c = t.clients(.{});
 
         t.replica(.R2).drop_all(.R_, .bidirectional);
         try c.request(cluster_commit_max, cluster_commit_max);
@@ -1082,7 +1144,7 @@ test "Cluster: repair: R=2 (primary checkpoints, but backup lags behind)" {
     const t = try TestContext.init(.{ .replica_count = 2 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
 
     var a0 = t.replica(.A0);
@@ -1124,7 +1186,7 @@ test "Cluster: sync: R=4, 2/4 ahead + idle, 2/4 lagging, sync" {
     const t = try TestContext.init(.{ .replica_count = 4 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(1, 1);
     try expectEqual(t.replica(.R_).commit(), 1);
 
@@ -1160,7 +1222,7 @@ test "Cluster: sync: view-change with lagging replica" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(1, 1); // Make sure that the logic doesn't depend on the root prepare.
     try expectEqual(t.replica(.R_).commit(), 1);
 
@@ -1205,7 +1267,7 @@ test "Cluster: sync: slightly lagging replica" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_1 - 1, checkpoint_1 - 1);
 
     var a0 = t.replica(.A0);
@@ -1233,7 +1295,7 @@ test "Cluster: sync: using SV from durable checkpoint" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
@@ -1281,7 +1343,7 @@ test "Cluster: sync: checkpoint from a newer view" {
     const t = try TestContext.init(.{ .replica_count = 6 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_1 - 1, checkpoint_1 - 1);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1 - 1);
 
@@ -1350,7 +1412,7 @@ test "Cluster: prepare beyond checkpoint trigger" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
     try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
 
@@ -1395,7 +1457,7 @@ test "Cluster: upgrade: operation=upgrade near trigger-minus-bar" {
         const t = try TestContext.init(.{ .replica_count = 3 });
         defer t.deinit();
 
-        var c = t.clients(0, t.cluster.clients.len);
+        var c = t.clients(.{});
         try c.request(data.request, data.request);
 
         t.replica(.R_).stop();
@@ -1439,7 +1501,7 @@ test "Cluster: upgrade: state-sync to new release" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
 
     t.replica(.R_).stop();
     try t.replica(.R0).open_upgrade(&[_]u8{ 10, 20 });
@@ -1484,7 +1546,7 @@ test "Cluster: scrub: background scrubber, fully corrupt grid" {
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
 
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     try c.request(checkpoint_2_trigger, checkpoint_2_trigger);
     try expectEqual(t.replica(.R_).commit(), checkpoint_2_trigger);
 
@@ -1606,8 +1668,8 @@ test "Cluster: eviction: no_session" {
     });
     defer t.deinit();
 
-    var c0 = t.clients(0, 1);
-    var c = t.clients(1, constants.clients_max);
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = constants.clients_max });
 
     // Register a single client.
     try c0.request(1, 1);
@@ -1628,7 +1690,7 @@ test "Cluster: eviction: client_release_too_low" {
     });
     defer t.deinit();
 
-    var c0 = t.clients(0, 1);
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
     try c0.request(1, 0);
     try expectEqual(c0.eviction_reason(), .client_release_too_low);
 }
@@ -1640,7 +1702,7 @@ test "Cluster: eviction: client_release_too_high" {
     });
     defer t.deinit();
 
-    var c0 = t.clients(0, 1);
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
     try c0.request(1, 0);
     try expectEqual(c0.eviction_reason(), .client_release_too_high);
 }
@@ -1652,8 +1714,8 @@ test "Cluster: eviction: session_too_low" {
     });
     defer t.deinit();
 
-    var c0 = t.clients(0, 1);
-    var c = t.clients(1, constants.clients_max);
+    var c0 = t.clients(.{ .index = 0, .count = 1 });
+    var c = t.clients(.{ .index = 1, .count = constants.clients_max });
 
     t.replica(.R_).record(.C0, .incoming, .request);
     try c0.request(1, 1);
@@ -1684,7 +1746,7 @@ test "Cluster: view_change: DVC header doesn't match current header in journal" 
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -1780,7 +1842,7 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
 
     const t = try TestContext.init(.{ .replica_count = 3 });
     defer t.deinit();
-    var c = t.clients(0, t.cluster.clients.len);
+    var c = t.clients(.{});
     var a0 = t.replica(.A0);
     var b1 = t.replica(.B1);
     var b2 = t.replica(.B2);
@@ -1930,6 +1992,7 @@ const TestContext = struct {
                 .seed = prng.int(u64),
                 .releases = &releases,
                 .client_release = options.client_release,
+                .reformats_max = 3,
                 .state_machine = .{
                     .batch_size_limit = constants.message_body_size_max,
                     .lsm_forest_node_count = 4096,
@@ -1972,7 +2035,7 @@ const TestContext = struct {
         errdefer allocator.free(client_requests);
         @memset(client_requests, 0);
 
-        const client_replies = try allocator.alloc(usize, options.client_count);
+        const client_replies = try allocator.alloc(usize, cluster.clients.len);
         errdefer allocator.free(client_replies);
         @memset(client_replies, 0);
 
@@ -2008,8 +2071,17 @@ const TestContext = struct {
             .replicas = replica_indexes,
         };
     }
+    pub fn clients(
+        t: *TestContext,
+        options: struct {
+            index: usize = 0,
+            count: ?usize = null,
+        },
+    ) TestClients {
+        const index = options.index;
+        const count = options.count orelse t.cluster.options.client_count;
+        assert(index + count <= t.cluster.options.client_count);
 
-    pub fn clients(t: *TestContext, index: usize, count: usize) TestClients {
         var client_indexes = stdx.BoundedArrayType(usize, constants.clients_max){};
         for (index..index + count) |i| client_indexes.append_assume_capacity(i);
         return TestClients{
@@ -2179,12 +2251,19 @@ const TestReplicas = struct {
         }
     }
 
+    pub fn open_reformat(t: *const TestReplicas) !void {
+        for (t.replicas.const_slice()) |r| {
+            log.info("{}: recover replica", .{r});
+            try t.cluster.replica_reformat(r, t.cluster.replicas[r].releases_bundled);
+        }
+    }
+
     pub fn index(t: *const TestReplicas) u8 {
         assert(t.replicas.count() == 1);
         return t.replicas.get(0);
     }
 
-    const Health = enum { up, down };
+    const Health = enum { up, down, reformatting };
 
     pub fn health(t: *const TestReplicas) Health {
         var value_all: ?Health = null;
@@ -2192,6 +2271,7 @@ const TestReplicas = struct {
             const value: Health = switch (t.cluster.replica_health[r]) {
                 .up => .up,
                 .down => .down,
+                .reformatting => .reformatting,
             };
             if (value_all) |all| {
                 assert(all == value);

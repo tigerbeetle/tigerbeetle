@@ -5053,6 +5053,7 @@ pub fn ReplicaType(
                     reply.buffer[@sizeOf(Header)..],
                 ),
                 .upgrade => self.execute_op_upgrade(prepare, reply.buffer[@sizeOf(Header)..]),
+                .noop => 0,
                 else => self.state_machine.commit(
                     prepare.header.client,
                     prepare.header.op,
@@ -6767,6 +6768,7 @@ pub fn ReplicaType(
                         assert(op_checkpoint_trigger > self.op + 1);
                     }
                 },
+                .noop => {},
                 else => {
                     self.state_machine.prepare(
                         request.message.header.operation.cast(StateMachine),
@@ -7954,6 +7956,16 @@ pub fn ReplicaType(
             // But each prepare should be replicated at most once, to avoid feedback loops.
             assert(!self.journal.has_prepare(message.header));
             assert(message.header.op > self.commit_min);
+
+            if (self.release.value < message.header.release.value and
+                self.replica == message.header.replica)
+            {
+                // Don't replica messages on a newer release than us if we were the one who
+                // originally sent it. This can happen if our release backtracked due to being
+                // reformatted.
+                log.warn("{}: replicate: ignoring prepare from newer release", .{self.replica});
+                return;
+            }
 
             if (self.replicate_options.star) {
                 if (self.status == .normal and self.primary()) {
