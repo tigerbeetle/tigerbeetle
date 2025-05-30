@@ -608,15 +608,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.replica_reformats[replica_index] = null;
             cluster.replica_health[replica_index] = .down;
             cluster.replica_restart(replica_index, &releases) catch unreachable;
-            //? matklad: Let's call state checker here and _directly_ verify the invariants we rely
-            //? on:
-            //? - That after restart, commit_max of the cluster is larger than the op of restarted
-            //?   replica used to be
-            //? - That the view is strinctly larger.
-            //? dj: I added a check for the commit, but not the view. We can't check the view in
-            //? the state machine b/c state machine only learns about views once they are committed
-            //? in, which this recovery process does not guarantee.
-            //? resolved.
             cluster.state_checker.reformat(replica_index);
         }
 
