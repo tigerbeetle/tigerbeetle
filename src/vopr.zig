@@ -11,6 +11,7 @@ const constants = @import("constants.zig");
 const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
+const fuzz = @import("./testing/fuzz.zig");
 const Header = vsr.Header;
 
 const vsr_vopr_options = @import("vsr_vopr_options");
@@ -84,6 +85,7 @@ const CLIArgs = struct {
 pub fn main() !void {
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
+    fuzz.limit_ram();
 
     var gpa_instance: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer {

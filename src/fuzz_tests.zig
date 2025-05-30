@@ -58,6 +58,7 @@ const CLIArgs = struct {
 };
 
 pub fn main() !void {
+    fuzz.limit_ram();
     probe_stack(3 * MiB);
 
     var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
