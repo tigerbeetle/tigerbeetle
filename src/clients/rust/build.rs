@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
         ("x86_64", "linux", "gnu") => "x86_64-linux-gnu.2.27",
         ("x86_64", "linux", "musl") => "x86_64-linux-musl",
         ("x86_64", "macos", "") => "x86_64-macos",
-        ("x86_64", "windows", "") => "x86_64-windows",
+        ("x86_64", "windows", "msvc") => "x86_64-windows",
         _ => todo!(),
     };
 
