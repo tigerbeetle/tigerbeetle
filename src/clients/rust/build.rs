@@ -25,10 +25,7 @@ fn main() -> anyhow::Result<()> {
         ("x86_64", "linux", "gnu") => "x86_64-linux-gnu.2.27",
         ("x86_64", "linux", "musl") => "x86_64-linux-musl",
         ("x86_64", "macos", "") => "x86_64-macos",
-        ("x86_64", "windows", "gnu") => "x86_64-windows",
-        ("x86_64", "windows", "msvc") => {
-            panic!("The TigerBeetle Rust client only supports the x86_64-pc-windows-gnu target on Windows, not -msvc");
-        },
+        ("x86_64", "windows", "msvc") => "x86_64-windows",
         _ => todo!(),
     };
 
