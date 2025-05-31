@@ -3029,9 +3029,11 @@ pub fn ReplicaType(
         ) void {
             const self: *Replica = @fieldParentPtr("client_replies", client_replies);
             const reply = reply_ orelse {
-                log.debug("{}: on_request_reply: reply not found for replica={} (checksum={})", .{
+                log.debug("{}: on_request_reply: reply not found for replica={} " ++
+                    "(op={} checksum={})", .{
                     self.replica,
                     destination_replica.?,
+                    reply_header.op,
                     reply_header.checksum,
                 });
 
@@ -3044,9 +3046,10 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.checksum == reply_header.checksum);
 
-            log.debug("{}: on_request_reply: sending reply to replica={} (checksum={})", .{
+            log.debug("{}: on_request_reply: sending reply to replica={} (op={} checksum={})", .{
                 self.replica,
                 destination_replica.?,
+                reply_header.op,
                 reply_header.checksum,
             });
 
