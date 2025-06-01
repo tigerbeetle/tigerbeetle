@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
 
-const type_mappings = .{
+pub const type_mappings = .{
     .{ exports.tb_account_flags, "TB_ACCOUNT_FLAGS" },
     .{ exports.tb_account_t, "tb_account_t" },
     .{ exports.tb_transfer_flags, "TB_TRANSFER_FLAGS" },
@@ -39,7 +39,7 @@ const type_mappings = .{
     .{ exports.tb_init_parameters, "tb_init_parameters_t" },
 };
 
-fn resolve_c_type(comptime Type: type) []const u8 {
+pub fn resolve_c_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
         .Array => |info| return resolve_c_type(info.child),
         .Enum => |info| return resolve_c_type(info.tag_type),
