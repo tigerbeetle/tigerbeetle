@@ -11,7 +11,7 @@ use futures::executor::block_on;
 
 use tigerbeetle as tb;
 
-// Using the std hasher for rng to avoid the dep on rand crate
+// Using the std hasher for rng to avoid the dep on rand crate.
 fn random_u64() -> u64 {
     std::hash::Hasher::finish(&std::hash::BuildHasher::build_hasher(
         &std::collections::hash_map::RandomState::new(),
