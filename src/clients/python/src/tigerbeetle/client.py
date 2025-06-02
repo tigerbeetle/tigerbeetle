@@ -8,7 +8,7 @@ import threading
 import time
 from collections.abc import Callable  # noqa: TCH003
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Self
 
 from . import bindings
 from .lib import tb_assert, c_uint128
@@ -17,11 +17,11 @@ logger = logging.getLogger("tigerbeetle")
 
 
 class AtomicInteger:
-    def __init__(self, value=0):
+    def __init__(self, value: int = 0) -> None:
         self._value = value
         self._lock = threading.Lock()
 
-    def increment(self):
+    def increment(self) -> int:
         with self._lock:
             self._value += 1
             return self._value
@@ -45,7 +45,7 @@ class InflightPacket:
     operation: bindings.Operation
     c_event_type: Any
     c_result_type: Any
-    on_completion: Callable | None
+    on_completion: Callable[[Self], None] | None
     on_completion_context: CompletionContextSync | CompletionContextAsync | None
 
 
@@ -137,7 +137,7 @@ class Client:
             c_event_type=c_event_type,
             c_result_type=c_result_type)
 
-    def close(self):
+    def close(self) -> None:
         bindings.tb_client_deinit(ctypes.byref(self._client))
         tb_assert(self._client is not None)
         tb_assert(len(self._inflight_packets) == 0)
@@ -177,10 +177,10 @@ class Client:
         tb_assert(inflight_packet.on_completion is not None)
         inflight_packet.on_completion(inflight_packet)
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
         self.close()
 
 
