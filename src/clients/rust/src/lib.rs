@@ -24,6 +24,9 @@ mod tb_client;
 use tb_client as tbc;
 
 mod conversions;
+mod time_based_id;
+
+pub use time_based_id::id;
 
 /// The tb_client completion context is unused by the Rust bindings.
 /// This is just a magic number to jump out of logs.
