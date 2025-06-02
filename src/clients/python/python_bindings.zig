@@ -206,7 +206,7 @@ fn emit_struct_ctypes(
     buffer.print(
         \\class C{[type_name]s}(ctypes.Structure):
         \\    @classmethod
-        \\    def from_param(cls, obj):
+        \\    def from_param(cls, obj: Any) -> Self:
         \\
     , .{
         .type_name = c_name,
@@ -249,7 +249,7 @@ fn emit_struct_ctypes(
     if (generate_ctypes_to_python) {
         buffer.print(
             \\
-            \\    def to_python(self):
+            \\    def to_python(self) -> {[type_name]s}:
             \\        return {[type_name]s}(
             \\
         , .{
@@ -352,9 +352,10 @@ fn emit_method(
     else
         event_name(operation);
 
+    // n.b. _submit is loosely annotated, as these operations define the interface for the Python developer already
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
-        \\        return {[prefix_call]s}self._submit(
+        \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
         \\            Operation.{[uppercase_name]s},
         \\            {[event_name_or_list]s},
         \\            {[event_type_c]s},
@@ -396,7 +397,7 @@ pub fn main() !void {
         \\import ctypes
         \\import enum
         \\from collections.abc import Callable # noqa: TCH003
-        \\from typing import Any
+        \\from typing import Any, Self
         \\
         \\from .lib import c_uint128, dataclass, tbclient, validate_uint
         \\
@@ -520,7 +521,7 @@ pub fn main() !void {
         \\tb_client_register_log_callback = tbclient.tb_client_register_log_callback
         \\tb_client_register_log_callback.restype = RegisterLogCallbackStatus
         \\# Need to pass in None to clear - ctypes will error if argtypes is set.
-        \\#tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
+        \\# tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
         \\
         \\
         \\
@@ -529,6 +530,8 @@ pub fn main() !void {
     inline for (.{ true, false }) |is_async| {
         const prefix_class = if (is_async) "Async" else "";
 
+        // This is annotated loosely, the operations calling it will contain their
+        // own annotations so the interface is clear to Python as well
         buffer.print(
             \\class {s}StateMachineMixin:
             \\    _submit: Callable[[Operation, Any, Any, Any], Any]
