@@ -88,7 +88,7 @@ pub fn main() !void {
 //
 // If you are from the future, consider removing this and seeing if the issue reproduces. Chances
 // are a kernel upgrade can fix it? The CFO kernel at the time of writing is 6.1.0-25-amd64.
-fn probe_stack(comptime size: usize) void {
+noinline fn probe_stack(comptime size: usize) void {
     var big: [size]u8 = undefined;
     touch(&big);
     assert(big[0] == 92 and big[size - 1] == 92);
