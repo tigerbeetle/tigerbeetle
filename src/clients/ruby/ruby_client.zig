@@ -1,7 +1,6 @@
 const std = @import("std");
 const vsr = @import("vsr");
 const exports = vsr.tb_client.exports;
-const type_mappings = vsr.tb_client.type_mappings;
 const assert = std.debug.assert;
 
 const constants = vsr.constants;
@@ -12,16 +11,14 @@ const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const tb = vsr.tigerbeetle;
 
-const ruby = @cImport({
-    @cInclude("ruby.h");
-});
+const ruby = @cImport(@cInclude("ruby.h"));
 
 /// VSR type mappings: these will always be the same regardless of state machine.
 const mappings_vsr = .{
     .{ exports.tb_operation, "Operation" },
     .{ exports.tb_packet_status, "PacketStatus" },
-    .{ exports.tb_packet_t, "Packet", "tb_packet" },
-    .{ exports.tb_client_t, "Client", "tb_client" },
+    .{ exports.tb_packet_t, "Packet" },
+    .{ exports.tb_client_t, "Client" },
     .{ exports.tb_init_status, "InitStatus" },
     .{ exports.tb_client_status, "ClientStatus" },
     .{ exports.tb_log_level, "LogLevel" },
@@ -56,14 +53,14 @@ export fn initialize_ruby_client() callconv(.C) void {
 
         switch (@typeInfo(ZigType)) {
             .Enum => {
-                convert_enum_to_ruby(m_bindings, ZigType, ruby_name);
+                convert_enum_to_ruby_const(m_bindings, ZigType, ruby_name);
             },
-            .Struct => {
-                continue;
+            .Struct => |info| switch (info.layout) {
+                .@"packed" => convert_enum_to_ruby_const(m_bindings, ZigType, ruby_name),
+                .@"extern" => convert_struct_to_ruby_class(m_bindings, ZigType, ruby_name),
+                else => @compileError("Unsupported struct: " ++ info),
             },
-            else => {
-                @compileError("Unsupported Zig type for Ruby mapping");
-            },
+            else => @compileError("Unsupported Zig type for Ruby mapping: " ++ @typeInfo(ZigType)),
         }
     }
 }
@@ -75,20 +72,41 @@ fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
     return result;
 }
 
-fn convert_enum_to_ruby(module: ruby.VALUE, comptime ZigType: type, ruby_name: []const u8) void {
+fn convert_struct_to_ruby_class(module: ruby.VALUE, comptime ZigType: type, comptime ruby_name: []const u8) void {
+    const type_info = @typeInfo(ZigType);
+    assert(type_info == .Struct);
+    _ = module;
+    _ = ruby_name;
+}
+
+fn convert_enum_to_ruby_const(module: ruby.VALUE, comptime ZigType: type, comptime ruby_name: []const u8) void {
     const ruby_enum = ruby.rb_define_module_under(module, ruby_name.ptr);
-    assert(@typeInfo(ZigType) == .Enum);
+    switch (@typeInfo(ZigType)) {
+        .Enum => |enum_info| {
+            inline for (enum_info.fields) |field| {
+                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
+                    continue;
+                }
+                const enum_value = @field(ZigType, field.name);
+                const ruby_value = @intFromEnum(enum_value);
 
-    const enum_info = @typeInfo(ZigType).Enum;
-    inline for (enum_info.fields) |field| {
-        if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
-            continue;
-        }
-        const enum_value = @field(ZigType, field.name);
-        const ruby_value = @intFromEnum(enum_value);
+                const ruby_const_name = to_upper_case(field.name);
 
-        const ruby_const_name = to_upper_case(field.name);
+                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
+            }
+        },
+        .Struct => |struct_info| {
+            const layout = struct_info.layout;
+            assert(layout == .@"packed");
 
-        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
+            inline for (struct_info.fields, 0..) |field, i| {
+                if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) {
+                    continue;
+                }
+                const ruby_const_name = to_upper_case(field.name);
+                _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
+            }
+        },
+        else => @compileError("Invalid conversion to enum: " ++ ZigType),
     }
 }

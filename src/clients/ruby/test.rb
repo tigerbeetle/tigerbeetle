@@ -1,0 +1,429 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "bundler/setup"
+require "tigerbeetle"
+
+TB_ACCOUNT_FLAGS = {
+  LINKED: 1 << 0,
+  DEBITS_MUST_NOT_EXCEED_CREDITS: 1 << 1,
+  CREDITS_MUST_NOT_EXCEED_DEBITS: 1 << 2,
+  HISTORY: 1 << 3,
+  IMPORTED: 1 << 4,
+  CLOSED: 1 << 5,
+}
+
+TB_ACCOUNT_FLAGS.each do |const, expected|
+  actual = TigerBeetle::Bindings::AccountFlags.const_get(const)
+  next if actual == expected
+
+  raise "AccountFlag::#{const} expected #{expected} got #{actual}"
+end
+
+# typedef struct tb_account_t {
+#     tb_uint128_t id;
+#     tb_uint128_t debits_pending;
+#     tb_uint128_t debits_posted;
+#     tb_uint128_t credits_pending;
+#     tb_uint128_t credits_posted;
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint32_t reserved;
+#     uint32_t ledger;
+#     uint16_t code;
+#     uint16_t flags;
+#     uint64_t timestamp;
+# } tb_account_t;
+
+TB_TRANSFER_FLAGS = {
+  LINKED: 1 << 0,
+  PENDING: 1 << 1,
+  POST_PENDING_TRANSFER: 1 << 2,
+  VOID_PENDING_TRANSFER: 1 << 3,
+  BALANCING_DEBIT: 1 << 4,
+  BALANCING_CREDIT: 1 << 5,
+  CLOSING_DEBIT: 1 << 6,
+  CLOSING_CREDIT: 1 << 7,
+  IMPORTED: 1 << 8,
+}
+TB_TRANSFER_FLAGS.each do |const, expected|
+  actual = TigerBeetle::Bindings::TransferFlags.const_get(const)
+  next if actual == expected
+
+  raise "TransferFlags::#{const} expected #{expected} got #{actual}"
+end
+
+# typedef struct tb_transfer_t {
+#     tb_uint128_t id;
+#     tb_uint128_t debit_account_id;
+#     tb_uint128_t credit_account_id;
+#     tb_uint128_t amount;
+#     tb_uint128_t pending_id;
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint32_t timeout;
+#     uint32_t ledger;
+#     uint16_t code;
+#     uint16_t flags;
+#     uint64_t timestamp;
+# } tb_transfer_t;
+
+TB_CREATE_ACCOUNT_RESULT = {
+  OK: 0,
+  LINKED_EVENT_FAILED: 1,
+  LINKED_EVENT_CHAIN_OPEN: 2,
+  IMPORTED_EVENT_EXPECTED: 22,
+  IMPORTED_EVENT_NOT_EXPECTED: 23,
+  TIMESTAMP_MUST_BE_ZERO: 3,
+  IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: 24,
+  IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: 25,
+  RESERVED_FIELD: 4,
+  RESERVED_FLAG: 5,
+  ID_MUST_NOT_BE_ZERO: 6,
+  ID_MUST_NOT_BE_INT_MAX: 7,
+  EXISTS_WITH_DIFFERENT_FLAGS: 15,
+  EXISTS_WITH_DIFFERENT_USER_DATA_128: 16,
+  EXISTS_WITH_DIFFERENT_USER_DATA_64: 17,
+  EXISTS_WITH_DIFFERENT_USER_DATA_32: 18,
+  EXISTS_WITH_DIFFERENT_LEDGER: 19,
+  EXISTS_WITH_DIFFERENT_CODE: 20,
+  EXISTS: 21,
+  FLAGS_ARE_MUTUALLY_EXCLUSIVE: 8,
+  DEBITS_PENDING_MUST_BE_ZERO: 9,
+  DEBITS_POSTED_MUST_BE_ZERO: 10,
+  CREDITS_PENDING_MUST_BE_ZERO: 11,
+  CREDITS_POSTED_MUST_BE_ZERO: 12,
+  LEDGER_MUST_NOT_BE_ZERO: 13,
+  CODE_MUST_NOT_BE_ZERO: 14,
+  IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS: 26,
+}
+TB_CREATE_ACCOUNT_RESULT.each do |const, expected|
+  actual = TigerBeetle::Bindings::CreateAccountResult.const_get(const)
+  next if actual == expected
+
+  raise "CreateAccountResult::#{const} expected #{expected} got #{actual}"
+end
+
+TB_CREATE_TRANSFER_RESULT = {
+  OK: 0,
+  LINKED_EVENT_FAILED: 1,
+  LINKED_EVENT_CHAIN_OPEN: 2,
+  IMPORTED_EVENT_EXPECTED: 56,
+  IMPORTED_EVENT_NOT_EXPECTED: 57,
+  TIMESTAMP_MUST_BE_ZERO: 3,
+  IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE: 58,
+  IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE: 59,
+  RESERVED_FLAG: 4,
+  ID_MUST_NOT_BE_ZERO: 5,
+  ID_MUST_NOT_BE_INT_MAX: 6,
+  EXISTS_WITH_DIFFERENT_FLAGS: 36,
+  EXISTS_WITH_DIFFERENT_PENDING_ID: 40,
+  EXISTS_WITH_DIFFERENT_TIMEOUT: 44,
+  EXISTS_WITH_DIFFERENT_DEBIT_ACCOUNT_ID: 37,
+  EXISTS_WITH_DIFFERENT_CREDIT_ACCOUNT_ID: 38,
+  EXISTS_WITH_DIFFERENT_AMOUNT: 39,
+  EXISTS_WITH_DIFFERENT_USER_DATA_128: 41,
+  EXISTS_WITH_DIFFERENT_USER_DATA_64: 42,
+  EXISTS_WITH_DIFFERENT_USER_DATA_32: 43,
+  EXISTS_WITH_DIFFERENT_LEDGER: 67,
+  EXISTS_WITH_DIFFERENT_CODE: 45,
+  EXISTS: 46,
+  ID_ALREADY_FAILED: 68,
+  FLAGS_ARE_MUTUALLY_EXCLUSIVE: 7,
+  DEBIT_ACCOUNT_ID_MUST_NOT_BE_ZERO: 8,
+  DEBIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX: 9,
+  CREDIT_ACCOUNT_ID_MUST_NOT_BE_ZERO: 10,
+  CREDIT_ACCOUNT_ID_MUST_NOT_BE_INT_MAX: 11,
+  ACCOUNTS_MUST_BE_DIFFERENT: 12,
+  PENDING_ID_MUST_BE_ZERO: 13,
+  PENDING_ID_MUST_NOT_BE_ZERO: 14,
+  PENDING_ID_MUST_NOT_BE_INT_MAX: 15,
+  PENDING_ID_MUST_BE_DIFFERENT: 16,
+  TIMEOUT_RESERVED_FOR_PENDING_TRANSFER: 17,
+  CLOSING_TRANSFER_MUST_BE_PENDING: 64,
+  LEDGER_MUST_NOT_BE_ZERO: 19,
+  CODE_MUST_NOT_BE_ZERO: 20,
+  DEBIT_ACCOUNT_NOT_FOUND: 21,
+  CREDIT_ACCOUNT_NOT_FOUND: 22,
+  ACCOUNTS_MUST_HAVE_THE_SAME_LEDGER: 23,
+  TRANSFER_MUST_HAVE_THE_SAME_LEDGER_AS_ACCOUNTS: 24,
+  PENDING_TRANSFER_NOT_FOUND: 25,
+  PENDING_TRANSFER_NOT_PENDING: 26,
+  PENDING_TRANSFER_HAS_DIFFERENT_DEBIT_ACCOUNT_ID: 27,
+  PENDING_TRANSFER_HAS_DIFFERENT_CREDIT_ACCOUNT_ID: 28,
+  PENDING_TRANSFER_HAS_DIFFERENT_LEDGER: 29,
+  PENDING_TRANSFER_HAS_DIFFERENT_CODE: 30,
+  EXCEEDS_PENDING_TRANSFER_AMOUNT: 31,
+  PENDING_TRANSFER_HAS_DIFFERENT_AMOUNT: 32,
+  PENDING_TRANSFER_ALREADY_POSTED: 33,
+  PENDING_TRANSFER_ALREADY_VOIDED: 34,
+  PENDING_TRANSFER_EXPIRED: 35,
+  IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS: 60,
+  IMPORTED_EVENT_TIMESTAMP_MUST_POSTDATE_DEBIT_ACCOUNT: 61,
+  IMPORTED_EVENT_TIMESTAMP_MUST_POSTDATE_CREDIT_ACCOUNT: 62,
+  IMPORTED_EVENT_TIMEOUT_MUST_BE_ZERO: 63,
+  DEBIT_ACCOUNT_ALREADY_CLOSED: 65,
+  CREDIT_ACCOUNT_ALREADY_CLOSED: 66,
+  OVERFLOWS_DEBITS_PENDING: 47,
+  OVERFLOWS_CREDITS_PENDING: 48,
+  OVERFLOWS_DEBITS_POSTED: 49,
+  OVERFLOWS_CREDITS_POSTED: 50,
+  OVERFLOWS_DEBITS: 51,
+  OVERFLOWS_CREDITS: 52,
+  OVERFLOWS_TIMEOUT: 53,
+  EXCEEDS_CREDITS: 54,
+  EXCEEDS_DEBITS: 55,
+}
+TB_CREATE_TRANSFER_RESULT.each do |const, expected|
+  actual = TigerBeetle::Bindings::CreateTransferResult.const_get(const)
+  next if actual == expected
+
+  raise "CreateTransferResult::#{const} expected #{expected} got #{actual}"
+end
+
+# typedef struct tb_create_accounts_result_t {
+#     uint32_t index;
+#     uint32_t result;
+# } tb_create_accounts_result_t;
+
+# typedef struct tb_create_transfers_result_t {
+#     uint32_t index;
+#     uint32_t result;
+# } tb_create_transfers_result_t;
+
+# typedef struct tb_account_filter_t {
+#     tb_uint128_t account_id;
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint16_t code;
+#     uint8_t reserved[58];
+#     uint64_t timestamp_min;
+#     uint64_t timestamp_max;
+#     uint32_t limit;
+#     uint32_t flags;
+# } tb_account_filter_t;
+
+TB_ACCOUNT_FILTER_FLAGS = {
+  DEBITS: 1 << 0,
+  CREDITS: 1 << 1,
+  REVERSED: 1 << 2,
+}
+TB_ACCOUNT_FILTER_FLAGS.each do |const, expected|
+  actual = TigerBeetle::Bindings::AccountFilterFlags.const_get(const)
+  next if actual == expected
+
+  raise "AccountFilterFlags::#{const} expected #{expected} got #{actual}"
+end
+
+# typedef struct tb_account_balance_t {
+#     tb_uint128_t debits_pending;
+#     tb_uint128_t debits_posted;
+#     tb_uint128_t credits_pending;
+#     tb_uint128_t credits_posted;
+#     uint64_t timestamp;
+#     uint8_t reserved[56];
+# } tb_account_balance_t;
+
+# typedef struct tb_query_filter_t {
+#     tb_uint128_t user_data_128;
+#     uint64_t user_data_64;
+#     uint32_t user_data_32;
+#     uint32_t ledger;
+#     uint16_t code;
+#     uint8_t reserved[6];
+#     uint64_t timestamp_min;
+#     uint64_t timestamp_max;
+#     uint32_t limit;
+#     uint32_t flags;
+# } tb_query_filter_t;
+
+TB_QUERY_FILTER_FLAGS = {
+  REVERSED: 1 << 0,
+}
+TB_QUERY_FILTER_FLAGS.each do |const, expected|
+  actual = TigerBeetle::Bindings::QueryFilterFlags.const_get(const)
+  next if actual == expected
+
+  raise "QueryFilterFlags::#{const} expected #{expected} got #{actual}"
+end
+
+# // Opaque struct serving as a handle for the client instance.
+# // This struct must be "pinned" (not copyable or movable), as its address must remain stable
+# // throughout the lifetime of the client instance.
+# typedef struct tb_client_t {
+#     uint64_t opaque[4];
+# } tb_client_t;
+
+# // Struct containing the state of a request submitted through the client.
+# // This struct must be "pinned" (not copyable or movable), as its address must remain stable
+# // throughout the lifetime of the request.
+# typedef struct tb_packet_t {
+#     void* user_data;
+#     void* data;
+#     uint32_t data_size;
+#     uint16_t user_tag;
+#     uint8_t operation;
+#     uint8_t status;
+#     uint8_t opaque[32];
+# } tb_packet_t;
+
+TB_OPERATION = {
+  PULSE: 128,
+  GET_CHANGE_EVENTS: 137,
+  CREATE_ACCOUNTS: 138,
+  CREATE_TRANSFERS: 139,
+  LOOKUP_ACCOUNTS: 140,
+  LOOKUP_TRANSFERS: 141,
+  GET_ACCOUNT_TRANSFERS: 142,
+  GET_ACCOUNT_BALANCES: 143,
+  QUERY_ACCOUNTS: 144,
+  QUERY_TRANSFERS: 145,
+}
+TB_OPERATION.each do |const, expected|
+  actual = TigerBeetle::Bindings::Operation.const_get(const)
+  next if actual == expected
+
+  raise "Operation::#{const} expected #{expected} got #{actual}"
+end
+
+TB_PACKET_STATUS = {
+  OK: 0,
+  TOO_MUCH_DATA: 1,
+  CLIENT_EVICTED: 2,
+  CLIENT_RELEASE_TOO_LOW: 3,
+  CLIENT_RELEASE_TOO_HIGH: 4,
+  CLIENT_SHUTDOWN: 5,
+  INVALID_OPERATION: 6,
+  INVALID_DATA_SIZE: 7,
+}
+TB_PACKET_STATUS.each do |const, expected|
+  actual = TigerBeetle::Bindings::PacketStatus.const_get(const)
+  next if actual == expected
+
+  raise "PacketStatus::#{const} expected #{expected} got #{actual}"
+end
+
+TB_INIT_STATUS = {
+  SUCCESS: 0,
+  UNEXPECTED: 1,
+  OUT_OF_MEMORY: 2,
+  ADDRESS_INVALID: 3,
+  ADDRESS_LIMIT_EXCEEDED: 4,
+  SYSTEM_RESOURCES: 5,
+  NETWORK_SUBSYSTEM: 6,
+}
+TB_INIT_STATUS.each do |const, expected|
+  actual = TigerBeetle::Bindings::InitStatus.const_get(const)
+  next if actual == expected
+
+  raise "InitStatus::#{const} expected #{expected} got #{actual}"
+end
+
+TB_CLIENT_STATUS = {
+  OK: 0,
+  INVALID: 1,
+}
+TB_CLIENT_STATUS.each do |const, expected|
+  actual = TigerBeetle::Bindings::ClientStatus.const_get(const)
+  next if actual == expected
+
+  raise "ClientStatus::#{const} expected #{expected} got #{actual}"
+end
+
+TB_REGISTER_LOG_CALLBACK_STATUS = {
+  SUCCESS: 0,
+  ALREADY_REGISTERED: 1,
+  NOT_REGISTERED: 2,
+}
+TB_REGISTER_LOG_CALLBACK_STATUS.each do |const, expected|
+  actual = TigerBeetle::Bindings::RegisterLogCallbackStatus.const_get(const)
+  next if actual == expected
+
+  raise "RegisterLogCallbackStatus::#{const} expected #{expected} got #{actual}"
+end
+
+TB_LOG_LEVEL = {
+  ERR: 0,
+  WARN: 1,
+  INFO: 2,
+  DEBUG: 3,
+}
+TB_LOG_LEVEL.each do |const, expected|
+  actual = TigerBeetle::Bindings::LogLevel.const_get(const)
+  next if actual == expected
+
+  raise "LogLevel::#{const} expected #{expected} got #{actual}"
+end
+
+# typedef struct tb_init_parameters_t {
+#     tb_uint128_t cluster_id;
+#     tb_uint128_t client_id;
+#     uint8_t* addresses_ptr;
+#     uint64_t addresses_len;
+# } tb_init_parameters_t;
+
+# // Initialize a new TigerBeetle client which connects to the addresses provided and
+# // completes submitted packets by invoking the callback with the given context.
+# TB_INIT_STATUS tb_client_init(
+#     tb_client_t *client_out,
+#     // 128-bit unsigned integer represented as a 16-byte little-endian array.
+#     const uint8_t cluster_id[16],
+#     const char *address_ptr,
+#     uint32_t address_len,
+#     uintptr_t completion_ctx,
+#     void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+# );
+
+# // Initialize a new TigerBeetle client that echoes back any submitted data.
+# TB_INIT_STATUS tb_client_init_echo(
+#     tb_client_t *client_out,
+#     // 128-bit unsigned integer represented as a 16-byte little-endian array.
+#     const uint8_t cluster_id[16],
+#     const char *address_ptr,
+#     uint32_t address_len,
+#     uintptr_t completion_ctx,
+#     void (*completion_callback)(uintptr_t, tb_packet_t*, uint64_t, const uint8_t*, uint32_t)
+# );
+
+# // Retrieve the parameters initially passed to `tb_client_init` or `tb_client_init_echo`.
+# // Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+# // not initialized or has already been closed.
+# TB_CLIENT_STATUS tb_client_init_parameters(
+#     tb_client_t* client,
+#     tb_init_parameters_t* init_parameters_out
+# );
+
+# // Retrieve the callback context initially passed to `tb_client_init` or `tb_client_init_echo`.
+# // Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+# // not initialized or has already been closed.
+# TB_CLIENT_STATUS tb_client_completion_context(
+#     tb_client_t* client,
+#     uintptr_t* completion_ctx_out
+# );
+
+# // Submit a packet with its `operation`, `data`, and `data_size` fields set.
+# // Once completed, `completion_callback` will be invoked with `completion_ctx`
+# // and the given packet on the `tb_client` thread (separate from the caller's thread).
+# // Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+# // not initialized or has already been closed.
+# TB_CLIENT_STATUS tb_client_submit(
+#     tb_client_t *client,
+#     tb_packet_t *packet
+# );
+
+# // Closes the client, causing any previously submitted packets to be completed with
+# // `TB_PACKET_CLIENT_SHUTDOWN` before freeing any allocated client resources from init.
+# // Return value: `TB_CLIENT_OK` on success, or `TB_CLIENT_INVALID` if the client handle was
+# // not initialized or has already been closed.
+# TB_CLIENT_STATUS tb_client_deinit(
+#     tb_client_t *client
+# );
+
+# // Registers or unregisters the application log callback.
+# TB_REGISTER_LOG_CALLBACK_STATUS tb_client_register_log_callback(
+#     void (*callback)(TB_LOG_LEVEL, const uint8_t*, uint32_t),
+#     bool debug
+# );
