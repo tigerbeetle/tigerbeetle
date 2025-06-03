@@ -54,6 +54,20 @@ module TigerBeetle
     def query_transfers(filter)
     end
 
+    def deinit
+      status = @client.deinit
+      @client = nil
+
+      case status
+      when Bindings::ClientStatus::OK
+        true
+      when Bindings::ClientStatus::INVALID
+        raise "Client invalid"
+      else
+        raise "Unknown client status: #{status}"
+      end
+    end
+
     private
 
     attr_reader :client

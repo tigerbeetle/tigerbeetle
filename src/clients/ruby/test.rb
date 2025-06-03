@@ -598,5 +598,7 @@ else
   raise "Expected 2 create account results, got #{create_account_result.size}"
 end
 
+
+client.deinit
 puts "*"* 80
 puts "  SUCCESS: All TigerBeetle constants match expected values\n"

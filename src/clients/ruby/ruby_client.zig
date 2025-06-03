@@ -83,6 +83,7 @@ pub export fn initialize_ruby_client() callconv(.C) void {
     const client_struct = tb_client_struct();
     const rb_client = ruby.rb_const_get(m_bindings, ruby.rb_intern("Client"));
     _ = ruby.rb_define_method(rb_client, "init", @ptrCast(&client_struct.init), 2);
+    _ = ruby.rb_define_method(rb_client, "deinit", @ptrCast(&client_struct.deinit), 0);
     _ = ruby.rb_define_method(rb_client, "submit", @ptrCast(&client_struct.submit), 2);
 }
 
@@ -94,6 +95,7 @@ fn tb_client_struct() type {
             }
         }
     };
+
     return struct {
         const ResultContext = struct {
             mutex: std.Thread.Mutex = std.Thread.Mutex{},
@@ -165,6 +167,18 @@ fn tb_client_struct() type {
                 @ptrCast(&on_completion),
             );
 
+            return ruby.INT2NUM(@intFromEnum(status));
+        }
+
+        fn deinit(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            if (!ruby.RB_TYPE_P(self, ruby.T_DATA)) {
+                ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
+                return ruby.Qnil;
+            }
+
+            const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+
+            const status = exports.deinit(client);
             return ruby.INT2NUM(@intFromEnum(status));
         }
 
