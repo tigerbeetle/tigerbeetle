@@ -1536,9 +1536,11 @@ pub fn ReplicaType(
 
                 assert(message.references == 1);
 
+                // Avoid leaking sector padding for messages written to a block device:
                 if (message.header.command == .request or
                     message.header.command == .prepare or
-                    message.header.command == .block)
+                    message.header.command == .block or
+                    message.header.command == .reply)
                 {
                     const sector_ceil = vsr.sector_ceil(message.header.size);
                     if (message.header.size != sector_ceil) {
@@ -5110,6 +5112,9 @@ pub fn ReplicaType(
             reply.header.context = reply.header.calculate_checksum();
             reply.header.set_checksum();
 
+            const size_ceil = vsr.sector_ceil(reply.header.size);
+            @memset(reply.buffer[reply.header.size..size_ceil], 0);
+
             if (self.event_callback) |hook| {
                 hook(self, .{ .committed = .{ .prepare = prepare, .reply = reply } });
             }
@@ -6824,6 +6829,9 @@ pub fn ReplicaType(
             };
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
+
+            const size_ceil = vsr.sector_ceil(message.header.size);
+            assert(stdx.zeroed(message.buffer[message.header.size..size_ceil]));
 
             log.debug("{}: primary_pipeline_prepare: prepare checksum={} op={}", .{
                 self.replica,
@@ -10598,11 +10606,11 @@ pub fn ReplicaType(
                 .session = 0,
             };
 
-            stdx.copy_disjoint(.exact, u8, request.body_used(), body);
-            @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
-
             request.header.set_checksum_body(request.body_used());
             request.header.set_checksum();
+
+            stdx.copy_disjoint(.exact, u8, request.body_used(), body);
+            @memset(request.buffer[request.header.size..vsr.sector_ceil(request.header.size)], 0);
 
             self.send_message_to_replica(self.replica, request);
             return self.flush_loopback_queue();
