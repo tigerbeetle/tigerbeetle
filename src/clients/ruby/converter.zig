@@ -64,7 +64,7 @@ pub fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) typ
         const Self = @This();
         const type_info = @typeInfo(ZigType);
         const type_name = @typeName(ZigType) ++ "\x00";
-        const rb_class_name = ruby_name ++ "\x00";
+        pub const rb_class_name = ruby_name ++ "\x00";
 
         pub const rb_data_type = ruby.rb_data_type_t{
             .wrap_struct_name = &type_name[0],
@@ -156,7 +156,6 @@ pub fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) typ
             ruby.rb_define_method(class, "initialize", @ptrCast(&initialize), -1);
             ruby.rb_define_method(class, "to_h", @ptrCast(&convert_to_ruby_hash), 0);
 
-            // Runtime calls to rb_define_method
             for (method_defs) |method_def| {
                 ruby.rb_define_method(class, method_def.name, @ptrCast(method_def.func), method_def.argc);
             }

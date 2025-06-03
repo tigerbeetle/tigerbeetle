@@ -16,7 +16,7 @@ module TigerBeetle
     end
 
     # CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
-    def create_accounts(*accounts)
+    def create_accounts(accounts)
       accounts = array_wrap(accounts)
 
       client.submit(Bindings::Operation::CREATE_ACCOUNTS, accounts)

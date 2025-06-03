@@ -573,5 +573,30 @@ if empty_lookup.size != 0
   raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
 end
 
+account1 = TigerBeetle::Bindings::Account.new(
+  id: 4201,
+  code: 10,
+  ledger: 1,
+  user_data_128: 4201
+)
+account2 = TigerBeetle::Bindings::Account.new(
+  id: 4202,
+  code: 10,
+  ledger: 1,
+  user_data_128: 4202
+)
+create_accounts_result = client.create_accounts([account1, account2])
+if create_accounts_result.size == 0
+  puts "2 Accounts created successfully"
+elsif create_accounts_result.size == 2
+  if create_accounts_result.map(&:result).uniq == [TigerBeetle::Bindings::CreateAccountResult::EXISTS]
+    puts "2 Accounts already exist"
+  else
+    raise "Accounts failed to create for unknown reason #{create_accounts_result.map(&:to_h)}"
+  end
+else
+  raise "Expected 2 create account results, got #{create_account_result.size}"
+end
+
 puts "*"* 80
 puts "  SUCCESS: All TigerBeetle constants match expected values\n"
