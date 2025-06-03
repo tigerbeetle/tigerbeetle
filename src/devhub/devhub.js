@@ -91,7 +91,7 @@ async function main_seeds() {
   const table_dom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let seed_fail_count = 0;
-  let vpm = undefined; // VOPRS per minute
+  let vpm = undefined; // VOPRs per minute
 
   for (const record of records) {
     if (
