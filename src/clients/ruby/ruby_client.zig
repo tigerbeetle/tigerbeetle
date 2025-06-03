@@ -66,6 +66,7 @@ const mappings_state_machine = .{
     .{ tb.AccountFilter, build_rb_setup_struct(tb.AccountFilter, "AccountFilter") },
     .{ tb.AccountBalance, build_rb_setup_struct(tb.AccountBalance, "AccountBalance") },
     .{ tb.QueryFilter, build_rb_setup_struct(tb.QueryFilter, "QueryFilter") },
+    .{ tb.CreateAccountsResult, build_rb_setup_struct(tb.CreateAccountsResult, "CreateAccountsResult") },
 };
 
 const mappings_all = mappings_vsr ++ mappings_state_machine;
@@ -234,24 +235,61 @@ fn tb_client_struct() type {
                 const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
                 switch (result_context.operation) {
                     .lookup_accounts => {
-                        const rb_account_class = ruby.rb_const_get(m_bindings, ruby.rb_intern("Account"));
-                        const num_accounts = result_context.result_len / @sizeOf(exports.tb_account_t);
+                        const rb_account_class_name = comptime blk: {
+                            for (mappings_state_machine) |type_mapping| {
+                                if (type_mapping[0] == tb.Account) {
+                                    break :blk type_mapping[1].rb_class_name;
+                                }
+                            }
+                        };
+                        const rb_account_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_account_class_name[0]));
+                        const num_accounts = result_context.result_len / @sizeOf(tb.Account);
                         const rb_result = ruby.rb_ary_new2(@intCast(num_accounts));
                         const rb_data_account_t: *const ruby.rb_data_type_t = comptime blk: {
                             for (mappings_state_machine) |type_mapping| {
-                                if (type_mapping[0] == exports.tb_account_t) {
+                                if (type_mapping[0] == tb.Account) {
                                     break :blk type_mapping[1].get_rb_data_type_ptr();
                                 }
                             }
                         };
                         for (0..num_accounts) |i| {
-                            const account_data = result[i * @sizeOf(exports.tb_account_t) .. (i + 1) * @sizeOf(exports.tb_account_t)];
+                            const account_data = result[i * @sizeOf(tb.Account) .. (i + 1) * @sizeOf(tb.Account)];
                             const rb_account = ruby.rb_class_new_instance(0, null, rb_account_class);
-                            const account: *exports.tb_account_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_account, rb_data_account_t)));
+                            const account: *tb.Account = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_account, rb_data_account_t)));
 
-                            @memcpy(@as([*]u8, @ptrCast(account))[0..@sizeOf(exports.tb_account_t)], account_data);
+                            @memcpy(@as([*]u8, @ptrCast(account))[0..@sizeOf(tb.Account)], account_data);
 
                             _ = ruby.rb_ary_push(rb_result, rb_account);
+                        }
+
+                        return rb_result;
+                    },
+                    .create_accounts => {
+                        const rb_account_results_class_name = comptime blk: {
+                            for (mappings_state_machine) |type_mapping| {
+                                if (type_mapping[0] == tb.CreateAccountsResult) {
+                                    break :blk type_mapping[1].rb_class_name;
+                                }
+                            }
+                        };
+                        const rb_create_account_result_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_account_results_class_name[0]));
+                        const num_results = result_context.result_len / @sizeOf(tb.CreateAccountsResult);
+                        const rb_result = ruby.rb_ary_new2(@intCast(num_results));
+                        const rb_data_create_account_result_t: *const ruby.rb_data_type_t = comptime blk: {
+                            for (mappings_state_machine) |type_mapping| {
+                                if (type_mapping[0] == tb.CreateAccountsResult) {
+                                    break :blk type_mapping[1].get_rb_data_type_ptr();
+                                }
+                            }
+                        };
+                        for (0..num_results) |i| {
+                            const result_data = result[i * @sizeOf(tb.CreateAccountsResult) .. (i + 1) * @sizeOf(tb.CreateAccountsResult)];
+                            const rb_result_instance = ruby.rb_class_new_instance(0, null, rb_create_account_result_class);
+                            const create_account_result: *tb.CreateAccountsResult = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_result_instance, rb_data_create_account_result_t)));
+
+                            @memcpy(@as([*]u8, @ptrCast(create_account_result))[0..@sizeOf(tb.CreateAccountsResult)], result_data);
+
+                            _ = ruby.rb_ary_push(rb_result, rb_result_instance);
                         }
 
                         return rb_result;
@@ -303,6 +341,29 @@ fn tb_client_struct() type {
 
                         const dest_slice = data_alloc[i * @sizeOf(u128) .. (i + 1) * @sizeOf(u128)];
                         @memcpy(dest_slice, std.mem.asBytes(&account_id));
+                    }
+                },
+                .create_accounts => {
+                    out_data.size = @intCast(data_array_len * @sizeOf(tb.Account));
+                    const data_alloc = global_allocator.alloc(u8, out_data.size) catch {
+                        ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to allocate memory for data");
+                        return;
+                    };
+                    out_data.data = data_alloc.ptr;
+
+                    const rb_data_account_t: *const ruby.rb_data_type_t = comptime blk: {
+                        for (mappings_state_machine) |type_mapping| {
+                            if (type_mapping[0] == tb.Account) {
+                                break :blk type_mapping[1].get_rb_data_type_ptr();
+                            }
+                        }
+                    };
+                    var i: usize = 0;
+                    while (i < data_array_len) : (i += 1) {
+                        const rb_account = ruby.rb_ary_entry(rb_data, @intCast(i));
+                        const accounts_result: *tb.Account = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_account, rb_data_account_t)));
+                        const dest_slice = data_alloc[i * @sizeOf(tb.Account) .. (i + 1) * @sizeOf(tb.Account)];
+                        @memcpy(dest_slice, std.mem.asBytes(accounts_result));
                     }
                 },
                 else => {
