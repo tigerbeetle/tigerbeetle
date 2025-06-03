@@ -18,7 +18,6 @@ pub const MessageBus = struct {
     network: *Network,
     pool: *MessagePool,
 
-    cluster: u128,
     process: Process,
 
     buffer: ?MessageBuffer,
@@ -33,7 +32,6 @@ pub const MessageBus = struct {
 
     pub fn init(
         _: std.mem.Allocator,
-        cluster: u128,
         process: Process,
         message_pool: *MessagePool,
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
@@ -42,7 +40,6 @@ pub const MessageBus = struct {
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
-            .cluster = cluster,
             .process = process,
             .buffer = MessageBuffer.init(message_pool),
             .on_messages_callback = on_messages_callback,
