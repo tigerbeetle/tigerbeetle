@@ -91,8 +91,16 @@ async function main_seeds() {
   const table_dom = document.querySelector("#seeds>tbody");
   let commit_previous = undefined;
   let seed_fail_count = 0;
+  let vpm = undefined; // VOPRs per minute
 
   for (const record of records) {
+    if (
+      !vpm && record.fuzzer === "vopr" && is_main(record) && record.count > 100
+    ) {
+      const elapsed_seconds = Date.now() / 1000 - record.seed_timestamp_start;
+      vpm = (record.count * 60) / elapsed_seconds;
+    }
+
     let include = undefined;
     if (query_all) {
       include = true;
@@ -168,6 +176,10 @@ async function main_seeds() {
           </td>
       `;
     table_dom.appendChild(row_dom);
+  }
+
+  if (vpm) {
+    document.querySelector("#vpm").innerHTML = `${Math.floor(vpm)} VPM`;
   }
 
   let main_branch_fail = 0;
