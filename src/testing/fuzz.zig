@@ -1,10 +1,15 @@
 //! Utils functions for writing fuzzers.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const PRNG = stdx.PRNG;
 const ratio = stdx.PRNG.ratio;
+
+const GiB = 1024 * 1024 * 1024;
+
+const log = std.log.scoped(.fuzz);
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
@@ -215,5 +220,16 @@ pub fn ReadyQueueType(T: type) type {
 
             return result;
         }
+    };
+}
+
+pub fn limit_ram() void {
+    if (builtin.target.os.tag != .linux) return;
+
+    std.posix.setrlimit(.AS, .{
+        .cur = 20 * GiB,
+        .max = 20 * GiB,
+    }) catch |err| {
+        log.warn("failed to setrlimit address space: {}", .{err});
     };
 }
