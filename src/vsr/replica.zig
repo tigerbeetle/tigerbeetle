@@ -1236,7 +1236,6 @@ pub fn ReplicaType(
             // faulting in.
             self.message_bus = try MessageBus.init(
                 allocator,
-                options.cluster,
                 .{ .replica = options.replica_index },
                 options.message_pool,
                 Replica.on_messages_from_bus,

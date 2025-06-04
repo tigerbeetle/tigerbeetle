@@ -2698,7 +2698,6 @@ const TestClientBus = struct {
             .message_pool = message_pool,
             .message_bus = try MessageBus.init(
                 allocator,
-                context.cluster.options.cluster_id,
                 .{ .client = client_id },
                 message_pool,
                 on_messages,
