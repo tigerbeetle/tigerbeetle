@@ -1,8 +1,7 @@
 # Monitoring
 
-TigerBeetle supports emitting metrics via StatsD, with
-[DogStatsD extensions](https://docs.datadoghq.com/developers/dogstatsd/datagram_shell?tab=metrics)
-for tags.
+TigerBeetle supports emitting metrics via StatsD, and uses the
+[DogStatsD format for tags.](https://docs.datadoghq.com/developers/dogstatsd/datagram_shell?tab=metrics)
 
 This requires a StatsD compatible agent running locally. The Datadog Agent works out of the
 box with its default configuration, as does Telegraf's [statsd plugin](https://github.com/influxdata/telegraf/blob/master/plugins/inputs/statsd/README.md),
@@ -14,7 +13,9 @@ You can enable emitting metrics by adding the following CLI flags to each replic
 ```
 --experimental --statsd=127.0.0.1:8125
 ```
-(the `--statsd=` only accepts IP addresses at present.)
+
+The `--statsd` argument must be specified as an `IP:Port` address (IPv4 or IPv6).  DNS names are not
+currently supported.
 
 All TigerBeetle metrics are namespaced under `tb.` and are tagged with `cluster` (the cluster ID
 specified at format time) and `replica` (the replica index). Specific metrics might have additional

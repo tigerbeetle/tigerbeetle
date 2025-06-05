@@ -92,34 +92,6 @@ pub const tree_ids = struct {
     };
 };
 
-// Looking to make backwards incompatible changes here? Make sure to check release.zig for
-// `release_triple_client_min`.
-pub const Operation_ = enum(u8) {
-    /// Operations exported by TigerBeetle:
-    pulse = global_constants.vsr_operations_reserved + 0,
-
-    // Deprecated operations not encoded as multi-batch:
-    deprecated_create_accounts = global_constants.vsr_operations_reserved + 1,
-    deprecated_create_transfers = global_constants.vsr_operations_reserved + 2,
-    deprecated_lookup_accounts = global_constants.vsr_operations_reserved + 3,
-    deprecated_lookup_transfers = global_constants.vsr_operations_reserved + 4,
-    deprecated_get_account_transfers = global_constants.vsr_operations_reserved + 5,
-    deprecated_get_account_balances = global_constants.vsr_operations_reserved + 6,
-    deprecated_query_accounts = global_constants.vsr_operations_reserved + 7,
-    deprecated_query_transfers = global_constants.vsr_operations_reserved + 8,
-
-    get_change_events = config.vsr_operations_reserved + 9,
-
-    create_accounts = global_constants.vsr_operations_reserved + 10,
-    create_transfers = global_constants.vsr_operations_reserved + 11,
-    lookup_accounts = global_constants.vsr_operations_reserved + 12,
-    lookup_transfers = global_constants.vsr_operations_reserved + 13,
-    get_account_transfers = global_constants.vsr_operations_reserved + 14,
-    get_account_balances = global_constants.vsr_operations_reserved + 15,
-    query_accounts = global_constants.vsr_operations_reserved + 16,
-    query_transfers = global_constants.vsr_operations_reserved + 17,
-};
-
 pub fn StateMachineType(
     comptime Storage: type,
     comptime config: global_constants.StateMachineConfig,
@@ -131,7 +103,7 @@ pub fn StateMachineType(
     return struct {
         const StateMachine = @This();
         const Grid = @import("vsr/grid.zig").GridType(Storage);
-        pub const Operation = Operation_;
+        pub const Operation = tb.Operation;
 
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;

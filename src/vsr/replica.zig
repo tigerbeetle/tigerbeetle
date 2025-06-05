@@ -1815,6 +1815,7 @@ pub fn ReplicaType(
             // so the StateMachine `{prepare,commit}_timestamp` will be used instead.
             // Invariant: header.timestamp ≠ 0 only for AOF recovery, then we need to be
             // deterministic with the timestamp being replayed.
+
             const realtime: i64 = if (message.header.client == 0)
                 @intCast(message.header.timestamp)
             else
@@ -4215,6 +4216,7 @@ pub fn ReplicaType(
 
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
+
                     self.commit_completion_timer.reset();
                     self.trace.start(.{ .replica_commit = .{
                         .stage = self.commit_stage,
@@ -4953,40 +4955,58 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_us = @divFloor(
+            const commit_completion_time_local_us = @divFloor(
                 self.commit_completion_timer.read(),
                 std.time.ns_per_us,
             );
-            const commit_completion_time_ms = @divFloor(
-                commit_completion_time_us,
+            const commit_completion_time_local_ms = @divFloor(
+                commit_completion_time_local_us,
                 std.time.us_per_ms,
             );
-            if (commit_completion_time_ms > constants.client_request_completion_warn_ms) {
+            if (commit_completion_time_local_ms > constants.client_request_completion_warn_ms) {
                 log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.replica,
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
                     self.commit_prepare.?.header.operation.tag_name(StateMachine),
-                    commit_completion_time_ms,
+                    commit_completion_time_local_ms,
                 });
             }
 
-            // In most cases, this should be equal to the latency the client sees when sending a
-            // request, less the language client overhead, MessageBus queue and network latency.
+            // This is the timestamp from when the primary first saw the request to now. It
+            // includes compaction time, and will work and show view change latencies, etc.
             //
+            // NB: When a request comes in, it may be blocked by CPU work (likely, compaction) and
+            // only get timestamped _after_ that work finishes. This adds some measurement error.
+            const commit_completion_time_request_us = blk: {
+                const maybe_realtime = self.clock.realtime_synchronized();
+                if (maybe_realtime) |realtime| {
+                    assert(realtime >= self.commit_prepare.?.header.timestamp);
+
+                    break :blk @as(u64, @intCast(realtime)) -
+                        self.commit_prepare.?.header.timestamp;
+                } else {
+                    break :blk 0;
+                }
+            };
+
             // Only time operations when:
             // * Running with the real state machine - as otherwise there's a circular dependency,
             // * and when the replica's status is .normal - otherwise things like WAL replay at
             //   startup will skew these numbers.
-            if (StateMachine.Operation == @import("../state_machine.zig").Operation_ and
+            if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                 self.status == .normal)
             {
                 if (StateMachine.operation_from_vsr(
                     self.commit_prepare.?.header.operation,
                 )) |operation| {
                     self.trace.timing(
+                        .{ .replica_request_local = .{ .operation = operation } },
+                        commit_completion_time_local_us,
+                    );
+                    self.trace.timing(
                         .{ .replica_request = .{ .operation = operation } },
-                        commit_completion_time_us,
+                        commit_completion_time_request_us,
                     );
                 }
             }
@@ -5112,7 +5132,6 @@ pub fn ReplicaType(
             self.commit_min += 1;
             assert(self.commit_min == prepare.header.op);
             self.advance_commit_max(self.commit_min, @src());
-
             reply.header.* = .{
                 .command = .reply,
                 .operation = prepare.header.operation,
@@ -5184,6 +5203,31 @@ pub fn ReplicaType(
                         reply.header,
                     });
                     self.send_reply_message_to_client(reply);
+
+                    const commit_execute_time_request_us = blk: {
+                        const maybe_realtime = self.clock.realtime_synchronized();
+                        if (maybe_realtime) |realtime| {
+                            assert(realtime >= self.commit_prepare.?.header.timestamp);
+
+                            break :blk @as(u64, @intCast(realtime)) -
+                                self.commit_prepare.?.header.timestamp;
+                        } else {
+                            break :blk 0;
+                        }
+                    };
+
+                    if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
+                        self.status == .normal)
+                    {
+                        if (StateMachine.operation_from_vsr(
+                            self.commit_prepare.?.header.operation,
+                        )) |operation| {
+                            self.trace.timing(
+                                .{ .replica_request_execute = .{ .operation = operation } },
+                                commit_execute_time_request_us,
+                            );
+                        }
+                    }
                 }
             }
         }

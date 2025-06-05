@@ -417,8 +417,8 @@ test "trace json" {
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":5,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":5,"ph":"E","ts":20000},
+        \\{"pid":0,"tid":7,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":0,"tid":7,"ph":"E","ts":20000},
         \\{"pid":0,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);

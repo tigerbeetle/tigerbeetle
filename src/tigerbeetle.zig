@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx.zig");
+const constants = @import("constants.zig");
 
 pub const Account = extern struct {
     id: u128,
@@ -628,6 +629,34 @@ pub const ChangeEventsFilter = extern struct {
         assert(stdx.no_padding(ChangeEventsFilter));
         assert(@sizeOf(ChangeEventsFilter) == 64);
     }
+};
+
+// Looking to make backwards incompatible changes here? Make sure to check release.zig for
+// `release_triple_client_min`.
+pub const Operation = enum(u8) {
+    /// Operations exported by TigerBeetle:
+    pulse = constants.vsr_operations_reserved + 0,
+
+    // Deprecated operations not encoded as multi-batch:
+    deprecated_create_accounts = constants.vsr_operations_reserved + 1,
+    deprecated_create_transfers = constants.vsr_operations_reserved + 2,
+    deprecated_lookup_accounts = constants.vsr_operations_reserved + 3,
+    deprecated_lookup_transfers = constants.vsr_operations_reserved + 4,
+    deprecated_get_account_transfers = constants.vsr_operations_reserved + 5,
+    deprecated_get_account_balances = constants.vsr_operations_reserved + 6,
+    deprecated_query_accounts = constants.vsr_operations_reserved + 7,
+    deprecated_query_transfers = constants.vsr_operations_reserved + 8,
+
+    get_change_events = constants.vsr_operations_reserved + 9,
+
+    create_accounts = constants.vsr_operations_reserved + 10,
+    create_transfers = constants.vsr_operations_reserved + 11,
+    lookup_accounts = constants.vsr_operations_reserved + 12,
+    lookup_transfers = constants.vsr_operations_reserved + 13,
+    get_account_transfers = constants.vsr_operations_reserved + 14,
+    get_account_balances = constants.vsr_operations_reserved + 15,
+    query_accounts = constants.vsr_operations_reserved + 16,
+    query_transfers = constants.vsr_operations_reserved + 17,
 };
 
 comptime {
