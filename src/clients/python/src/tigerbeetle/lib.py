@@ -1,6 +1,7 @@
 import ctypes
 import dataclasses
 import platform
+import sys
 from pathlib import Path
 from typing import Any, Self
 
@@ -74,14 +75,6 @@ class c_uint128(ctypes.Structure):  # noqa: N801
 
     def to_python(self) -> int:
         return int(self._high << 64 | self._low)
-
-
-# Use slots=True if the version of Python is new enough (3.10+) to support it.
-try:
-    dataclass = dataclasses.dataclass(slots=True)
-except TypeError:
-    dataclass = dataclasses.dataclass()
-
 
 def tb_assert(value: Any) -> None:
     """
