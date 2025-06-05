@@ -4,11 +4,16 @@ import asyncio
 import ctypes
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable  # noqa: TCH003
 from dataclasses import dataclass
-from typing import Any, Self
+from typing import Any
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 from . import bindings
 from .lib import tb_assert, c_uint128

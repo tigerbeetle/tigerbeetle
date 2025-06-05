@@ -9,7 +9,11 @@ import enum
 import sys
 from dataclasses import dataclass
 from collections.abc import Callable # noqa: TCH003
-from typing import Any, Self
+from typing import Any
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 from .lib import c_uint128, tbclient, validate_uint
 
