@@ -250,7 +250,7 @@ fn ScanMergeType(
                             // The new timestamp may lag behind the merge_iterator's latest key.
                             //
                             // Suppose there is a query:
-                            //   (index_1 AND (index_1 OR (index_2 AND index_3)))
+                            //   (index_0 AND (index_1 OR (index_2 AND index_3)))
                             // with the listed timestamps in each index:
                             //
                             //   zig_zag_merge₁:     [              13, 13     ]
