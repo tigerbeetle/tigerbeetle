@@ -396,10 +396,16 @@ pub fn main() !void {
         \\
         \\import ctypes
         \\import enum
+        \\import sys
+        \\from dataclasses import dataclass
         \\from collections.abc import Callable # noqa: TCH003
         \\from typing import Any, Self
         \\
-        \\from .lib import c_uint128, dataclass, tbclient, validate_uint
+        \\from .lib import c_uint128, tbclient, validate_uint
+        \\
+        \\# Use slots=True if the version of Python is new enough (3.10+) to support it.
+        \\if sys.version_info >= (3, 10):
+        \\    dataclass = dataclass(slots=True)
         \\
         \\
         \\

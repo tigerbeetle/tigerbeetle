@@ -156,7 +156,8 @@ class Client:
 
         if packet[0].status != bindings.PacketStatus.OK.value:
             inflight_packet.response = PacketError(repr(bindings.PacketStatus(packet[0].status)))
-            tb_assert(inflight_packet.on_completion is not None)
+            if inflight_packet.on_completion is None:
+                raise PacketError(repr(bindings.PacketStatus(packet[0].status)))
             inflight_packet.on_completion(inflight_packet)
             return
 
@@ -174,7 +175,8 @@ class Client:
 
         inflight_packet.response = results
 
-        tb_assert(inflight_packet.on_completion is not None)
+        if inflight_packet.on_completion is None:
+            raise TypeError(repr(inflight_packet.on_completion))
         inflight_packet.on_completion(inflight_packet)
 
     def __enter__(self) -> Self:
@@ -185,11 +187,13 @@ class Client:
 
 
 class ClientSync(Client, bindings.StateMachineMixin):
-    def _on_completion(self, inflight_packet):
+    def _on_completion(self, inflight_packet: InflightPacket) -> None:
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextSync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.event.set()
 
     def _submit(self, operation: bindings.Operation, operations: list[Any],
-                c_event_type: Any, c_result_type: Any):
+                c_event_type: Any, c_result_type: Any) -> Any:
         inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
@@ -212,18 +216,22 @@ class ClientSync(Client, bindings.StateMachineMixin):
 
 
 class ClientAsync(Client, bindings.AsyncStateMachineMixin):
-    def _on_completion(self, inflight_packet):
+    def _on_completion(self, inflight_packet: InflightPacket) -> None:
         """
         Called by Client._c_on_completion, which itself is called from a different thread. Use
         `call_soon_threadsafe` to return to the thread of the event loop the request was invoked
         from, so _trigger_event() can trigger the async event and allow the client to progress.
         """
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.loop.call_soon_threadsafe(
             self._trigger_event,
             inflight_packet
         )
 
-    def _trigger_event(self, inflight_packet):
+    def _trigger_event(self, inflight_packet:InflightPacket) -> None:
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.event.set()
 
     async def _submit(self, operation: bindings.Operation, operations: Any,
