@@ -352,7 +352,7 @@ fn emit_method(
     else
         event_name(operation);
 
-    // n.b. _submit is loosely annotated, as these operations define the interface for the Python developer already
+    // n.b. _submit is loosely annotated, the operations define interfaces for the Python developer
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
         \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
