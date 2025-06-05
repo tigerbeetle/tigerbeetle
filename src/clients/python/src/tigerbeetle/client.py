@@ -227,7 +227,7 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
         inflight_packet.on_completion_context.event.set()
 
     async def _submit(self, operation: bindings.Operation, operations: Any,
-                      c_event_type: Any, c_result_type: Any):
+                      c_event_type: Any, c_result_type: Any) -> Any:
         inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
@@ -253,7 +253,7 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
 
 
 @bindings.LogHandler
-def log_handler(level_zig, message_ptr, message_len):
+def log_handler(level_zig: bindings.LogLevel, message_ptr: Any, message_len: int) -> None:
     level_python = {
         bindings.LogLevel.ERR: logging.ERROR,
         bindings.LogLevel.WARN: logging.WARNING,
@@ -265,7 +265,7 @@ def log_handler(level_zig, message_ptr, message_len):
 tb_assert(bindings.tb_client_register_log_callback(log_handler, True) ==
     bindings.RegisterLogCallbackStatus.SUCCESS)
 
-def configure_logging(*, debug, log_handler=log_handler):
+def configure_logging(*, debug: bool, log_handler=log_handler) -> None:
     # First disable the existing log handler, before enabling the new one.
     tb_assert(bindings.tb_client_register_log_callback(None, debug) ==
         bindings.RegisterLogCallbackStatus.SUCCESS)
