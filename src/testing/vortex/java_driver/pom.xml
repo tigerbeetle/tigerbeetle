@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle.vortex</groupId>
-  <artifactId>driver</artifactId>
+  <artifactId>vortex-driver-java</artifactId>
   <version>0.0.1-SNAPSHOT</version>
 
   <properties>
