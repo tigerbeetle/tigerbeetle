@@ -145,7 +145,7 @@ class Client:
 
     @staticmethod
     @bindings.OnCompletion
-    def _c_on_completion(completion_ctx, packet, timestamp, bytes_ptr, len_):
+    def _c_on_completion(completion_ctx: int, packet: Any, timestamp: int, bytes_ptr: Any, len_: int) -> None:
         """
         Invoked in a separate thread
         """
