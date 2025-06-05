@@ -9,7 +9,7 @@ on:
   merge_group:
   pull_request:
   push:
-    branches: ["main"]
+#    branches: ["main"]
 
 env:
   GH_TOKEN: ${{ github.token }}
