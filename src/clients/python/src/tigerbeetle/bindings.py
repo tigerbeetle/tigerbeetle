@@ -687,64 +687,56 @@ class AsyncStateMachineMixin:
         return await self._submit(
             Operation.CREATE_ACCOUNTS,
             accounts,
-            CAccount,
-            CCreateAccountsResult,
+            CreateAccountsResult,
         )
 
     async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return await self._submit(
             Operation.CREATE_TRANSFERS,
             transfers,
-            CTransfer,
-            CCreateTransfersResult,
+            CreateTransfersResult,
         )
 
     async def lookup_accounts(self, accounts: list[int]) -> list[Account]:
         return await self._submit(
             Operation.LOOKUP_ACCOUNTS,
             accounts,
-            c_uint128,
-            CAccount,
+            Account,
         )
 
     async def lookup_transfers(self, transfers: list[int]) -> list[Transfer]:
         return await self._submit(
             Operation.LOOKUP_TRANSFERS,
             transfers,
-            c_uint128,
-            CTransfer,
+            Transfer,
         )
 
     async def get_account_transfers(self, filter: AccountFilter) -> list[Transfer]:
         return await self._submit(
             Operation.GET_ACCOUNT_TRANSFERS,
             [filter],
-            CAccountFilter,
-            CTransfer,
+            Transfer,
         )
 
     async def get_account_balances(self, filter: AccountFilter) -> list[AccountBalance]:
         return await self._submit(
             Operation.GET_ACCOUNT_BALANCES,
             [filter],
-            CAccountFilter,
-            CAccountBalance,
+            AccountBalance,
         )
 
     async def query_accounts(self, query_filter: QueryFilter) -> list[Account]:
         return await self._submit(
             Operation.QUERY_ACCOUNTS,
             [query_filter],
-            CQueryFilter,
-            CAccount,
+            Account,
         )
 
     async def query_transfers(self, query_filter: QueryFilter) -> list[Transfer]:
         return await self._submit(
             Operation.QUERY_TRANSFERS,
             [query_filter],
-            CQueryFilter,
-            CTransfer,
+            Transfer,
         )
 
 
@@ -755,64 +747,56 @@ class StateMachineMixin:
         return self._submit(
             Operation.CREATE_ACCOUNTS,
             accounts,
-            CAccount,
-            CCreateAccountsResult,
+            CreateAccountsResult,
         )
 
     def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return self._submit(
             Operation.CREATE_TRANSFERS,
             transfers,
-            CTransfer,
-            CCreateTransfersResult,
+            CreateTransfersResult,
         )
 
     def lookup_accounts(self, accounts: list[int]) -> list[Account]:
         return self._submit(
             Operation.LOOKUP_ACCOUNTS,
             accounts,
-            c_uint128,
-            CAccount,
+            Account,
         )
 
     def lookup_transfers(self, transfers: list[int]) -> list[Transfer]:
         return self._submit(
             Operation.LOOKUP_TRANSFERS,
             transfers,
-            c_uint128,
-            CTransfer,
+            Transfer,
         )
 
     def get_account_transfers(self, filter: AccountFilter) -> list[Transfer]:
         return self._submit(
             Operation.GET_ACCOUNT_TRANSFERS,
             [filter],
-            CAccountFilter,
-            CTransfer,
+            Transfer,
         )
 
     def get_account_balances(self, filter: AccountFilter) -> list[AccountBalance]:
         return self._submit(
             Operation.GET_ACCOUNT_BALANCES,
             [filter],
-            CAccountFilter,
-            CAccountBalance,
+            AccountBalance,
         )
 
     def query_accounts(self, query_filter: QueryFilter) -> list[Account]:
         return self._submit(
             Operation.QUERY_ACCOUNTS,
             [query_filter],
-            CQueryFilter,
-            CAccount,
+            Account,
         )
 
     def query_transfers(self, query_filter: QueryFilter) -> list[Transfer]:
         return self._submit(
             Operation.QUERY_TRANSFERS,
             [query_filter],
-            CQueryFilter,
-            CTransfer,
+            Transfer,
         )
 
 
