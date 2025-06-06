@@ -3,6 +3,42 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.44
+
+Released: 2025-06-06
+
+### Features
+
+- [#3006](https://github.com/tigerbeetle/tigerbeetle/pull/3006)
+
+  Improve logging for missing replies by including the op number.
+
+### Internals
+
+- [#3011](https://github.com/tigerbeetle/tigerbeetle/pull/3011)
+
+  DevHub now displays how many fuzz runs are executed per minute (VPM).
+
+- [#3010](https://github.com/tigerbeetle/tigerbeetle/pull/3010)
+
+  Remove `cluster` from the MessageBus as part of the MessageBuffer rework.
+
+- [#2992](https://github.com/tigerbeetle/tigerbeetle/pull/2992)
+
+  Handle all message padding uniformly.
+
+- [#3001](https://github.com/tigerbeetle/tigerbeetle/pull/3001)
+
+  Limit the fuzzer processes to 20GiB of RAM.
+
+- [#3009](https://github.com/tigerbeetle/tigerbeetle/pull/3009)
+
+  Prevent stack probing from actually using all of the stack due to unexpected inlining.
+
+### TigerTracks 🎧
+
+- [Don Toliver - Lose My Mind (feat. Doja Cat)](https://www.youtube.com/watch?v=WWEs82u37Mw)
+
 ## TigerBeetle 0.16.43
 
 Released: 2025-05-30
