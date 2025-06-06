@@ -18,7 +18,7 @@ pub fn StateMachineType(
         pub const Workload = WorkloadType(StateMachine);
 
         pub const Operation = enum(u8) {
-            echo = config.vsr_operations_reserved + 0,
+            echo = global_constants.vsr_operations_reserved + 0,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {

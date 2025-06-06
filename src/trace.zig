@@ -360,7 +360,7 @@ pub fn TracerType(comptime Time: type) type {
         // values.
         //
         // This matches the default behavior of the `g` and `c` statsd types respectively.
-        fn timing(tracer: *Tracer, event_timing: EventTiming, duration_us: u64) void {
+        pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration_us: u64) void {
             const timing_slot = event_timing.slot();
 
             if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
@@ -417,8 +417,8 @@ test "trace json" {
     try snap(@src(),
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":4,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":4,"ph":"E","ts":20000},
+        \\{"pid":0,"tid":7,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":0,"tid":7,"ph":"E","ts":20000},
         \\{"pid":0,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);
