@@ -8,8 +8,6 @@ const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;
 const format_wal_prepares = @import("./journal.zig").format_wal_prepares;
 
-// TODO Parallelize formatting IO.
-
 /// Initialize the TigerBeetle replica's data file.
 pub fn format(
     comptime Storage: type,
@@ -26,53 +24,49 @@ pub fn format(
 
     var replica_format = ReplicaFormat{};
 
-    try replica_format.format_wal(allocator, options.cluster, storage);
-    assert(!replica_format.formatting);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
 
-    try replica_format.format_replies(allocator, storage);
-    assert(!replica_format.formatting);
+    try replica_format.queue_format_wal(arena.allocator(), options.cluster, storage);
+    try replica_format.queue_format_replies(arena.allocator(), storage);
+    try replica_format.queue_format_grid_padding(arena.allocator(), storage);
 
-    try replica_format.format_grid_padding(allocator, storage);
-    assert(!replica_format.formatting);
+    replica_format.format_and_tick(storage, superblock, options);
 
-    superblock.format(
-        ReplicaFormat.format_superblock_callback,
-        &replica_format.superblock_context,
-        options,
-    );
-
-    replica_format.formatting = true;
-    while (replica_format.formatting) storage.run();
+    assert(!replica_format.formatting and !replica_format.formatting_superblock);
 }
+
+/// When formatting, we write:
+/// * constants.journal_slot_count many prepares,
+/// * 1 write that contains all of the headers,
+/// * constants.clients_max many replies,
+/// * 1 block for grid padding, maybe.
+pub const writes_max = constants.journal_slot_count + 1 + constants.clients_max + 1;
 
 fn ReplicaFormatType(comptime Storage: type) type {
     const SuperBlock = vsr.SuperBlockType(Storage);
     return struct {
         const ReplicaFormat = @This();
+        var formating_instance: ?*ReplicaFormat = null;
 
         formatting: bool = false,
+        formatting_superblock: bool = false,
         superblock_context: SuperBlock.Context = undefined,
-        write: Storage.Write = undefined,
 
-        fn format_wal(
+        writes: [writes_max]Storage.Write = undefined,
+        writes_pending: u64 = 0,
+
+        /// Assume no padding for the grid (hence the -1). If padding is added, this will be
+        /// incremented.
+        writes_expected: u64 = writes_max - 1,
+
+        fn queue_format_wal(
             self: *ReplicaFormat,
-            allocator: std.mem.Allocator,
+            arena: std.mem.Allocator,
             cluster: u128,
             storage: *Storage,
         ) !void {
-            assert(!self.formatting);
-
-            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
-            const wal_write_size_max = 4 * 1024 * 1024;
-            assert(wal_write_size_max % constants.sector_size == 0);
-
-            // Direct I/O requires the buffer to be sector-aligned.
-            var wal_buffer = try allocator.alignedAlloc(
-                u8,
-                constants.sector_size,
-                wal_write_size_max,
-            );
-            defer allocator.free(wal_buffer);
+            assert(!self.formatting and !self.formatting_superblock);
 
             // The logical offset *within the Zone*.
             // Even though the prepare zone follows the redundant header zone, write the prepares
@@ -80,40 +74,55 @@ fn ReplicaFormatType(comptime Storage: type) type {
             // header before the prepare".
             var wal_offset: u64 = 0;
             while (wal_offset < constants.journal_size_prepares) {
-                const size = format_wal_prepares(cluster, wal_offset, wal_buffer);
+                // Direct I/O requires the buffer to be sector-aligned.
+                const prepare_buffer_first_sector = try arena.alignedAlloc(
+                    u8,
+                    constants.sector_size,
+                    constants.sector_size,
+                );
+                // Freed when the arena is cleaned up.
+
+                const size = format_wal_prepares(cluster, wal_offset, prepare_buffer_first_sector);
                 assert(size > 0);
+                assert(!stdx.zeroed(prepare_buffer_first_sector[0..@sizeOf(Header.Prepare)]));
+                assert(stdx.zeroed(prepare_buffer_first_sector[@sizeOf(Header.Prepare)..]));
 
-                for (std.mem.bytesAsSlice(Header.Prepare, wal_buffer[0..size])) |*header| {
-                    if (std.mem.eql(u8, std.mem.asBytes(header), &header_zeroes)) {
-                        // This is the (empty) body of a reserved or root Prepare.
-                    } else {
-                        // This is a Prepare's header.
-                        assert(header.valid_checksum());
+                const header: *Header.Prepare = @ptrCast(prepare_buffer_first_sector);
+                assert(header.valid_checksum());
 
-                        if (header.op == 0) {
-                            assert(header.operation == .root);
-                        } else {
-                            assert(header.operation == .reserved);
-                        }
-                    }
+                if (header.op == 0) {
+                    assert(header.operation == .root);
+                } else {
+                    assert(header.operation == .reserved);
                 }
 
                 storage.write_sectors(
                     write_sectors_callback,
-                    &self.write,
-                    wal_buffer[0..size],
+                    &self.writes[self.writes_pending],
+                    prepare_buffer_first_sector[0..constants.sector_size],
                     .wal_prepares,
                     wal_offset,
                 );
-                self.formatting = true;
-                while (self.formatting) storage.run();
-                wal_offset += size;
+                self.writes_pending += 1;
+
+                // Increment the offset by a full message_size_max, rather than the sector. This
+                // skips having to write out and process ~1GiB of zeroes.
+                wal_offset += constants.message_size_max;
             }
             // There are no prepares left to write.
-            assert(format_wal_prepares(cluster, wal_offset, wal_buffer) == 0);
+            var wal_buffer_test: [constants.sector_size]u8 = undefined;
+            assert(format_wal_prepares(cluster, wal_offset, &wal_buffer_test) == 0);
 
             wal_offset = 0;
             while (wal_offset < constants.journal_size_headers) {
+                // Direct I/O requires the buffer to be sector-aligned.
+                const wal_buffer = try arena.alignedAlloc(
+                    u8,
+                    constants.sector_size,
+                    vsr.sector_ceil(constants.journal_size_headers),
+                );
+                // Freed when the arena is cleaned up.
+
                 const size = format_wal_headers(cluster, wal_offset, wal_buffer);
                 assert(size > 0);
 
@@ -129,88 +138,125 @@ fn ReplicaFormatType(comptime Storage: type) type {
 
                 storage.write_sectors(
                     write_sectors_callback,
-                    &self.write,
+                    &self.writes[self.writes_pending],
                     wal_buffer[0..size],
                     .wal_headers,
                     wal_offset,
                 );
-                self.formatting = true;
-                while (self.formatting) storage.run();
+                self.writes_pending += 1;
                 wal_offset += size;
             }
             // There are no headers left to write.
-            assert(format_wal_headers(cluster, wal_offset, wal_buffer) == 0);
+            assert(format_wal_headers(cluster, wal_offset, &wal_buffer_test) == 0);
         }
 
-        fn format_replies(
+        fn queue_format_replies(
             self: *ReplicaFormat,
-            allocator: std.mem.Allocator,
+            arena: std.mem.Allocator,
             storage: *Storage,
         ) !void {
-            assert(!self.formatting);
+            assert(!self.formatting and !self.formatting_superblock);
 
             // Direct I/O requires the buffer to be sector-aligned.
             const message_buffer =
-                try allocator.alignedAlloc(u8, constants.sector_size, constants.message_size_max);
-            defer allocator.free(message_buffer);
+                try arena.alignedAlloc(
+                u8,
+                constants.sector_size,
+                constants.message_size_max * constants.clients_max,
+            );
+            // Freed when the arena is cleaned up.
+
             @memset(message_buffer, 0);
 
             for (0..constants.clients_max) |slot| {
+                // Line length limits:
+                const message_buffer_slot = message_buffer[slot * constants.message_size_max ..];
+
                 storage.write_sectors(
                     write_sectors_callback,
-                    &self.write,
-                    message_buffer,
+                    &self.writes[self.writes_pending],
+                    message_buffer_slot[0..constants.message_size_max],
                     .client_replies,
                     slot * constants.message_size_max,
                 );
-                self.formatting = true;
-                while (self.formatting) storage.run();
+                self.writes_pending += 1;
             }
         }
 
-        fn format_grid_padding(
+        fn queue_format_grid_padding(
             self: *ReplicaFormat,
-            allocator: std.mem.Allocator,
+            arena: std.mem.Allocator,
             storage: *Storage,
         ) !void {
-            assert(!self.formatting);
+            assert(!self.formatting and !self.formatting_superblock);
 
             const padding_size = vsr.Zone.size(.grid_padding).?;
             assert(padding_size < constants.block_size);
 
             if (padding_size > 0) {
+                self.writes_expected += 1;
+
                 // Direct I/O requires the buffer to be sector-aligned.
-                const padding_buffer = try allocator.alignedAlloc(
+                const padding_buffer = try arena.alignedAlloc(
                     u8,
                     constants.sector_size,
                     vsr.Zone.size(.grid_padding).?,
                 );
-                defer allocator.free(padding_buffer);
+                // Freed when the arena is cleaned up.
+
                 @memset(padding_buffer, 0);
 
                 storage.write_sectors(
                     write_sectors_callback,
-                    &self.write,
+                    &self.writes[self.writes_pending],
                     padding_buffer,
                     .grid_padding,
                     0,
                 );
-                self.formatting = true;
-                while (self.formatting) storage.run();
+                self.writes_pending += 1;
             }
         }
 
-        fn write_sectors_callback(write: *Storage.Write) void {
-            const self: *ReplicaFormat = @alignCast(@fieldParentPtr("write", write));
+        fn format_and_tick(
+            self: *ReplicaFormat,
+            storage: *Storage,
+            superblock: *SuperBlock,
+            superblock_options: SuperBlock.FormatOptions,
+        ) void {
+            assert(formating_instance == null);
+            formating_instance = self;
+
+            assert(self.writes_pending == self.writes_expected);
+
+            superblock.format(
+                format_superblock_callback,
+                &self.superblock_context,
+                superblock_options,
+            );
+
+            self.formatting = true;
+            self.formatting_superblock = true;
+            while (self.formatting or self.formatting_superblock) storage.run();
+
+            formating_instance = null;
+        }
+
+        fn write_sectors_callback(_: *Storage.Write) void {
+            const self: *ReplicaFormat = formating_instance.?;
             assert(self.formatting);
-            self.formatting = false;
+
+            self.writes_pending -= 1;
+
+            if (self.writes_pending == 0) {
+                self.formatting = false;
+            }
         }
 
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self: *ReplicaFormat =
                 @alignCast(@fieldParentPtr("superblock_context", superblock_context));
-            assert(self.formatting);
-            self.formatting = false;
+            assert(self.formatting_superblock);
+            self.formatting_superblock = false;
         }
     };
 }
@@ -231,6 +277,7 @@ test "format" {
             .read_latency_mean = 0,
             .write_latency_min = 0,
             .write_latency_mean = 0,
+            .iops_write_max = writes_max,
         },
     );
     defer storage.deinit(allocator);
