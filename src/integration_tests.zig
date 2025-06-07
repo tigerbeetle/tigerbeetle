@@ -532,28 +532,12 @@ test "vortex smoke" {
     const shell = try Shell.create(std.testing.allocator);
     defer shell.destroy();
 
-    const script_path = try shell.fmt("./.zig-cache/tmp/{}.sh", .{
-        std.crypto.random.int(u64),
-    });
-    defer shell.cwd.deleteTree(script_path) catch {};
-
-    const script_contents = try shell.fmt(
-        \\ ip link set up dev lo && \
-        \\   {s} supervisor \
-        \\   --test-duration-seconds=10 \
-        \\   --replica-count=1 \
-        \\   --tigerbeetle-executable={s}
-    , .{
-        vortex_exe,
-        tigerbeetle,
-    });
-    _ = try shell.cwd.writeFile(.{
-        .sub_path = script_path,
-        .data = script_contents,
-        .flags = .{ .mode = 0o777 },
-    });
-
-    try shell.exec("unshare --net --fork --map-root-user --pid sh {script_path}", .{
-        .script_path = script_path,
-    });
+    try shell.exec(
+        "{vortex_exe} run --test-duration-seconds=10 " ++
+            "--replica-count=1 --tigerbeetle-executable={tigerbeetle}",
+        .{
+            .vortex_exe = vortex_exe,
+            .tigerbeetle = tigerbeetle,
+        },
+    );
 }

@@ -123,12 +123,40 @@ pub const CLIArgs = struct {
     disable_faults: bool = false,
     output_directory: ?[]const u8 = null,
     log_debug: bool = false,
+    // Set up a linux namespace for testing.
+    // This flag is added automatically by `vortex run`.
+    configure_namespace: bool = false,
 };
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
         log.err("vortex is not supported for Windows", .{});
         return error.NotSupported;
+    }
+
+    if (args.configure_namespace) {
+        // Set up network loopback device.
+        const argv = &.{
+            "ip", "link", "set", "up", "dev", "lo",
+        };
+
+        const process = try LoggedProcess.spawn(allocator, argv, .{
+            .stdout_behavior = .Inherit,
+        });
+        defer process.destroy(allocator);
+
+        switch (try process.wait()) {
+            .Exited => |code| {
+                if (code != 0) {
+                    log.err("network setup failed with code {}", .{code});
+                    return error.TestFailure;
+                }
+            },
+            else => {
+                log.err("ip failed with unexpected error", .{});
+                return error.TestFailed;
+            },
+        }
     }
 
     var io = try IO.init(128, 0);
