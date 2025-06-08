@@ -59,40 +59,56 @@ const assert = std.debug.assert;
 const replica_ports_actual = constants.replica_ports_actual;
 const replica_ports_proxied = constants.replica_ports_proxied;
 
-// Calculate replica addresses (comma-separated) for each replica. Because
+// Calculate replica ports for each replica. Because
 // we want replicas to communicate over the proxies, we use those ports
 // for their peers, but we must use the replica's actual port for itself
 // (because that's the port it listens to).
-const replica_addresses_for_replicas = blk: {
-    var result: [constants.replica_count][]const u8 = undefined;
-    for (0..constants.replica_count) |replica_self| {
-        var ports: [constants.replica_count]u16 = undefined;
-        for (0..constants.replica_count) |replica_other| {
+const replica_ports_for_replicas = blk: {
+    var result: [constants.replicas_max][constants.replicas_max]u16 = undefined;
+    for (0..constants.replicas_max) |replica_self| {
+        var ports: [constants.replicas_max]u16 = undefined;
+        for (0..constants.replicas_max) |replica_other| {
             ports[replica_other] = if (replica_self == replica_other)
                 replica_ports_actual[replica_other]
             else
                 replica_ports_proxied[replica_other];
         }
-        result[replica_self] = comma_separate_ports(&ports);
+        result[replica_self] = ports;
     }
     break :blk result;
 };
 
-const replica_addresses_for_clients = comma_separate_ports(&replica_ports_proxied);
+fn replica_addresses_for_replica(
+    allocator: std.mem.Allocator,
+    replica_count: u8,
+    replica_index: u8,
+) !std.ArrayListUnmanaged(u8) {
+    return try comma_separate_ports(
+        allocator,
+        replica_ports_for_replicas[replica_index][0..replica_count],
+    );
+}
+
+fn replica_addresses_for_clients(
+    allocator: std.mem.Allocator,
+    replica_count: u8,
+) !std.ArrayListUnmanaged(u8) {
+    return try comma_separate_ports(allocator, replica_ports_proxied[0..replica_count]);
+}
 
 // For the Chrome trace file, we need to assign process IDs to all logical
 // processes in the Vortex test. The replicas get their replica indices, and
 // the other ones are assigned manually here.
 const vortex_process_ids = .{
-    .supervisor = constants.replica_count,
-    .workload = constants.replica_count + 1,
-    .network = constants.replica_count + 2,
+    .supervisor = constants.replicas_max,
+    .workload = constants.replicas_max + 1,
+    .network = constants.replicas_max + 2,
 };
 comptime {
     // Check that the assigned process IDs are sequential and start at the right number.
     for (
         std.meta.fields(@TypeOf(vortex_process_ids)),
-        constants.replica_count..,
+        constants.replicas_max..,
     ) |field, value_expected| {
         const value_actual = @field(vortex_process_ids, field.name);
         assert(value_actual == value_expected);
@@ -103,6 +119,7 @@ pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
     test_duration_minutes: u16 = 10,
     driver_command: ?[]const u8 = null,
+    replica_count: u8 = 1,
     disable_faults: bool = false,
     output_directory: ?[]const u8 = null,
     log_debug: bool = false,
@@ -142,7 +159,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
-    var replicas: [constants.replica_count]*Replica = undefined;
+    var replicas: [constants.replicas_max]*Replica = undefined;
     var replicas_initialized: usize = 0;
     defer {
         for (replicas[0..replicas_initialized]) |replica| {
@@ -155,21 +172,40 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         }
     }
 
-    var datafile_buffers: [constants.replica_count][std.fs.max_path_bytes]u8 = undefined;
-    inline for (0..constants.replica_count) |replica_index| {
+    var datafile_buffers: [constants.replicas_max][std.fs.max_path_bytes]u8 = undefined;
+    for (0..args.replica_count) |replica_index| {
         const datafile = try std.fmt.bufPrint(
             datafile_buffers[replica_index][0..],
             "{s}/{d}_{d}.tigerbeetle",
             .{ output_directory, constants.cluster_id, replica_index },
         );
 
+        const arg_cluster = try std.fmt.allocPrint(
+            allocator,
+            "--cluster={d}",
+            .{constants.cluster_id},
+        );
+        defer allocator.free(arg_cluster);
+        const arg_replica = try std.fmt.allocPrint(
+            allocator,
+            "--replica={d}",
+            .{replica_index},
+        );
+        defer allocator.free(arg_replica);
+        const arg_replica_count = try std.fmt.allocPrint(
+            allocator,
+            "--replica-count={d}",
+            .{args.replica_count},
+        );
+        defer allocator.free(arg_replica_count);
+
         // Format each replica's datafile.
         const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &.{
             args.tigerbeetle_executable,
             "format",
-            std.fmt.comptimePrint("--cluster={d}", .{constants.cluster_id}),
-            std.fmt.comptimePrint("--replica={d}", .{replica_index}),
-            std.fmt.comptimePrint("--replica-count={d}", .{constants.replica_count}),
+            arg_cluster,
+            arg_replica,
+            arg_replica_count,
             datafile,
         } });
         defer {
@@ -186,6 +222,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         var replica = try Replica.create(
             allocator,
             args.tigerbeetle_executable,
+            args.replica_count,
             @intCast(replica_index),
             datafile,
             args.log_debug,
@@ -194,17 +231,20 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         replicas[replica_index] = replica;
         replicas_initialized += 1;
 
+        const process_name = try std.fmt.allocPrint(allocator, "replica {d}", .{replica_index});
+        defer allocator.free(process_name);
+
         try trace.process_name_assign(
-            replica_index,
-            std.fmt.comptimePrint("replica {d}", .{replica_index}),
+            @as(u8, @intCast(replica_index)),
+            process_name,
         );
 
         try replica.start();
     }
 
     // Construct mappings between proxy and underlying replicas.
-    var mappings: [constants.replica_count]faulty_network.Mapping = undefined;
-    inline for (0..constants.replica_count) |replica_index| {
+    var mappings: [constants.replicas_max]faulty_network.Mapping = undefined;
+    for (0..args.replica_count) |replica_index| {
         mappings[replica_index] = .{
             .origin = .{ .in = std.net.Ip4Address.init(
                 .{ 0, 0, 0, 0 },
@@ -221,7 +261,8 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     var network = try faulty_network.Network.listen(
         allocator,
         &io,
-        mappings[0..],
+        args.replica_count,
+        mappings[0..args.replica_count],
         &prng,
     );
     defer network.destroy(allocator);
@@ -237,7 +278,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const supervisor = try Supervisor.create(allocator, .{
         .io = &io,
         .network = network,
-        .replicas = replicas,
+        .replicas = replicas[0..args.replica_count],
         .workload = workload,
         .trace = &trace,
         .prng = &prng,
@@ -252,21 +293,21 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
 const Supervisor = struct {
     io: *IO,
     network: *faulty_network.Network,
-    replicas: [constants.replica_count]*Replica,
+    replicas: []*Replica,
     workload: *Workload,
     trace: *TraceWriter,
     prng: *stdx.PRNG,
     test_deadline: i128,
     disable_faults: bool,
 
-    running_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
-    terminated_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
-    stopped_replicas_buffer: [constants.replica_count]ReplicaWithIndex = undefined,
+    running_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
+    terminated_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
+    stopped_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
 
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
         network: *faulty_network.Network,
-        replicas: [constants.replica_count]*Replica,
+        replicas: []*Replica,
         workload: *Workload,
         trace: *TraceWriter,
         prng: *stdx.PRNG,
@@ -303,23 +344,26 @@ const Supervisor = struct {
         // certain time period). If null, it means we're in a period of too many faults, thus
         // enforcing no such requirement.
         var acceptable_faults_start_ns: ?u64 = null;
+        // How many replicas can be faulty while still expecting the cluster to
+        // make progress (based on 2f+1).
+        const liveness_faulty_replicas_max = @divFloor(supervisor.replicas.len - 1, 2);
         const workload_result = while (std.time.nanoTimestamp() < supervisor.test_deadline) {
             supervisor.network.tick();
             try supervisor.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
             const running_replicas = replicas_in_state(
-                &supervisor.replicas,
+                supervisor.replicas,
                 &supervisor.running_replicas_buffer,
                 .running,
             );
             const terminated_replicas = replicas_in_state(
-                &supervisor.replicas,
+                supervisor.replicas,
                 &supervisor.terminated_replicas_buffer,
                 .terminated,
             );
             const stopped_replicas = replicas_in_state(
-                &supervisor.replicas,
+                supervisor.replicas,
                 &supervisor.stopped_replicas_buffer,
                 .stopped,
             );
@@ -369,7 +413,7 @@ const Supervisor = struct {
             // Check if `acceptable_faults_start_ns` should change state. If so, we reset the max
             // request duration too.
             // NOTE: Network faults are currently global, so we relax the requirement in such cases.
-            if (faulty_replica_count <= constants.liveness_faulty_replicas_max and
+            if (faulty_replica_count <= liveness_faulty_replicas_max and
                 supervisor.network.faults.is_healed())
             {
                 // We have an acceptable number of faults, so we require liveness (after some time).
@@ -669,16 +713,27 @@ fn replicas_in_state(
     return buffer[0..count];
 }
 
-pub fn comma_separate_ports(comptime ports: []const u16) []const u8 {
+pub fn comma_separate_ports(
+    allocator: std.mem.Allocator,
+    ports: []const u16,
+) !std.ArrayListUnmanaged(u8) {
     assert(ports.len > 0);
 
-    var out: []const u8 = std.fmt.comptimePrint("{d}", .{ports[0]});
+    var out: std.ArrayListUnmanaged(u8) = .{};
 
-    inline for (ports[1..]) |port| {
-        out = out ++ std.fmt.comptimePrint(",{d}", .{port});
+    const first = try std.fmt.allocPrint(allocator, "{d}", .{ports[0]});
+    defer allocator.free(first);
+    try out.appendSlice(allocator, first);
+
+    for (ports[1..]) |port| {
+        const next = try std.fmt.allocPrint(allocator, ",{d}", .{port});
+        defer allocator.free(next);
+        try out.appendSlice(allocator, next);
     }
 
-    assert(std.mem.count(u8, out, ",") == ports.len - 1);
+    out.shrinkAndFree(allocator, out.items.len);
+
+    assert(std.mem.count(u8, out.items, ",") == ports.len - 1);
     return out;
 }
 
@@ -701,6 +756,7 @@ const Replica = struct {
 
     allocator: std.mem.Allocator,
     executable_path: []const u8,
+    replica_count: u8,
     replica_index: u8,
     datafile: []const u8,
     log_debug: bool,
@@ -709,6 +765,7 @@ const Replica = struct {
     pub fn create(
         allocator: std.mem.Allocator,
         executable_path: []const u8,
+        replica_count: u8,
         replica_index: u8,
         datafile: []const u8,
         log_debug: bool,
@@ -719,6 +776,7 @@ const Replica = struct {
         self.* = .{
             .allocator = allocator,
             .executable_path = executable_path,
+            .replica_count = replica_count,
             .replica_index = replica_index,
             .datafile = datafile,
             .log_debug = log_debug,
@@ -755,10 +813,16 @@ const Replica = struct {
         }
 
         var addresses_buffer: [128]u8 = undefined;
+        var replica_addresses = try replica_addresses_for_replica(
+            self.allocator,
+            self.replica_count,
+            self.replica_index,
+        );
+        defer replica_addresses.deinit(self.allocator);
         const addresses_arg = try std.fmt.bufPrint(
             addresses_buffer[0..],
             "--addresses={s}",
-            .{replica_addresses_for_replicas[self.replica_index]},
+            .{replica_addresses.items},
         );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
@@ -857,11 +921,20 @@ const Workload = struct {
             .{driver_command_selected},
         );
 
+        var replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
+        defer replica_addresses.deinit(allocator);
+        const arg_addresses = try std.fmt.allocPrint(
+            allocator,
+            "--addresses={s}",
+            .{replica_addresses.items},
+        );
+        defer allocator.free(arg_addresses);
+
         const argv = &.{
             vortex_path,
             "workload",
             std.fmt.comptimePrint("--cluster-id={d}", .{constants.cluster_id}),
-            std.fmt.comptimePrint("--addresses={s}", .{replica_addresses_for_clients}),
+            arg_addresses,
             driver_command_arg,
         };
 

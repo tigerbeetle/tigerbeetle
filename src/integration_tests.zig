@@ -541,6 +541,7 @@ test "vortex smoke" {
         \\ ip link set up dev lo && \
         \\   {s} supervisor \
         \\   --test-duration-minutes=1 \
+        \\   --replica-count=1 \
         \\   --tigerbeetle-executable={s}
     , .{
         vortex_exe,
