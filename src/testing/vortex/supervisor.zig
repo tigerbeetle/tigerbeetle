@@ -26,7 +26,7 @@
 //!
 //! Other options:
 //!
-//! * Control the test duration by adding the `--test-duration-minutes=N` option (it's 10 minutes
+//! * Control the test duration by adding the `--test-duration-seconds=N` option (it's 1 minute
 //!   by default).
 //! * Enable replica debug logging with `--log-debug`.
 //!
@@ -117,7 +117,7 @@ comptime {
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
-    test_duration_minutes: u16 = 10,
+    test_duration_seconds: u32 = 60,
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
     disable_faults: bool = false,
@@ -151,10 +151,17 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
     }
 
-    log.info(
-        "starting test with target runtime of {d}m",
-        .{args.test_duration_minutes},
-    );
+    if (args.test_duration_seconds % 60 == 0) {
+        log.info(
+            "starting test with target runtime of {d}m",
+            .{@divFloor(args.test_duration_seconds, 6)},
+        );
+    } else {
+        log.info(
+            "starting test with target runtime of {d}s",
+            .{args.test_duration_seconds},
+        );
+    }
 
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
@@ -282,7 +289,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .workload = workload,
         .trace = &trace,
         .prng = &prng,
-        .test_duration_minutes = args.test_duration_minutes,
+        .test_duration_seconds = args.test_duration_seconds,
         .disable_faults = args.disable_faults,
     });
     defer supervisor.destroy(allocator);
@@ -311,11 +318,11 @@ const Supervisor = struct {
         workload: *Workload,
         trace: *TraceWriter,
         prng: *stdx.PRNG,
-        test_duration_minutes: u16,
+        test_duration_seconds: u32,
         disable_faults: bool,
     }) !*Supervisor {
-        const test_duration_ns = @as(u64, @intCast(options.test_duration_minutes)) *
-            std.time.ns_per_min;
+        const test_duration_ns = @as(u64, @intCast(options.test_duration_seconds)) *
+            std.time.ns_per_s;
         const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
 
         const supervisor = try allocator.create(Supervisor);

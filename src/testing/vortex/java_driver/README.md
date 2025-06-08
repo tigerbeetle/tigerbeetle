@@ -16,7 +16,7 @@ unshare --net --fork --map-root-user --pid bash -c "
     ip link set up dev lo ; 
     zig-out/bin/vortex supervisor \
         --tigerbeetle-executable=./zig-out/bin/tigerbeetle \
-        --test-duration-minutes=10 \
+        --test-duration-seconds=60 \
         --driver-command=java\ -cp\ $CLASS_PATH\ Main
     "
 ```

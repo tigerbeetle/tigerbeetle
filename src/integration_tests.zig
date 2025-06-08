@@ -540,7 +540,7 @@ test "vortex smoke" {
     const script_contents = try shell.fmt(
         \\ ip link set up dev lo && \
         \\   {s} supervisor \
-        \\   --test-duration-minutes=1 \
+        \\   --test-duration-seconds=10 \
         \\   --replica-count=1 \
         \\   --tigerbeetle-executable={s}
     , .{
