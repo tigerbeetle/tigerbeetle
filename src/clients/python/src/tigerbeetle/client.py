@@ -66,7 +66,8 @@ def id() -> int:
     if time_ms <= time_ms_last:
         time_ms = time_ms_last
     else:
-        id._time_ms_last = time_ms
+        # fixme: this is a very non-pythonic solution, and discouraged
+        id._time_ms_last = time_ms  # type: ignore[attr-defined]
 
     randomness = os.urandom(10)
 
@@ -276,10 +277,15 @@ def log_handler(level_zig: bindings.LogLevel, message_ptr: Any, message_len: int
 tb_assert(bindings.tb_client_register_log_callback(log_handler, True) ==
     bindings.RegisterLogCallbackStatus.SUCCESS)
 
-def configure_logging(*, debug: bool, log_handler=log_handler) -> None:
+
+def configure_logging(
+    *,
+    debug: bool,
+    handler: Callable[[bindings.LogLevel, Any, int], None] = log_handler,
+) -> None:
     # First disable the existing log handler, before enabling the new one.
     tb_assert(bindings.tb_client_register_log_callback(None, debug) ==
         bindings.RegisterLogCallbackStatus.SUCCESS)
 
-    tb_assert(bindings.tb_client_register_log_callback(log_handler, debug) ==
+    tb_assert(bindings.tb_client_register_log_callback(handler, debug) ==
         bindings.RegisterLogCallbackStatus.SUCCESS)
