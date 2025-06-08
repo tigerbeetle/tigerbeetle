@@ -246,13 +246,13 @@ class Transfer:
 @dataclass
 class CreateAccountsResult:
     index: int = 0
-    result: CreateAccountResult = 0
+    result: CreateAccountResult = CreateAccountResult.OK
 
 
 @dataclass
 class CreateTransfersResult:
     index: int = 0
-    result: CreateTransferResult = 0
+    result: CreateTransferResult = CreateTransferResult.OK
 
 
 @dataclass

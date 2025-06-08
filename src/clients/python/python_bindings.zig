@@ -314,9 +314,16 @@ fn emit_struct_dataclass(
             });
 
             if (field_type_info == .Struct and field_type_info.Struct.layout == .@"packed") {
+                // flags
                 buffer.print("{s}.NONE\n", .{python_type});
             } else {
-                buffer.print("0\n", .{});
+                if (field_type_info == .Enum) {
+                    // enums: the only ones exposed by the client call `.0` as `.OK`
+                    buffer.print("{s}.OK\n", .{python_type});
+                } else {
+                    // simple integer types
+                    buffer.print("0\n", .{});
+                }
             }
         }
     }
