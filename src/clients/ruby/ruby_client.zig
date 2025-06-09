@@ -23,57 +23,47 @@ const MAX_BATCH_SIZE = 8192;
 
 const SKIP_PREFIXES = [_][]const u8{ "reserved", "opaque", "deprecated" };
 
-fn skip_field(comptime field_name: []const u8) bool {
-    inline for (SKIP_PREFIXES) |prefix| {
-        if (comptime std.mem.startsWith(u8, field_name, prefix)) {
-            return true;
-        }
+const mappings_vsr = .{
+    .{ exports.tb_operation, build_rb_setup_struct(exports.tb_operation, "Operation") },
+    .{ exports.tb_packet_status, build_rb_setup_struct(exports.tb_packet_status, "PacketStatus") },
+    .{ exports.tb_client_t, build_rb_setup_struct(exports.tb_client_t, "Client") },
+    .{ exports.tb_init_status, build_rb_setup_struct(exports.tb_init_status, "InitStatus") },
+    .{ exports.tb_client_status, build_rb_setup_struct(exports.tb_client_status, "ClientStatus") },
+    .{ exports.tb_log_level, build_rb_setup_struct(exports.tb_log_level, "LogLevel") },
+    .{ exports.tb_register_log_callback_status, build_rb_setup_struct(exports.tb_register_log_callback_status, "RegisterLogCallbackStatus") },
+};
+
+const mappings_state_machine = .{
+    .{ tb.AccountFlags, build_rb_setup_struct(tb.AccountFlags, "AccountFlags") },
+    .{ tb.TransferFlags, build_rb_setup_struct(tb.TransferFlags, "TransferFlags") },
+    .{ tb.AccountFilterFlags, build_rb_setup_struct(tb.AccountFilterFlags, "AccountFilterFlags") },
+    .{ tb.QueryFilterFlags, build_rb_setup_struct(tb.QueryFilterFlags, "QueryFilterFlags") },
+    .{ tb.Account, build_rb_setup_struct(tb.Account, "Account") },
+    .{ tb.Transfer, build_rb_setup_struct(tb.Transfer, "Transfer") },
+    .{ tb.CreateAccountResult, build_rb_setup_struct(tb.CreateAccountResult, "CreateAccountResult") },
+    .{ tb.CreateTransferResult, build_rb_setup_struct(tb.CreateTransferResult, "CreateTransferResult") },
+    .{ tb.AccountFilter, build_rb_setup_struct(tb.AccountFilter, "AccountFilter") },
+    .{ tb.AccountBalance, build_rb_setup_struct(tb.AccountBalance, "AccountBalance") },
+    .{ tb.QueryFilter, build_rb_setup_struct(tb.QueryFilter, "QueryFilter") },
+    .{ tb.CreateAccountsResult, build_rb_setup_struct(tb.CreateAccountsResult, "CreateAccountsResult") },
+};
+
+const mappings_all = mappings_vsr ++ mappings_state_machine;
+
+pub export fn initialize_ruby_client() callconv(.C) void {
+    const m_tiger_beetle = ruby.rb_define_module("TigerBeetle");
+    const m_bindings = ruby.rb_define_module_under(m_tiger_beetle, "Bindings");
+
+    inline for (mappings_all) |type_mapping| {
+        const setup_struct = type_mapping[1];
+        setup_struct.init_methods(m_bindings);
     }
-    return false;
+
+    const rb_client = ruby.rb_const_get(m_bindings, ruby.rb_intern("Client"));
+    tb_client_struct().init_methods(rb_client);
 }
 
-fn rb_int_to_u128(value: ruby.VALUE) u128 {
-    if (!ruby.RB_INTEGER_TYPE_P(value)) {
-        ruby.rb_raise(ruby.rb_eTypeError, "expected Integer");
-        return 0;
-    }
-
-    if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
-        ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
-        return 0;
-    }
-
-    var result: u128 = 0;
-    const overflow = ruby.rb_integer_pack(value, // val: the Ruby VALUE
-        &result, // words: pointer to output buffer
-        1, // numwords: we want 1 chunk of 16 bytes
-        @sizeOf(u128), // wordsize: 16 bytes
-        0, // nails: 0 (no nail bits)
-        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-    );
-
-    if (overflow == 2) {
-        ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
-        return 0;
-    }
-
-    return result;
-}
-
-fn u128_to_rb_int(value: u128) ruby.VALUE {
-    if (value == 0) {
-        return ruby.UINT2NUM(0);
-    }
-
-    return ruby.rb_integer_unpack(&value, // ruby value
-        1, // numwords: we want 1 chunk of 16 bytes
-        @sizeOf(u128), // wordsize: 16 bytes
-        0, // nails: 0 (no nail bits)
-        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-    );
-}
-
-fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
+fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
     if (@typeInfo(ZigType) != .Struct) {
         @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
     }
@@ -82,9 +72,10 @@ fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
         const Self = @This();
         const type_info = @typeInfo(ZigType);
         const type_name = @typeName(ZigType) ++ "\x00";
+
         pub const rb_class_name = ruby_name ++ "\x00";
 
-        pub const rb_data_type = ruby.rb_data_type_t{
+        const rb_data_type = ruby.rb_data_type_t{
             .wrap_struct_name = &type_name[0],
             .function = .{
                 .dmark = null,
@@ -127,7 +118,7 @@ fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
                 const key_id = ruby.rb_intern(&field_name_cstr[0]);
                 const key_symbol = ruby.ID2SYM(key_id); // Convert ID to symbol
 
-                const value = zigToRuby(@TypeOf(field_value), field_value);
+                const value = zig_type_to_rb_value(@TypeOf(field_value), field_value);
 
                 _ = ruby.rb_hash_aset(hash, key_symbol, value);
             }
@@ -136,166 +127,32 @@ fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
         }
 
         pub fn init_methods(parent: ruby.VALUE) void {
-            const method_defs: []const MethodDef = blk: {
-                if (@typeInfo(ZigType) != .Struct) {
-                    @compileError("Expected a struct type for Ruby class conversion, got: " ++ @typeInfo(ZigType));
-                }
-
-                const fields = type_info.Struct.fields;
-                var defs: [fields.len * 2]MethodDef = undefined;
-
-                comptime var i = 0;
-                inline for (fields) |field| {
-                    if (comptime skip_field(field.name)) {
-                        continue;
-                    }
-
-                    const getter_name = field.name ++ "\x00";
-                    const setter_name = field.name ++ "=\x00";
-
-                    defs[i] = MethodDef{
-                        .name = &getter_name[0],
-                        .func = @ptrCast(&make_getter_fn(field.name)),
-                        .argc = 0,
-                    };
-                    defs[i + 1] = MethodDef{
-                        .name = &setter_name[0],
-                        .func = @ptrCast(&make_setter_fn(field.name)),
-                        .argc = 1,
-                    };
-                    i += 2;
-                }
-
-                break :blk defs[0..i];
-            };
-
             const class = ruby.rb_define_class_under(parent, &rb_class_name[0], ruby.rb_cObject);
             ruby.rb_define_alloc_func(class, alloc_fn);
-            ruby.rb_define_method(class, "initialize", @ptrCast(&initialize), -1);
+            ruby.rb_define_method(class, "initialize", @ptrCast(&rb_initialize), -1);
             ruby.rb_define_method(class, "to_h", @ptrCast(&convert_to_ruby_hash), 0);
 
-            for (method_defs) |method_def| {
-                ruby.rb_define_method(class, method_def.name, @ptrCast(method_def.func), method_def.argc);
-            }
+            define_getters_and_setters(class);
         }
 
-        const MethodDef = struct {
-            name: [*c]const u8,
-            func: ?*const anyopaque,
-            argc: c_int,
-        };
+        fn define_getters_and_setters(class: ruby.VALUE) void {
+            const fields = type_info.Struct.fields;
 
-        fn make_getter_fn(comptime field_name: []const u8) fn (ruby.VALUE) callconv(.C) ruby.VALUE {
-            return struct {
-                fn get(self: ruby.VALUE) callconv(.C) ruby.VALUE {
-                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
-                    const field_value = @field(wrapper.*, field_name);
-                    return zigToRuby(@TypeOf(field_value), field_value);
+            inline for (fields) |field| {
+                if (comptime skip_field(field.name)) {
+                    continue;
                 }
-            }.get;
-        }
 
-        fn make_setter_fn(comptime field_name: []const u8) fn (ruby.VALUE, ruby.VALUE) callconv(.C) ruby.VALUE {
-            return struct {
-                fn set(self: ruby.VALUE, value: ruby.VALUE) callconv(.C) ruby.VALUE {
-                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
-                    const FieldType = @TypeOf(@field(wrapper.*, field_name));
-                    @field(wrapper.*, field_name) = rubyToZig(FieldType, value);
-                    return value;
-                }
-            }.set;
-        }
+                const getter_name = field.name ++ "\x00";
+                const setter_name = field.name ++ "=\x00";
 
-        fn uintToRuby(comptime T: type, value: T) ruby.VALUE {
-            if (@typeInfo(T) != .Int) {
-                @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+                ruby.rb_define_method(class, &getter_name[0], @ptrCast(&make_getter_fn(field.name)), 0);
+                ruby.rb_define_method(class, &setter_name[0], @ptrCast(&make_setter_fn(field.name)), 1);
             }
-
-            return switch (T) {
-                u8, u16, u32 => ruby.UINT2NUM(value),
-                u64 => ruby.ULONG2NUM(value),
-                u128 => u128_to_rb_int(value),
-                else => @compileError("Unsupported integer size: " ++ @typeName(T)),
-            };
         }
 
-        // Condensed type conversion helpers
-        fn zigToRuby(comptime T: type, value: T) ruby.VALUE {
-            return switch (@typeInfo(T)) {
-                .Int => uintToRuby(T, value),
-                .Enum => |info| {
-                    const tag_type = info.tag_type;
-                    return switch (@typeInfo(tag_type)) {
-                        .Int => {
-                            const int_value = @intFromEnum(value);
-                            return uintToRuby(tag_type, int_value);
-                        },
-                        else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
-                    };
-                },
-                .Struct => |info| {
-                    if (info.layout == .@"packed") {
-                        if (info.backing_integer) |backing_type| {
-                            const int_value: backing_type = @bitCast(value);
-                            return uintToRuby(backing_type, int_value);
-                        } else {
-                            @compileError("Packed struct has no backing integer type");
-                        }
-                    }
-                    @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
-                },
-                else => {
-                    @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
-                },
-            };
-        }
-
-        fn rubyToUint(comptime T: type, value: ruby.VALUE) T {
-            if (@typeInfo(T) != .Int) {
-                @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
-            }
-
-            return switch (T) {
-                u8 => @intCast(ruby.NUM2UINT(value)),
-                u16 => @intCast(ruby.NUM2UINT(value)),
-                u32 => ruby.NUM2UINT(value),
-                u64 => @intCast(ruby.NUM2ULONG(value)),
-                u128 => rb_int_to_u128(value),
-                else => @compileError("Unsupported integer type: " ++ @typeName(T)),
-            };
-        }
-
-        fn rubyToZig(comptime T: type, value: ruby.VALUE) T {
-            return switch (@typeInfo(T)) {
-                .Int => rubyToUint(T, value),
-                .Enum => |info| {
-                    const tag_type = info.tag_type;
-                    return switch (@typeInfo(tag_type)) {
-                        .Int => {
-                            const int_value = rubyToUint(tag_type, value);
-                            return @enumFromInt(int_value);
-                        },
-                        else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
-                    };
-                },
-                .Struct => |info| {
-                    if (info.layout == .@"packed") {
-                        if (info.backing_integer) |backing_type| {
-                            const int_value = rubyToUint(backing_type, value);
-                            return @bitCast(int_value);
-                        } else {
-                            @compileError("Packed struct has no backing integer type");
-                        }
-                    }
-                    @compileLog("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
-                },
-                else => {
-                    @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
-                },
-            };
-        }
-
-        fn initialize(argc: c_int, argv: [*]ruby.VALUE, self: ruby.VALUE) callconv(.C) ruby.VALUE {
+        // This defines the Object.new function
+        fn rb_initialize(argc: c_int, argv: [*]ruby.VALUE, self: ruby.VALUE) callconv(.C) ruby.VALUE {
             _ = ruby.rb_check_typeddata(self, &rb_data_type);
 
             var kwargs: ruby.VALUE = ruby.Qnil;
@@ -307,6 +164,29 @@ fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
             _ = ruby.rb_hash_foreach(kwargs, initialize_keyword_parameter_value, self);
 
             return self;
+        }
+
+        // ruby getter function to fetch the value fromt he tb struct and return it as a ruby value
+        fn make_getter_fn(comptime field_name: []const u8) fn (ruby.VALUE) callconv(.C) ruby.VALUE {
+            return struct {
+                fn get(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
+                    const field_value = @field(wrapper.*, field_name);
+                    return zig_type_to_rb_value(@TypeOf(field_value), field_value);
+                }
+            }.get;
+        }
+
+        // ruby setter function to set the value in the tb struct from a ruby value
+        fn make_setter_fn(comptime field_name: []const u8) fn (ruby.VALUE, ruby.VALUE) callconv(.C) ruby.VALUE {
+            return struct {
+                fn set(self: ruby.VALUE, value: ruby.VALUE) callconv(.C) ruby.VALUE {
+                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
+                    const FieldType = @TypeOf(@field(wrapper.*, field_name));
+                    @field(wrapper.*, field_name) = rb_value_to_zig_type(FieldType, value);
+                    return value;
+                }
+            }.set;
         }
 
         fn initialize_keyword_parameter_value(key: ruby.VALUE, value: ruby.VALUE, self: ruby.VALUE) callconv(.C) c_int {
@@ -333,7 +213,7 @@ fn to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
     };
 }
 
-fn to_ruby_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
+fn convert_to_module_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
     if (@typeInfo(ZigType) != .Enum and @typeInfo(ZigType) != .Struct) {
         @compileError("Expected an enum or struct type for Ruby module conversion, got: " ++ @typeInfo(ZigType));
     }
@@ -391,62 +271,19 @@ fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
 fn build_rb_setup_struct(comptime ZigType: type, comptime ruby_name: []const u8) type {
     return switch (@typeInfo(ZigType)) {
         .Enum => {
-            return to_ruby_enum(ZigType, ruby_name);
+            return convert_to_module_enum(ZigType, ruby_name);
         },
         .Struct => |info| switch (info.layout) {
             .@"packed" => {
-                return to_ruby_enum(ZigType, ruby_name);
+                return convert_to_module_enum(ZigType, ruby_name);
             },
             .@"extern" => {
-                return to_ruby_class(ZigType, ruby_name);
+                return convert_to_ruby_class(ZigType, ruby_name);
             },
             else => @compileError("Unsupported struct layout: " ++ info),
         },
         else => @compileError("Unsupported Zig type for Ruby mapping: " ++ @typeInfo(ZigType)),
     };
-}
-/// VSR type mappings: these will always be the same regardless of state machine.
-const mappings_vsr = .{
-    .{ exports.tb_operation, build_rb_setup_struct(exports.tb_operation, "Operation") },
-    .{ exports.tb_packet_status, build_rb_setup_struct(exports.tb_packet_status, "PacketStatus") },
-    // .{ exports.tb_packet_t, "Packet" }, // Not used in Ruby bindings, so not included.
-    .{ exports.tb_client_t, build_rb_setup_struct(exports.tb_client_t, "Client") },
-    .{ exports.tb_init_status, build_rb_setup_struct(exports.tb_init_status, "InitStatus") },
-    .{ exports.tb_client_status, build_rb_setup_struct(exports.tb_client_status, "ClientStatus") },
-    .{ exports.tb_log_level, build_rb_setup_struct(exports.tb_log_level, "LogLevel") },
-    .{ exports.tb_register_log_callback_status, build_rb_setup_struct(exports.tb_register_log_callback_status, "RegisterLogCallbackStatus") },
-};
-
-/// State machine specific mappings: in future, these should be pulled automatically from the state
-/// machine.
-const mappings_state_machine = .{
-    .{ tb.AccountFlags, build_rb_setup_struct(tb.AccountFlags, "AccountFlags") },
-    .{ tb.TransferFlags, build_rb_setup_struct(tb.TransferFlags, "TransferFlags") },
-    .{ tb.AccountFilterFlags, build_rb_setup_struct(tb.AccountFilterFlags, "AccountFilterFlags") },
-    .{ tb.QueryFilterFlags, build_rb_setup_struct(tb.QueryFilterFlags, "QueryFilterFlags") },
-    .{ tb.Account, build_rb_setup_struct(tb.Account, "Account") },
-    .{ tb.Transfer, build_rb_setup_struct(tb.Transfer, "Transfer") },
-    .{ tb.CreateAccountResult, build_rb_setup_struct(tb.CreateAccountResult, "CreateAccountResult") },
-    .{ tb.CreateTransferResult, build_rb_setup_struct(tb.CreateTransferResult, "CreateTransferResult") },
-    .{ tb.AccountFilter, build_rb_setup_struct(tb.AccountFilter, "AccountFilter") },
-    .{ tb.AccountBalance, build_rb_setup_struct(tb.AccountBalance, "AccountBalance") },
-    .{ tb.QueryFilter, build_rb_setup_struct(tb.QueryFilter, "QueryFilter") },
-    .{ tb.CreateAccountsResult, build_rb_setup_struct(tb.CreateAccountsResult, "CreateAccountsResult") },
-};
-
-const mappings_all = mappings_vsr ++ mappings_state_machine;
-
-pub export fn initialize_ruby_client() callconv(.C) void {
-    const m_tiger_beetle = ruby.rb_define_module("TigerBeetle");
-    const m_bindings = ruby.rb_define_module_under(m_tiger_beetle, "Bindings");
-
-    inline for (mappings_all) |type_mapping| {
-        const setup_struct = type_mapping[1];
-        setup_struct.init_methods(m_bindings);
-    }
-
-    const rb_client = ruby.rb_const_get(m_bindings, ruby.rb_intern("Client"));
-    tb_client_struct().init_methods(rb_client);
 }
 
 fn tb_client_struct() type {
@@ -468,6 +305,7 @@ fn tb_client_struct() type {
         const ResultContext = struct {
             mutex: std.Thread.Mutex = std.Thread.Mutex{},
             condition: std.Thread.Condition = std.Thread.Condition{},
+
             result_data: ?[]u8 = null,
             result_len: u32 = 0,
             waiting: bool = true,
@@ -759,5 +597,143 @@ fn tb_client_struct() type {
                 },
             }
         }
+    };
+}
+
+fn skip_field(comptime field_name: []const u8) bool {
+    inline for (SKIP_PREFIXES) |prefix| {
+        if (comptime std.mem.startsWith(u8, field_name, prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn rb_int_to_u128(value: ruby.VALUE) u128 {
+    if (!ruby.RB_INTEGER_TYPE_P(value)) {
+        ruby.rb_raise(ruby.rb_eTypeError, "expected Integer");
+        return 0;
+    }
+
+    if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
+        ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
+        return 0;
+    }
+
+    var result: u128 = 0;
+    const overflow = ruby.rb_integer_pack(value, // val: the Ruby VALUE
+        &result, // words: pointer to output buffer
+        1, // numwords: we want 1 chunk of 16 bytes
+        @sizeOf(u128), // wordsize: 16 bytes
+        0, // nails: 0 (no nail bits)
+        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
+    );
+
+    if (overflow == 2) {
+        ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
+        return 0;
+    }
+
+    return result;
+}
+
+fn u128_to_rb_int(value: u128) ruby.VALUE {
+    if (value == 0) {
+        return ruby.UINT2NUM(0);
+    }
+
+    return ruby.rb_integer_unpack(&value, // ruby value
+        1, // numwords: we want 1 chunk of 16 bytes
+        @sizeOf(u128), // wordsize: 16 bytes
+        0, // nails: 0 (no nail bits)
+        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
+    );
+}
+
+fn uint_to_rb_value(comptime T: type, value: T) ruby.VALUE {
+    if (@typeInfo(T) != .Int) {
+        @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+    }
+
+    return switch (T) {
+        u8, u16, u32 => ruby.UINT2NUM(value),
+        u64 => ruby.ULONG2NUM(value),
+        u128 => u128_to_rb_int(value),
+        else => @compileError("Unsupported integer size: " ++ @typeName(T)),
+    };
+}
+
+fn zig_type_to_rb_value(comptime T: type, value: T) ruby.VALUE {
+    return switch (@typeInfo(T)) {
+        .Int => uint_to_rb_value(T, value),
+        .Enum => |info| {
+            const tag_type = info.tag_type;
+            return switch (@typeInfo(tag_type)) {
+                .Int => {
+                    const int_value = @intFromEnum(value);
+                    return uint_to_rb_value(tag_type, int_value);
+                },
+                else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
+            };
+        },
+        .Struct => |info| {
+            if (info.layout == .@"packed") {
+                if (info.backing_integer) |backing_type| {
+                    const int_value: backing_type = @bitCast(value);
+                    return uint_to_rb_value(backing_type, int_value);
+                } else {
+                    @compileError("Packed struct has no backing integer type");
+                }
+            }
+            @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+        },
+        else => {
+            @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
+        },
+    };
+}
+
+fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) T {
+    if (@typeInfo(T) != .Int) {
+        @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+    }
+
+    return switch (T) {
+        u8 => @intCast(ruby.NUM2UINT(value)),
+        u16 => @intCast(ruby.NUM2UINT(value)),
+        u32 => ruby.NUM2UINT(value),
+        u64 => @intCast(ruby.NUM2ULONG(value)),
+        u128 => rb_int_to_u128(value),
+        else => @compileError("Unsupported integer type: " ++ @typeName(T)),
+    };
+}
+
+fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) T {
+    return switch (@typeInfo(T)) {
+        .Int => rb_value_to_uint(T, value),
+        .Enum => |info| {
+            const tag_type = info.tag_type;
+            return switch (@typeInfo(tag_type)) {
+                .Int => {
+                    const int_value = rb_value_to_uint(tag_type, value);
+                    return @enumFromInt(int_value);
+                },
+                else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
+            };
+        },
+        .Struct => |info| {
+            if (info.layout == .@"packed") {
+                if (info.backing_integer) |backing_type| {
+                    const int_value = rb_value_to_uint(backing_type, value);
+                    return @bitCast(int_value);
+                } else {
+                    @compileError("Packed struct has no backing integer type");
+                }
+            }
+            @compileLog("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+        },
+        else => {
+            @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
+        },
     };
 }
