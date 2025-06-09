@@ -347,7 +347,8 @@ fn to_ruby_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
 
             switch (@typeInfo(ZigType)) {
                 .Enum => |enum_info| {
-                    // TODO for non packed structs we need some way in ruby to know that the values have to match the enum
+                    _ = ruby.rb_define_const(ruby_enum, "ENUM_PACKED", ruby.Qfalse);
+
                     inline for (enum_info.fields) |field| {
                         if (comptime skip_field(field.name)) {
                             continue;
@@ -364,7 +365,8 @@ fn to_ruby_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
                     if (layout != .@"packed") {
                         @compileError("Only packed structs can be converted to Ruby enums: " ++ @typeName(ZigType));
                     }
-                    // TODO for packed structs we need some way in ruby to know that the value can match any enum value
+                    _ = ruby.rb_define_const(ruby_enum, "ENUM_PACKED", ruby.Qtrue);
+
                     inline for (struct_info.fields, 0..) |field, i| {
                         if (comptime skip_field(field.name)) {
                             continue;
