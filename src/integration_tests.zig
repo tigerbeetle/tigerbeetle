@@ -334,7 +334,7 @@ test "in-place upgrade" {
         try cluster.replica_install(replica_index, .past);
         try cluster.replica_format(replica_index);
     }
-    try cluster.workload_start();
+    try cluster.workload_start(.{ .transfer_count = 2_000_000 });
 
     for (0..replica_count) |replica_index| {
         try cluster.replica_spawn(replica_index);
@@ -533,13 +533,21 @@ const TmpCluster = struct {
         cluster.replicas[replica_index] = null;
     }
 
-    fn workload_start(cluster: *TmpCluster) !void {
+    const WorkloadStartOptions = struct {
+        transfer_count: usize,
+    };
+
+    fn workload_start(cluster: *TmpCluster, options: WorkloadStartOptions) !void {
         assert(cluster.workload_thread == null);
         assert(!cluster.workload_exit_ok);
         // Run workload in a separate thread, to collect it's stdout and stderr, and to
         // forcefully terminate it after 10 minutes.
         cluster.workload_thread = try std.Thread.spawn(.{}, struct {
-            fn thread_main(workload_exit_ok_ptr: *bool, tigerbeetle_path: []const u8) !void {
+            fn thread_main(
+                workload_exit_ok_ptr: *bool,
+                tigerbeetle_path: []const u8,
+                benchmark_options: WorkloadStartOptions,
+            ) !void {
                 const shell = try Shell.create(std.testing.allocator);
                 defer shell.destroy();
 
@@ -548,15 +556,16 @@ const TmpCluster = struct {
                 },
                     \\{tigerbeetle} benchmark
                     \\    --print-batch-timings
-                    \\    --transfer-count=2_000_000
+                    \\    --transfer-count={transfer_count}
                     \\    --addresses={addresses}
                 , .{
                     .tigerbeetle = tigerbeetle_path,
                     .addresses = addresses,
+                    .transfer_count = benchmark_options.transfer_count,
                 });
                 workload_exit_ok_ptr.* = true;
             }
-        }.thread_main, .{ &cluster.workload_exit_ok, tigerbeetle_past });
+        }.thread_main, .{ &cluster.workload_exit_ok, tigerbeetle_past, options });
     }
 
     fn workload_finish(cluster: *TmpCluster) void {
