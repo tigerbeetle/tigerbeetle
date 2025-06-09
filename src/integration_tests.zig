@@ -525,8 +525,7 @@ test "in-place upgrade" {
 
 test "vortex smoke" {
     if (builtin.os.tag != .linux) {
-        log.info("skipping vortex on unsupported OS: {s}", .{@tagName(builtin.os.tag)});
-        return;
+        return error.SkipZigTest;
     }
 
     const shell = try Shell.create(std.testing.allocator);
