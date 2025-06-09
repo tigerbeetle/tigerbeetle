@@ -378,6 +378,34 @@ test "in-place upgrade" {
     cluster.workload_finish();
 }
 
+test "recover smoke" {
+    if (builtin.os.tag != .linux) {
+        return error.SkipZigTest;
+    }
+
+    const replica_count = TmpCluster.replica_count;
+    const seed = std.crypto.random.int(u64);
+    log.info("seed = {}", .{seed});
+
+    var cluster = try TmpCluster.init(.{ .seed = seed });
+    defer cluster.deinit();
+
+    for (0..replica_count) |replica_index| {
+        try cluster.replica_install(replica_index, .past);
+    }
+    try cluster.replica_format(0);
+    try cluster.replica_format(1);
+    try cluster.workload_start(.{ .transfer_count = 200_000 });
+    try cluster.replica_spawn(0);
+    try cluster.replica_spawn(1);
+    std.time.sleep(2 * std.time.ns_per_s);
+
+    try cluster.replica_reformat(2);
+    try cluster.replica_kill(1);
+    try cluster.replica_spawn(2);
+    cluster.workload_finish();
+}
+
 test "vortex smoke" {
     if (builtin.os.tag != .linux) {
         return error.SkipZigTest;
@@ -505,6 +533,22 @@ const TmpCluster = struct {
         , .{
             .tigerbeetle = cluster.replica_exe[replica_index],
             .replica = replica_index,
+            .datafile = cluster.replica_datafile[replica_index],
+        });
+    }
+
+    fn replica_reformat(cluster: *TmpCluster, replica_index: usize) !void {
+        try cluster.shell.exec(
+            \\{tigerbeetle} recover
+            \\    --cluster=0
+            \\    --replica={replica}
+            \\    --replica-count=3
+            \\    --addresses={addresses}
+            \\    {datafile}
+        , .{
+            .tigerbeetle = cluster.replica_exe[replica_index],
+            .replica = replica_index,
+            .addresses = addresses,
             .datafile = cluster.replica_datafile[replica_index],
         });
     }
