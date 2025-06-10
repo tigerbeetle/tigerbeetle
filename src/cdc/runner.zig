@@ -1083,7 +1083,7 @@ const ProgressTrackerMessage = struct {
                         "{}",
                         .{message.release},
                     ) catch unreachable });
-                    encoder.put("timestamp", .{ .long_long_uint = message.timestamp });
+                    encoder.put("timestamp", .{ .int64 = @bitCast(message.timestamp) });
                 }
             }.write,
         };
@@ -1101,7 +1101,8 @@ const ProgressTrackerMessage = struct {
             while (try iterator.next()) |entry| {
                 if (std.mem.eql(u8, entry.key, "timestamp")) {
                     switch (entry.value) {
-                        .long_long_uint => |value| {
+                        .int64 => |int64| {
+                            const value: u64 = @bitCast(int64);
                             if (!TimestampRange.valid(value)) break;
                             timestamp = value;
                         },
@@ -1243,13 +1244,17 @@ pub const Message = struct {
                 fn write(context: *const anyopaque, encoder: *amqp.Encoder.TableEncoder) void {
                     const message: *const Message = @ptrCast(@alignCast(context));
                     encoder.put("event_type", .{ .string = @tagName(message.type) });
-                    encoder.put("ledger", .{ .long_uint = message.ledger });
-                    encoder.put("transfer_code", .{ .short_uint = message.transfer.code });
+
+                    // N.B.: Unsigned integers like u32 and u16 are not universally supported by
+                    // all RabbitMQ clients.
+                    // To ensure compatibility, we promote them to a signed integer.
+                    encoder.put("ledger", .{ .int64 = message.ledger });
+                    encoder.put("transfer_code", .{ .int32 = message.transfer.code });
                     encoder.put("debit_account_code", .{
-                        .short_uint = message.debit_account.code,
+                        .int32 = message.debit_account.code,
                     });
                     encoder.put("credit_account_code", .{
-                        .short_uint = message.credit_account.code,
+                        .int32 = message.credit_account.code,
                     });
                 }
             }.write,
