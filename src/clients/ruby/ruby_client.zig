@@ -1,9 +1,7 @@
 const std = @import("std");
 const vsr = @import("vsr");
 
-const tb_client = vsr.tb_client;
-const exports = tb_client.exports;
-const tb_packet_t = exports.tb_packet_t;
+const exports = vsr.tb_client.exports;
 
 const assert = std.debug.assert;
 
@@ -34,19 +32,19 @@ const mappings_vsr = .{
 };
 
 const mappings_state_machine = .{
-    .{ tb.AccountFlags, build_rb_setup_struct(tb.AccountFlags, "AccountFlags") },
-    .{ tb.TransferFlags, build_rb_setup_struct(tb.TransferFlags, "TransferFlags") },
-    .{ tb.AccountFilterFlags, build_rb_setup_struct(tb.AccountFilterFlags, "AccountFilterFlags") },
-    .{ tb.QueryFilterFlags, build_rb_setup_struct(tb.QueryFilterFlags, "QueryFilterFlags") },
-    .{ tb.Account, build_rb_setup_struct(tb.Account, "Account") },
-    .{ tb.Transfer, build_rb_setup_struct(tb.Transfer, "Transfer") },
-    .{ tb.CreateAccountResult, build_rb_setup_struct(tb.CreateAccountResult, "CreateAccountResult") },
-    .{ tb.CreateTransferResult, build_rb_setup_struct(tb.CreateTransferResult, "CreateTransferResult") },
-    .{ tb.AccountFilter, build_rb_setup_struct(tb.AccountFilter, "AccountFilter") },
-    .{ tb.AccountBalance, build_rb_setup_struct(tb.AccountBalance, "AccountBalance") },
-    .{ tb.QueryFilter, build_rb_setup_struct(tb.QueryFilter, "QueryFilter") },
-    .{ tb.CreateAccountsResult, build_rb_setup_struct(tb.CreateAccountsResult, "CreateAccountsResult") },
-    .{ tb.CreateTransfersResult, build_rb_setup_struct(tb.CreateTransfersResult, "CreateTransfersResult") },
+    .{ exports.tb_account_t, build_rb_setup_struct(exports.tb_account_t, "Account") },
+    .{ exports.tb_transfer_t, build_rb_setup_struct(exports.tb_transfer_t, "Transfer") },
+    .{ exports.tb_account_flags, build_rb_setup_struct(exports.tb_account_flags, "AccountFlags") },
+    .{ exports.tb_transfer_flags, build_rb_setup_struct(exports.tb_transfer_flags, "TransferFlags") },
+    .{ exports.tb_create_account_result, build_rb_setup_struct(exports.tb_create_account_result, "CreateAccountResult") },
+    .{ exports.tb_create_transfer_result, build_rb_setup_struct(exports.tb_create_transfer_result, "CreateTransferResult") },
+    .{ exports.tb_create_accounts_result_t, build_rb_setup_struct(exports.tb_create_accounts_result_t, "CreateAccountsResult") },
+    .{ exports.tb_create_transfers_result_t, build_rb_setup_struct(exports.tb_create_transfers_result_t, "CreateTransfersResult") },
+    .{ exports.tb_account_filter_t, build_rb_setup_struct(exports.tb_account_filter_t, "AccountFilter") },
+    .{ exports.tb_account_filter_flags, build_rb_setup_struct(exports.tb_account_filter_flags, "AccountFilterFlags") },
+    .{ exports.tb_account_balance_t, build_rb_setup_struct(exports.tb_account_balance_t, "AccountBalance") },
+    .{ exports.tb_query_filter_t, build_rb_setup_struct(exports.tb_query_filter_t, "QueryFilter") },
+    .{ exports.tb_query_filter_flags, build_rb_setup_struct(exports.tb_query_filter_flags, "QueryFilterFlags") },
 };
 
 const mappings_all = mappings_vsr ++ mappings_state_machine;
@@ -315,8 +313,12 @@ const ResultContext = struct {
 };
 
 fn tb_client_struct() type {
-    const rb_client_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(exports.tb_client_t).get_rb_data_type_ptr();
+    const Client = exports.tb_client_t;
+    const Packet = exports.tb_packet_t;
+
+    const rb_client_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(Client).get_rb_data_type_ptr();
     const c_allocator = std.heap.c_allocator;
+
 
     return struct {
         pub fn init_methods(rb_client: ruby.VALUE) void {
@@ -327,7 +329,7 @@ fn tb_client_struct() type {
 
         fn on_completion(
             completion_ctx: usize,
-            packet: *tb_packet_t,
+            packet: *Packet,
             timestamp: u64,
             result_ptr: [*]const u8,
             result_len: u32,
@@ -370,7 +372,7 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
             const status = exports.init(
                 client,
@@ -390,17 +392,17 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
             const status = exports.deinit(client);
             return ruby.INT2NUM(@intFromEnum(status));
         }
 
         const OperationParsers = .{
-            .{ .operation = Operation.lookup_accounts, .parser = create_parser(u128, tb.Account) },
-            .{ .operation = Operation.create_accounts, .parser = create_parser(tb.Account, tb.CreateAccountsResult) },
-            .{ .operation = Operation.lookup_transfers, .parser = create_parser(u128, tb.Transfer) },
-            .{ .operation = Operation.create_transfers, .parser = create_parser(tb.Transfer, tb.CreateTransfersResult) },
+            .{ .operation = Operation.lookup_accounts, .parser = create_parser(u128, exports.tb_account_t) },
+            .{ .operation = Operation.create_accounts, .parser = create_parser(exports.tb_account_t, exports.tb_create_accounts_result_t) },
+            .{ .operation = Operation.lookup_transfers, .parser = create_parser(u128, exports.tb_transfer_t) },
+            .{ .operation = Operation.create_transfers, .parser = create_parser(exports.tb_transfer_t, exports.tb_create_transfers_result_t) },
         };
 
         fn get_parser(operation: Operation) error{UnsupportedOp}!Parser {
@@ -436,13 +438,13 @@ fn tb_client_struct() type {
             };
             defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
 
-            const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
             var result_context = ResultContext{
                 .operation = operation_enum,
             };
 
-            var packet = exports.tb_packet_t{
+            var packet = Packet{
                 .user_data = @ptrCast(&result_context),
                 .data = @constCast(@ptrCast(parsed_data.data)),
                 .data_size = parsed_data.size,
