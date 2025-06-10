@@ -66,10 +66,10 @@ Message headers:
 | Key                   | AMQP data type     | Description                              |
 |-----------------------|--------------------|------------------------------------------|
 | `event_type`          | `string`           | The event type.                          |
-| `ledger`              | `long_uint`        | The ledger of the transfer and accounts. |
-| `transfer_code`       | `short_uint`       | The transfer code.                       |
-| `debit_account_code`  | `short_uint`       | The debit account code.                  |
-| `credit_account_code` | `short_uint`       | The credit account code.                 |
+| `ledger`              | `long_long_int`    | The ledger of the transfer and accounts. |
+| `transfer_code`       | `long_int`         | The transfer code.                       |
+| `debit_account_code`  | `long_int`         | The debit account code.                  |
+| `credit_account_code` | `long_int`         | The credit account code.                 |
 | `app_id`              | `string`           | Constant `tigerbeetle`.                  |
 | `content_type`        | `string`           | Constant `application/json`              |
 | `delivery_mode`       | `short_short_uint` | Constant `2` which means _persistent_.   |
