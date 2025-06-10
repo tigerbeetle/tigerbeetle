@@ -396,27 +396,21 @@ fn tb_client_struct() type {
             return ruby.INT2NUM(@intFromEnum(status));
         }
 
-        const ParserRegistry = struct {
-            pub fn from_ruby(operation: Operation) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
-                return switch (operation) {
-                    .lookup_accounts => Parser(u128, tb.Account).from_ruby,
-                    .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).from_ruby,
-                    .lookup_transfers => Parser(u128, tb.Transfer).from_ruby,
-                    .create_transfers => Parser(tb.Transfer, tb.CreateTransfersResult).from_ruby,
-                    else => unreachable,
-                };
-            }
-
-            pub fn to_ruby(operation: Operation) *const fn (*ResultContext) ruby.VALUE {
-                return switch (operation) {
-                    .lookup_accounts => Parser(u128, tb.Account).to_ruby,
-                    .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).to_ruby,
-                    .lookup_transfers => Parser(u128, tb.Transfer).to_ruby,
-                    .create_transfers => Parser(tb.Transfer, tb.CreateTransfersResult).to_ruby,
-                    else => unreachable,
-                };
-            }
+        const OperationParsers = .{
+            .{ .operation = Operation.lookup_accounts, .parser = create_parser(u128, tb.Account) },
+            .{ .operation = Operation.create_accounts, .parser = create_parser(tb.Account, tb.CreateAccountsResult) },
+            .{ .operation = Operation.lookup_transfers, .parser = create_parser(u128, tb.Transfer) },
+            .{ .operation = Operation.create_transfers, .parser = create_parser(tb.Transfer, tb.CreateTransfersResult) },
         };
+
+        fn get_parser(operation: Operation) error{UnsupportedOp}!Parser {
+            inline for (OperationParsers) |op| {
+                if (op.operation == operation) {
+                    return op.parser;
+                }
+            }
+            return error.UnsupportedOp;
+        }
 
         fn submit(self: ruby.VALUE, rb_operation: ruby.VALUE, rb_data: ruby.VALUE) callconv(.C) ruby.VALUE {
             if (ruby.NIL_P(rb_operation) or !ruby.RB_TYPE_P(rb_operation, ruby.T_FIXNUM)) {
@@ -431,16 +425,13 @@ fn tb_client_struct() type {
             const operation_int: u8 = @intCast(ruby.NUM2INT(rb_operation));
             const operation_enum: Operation = @enumFromInt(operation_int);
 
-            const from_ruby = switch (operation_enum) {
-                .lookup_accounts, .create_accounts,
-                .lookup_transfers, .create_transfers, => ParserRegistry.from_ruby(operation_enum),
-                else => {
-                    ruby.rb_raise(ruby.rb_eRuntimeError, "Unsupported operation");
-                    return ruby.Qfalse;
-                }
+            const parser = get_parser(operation_enum) catch {
+                ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation: %d", operation_int);
+                return ruby.Qnil;
             };
 
-            const parsed_data: ParsedData = from_ruby(c_allocator, rb_data) catch {
+            const parsed_data: ParsedData = parser.from_ruby(c_allocator, rb_data) catch {
+                // #from_ruby will raise the ruby error if it fails
                 return ruby.Qnil;
             };
             defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
@@ -487,9 +478,7 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const to_ruby = ParserRegistry.to_ruby(operation_enum);
-
-            return to_ruby(&result_context);
+            return parser.to_ruby(&result_context);
         }
     };
 }
@@ -638,10 +627,18 @@ const Error = error{
     UnsupportedOp,
 };
 
-const ParsedData = struct { size: u32, data: ?[*]const u8 = null, };
+const ParsedData = struct {
+    size: u32,
+    data: ?[*]const u8 = null,
+};
 
-fn Parser(comptime InputType: type, comptime OutputType: type) type {
-    return struct {
+const Parser = struct {
+    from_ruby: *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData,
+    to_ruby: *const fn (*ResultContext) ruby.VALUE,
+};
+
+fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
+    const impl = struct {
         fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
             if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
                 ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
@@ -700,35 +697,41 @@ fn Parser(comptime InputType: type, comptime OutputType: type) type {
                 return ruby.rb_ary_new();
             }
 
-            if (ctx.result_data) |result| {
-                const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
-                const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
-
-                const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
-                const rb_class_name = rb_type_struct.rb_class_name;
-                const rb_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_class_name[0]));
-
-                const result_size = ctx.result_len / @sizeOf(OutputType);
-                const rb_result = ruby.rb_ary_new2(@intCast(result_size));
-
-                const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
-
-                for (0..result_size) |i| {
-                    const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
-
-                    const data_block = result[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
-                    const data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
-
-                    @memcpy(@as([*]u8, @ptrCast(data))[0..@sizeOf(OutputType)], data_block);
-
-                    _ = ruby.rb_ary_push(rb_result, rb_instance);
-                }
-
-                return rb_result;
-            } else {
-                ruby.rb_raise(ruby.rb_eRuntimeError, "No result data available");
-                return ruby.Qnil;
+            if (ctx.result_data == null) {
+                @panic("Result data is null, expected non-null data for Ruby conversion");
             }
+
+            const result = ctx.result_data.?;
+            const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
+            const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
+
+            const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
+            const rb_class_name = rb_type_struct.rb_class_name;
+            const rb_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_class_name[0]));
+
+            const result_size = ctx.result_len / @sizeOf(OutputType);
+            const rb_result_array = ruby.rb_ary_new2(@intCast(result_size));
+
+            const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
+
+            for (0..result_size) |i| {
+                const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
+
+                const data_block = result[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
+                const data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
+
+                @memcpy(@as([*]u8, @ptrCast(data))[0..@sizeOf(OutputType)], data_block);
+
+                _ = ruby.rb_ary_push(rb_result_array, rb_instance);
+            }
+
+            std.debug.print("Returning Ruby array with {d} items\n", .{result_size});
+            return rb_result_array;
         }
+    };
+
+    return Parser{
+        .from_ruby = impl.from_ruby,
+        .to_ruby = impl.to_ruby,
     };
 }
