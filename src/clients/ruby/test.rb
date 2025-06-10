@@ -603,37 +603,61 @@ ADDRESSES = ENV.fetch("TB_ADDRESSES", "3000").to_s
 CLUSTER_ID = ENV.fetch("TB_CLUSTER_ID", "0").to_i
 client = TigerBeetle.connect(addresses: ADDRESSES, cluster_id: CLUSTER_ID)
 
-empty_lookup = client.lookup_accounts([10000])
-if empty_lookup.size != 0
-  raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
-end
-
-account1 = TigerBeetle::Bindings::Account.new(
-  id: 4201,
-  code: 10,
-  ledger: 1,
-  user_data_128: 4201
-)
-account2 = TigerBeetle::Bindings::Account.new(
-  id: 4202,
-  code: 10,
-  ledger: 1,
-  user_data_128: 4202
-)
-create_accounts_result = client.create_accounts([account1, account2])
-if create_accounts_result.size == 0
-  puts "2 Accounts created successfully"
-elsif create_accounts_result.size == 2
-  if create_accounts_result.map(&:result).uniq == [TigerBeetle::Bindings::CreateAccountResult::EXISTS]
-    puts "2 Accounts already exist"
-  else
-    raise "Accounts failed to create for unknown reason #{create_accounts_result.map(&:to_h)}"
+begin
+  empty_lookup = client.lookup_accounts([10000])
+  if empty_lookup.size != 0
+    raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
   end
-else
-  raise "Expected 2 create account results, got #{create_account_result.size}"
+
+  account1 = TigerBeetle::Bindings::Account.new(
+    id: 4201,
+    code: 10,
+    ledger: 1,
+    user_data_128: 4201
+  )
+  account2 = TigerBeetle::Bindings::Account.new(
+    id: 4202,
+    code: 10,
+    ledger: 1,
+    user_data_128: 4202
+  )
+  create_accounts_result = client.create_accounts([account1, account2])
+  if create_accounts_result.size == 0
+    puts "2 Accounts created successfully"
+  elsif create_accounts_result.size == 2
+    if create_accounts_result.map(&:result).uniq == [TigerBeetle::Bindings::CreateAccountResult::EXISTS]
+      puts "2 Accounts already exist"
+    else
+      raise "Accounts failed to create for unknown reason #{create_accounts_result.map(&:to_h)}"
+    end
+  else
+    raise "Expected 2 create account results, got #{create_account_result.size}"
+  end
+
+  transfer1 = TigerBeetle::Bindings::Transfer.new(
+    id: 10001,
+    debit_account_id: account1.id,
+    credit_account_id: account2.id,
+    amount: 1000,
+    ledger: account1.ledger,
+    code: account1.code,
+  )
+  transfer2 = TigerBeetle::Bindings::Transfer.new(
+    id: 10002,
+    debit_account_id: account2.id,
+    credit_account_id: account1.id,
+    amount: 2000,
+    ledger: account2.ledger,
+    code: account2.code,
+  )
+  client.create_transfers([transfer1, transfer2])
+  transfers = client.lookup_transfers([transfer1.id, transfer2.id])
+  if transfers.size != 2
+    raise "Expected 2 transfers, got #{transfers.size}"
+  end
+
+  puts "*"* 80
+  puts "  SUCCESS: All TigerBeetle constants match expected values\n"
+ensure
+  client.deinit
 end
-
-
-client.deinit
-puts "*"* 80
-puts "  SUCCESS: All TigerBeetle constants match expected values\n"

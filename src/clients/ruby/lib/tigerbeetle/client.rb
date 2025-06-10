@@ -24,6 +24,9 @@ module TigerBeetle
 
     # CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
     def create_transfers(transfers)
+      transfers = array_wrap(transfers)
+
+      client.submit(Bindings::Operation::CREATE_TRANSFERS, transfers)
     end
 
     # LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
@@ -36,6 +39,9 @@ module TigerBeetle
 
     # LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
     def lookup_transfers(transfer_ids)
+      transfer_ids = array_wrap(transfer_ids)
+
+      client.submit(Bindings::Operation::LOOKUP_TRANSFERS, transfer_ids)
     end
 
     # GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)

@@ -46,6 +46,7 @@ const mappings_state_machine = .{
     .{ tb.AccountBalance, build_rb_setup_struct(tb.AccountBalance, "AccountBalance") },
     .{ tb.QueryFilter, build_rb_setup_struct(tb.QueryFilter, "QueryFilter") },
     .{ tb.CreateAccountsResult, build_rb_setup_struct(tb.CreateAccountsResult, "CreateAccountsResult") },
+    .{ tb.CreateTransfersResult, build_rb_setup_struct(tb.CreateTransfersResult, "CreateTransfersResult") },
 };
 
 const mappings_all = mappings_vsr ++ mappings_state_machine;
@@ -400,6 +401,8 @@ fn tb_client_struct() type {
                 return switch (operation) {
                     .lookup_accounts => Parser(u128, tb.Account).from_ruby,
                     .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).from_ruby,
+                    .lookup_transfers => Parser(u128, tb.Transfer).from_ruby,
+                    .create_transfers => Parser(tb.Transfer, tb.CreateTransfersResult).from_ruby,
                     else => unreachable,
                 };
             }
@@ -408,6 +411,8 @@ fn tb_client_struct() type {
                 return switch (operation) {
                     .lookup_accounts => Parser(u128, tb.Account).to_ruby,
                     .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).to_ruby,
+                    .lookup_transfers => Parser(u128, tb.Transfer).to_ruby,
+                    .create_transfers => Parser(tb.Transfer, tb.CreateTransfersResult).to_ruby,
                     else => unreachable,
                 };
             }
@@ -427,7 +432,8 @@ fn tb_client_struct() type {
             const operation_enum: Operation = @enumFromInt(operation_int);
 
             const from_ruby = switch (operation_enum) {
-                .lookup_accounts, .create_accounts => ParserRegistry.from_ruby(operation_enum),
+                .lookup_accounts, .create_accounts,
+                .lookup_transfers, .create_transfers, => ParserRegistry.from_ruby(operation_enum),
                 else => {
                     ruby.rb_raise(ruby.rb_eRuntimeError, "Unsupported operation");
                     return ruby.Qfalse;
@@ -481,10 +487,7 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const to_ruby = switch (operation_enum) {
-                .lookup_accounts, .create_accounts => ParserRegistry.to_ruby(operation_enum),
-                else => unreachable
-            };
+            const to_ruby = ParserRegistry.to_ruby(operation_enum);
 
             return to_ruby(&result_context);
         }
