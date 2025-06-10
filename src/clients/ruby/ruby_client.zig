@@ -182,7 +182,10 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
                 fn set(self: ruby.VALUE, value: ruby.VALUE) callconv(.C) ruby.VALUE {
                     const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
                     const FieldType = @TypeOf(@field(wrapper.*, field_name));
-                    @field(wrapper.*, field_name) = rb_value_to_zig_type(FieldType, value);
+                    @field(wrapper.*, field_name) = rb_value_to_zig_type(FieldType, value) catch {
+                        // We have already triggered the error, just need to return for the compiler
+                        return ruby.Qnil;
+                    };
                     return value;
                 }
             }.set;
@@ -218,7 +221,6 @@ fn convert_to_module_enum(comptime ZigType: type, comptime ruby_name: []const u8
     }
 
     return struct {
-        const Self = @This();
         const class_name = ruby_name ++ "\x00";
 
         pub fn init_methods(module: ruby.VALUE) void {
@@ -285,11 +287,6 @@ fn build_rb_setup_struct(comptime ZigType: type, comptime ruby_name: []const u8)
     };
 }
 
-const packet_data = struct {
-    size: u32,
-    data: ?[*]const u8 = null,
-};
-
 fn type_mapping_from_zig_type(ZigType: type) type {
     return comptime blk: {
         for (mappings_all) |type_mapping| {
@@ -319,7 +316,6 @@ fn tb_client_struct() type {
     const rb_client_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(Client).get_rb_data_type_ptr();
     const c_allocator = std.heap.c_allocator;
 
-
     return struct {
         pub fn init_methods(rb_client: ruby.VALUE) void {
             _ = ruby.rb_define_method(rb_client, "init", @ptrCast(&init), 2);
@@ -338,8 +334,10 @@ fn tb_client_struct() type {
             _ = timestamp;
 
             const result_context: *ResultContext = @ptrCast(@alignCast(packet.user_data));
+
             result_context.mutex.lock();
             defer result_context.mutex.unlock();
+
             result_context.waiting = false;
             result_context.result_len = result_len;
             if (result_len > 0) {
@@ -365,8 +363,10 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const cluster_id: [16]u8 = @bitCast(rb_int_to_u128(rb_cluster_id));
-
+            const cluster_id: [16]u8 = @bitCast(rb_int_to_u128(rb_cluster_id) catch {
+                // rb_int_to_u128 will raise the ruby error if it fails
+                return ruby.Qnil;
+            });
             if (!ruby.RB_TYPE_P(self, ruby.T_DATA)) {
                 ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
                 return ruby.Qnil;
@@ -494,15 +494,15 @@ fn skip_field(comptime field_name: []const u8) bool {
     return false;
 }
 
-fn rb_int_to_u128(value: ruby.VALUE) u128 {
+fn rb_int_to_u128(value: ruby.VALUE) Error!u128 {
     if (!ruby.RB_INTEGER_TYPE_P(value)) {
-        ruby.rb_raise(ruby.rb_eTypeError, "expected Integer");
-        return 0;
+        ruby.rb_raise(ruby.rb_eArgError, "expected Integer");
+        return Error.ArgError;
     }
 
     if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
         ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
-        return 0;
+        return Error.ArgError;
     }
 
     var result: u128 = 0;
@@ -516,7 +516,7 @@ fn rb_int_to_u128(value: ruby.VALUE) u128 {
 
     if (overflow == 2) {
         ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
-        return 0;
+        return Error.ArgError;
     }
 
     return result;
@@ -578,7 +578,7 @@ fn zig_type_to_rb_value(comptime T: type, value: T) ruby.VALUE {
     };
 }
 
-fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) T {
+fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) Error!T {
     if (@typeInfo(T) != .Int) {
         @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
     }
@@ -588,19 +588,19 @@ fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) T {
         u16 => @intCast(ruby.NUM2UINT(value)),
         u32 => ruby.NUM2UINT(value),
         u64 => @intCast(ruby.NUM2ULONG(value)),
-        u128 => rb_int_to_u128(value),
+        u128 => try rb_int_to_u128(value),
         else => @compileError("Unsupported integer type: " ++ @typeName(T)),
     };
 }
 
-fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) T {
+fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) Error!T {
     return switch (@typeInfo(T)) {
-        .Int => rb_value_to_uint(T, value),
+        .Int => try rb_value_to_uint(T, value),
         .Enum => |info| {
             const tag_type = info.tag_type;
             return switch (@typeInfo(tag_type)) {
                 .Int => {
-                    const int_value = rb_value_to_uint(tag_type, value);
+                    const int_value = try rb_value_to_uint(tag_type, value);
                     return @enumFromInt(int_value);
                 },
                 else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
@@ -609,13 +609,13 @@ fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) T {
         .Struct => |info| {
             if (info.layout == .@"packed") {
                 if (info.backing_integer) |backing_type| {
-                    const int_value = rb_value_to_uint(backing_type, value);
+                    const int_value = try rb_value_to_uint(backing_type, value);
                     return @bitCast(int_value);
                 } else {
                     @compileError("Packed struct has no backing integer type");
                 }
             }
-            @compileLog("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+            @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
         },
         else => {
             @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
@@ -672,7 +672,7 @@ fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
                     var i: usize = 0;
                     while (i < data_array_len) : (i += 1) {
                         const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
-                        const zig_value: InputType = rb_value_to_uint(InputType, rb_item);
+                        const zig_value: InputType = try rb_value_to_uint(InputType, rb_item);
 
                         const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
                         @memcpy(dest_slice, std.mem.asBytes(&zig_value));
