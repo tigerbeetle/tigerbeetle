@@ -17,14 +17,14 @@ const tb = vsr.tigerbeetle;
 
 const ruby = @cImport(@cInclude("ruby.h"));
 
-const global_allocator = std.heap.c_allocator;
-
 const MAX_BATCH_SIZE = 8192;
 
 const SKIP_PREFIXES = [_][]const u8{ "reserved", "opaque", "deprecated" };
 
+const Operation = exports.tb_operation;
+
 const mappings_vsr = .{
-    .{ exports.tb_operation, build_rb_setup_struct(exports.tb_operation, "Operation") },
+    .{ Operation, build_rb_setup_struct(Operation, "Operation") },
     .{ exports.tb_packet_status, build_rb_setup_struct(exports.tb_packet_status, "PacketStatus") },
     .{ exports.tb_client_t, build_rb_setup_struct(exports.tb_client_t, "Client") },
     .{ exports.tb_init_status, build_rb_setup_struct(exports.tb_init_status, "InitStatus") },
@@ -286,14 +286,36 @@ fn build_rb_setup_struct(comptime ZigType: type, comptime ruby_name: []const u8)
     };
 }
 
-fn tb_client_struct() type {
-    const rb_client_type_t: *const ruby.rb_data_type_t = comptime blk: {
+const packet_data = struct {
+    size: u32,
+    data: ?[*]const u8 = null,
+};
+
+fn type_mapping_from_zig_type(ZigType: type) type {
+    return comptime blk: {
         for (mappings_all) |type_mapping| {
-            if (type_mapping[0] == exports.tb_client_t) {
-                break :blk type_mapping[1].get_rb_data_type_ptr();
+            if (type_mapping[0] == ZigType) {
+                break :blk type_mapping[1];
             }
         }
+        @compileError("No mappings found for " ++ @typeName(ZigType));
     };
+}
+
+const ResultContext = struct {
+    mutex: std.Thread.Mutex = std.Thread.Mutex{},
+    condition: std.Thread.Condition = std.Thread.Condition{},
+
+    result_data: ?[]u8 = null,
+    result_len: u32 = 0,
+    waiting: bool = true,
+    operation: Operation,
+    result_error: ?Error = null,
+};
+
+fn tb_client_struct() type {
+    const rb_client_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(exports.tb_client_t).get_rb_data_type_ptr();
+    const c_allocator = std.heap.c_allocator;
 
     return struct {
         pub fn init_methods(rb_client: ruby.VALUE) void {
@@ -301,21 +323,6 @@ fn tb_client_struct() type {
             _ = ruby.rb_define_method(rb_client, "deinit", @ptrCast(&deinit), 0);
             _ = ruby.rb_define_method(rb_client, "submit", @ptrCast(&submit), 2);
         }
-
-        const ResultContext = struct {
-            mutex: std.Thread.Mutex = std.Thread.Mutex{},
-            condition: std.Thread.Condition = std.Thread.Condition{},
-
-            result_data: ?[]u8 = null,
-            result_len: u32 = 0,
-            waiting: bool = true,
-            operation: exports.tb_operation,
-            result_error: ?Error = null,
-
-            const Error = error{
-                MemoryAllocationFailed,
-            };
-        };
 
         fn on_completion(
             completion_ctx: usize,
@@ -333,8 +340,8 @@ fn tb_client_struct() type {
             result_context.waiting = false;
             result_context.result_len = result_len;
             if (result_len > 0) {
-                const data_alloc = global_allocator.alloc(u8, result_len) catch {
-                    result_context.result_error = ResultContext.Error.MemoryAllocationFailed;
+                const data_alloc = c_allocator.alloc(u8, result_len) catch {
+                    result_context.result_error = error.OutOfMemory;
                     return;
                 };
                 result_context.result_data = data_alloc;
@@ -388,6 +395,24 @@ fn tb_client_struct() type {
             return ruby.INT2NUM(@intFromEnum(status));
         }
 
+        const ParserRegistry = struct {
+            pub fn from_ruby(operation: Operation) *const fn (std.mem.Allocator, ruby.VALUE) Error!*ParsedData {
+                return switch (operation) {
+                    .lookup_accounts => Parser(u128, tb.Account).from_ruby,
+                    .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).from_ruby,
+                    else => unreachable,
+                };
+            }
+
+            pub fn to_ruby(operation: Operation) *const fn (*ResultContext) ruby.VALUE {
+                return switch (operation) {
+                    .lookup_accounts => Parser(u128, tb.Account).to_ruby,
+                    .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).to_ruby,
+                    else => unreachable,
+                };
+            }
+        };
+
         fn submit(self: ruby.VALUE, rb_operation: ruby.VALUE, rb_data: ruby.VALUE) callconv(.C) ruby.VALUE {
             if (ruby.NIL_P(rb_operation) or !ruby.RB_TYPE_P(rb_operation, ruby.T_FIXNUM)) {
                 ruby.rb_raise(ruby.rb_eArgError, "operation must be a non-nil Integer object");
@@ -398,13 +423,21 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const operation_int = ruby.NUM2INT(rb_operation);
-            const operation_enum: exports.tb_operation = @enumFromInt(operation_int);
-            var data: packet_data = undefined;
-            data.size = 0;
-            data.data = null;
+            const operation_int: u8 = @intCast(ruby.NUM2INT(rb_operation));
+            const operation_enum: Operation = @enumFromInt(operation_int);
 
-            parse_data(operation_enum, rb_data, &data);
+            const from_ruby = switch (operation_enum) {
+                .lookup_accounts, .create_accounts => ParserRegistry.from_ruby(operation_enum),
+                else => {
+                    ruby.rb_raise(ruby.rb_eRuntimeError, "Unsupported operation");
+                    return ruby.Qfalse;
+                }
+            };
+
+            const parsed_data: *ParsedData = from_ruby(c_allocator, rb_data) catch {
+                return ruby.Qnil;
+            };
+            // defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
 
             const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
@@ -414,8 +447,8 @@ fn tb_client_struct() type {
 
             var packet = exports.tb_packet_t{
                 .user_data = @ptrCast(&result_context),
-                .data = @constCast(@ptrCast(data.data)),
-                .data_size = data.size,
+                .data = @constCast(@ptrCast(parsed_data.data)),
+                .data_size = parsed_data.size,
                 .user_tag = 0, // Set by the client internally
                 .operation = @intFromEnum(operation_enum),
                 .status = exports.tb_packet_status.ok, // Initial status
@@ -442,160 +475,18 @@ fn tb_client_struct() type {
 
             if (result_context.result_error) |e| {
                 switch (e) {
-                    ResultContext.Error.MemoryAllocationFailed => ruby.rb_raise(ruby.rb_eRuntimeError, "Memory allocation failed"),
+                    Error.OutOfMemory => ruby.rb_raise(ruby.rb_eRuntimeError, "Out of memory while processing request"),
+                    else => unreachable,
                 }
                 return ruby.Qnil;
             }
-            if (result_context.result_len == 0) {
-                return ruby.rb_ary_new();
-            }
 
-            if (result_context.result_data) |result| {
-                const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
-                const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
-                switch (result_context.operation) {
-                    .lookup_accounts => {
-                        const rb_account_class_name = comptime blk: {
-                            for (mappings_state_machine) |type_mapping| {
-                                if (type_mapping[0] == tb.Account) {
-                                    break :blk type_mapping[1].rb_class_name;
-                                }
-                            }
-                        };
-                        const rb_account_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_account_class_name[0]));
-                        const num_accounts = result_context.result_len / @sizeOf(tb.Account);
-                        const rb_result = ruby.rb_ary_new2(@intCast(num_accounts));
-                        const rb_data_account_t: *const ruby.rb_data_type_t = comptime blk: {
-                            for (mappings_state_machine) |type_mapping| {
-                                if (type_mapping[0] == tb.Account) {
-                                    break :blk type_mapping[1].get_rb_data_type_ptr();
-                                }
-                            }
-                        };
-                        for (0..num_accounts) |i| {
-                            const account_data = result[i * @sizeOf(tb.Account) .. (i + 1) * @sizeOf(tb.Account)];
-                            const rb_account = ruby.rb_class_new_instance(0, null, rb_account_class);
-                            const account: *tb.Account = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_account, rb_data_account_t)));
+            const to_ruby = switch (operation_enum) {
+                .lookup_accounts, .create_accounts => ParserRegistry.to_ruby(operation_enum),
+                else => unreachable
+            };
 
-                            @memcpy(@as([*]u8, @ptrCast(account))[0..@sizeOf(tb.Account)], account_data);
-
-                            _ = ruby.rb_ary_push(rb_result, rb_account);
-                        }
-
-                        return rb_result;
-                    },
-                    .create_accounts => {
-                        const rb_account_results_class_name = comptime blk: {
-                            for (mappings_state_machine) |type_mapping| {
-                                if (type_mapping[0] == tb.CreateAccountsResult) {
-                                    break :blk type_mapping[1].rb_class_name;
-                                }
-                            }
-                        };
-                        const rb_create_account_result_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_account_results_class_name[0]));
-                        const num_results = result_context.result_len / @sizeOf(tb.CreateAccountsResult);
-                        const rb_result = ruby.rb_ary_new2(@intCast(num_results));
-                        const rb_data_create_account_result_t: *const ruby.rb_data_type_t = comptime blk: {
-                            for (mappings_state_machine) |type_mapping| {
-                                if (type_mapping[0] == tb.CreateAccountsResult) {
-                                    break :blk type_mapping[1].get_rb_data_type_ptr();
-                                }
-                            }
-                        };
-                        for (0..num_results) |i| {
-                            const result_data = result[i * @sizeOf(tb.CreateAccountsResult) .. (i + 1) * @sizeOf(tb.CreateAccountsResult)];
-                            const rb_result_instance = ruby.rb_class_new_instance(0, null, rb_create_account_result_class);
-                            const create_account_result: *tb.CreateAccountsResult = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_result_instance, rb_data_create_account_result_t)));
-
-                            @memcpy(@as([*]u8, @ptrCast(create_account_result))[0..@sizeOf(tb.CreateAccountsResult)], result_data);
-
-                            _ = ruby.rb_ary_push(rb_result, rb_result_instance);
-                        }
-
-                        return rb_result;
-                    },
-                    else => {
-                        ruby.rb_raise(ruby.rb_eRuntimeError, "Unsupported operation for result data");
-                        return ruby.Qnil;
-                    },
-                }
-            } else {
-                ruby.rb_raise(ruby.rb_eRuntimeError, "No result data available");
-                return ruby.Qfalse;
-            }
-        }
-
-        const packet_data = struct {
-            size: u32,
-            data: ?[*]const u8 = null,
-        };
-
-        fn parse_data(operation: exports.tb_operation, rb_data: ruby.VALUE, out_data: *packet_data) void {
-            if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
-                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
-                return;
-            }
-
-            const data_array_len = ruby.RARRAY_LEN(rb_data);
-            if (data_array_len == 0) {
-                ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
-                return;
-            } else if (data_array_len > MAX_BATCH_SIZE) {
-                ruby.rb_raise(ruby.rb_eArgError, "data array size exceeds maximum allowed size of {}", .{MAX_BATCH_SIZE});
-                return;
-            }
-
-            switch (operation) {
-                .lookup_accounts => {
-                    out_data.size = @intCast(data_array_len * @sizeOf(u128));
-                    const data_alloc = global_allocator.alloc(u8, out_data.size) catch {
-                        ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to allocate memory for data");
-                        return;
-                    };
-                    out_data.data = data_alloc.ptr;
-
-                    var i: usize = 0;
-                    while (i < data_array_len) : (i += 1) {
-                        const rb_account_id = ruby.rb_ary_entry(rb_data, @intCast(i));
-                        const account_id = rb_int_to_u128(rb_account_id);
-
-                        const dest_slice = data_alloc[i * @sizeOf(u128) .. (i + 1) * @sizeOf(u128)];
-                        @memcpy(dest_slice, std.mem.asBytes(&account_id));
-                    }
-                },
-                .create_accounts => {
-                    out_data.size = @intCast(data_array_len * @sizeOf(tb.Account));
-                    const data_alloc = global_allocator.alloc(u8, out_data.size) catch {
-                        ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to allocate memory for data");
-                        return;
-                    };
-                    out_data.data = data_alloc.ptr;
-
-                    const rb_data_account_t: *const ruby.rb_data_type_t = comptime blk: {
-                        for (mappings_state_machine) |type_mapping| {
-                            if (type_mapping[0] == tb.Account) {
-                                break :blk type_mapping[1].get_rb_data_type_ptr();
-                            }
-                        }
-                    };
-                    var i: usize = 0;
-                    while (i < data_array_len) : (i += 1) {
-                        const rb_account = ruby.rb_ary_entry(rb_data, @intCast(i));
-                        const accounts_result: *tb.Account = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_account, rb_data_account_t)));
-                        const dest_slice = data_alloc[i * @sizeOf(tb.Account) .. (i + 1) * @sizeOf(tb.Account)];
-                        @memcpy(dest_slice, std.mem.asBytes(accounts_result));
-                    }
-                },
-                else => {
-                    var buf: [256]u8 = undefined;
-                    const msg = std.fmt.bufPrintZ(&buf, "Unsupported operation for data parsing: {d}", .{@intFromEnum(operation)}) catch {
-                        ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation for data parsing");
-                        return;
-                    };
-                    ruby.rb_raise(ruby.rb_eArgError, msg.ptr);
-                    return;
-                },
-            }
+            return to_ruby(&result_context);
         }
     };
 }
@@ -735,5 +626,106 @@ fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) T {
         else => {
             @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
         },
+    };
+}
+
+const Error = error{
+    ArgError,
+    OutOfMemory,
+    UnsupportedOp,
+};
+
+const ParsedData = struct { size: u32, data: ?[*]const u8 = null, };
+
+fn Parser(comptime InputType: type, comptime OutputType: type) type {
+    return struct {
+        fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!*ParsedData {
+            if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
+                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
+                return Error.ArgError;
+            }
+
+            const data_array_len = ruby.RARRAY_LEN(rb_data);
+            if (data_array_len == 0) {
+                ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
+                return Error.ArgError;
+            } else if (data_array_len > MAX_BATCH_SIZE) {
+                ruby.rb_raise(ruby.rb_eArgError, "data array size exceeds maximum allowed size of {}", .{MAX_BATCH_SIZE});
+                return Error.ArgError;
+            }
+
+            var out_data: ParsedData = .{
+                .size = 0,
+                .data = null,
+            };
+            out_data.size = @intCast(data_array_len * @sizeOf(InputType));
+            const data_block = allocator.alloc(u8, out_data.size) catch {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to allocate memory for data");
+                return Error.OutOfMemory;
+            };
+            out_data.data = data_block.ptr;
+
+            switch (@typeInfo(InputType)) {
+                .Int => {
+                    var i: usize = 0;
+                    while (i < data_array_len) : (i += 1) {
+                        const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
+                        const zig_value: InputType = rb_value_to_uint(InputType, rb_item);
+
+                        const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
+                        @memcpy(dest_slice, std.mem.asBytes(&zig_value));
+                    }
+                },
+                .Struct => {
+                    const rb_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(InputType).get_rb_data_type_ptr();
+                    var i: usize = 0;
+                    while (i < data_array_len) : (i += 1) {
+                        const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
+                        const zig_item: *InputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_item, rb_type_t)));
+                        const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
+                        @memcpy(dest_slice, std.mem.asBytes(zig_item));
+                    }
+                },
+                else => @compileError("Unable to handle type " ++ @typeName(InputType)),
+            }
+
+            return &out_data;
+        }
+
+        fn to_ruby(ctx: *ResultContext) ruby.VALUE {
+            if (ctx.result_len == 0) {
+                return ruby.rb_ary_new();
+            }
+
+            if (ctx.result_data) |result| {
+                const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
+                const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
+
+                const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
+                const rb_class_name = rb_type_struct.rb_class_name;
+                const rb_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_class_name[0]));
+
+                const result_size = ctx.result_len / @sizeOf(OutputType);
+                const rb_result = ruby.rb_ary_new2(@intCast(result_size));
+
+                const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
+
+                for (0..result_size) |i| {
+                    const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
+
+                    const data_block = result[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
+                    const data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
+
+                    @memcpy(@as([*]u8, @ptrCast(data))[0..@sizeOf(OutputType)], data_block);
+
+                    _ = ruby.rb_ary_push(rb_result, rb_instance);
+                }
+
+                return rb_result;
+            } else {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "No result data available");
+                return ruby.Qnil;
+            }
+        }
     };
 }
