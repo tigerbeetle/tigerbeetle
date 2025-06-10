@@ -396,7 +396,7 @@ fn tb_client_struct() type {
         }
 
         const ParserRegistry = struct {
-            pub fn from_ruby(operation: Operation) *const fn (std.mem.Allocator, ruby.VALUE) Error!*ParsedData {
+            pub fn from_ruby(operation: Operation) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
                 return switch (operation) {
                     .lookup_accounts => Parser(u128, tb.Account).from_ruby,
                     .create_accounts => Parser(tb.Account, tb.CreateAccountsResult).from_ruby,
@@ -434,10 +434,10 @@ fn tb_client_struct() type {
                 }
             };
 
-            const parsed_data: *ParsedData = from_ruby(c_allocator, rb_data) catch {
+            const parsed_data: ParsedData = from_ruby(c_allocator, rb_data) catch {
                 return ruby.Qnil;
             };
-            // defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
+            defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
 
             const client: *exports.tb_client_t = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
@@ -639,7 +639,7 @@ const ParsedData = struct { size: u32, data: ?[*]const u8 = null, };
 
 fn Parser(comptime InputType: type, comptime OutputType: type) type {
     return struct {
-        fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!*ParsedData {
+        fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
             if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
                 ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
                 return Error.ArgError;
@@ -689,7 +689,7 @@ fn Parser(comptime InputType: type, comptime OutputType: type) type {
                 else => @compileError("Unable to handle type " ++ @typeName(InputType)),
             }
 
-            return &out_data;
+            return out_data;
         }
 
         fn to_ruby(ctx: *ResultContext) ruby.VALUE {
