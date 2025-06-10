@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
+const Operation = @import("../tigerbeetle.zig").Operation;
 
 const TreeEnum = tree_enum: {
     const tree_ids = @import("../state_machine.zig").tree_ids;
@@ -66,6 +67,9 @@ pub const Event = union(enum) {
     replica_commit: struct { stage: CommitStage.Tag, op: ?usize = null },
     replica_aof_write: struct { op: usize },
     replica_sync_table: struct { index: usize },
+    replica_request: struct { operation: Operation },
+    replica_request_execute: struct { operation: Operation },
+    replica_request_local: struct { operation: Operation },
 
     compact_beat: struct { tree: TreeEnum, level_b: u8 },
     compact_beat_merge: struct { tree: TreeEnum, level_b: u8 },
@@ -132,6 +136,9 @@ pub const EventTiming = union(Event.Tag) {
     replica_commit: struct { stage: CommitStage.Tag },
     replica_aof_write,
     replica_sync_table,
+    replica_request: struct { operation: Operation },
+    replica_request_execute: struct { operation: Operation },
+    replica_request_local: struct { operation: Operation },
 
     compact_beat: struct { tree: TreeEnum },
     compact_beat_merge: struct { tree: TreeEnum },
@@ -154,6 +161,9 @@ pub const EventTiming = union(Event.Tag) {
         .replica_commit = enum_max(CommitStage.Tag),
         .replica_aof_write = 1,
         .replica_sync_table = 1,
+        .replica_request = enum_max(Operation),
+        .replica_request_execute = enum_max(Operation),
+        .replica_request_local = enum_max(Operation),
         .compact_beat = enum_max(TreeEnum),
         .compact_beat_merge = enum_max(TreeEnum),
         .compact_manifest = 1,
@@ -202,6 +212,16 @@ pub const EventTiming = union(Event.Tag) {
                 assert(stage < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + @as(u32, @intCast(stage));
+            },
+            // Single payload: Operation
+            inline .replica_request,
+            .replica_request_execute,
+            .replica_request_local,
+            => |data| {
+                const operation = @intFromEnum(data.operation);
+                assert(operation < slot_limits.get(event.*));
+
+                return slot_bases.get(event.*) + @as(u32, @intCast(operation));
             },
             // Single payload: TreeEnum
             inline .compact_mutable,
@@ -259,6 +279,9 @@ pub const EventTracing = union(Event.Tag) {
     replica_commit,
     replica_aof_write,
     replica_sync_table: struct { index: usize },
+    replica_request,
+    replica_request_execute,
+    replica_request_local,
 
     compact_beat,
     compact_beat_merge,
@@ -281,6 +304,9 @@ pub const EventTracing = union(Event.Tag) {
         .replica_commit = 1,
         .replica_aof_write = 1,
         .replica_sync_table = constants.grid_missing_tables_max,
+        .replica_request = 1,
+        .replica_request_execute = 1,
+        .replica_request_local = 1,
         .compact_beat = 1,
         .compact_beat_merge = 1,
         .compact_manifest = 1,
@@ -540,6 +566,13 @@ test "EventTiming slot doesn't have collisions" {
             .replica_commit => .{ .replica_commit = .{ .stage = g.enum_value(CommitStage.Tag) } },
             .replica_aof_write => .replica_aof_write,
             .replica_sync_table => .replica_sync_table,
+            .replica_request => .{ .replica_request = .{ .operation = g.enum_value(Operation) } },
+            .replica_request_execute => .{ .replica_request_execute = .{
+                .operation = g.enum_value(Operation),
+            } },
+            .replica_request_local => .{ .replica_request_local = .{
+                .operation = g.enum_value(Operation),
+            } },
             .compact_beat => .{ .compact_beat = .{
                 .tree = g.enum_value(TreeEnum),
             } },

@@ -4,7 +4,6 @@ const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
 const IO = @import("../io.zig").IO;
-const IOPSType = @import("../iops.zig").IOPSType;
 
 const EventMetric = @import("event.zig").EventMetric;
 const EventMetricAggregate = @import("event.zig").EventMetricAggregate;
@@ -103,7 +102,7 @@ const packet_count_max = stdx.div_ceil(
 comptime {
     // Sanity-check:
     assert(packet_count_max > 0);
-    assert(packet_count_max < 256);
+    assert(packet_count_max < 512);
 }
 
 pub const StatsD = struct {
@@ -119,7 +118,8 @@ pub const StatsD = struct {
     },
 
     send_buffer: *[packet_count_max * packet_size_max]u8,
-    send_completions: IOPSType(IO.Completion, packet_count_max) = .{},
+    send_completions: [packet_count_max]IO.Completion = undefined,
+    send_in_flight_count: u32 = 0,
 
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
@@ -191,10 +191,12 @@ pub const StatsD = struct {
         //
         // Keep it as a log, rather than assert, to avoid the common pitfall of metrics killing
         // the whole system.
-        if (self.send_completions.executing() != 0) {
+        //
+        // This is also a load-bearing check: see send_callback().
+        if (self.send_in_flight_count != 0) {
             log.err("{}: {} / {} packets still in flight; skipping emit", .{
                 self.replica,
-                self.send_completions.executing(),
+                self.send_in_flight_count,
                 packet_count_max,
             });
             return error.Busy;
@@ -264,11 +266,13 @@ pub const StatsD = struct {
 
         var send_offset: u32 = 0;
         for (send_sizes.const_slice()) |send_size| {
-            const completion = self.send_completions.acquire() orelse {
+            if (self.send_in_flight_count >= self.send_completions.len) {
                 // This shouldn't ever happen, but don't allow metrics to kill the system.
                 log.err("{}: insufficient packets to emit any metrics", .{self.replica});
                 return;
-            };
+            }
+            const completion = &self.send_completions[self.send_in_flight_count];
+            self.send_in_flight_count += 1;
             self.emit_buffer(completion, self.send_buffer[send_offset..][0..send_size]);
             send_offset += send_size;
         }
@@ -300,7 +304,11 @@ pub const StatsD = struct {
             assert(self.implementation == .udp);
             self.implementation.udp.send_callback_error_count += 1;
         };
-        self.send_completions.release(completion);
+
+        // Completions can be returned in any order: this is _only_ safe because their emitting is
+        // guarded on `self.send_in_flight_count != 0`.
+        self.send_in_flight_count -= 1;
+        completion.* = undefined;
     }
 };
 

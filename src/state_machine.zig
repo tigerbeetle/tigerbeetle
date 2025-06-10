@@ -98,11 +98,12 @@ pub fn StateMachineType(
 ) type {
     assert(config.message_body_size_max > 0);
     assert(config.lsm_compaction_ops > 0);
-    assert(config.vsr_operations_reserved > 0);
+    assert(global_constants.vsr_operations_reserved > 0);
 
     return struct {
         const StateMachine = @This();
         const Grid = @import("vsr/grid.zig").GridType(Storage);
+        pub const Operation = tb.Operation;
 
         pub const constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
@@ -438,34 +439,6 @@ pub fn StateMachineType(
         );
 
         const AccountEventsScanLookup = AccountEventsScanLookupType(AccountEventsGroove, Storage);
-
-        // Looking to make backwards incompatible changes here? Make sure to check release.zig for
-        // `release_triple_client_min`.
-        pub const Operation = enum(u8) {
-            /// Operations exported by TigerBeetle:
-            pulse = config.vsr_operations_reserved + 0,
-
-            // Deprecated operations not encoded as multi-batch:
-            deprecated_create_accounts = config.vsr_operations_reserved + 1,
-            deprecated_create_transfers = config.vsr_operations_reserved + 2,
-            deprecated_lookup_accounts = config.vsr_operations_reserved + 3,
-            deprecated_lookup_transfers = config.vsr_operations_reserved + 4,
-            deprecated_get_account_transfers = config.vsr_operations_reserved + 5,
-            deprecated_get_account_balances = config.vsr_operations_reserved + 6,
-            deprecated_query_accounts = config.vsr_operations_reserved + 7,
-            deprecated_query_transfers = config.vsr_operations_reserved + 8,
-
-            get_change_events = config.vsr_operations_reserved + 9,
-
-            create_accounts = config.vsr_operations_reserved + 10,
-            create_transfers = config.vsr_operations_reserved + 11,
-            lookup_accounts = config.vsr_operations_reserved + 12,
-            lookup_transfers = config.vsr_operations_reserved + 13,
-            get_account_transfers = config.vsr_operations_reserved + 14,
-            get_account_balances = config.vsr_operations_reserved + 15,
-            query_accounts = config.vsr_operations_reserved + 16,
-            query_transfers = config.vsr_operations_reserved + 17,
-        };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
             if (operation == .pulse) return .pulse;
@@ -4918,7 +4891,6 @@ pub const TestContext = struct {
         // Overestimate the batch size because the test never compacts.
         .message_body_size_max = TestContext.message_body_size_max,
         .lsm_compaction_ops = global_constants.lsm_compaction_ops,
-        .vsr_operations_reserved = 128,
     });
     const AccountEvent = StateMachine.AccountEvent;
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
@@ -7709,7 +7681,6 @@ test "StateMachine: batch_elements_max" {
         .release = vsr.Release.minimum,
         .message_body_size_max = message_body_size_max,
         .lsm_compaction_ops = global_constants.lsm_compaction_ops,
-        .vsr_operations_reserved = global_constants.vsr_operations_reserved,
     });
 
     // No multi-batch encode.
