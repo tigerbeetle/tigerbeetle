@@ -1083,7 +1083,7 @@ const ProgressTrackerMessage = struct {
                         "{}",
                         .{message.release},
                     ) catch unreachable });
-                    encoder.put("timestamp", .{ .int64 = @bitCast(message.timestamp) });
+                    encoder.put("timestamp", .{ .int64 = @intCast(message.timestamp) });
                 }
             }.write,
         };
@@ -1102,7 +1102,7 @@ const ProgressTrackerMessage = struct {
                 if (std.mem.eql(u8, entry.key, "timestamp")) {
                     switch (entry.value) {
                         .int64 => |int64| {
-                            const value: u64 = @bitCast(int64);
+                            const value: u64 = @intCast(int64);
                             if (!TimestampRange.valid(value)) break;
                             timestamp = value;
                         },
