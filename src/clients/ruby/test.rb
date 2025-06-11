@@ -20,6 +20,9 @@ class Integer
   end
 end
 
+# load all the bindings
+include TigerBeetle::Bindings
+
 # Constants from TigerBeetle C Bindings
 
 TB_ACCOUNT_FLAGS = {
@@ -31,10 +34,10 @@ TB_ACCOUNT_FLAGS = {
   CLOSED: 1 << 5,
 }
 
-raise "AccountFlags not packed" unless TigerBeetle::Bindings::AccountFlags::ENUM_PACKED
+raise "AccountFlags not packed" unless AccountFlags::ENUM_PACKED
 
 TB_ACCOUNT_FLAGS.each do |const, expected|
-  actual = TigerBeetle::Bindings::AccountFlags.const_get(const)
+  actual = AccountFlags.const_get(const)
   next if actual == expected
 
   raise "AccountFlag::#{const} expected #{expected} got #{actual}"
@@ -53,10 +56,10 @@ TB_TRANSFER_FLAGS = {
   IMPORTED: 1 << 8,
 }
 
-raise "TransferFlags not packed" unless TigerBeetle::Bindings::TransferFlags::ENUM_PACKED
+raise "TransferFlags not packed" unless TransferFlags::ENUM_PACKED
 
 TB_TRANSFER_FLAGS.each do |const, expected|
-  actual = TigerBeetle::Bindings::TransferFlags.const_get(const)
+  actual = TransferFlags.const_get(const)
   next if actual == expected
 
   raise "TransferFlags::#{const} expected #{expected} got #{actual}"
@@ -92,10 +95,10 @@ TB_CREATE_ACCOUNT_RESULT = {
   IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS: 26,
 }
 
-raise "CreateAccountResult is packed" if TigerBeetle::Bindings::CreateAccountResult::ENUM_PACKED
+raise "CreateAccountResult is packed" if CreateAccountResult::ENUM_PACKED
 
 TB_CREATE_ACCOUNT_RESULT.each do |const, expected|
-  actual = TigerBeetle::Bindings::CreateAccountResult.const_get(const)
+  actual = CreateAccountResult.const_get(const)
   next if actual == expected
 
   raise "CreateAccountResult::#{const} expected #{expected} got #{actual}"
@@ -172,10 +175,10 @@ TB_CREATE_TRANSFER_RESULT = {
   EXCEEDS_DEBITS: 55,
 }
 
-raise "CreateTransferResult is packed" if TigerBeetle::Bindings::CreateTransferResult::ENUM_PACKED
+raise "CreateTransferResult is packed" if CreateTransferResult::ENUM_PACKED
 
 TB_CREATE_TRANSFER_RESULT.each do |const, expected|
-  actual = TigerBeetle::Bindings::CreateTransferResult.const_get(const)
+  actual = CreateTransferResult.const_get(const)
   next if actual == expected
 
   raise "CreateTransferResult::#{const} expected #{expected} got #{actual}"
@@ -210,10 +213,10 @@ TB_ACCOUNT_FILTER_FLAGS = {
   REVERSED: 1 << 2,
 }
 
-raise "AccountFilterFlags not packed" unless TigerBeetle::Bindings::AccountFilterFlags::ENUM_PACKED
+raise "AccountFilterFlags not packed" unless AccountFilterFlags::ENUM_PACKED
 
 TB_ACCOUNT_FILTER_FLAGS.each do |const, expected|
-  actual = TigerBeetle::Bindings::AccountFilterFlags.const_get(const)
+  actual = AccountFilterFlags.const_get(const)
   next if actual == expected
 
   raise "AccountFilterFlags::#{const} expected #{expected} got #{actual}"
@@ -245,10 +248,10 @@ TB_QUERY_FILTER_FLAGS = {
   REVERSED: 1 << 0,
 }
 
-raise "QueryFilterFlags not packed" unless TigerBeetle::Bindings::QueryFilterFlags::ENUM_PACKED
+raise "QueryFilterFlags not packed" unless QueryFilterFlags::ENUM_PACKED
 
 TB_QUERY_FILTER_FLAGS.each do |const, expected|
-  actual = TigerBeetle::Bindings::QueryFilterFlags.const_get(const)
+  actual = QueryFilterFlags.const_get(const)
   next if actual == expected
 
   raise "QueryFilterFlags::#{const} expected #{expected} got #{actual}"
@@ -287,10 +290,10 @@ TB_OPERATION = {
   QUERY_TRANSFERS: 145,
 }
 
-raise "Operation is packed" if TigerBeetle::Bindings::Operation::ENUM_PACKED
+raise "Operation is packed" if Operation::ENUM_PACKED
 
 TB_OPERATION.each do |const, expected|
-  actual = TigerBeetle::Bindings::Operation.const_get(const)
+  actual = Operation.const_get(const)
   next if actual == expected
 
   raise "Operation::#{const} expected #{expected} got #{actual}"
@@ -307,10 +310,10 @@ TB_PACKET_STATUS = {
   INVALID_DATA_SIZE: 7,
 }
 
-raise "PacketStatus is packed" if TigerBeetle::Bindings::PacketStatus::ENUM_PACKED
+raise "PacketStatus is packed" if PacketStatus::ENUM_PACKED
 
 TB_PACKET_STATUS.each do |const, expected|
-  actual = TigerBeetle::Bindings::PacketStatus.const_get(const)
+  actual = PacketStatus.const_get(const)
   next if actual == expected
 
   raise "PacketStatus::#{const} expected #{expected} got #{actual}"
@@ -326,10 +329,10 @@ TB_INIT_STATUS = {
   NETWORK_SUBSYSTEM: 6,
 }
 
-raise "InitStatus is packed" if TigerBeetle::Bindings::InitStatus::ENUM_PACKED
+raise "InitStatus is packed" if InitStatus::ENUM_PACKED
 
 TB_INIT_STATUS.each do |const, expected|
-  actual = TigerBeetle::Bindings::InitStatus.const_get(const)
+  actual = InitStatus.const_get(const)
   next if actual == expected
 
   raise "InitStatus::#{const} expected #{expected} got #{actual}"
@@ -340,10 +343,10 @@ TB_CLIENT_STATUS = {
   INVALID: 1,
 }
 
-raise "ClientStatus is packed" if TigerBeetle::Bindings::ClientStatus::ENUM_PACKED
+raise "ClientStatus is packed" if ClientStatus::ENUM_PACKED
 
 TB_CLIENT_STATUS.each do |const, expected|
-  actual = TigerBeetle::Bindings::ClientStatus.const_get(const)
+  actual = ClientStatus.const_get(const)
   next if actual == expected
 
   raise "ClientStatus::#{const} expected #{expected} got #{actual}"
@@ -355,10 +358,10 @@ TB_REGISTER_LOG_CALLBACK_STATUS = {
   NOT_REGISTERED: 2,
 }
 
-raise "RegisterLogCallbackStatus is packed" if TigerBeetle::Bindings::RegisterLogCallbackStatus::ENUM_PACKED
+raise "RegisterLogCallbackStatus is packed" if RegisterLogCallbackStatus::ENUM_PACKED
 
 TB_REGISTER_LOG_CALLBACK_STATUS.each do |const, expected|
-  actual = TigerBeetle::Bindings::RegisterLogCallbackStatus.const_get(const)
+  actual = RegisterLogCallbackStatus.const_get(const)
   next if actual == expected
 
   raise "RegisterLogCallbackStatus::#{const} expected #{expected} got #{actual}"
@@ -371,10 +374,10 @@ TB_LOG_LEVEL = {
   DEBUG: 3,
 }
 
-raise "LogLevel is packed" if TigerBeetle::Bindings::LogLevel::ENUM_PACKED
+raise "LogLevel is packed" if LogLevel::ENUM_PACKED
 
 TB_LOG_LEVEL.each do |const, expected|
-  actual = TigerBeetle::Bindings::LogLevel.const_get(const)
+  actual = LogLevel.const_get(const)
   next if actual == expected
 
   raise "LogLevel::#{const} expected #{expected} got #{actual}"
@@ -478,7 +481,7 @@ def test_account
   user_data_32 = 6000
   ledger = 1
   code = 1234
-  account = TigerBeetle::Bindings::Account.new(
+  account = Account.new(
     id: account_id.from_uuid_to_int,
     debits_pending:,
     debits_posted:,
@@ -553,7 +556,7 @@ def test_transfer
   user_data_32 = 6000
   ledger = 1
   code = 1234
-  transfer = TigerBeetle::Bindings::Transfer.new(
+  transfer = Transfer.new(
     id: transfer_id.from_uuid_to_int,
     debit_account_id: debit_account_id.from_uuid_to_int,
     credit_account_id: credit_account_id.from_uuid_to_int,
@@ -609,13 +612,13 @@ begin
     raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
   end
 
-  account1 = TigerBeetle::Bindings::Account.new(
+  account1 = Account.new(
     id: 4201,
     code: 10,
     ledger: 1,
     user_data_128: 4201
   )
-  account2 = TigerBeetle::Bindings::Account.new(
+  account2 = Account.new(
     id: 4202,
     code: 10,
     ledger: 1,
@@ -625,7 +628,7 @@ begin
   if create_accounts_result.size == 0
     puts "2 Accounts created successfully"
   elsif create_accounts_result.size == 2
-    if create_accounts_result.map(&:result).uniq == [TigerBeetle::Bindings::CreateAccountResult::EXISTS]
+    if create_accounts_result.map(&:result).uniq == [CreateAccountResult::EXISTS]
       puts "2 Accounts already exist"
     else
       raise "Accounts failed to create for unknown reason #{create_accounts_result.map(&:to_h)}"
@@ -634,7 +637,7 @@ begin
     raise "Expected 2 create account results, got #{create_account_result.size}"
   end
 
-  transfer1 = TigerBeetle::Bindings::Transfer.new(
+  transfer1 = Transfer.new(
     id: 10001,
     debit_account_id: account1.id,
     credit_account_id: account2.id,
@@ -642,7 +645,7 @@ begin
     ledger: account1.ledger,
     code: account1.code,
   )
-  transfer2 = TigerBeetle::Bindings::Transfer.new(
+  transfer2 = Transfer.new(
     id: 10002,
     debit_account_id: account2.id,
     credit_account_id: account1.id,

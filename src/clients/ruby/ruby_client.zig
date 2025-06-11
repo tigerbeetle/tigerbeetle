@@ -322,15 +322,20 @@ const Error = error{
 };
 
 const Parser = struct {
+    operation: Operation,
     from_ruby: *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData,
     to_ruby: *const fn (*ParsedData) ruby.VALUE,
 };
 
-const OperationParsers = .{
-    .{ .operation = Operation.lookup_accounts, .parser = Parser{ .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_account_t) } },
-    .{ .operation = Operation.create_accounts, .parser = Parser{ .from_ruby = create_from_ruby(exports.tb_account_t), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) } },
-    .{ .operation = Operation.lookup_transfers, .parser = Parser{ .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_transfer_t) } },
-    .{ .operation = Operation.create_transfers, .parser = Parser{ .from_ruby = create_from_ruby(exports.tb_transfer_t), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) } },
+const SupportedOperationParsers = [_]Parser{
+    Parser{ .operation = Operation.lookup_accounts, .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    Parser{ .operation = Operation.create_accounts, .from_ruby = create_from_ruby(exports.tb_account_t), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) },
+    Parser{ .operation = Operation.lookup_transfers, .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.create_transfers, .from_ruby = create_from_ruby(exports.tb_transfer_t), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) },
+    // Parser{ .operation = Operation.get_account_transfers, .from_ruby = create_from_ruby(exports.tb_account_filter_t), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    // Parser{ .operation = Operation.get_account_balances, .from_ruby = create_from_ruby(exports.tb_account_filter_t), .to_ruby = create_to_ruby(exports.tb_account_balance_t) },
+    // Parser{ .operation = Operation.query_accounts, .from_ruby = create_from_ruby(exports.tb_query_filter_t), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    // Parser{ .operation = Operation.query_transfers, .from_ruby = create_from_ruby(exports.tb_query_filter_t), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
 };
 
 fn tb_client_struct() type {
@@ -421,9 +426,9 @@ fn tb_client_struct() type {
         }
 
         fn get_parser(operation: Operation) !Parser {
-            inline for (OperationParsers) |op| {
-                if (op.operation == operation) {
-                    return op.parser;
+            inline for (SupportedOperationParsers) |parser| {
+                if (parser.operation == operation) {
+                    return parser;
                 }
             }
             return Error.ArgError;

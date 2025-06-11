@@ -46,18 +46,22 @@ module TigerBeetle
 
     # GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)
     def get_account_transfers(filter)
+      client.submit(Bindings::Operation::GET_ACCOUNT_TRANSFERS, array_wrap(filter))
     end
 
     # GetAccountBalances(filter types.AccountFilter) ([]types.AccountBalance, error)
     def get_account_balances(filter)
+      client.submit(Bindings::Operation::GET_ACCOUNT_BALANCES, array_wrap(filter))
     end
 
     # QueryAccounts(filter types.QueryFilter) ([]types.Account, error)
     def query_accounts(filter)
+      client.submit(Bindings::Operation::QUERY_ACCOUNTS, array_wrap(filter))
     end
 
     # QueryTransfers(filter types.QueryFilter) ([]types.Transfer, error)
     def query_transfers(filter)
+      client.submit(Bindings::Operation::QUERY_TRANSFERS, array_wrap(filter))
     end
 
     def deinit
