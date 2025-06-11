@@ -604,10 +604,11 @@ test_transfer
 
 ADDRESSES = ENV.fetch("TB_ADDRESSES", "3000").to_s
 CLUSTER_ID = ENV.fetch("TB_CLUSTER_ID", "0").to_i
-client = TigerBeetle.connect(addresses: ADDRESSES, cluster_id: CLUSTER_ID)
+client = Client.new
+client.init(ADDRESSES, CLUSTER_ID)
 
 begin
-  empty_lookup = client.lookup_accounts([10000])
+  empty_lookup = client.submit(Operation::LOOKUP_ACCOUNTS, [10000])
   if empty_lookup.size != 0
     raise "Expected empty lookup for non-existent account, got #{empty_lookup.size} results"
   end
@@ -624,7 +625,7 @@ begin
     ledger: 1,
     user_data_128: 4202
   )
-  create_accounts_result = client.create_accounts([account1, account2])
+  create_accounts_result = client.submit(Operation::CREATE_ACCOUNTS, [account1, account2])
   if create_accounts_result.size == 0
     puts "2 Accounts created successfully"
   elsif create_accounts_result.size == 2
@@ -653,8 +654,8 @@ begin
     ledger: account2.ledger,
     code: account2.code,
   )
-  client.create_transfers([transfer1, transfer2])
-  transfers = client.lookup_transfers([transfer1.id, transfer2.id])
+  client.submit(Operation::CREATE_TRANSFERS, [transfer1, transfer2])
+  transfers = client.submit(Operation::LOOKUP_TRANSFERS, [transfer1.id, transfer2.id])
   if transfers.size != 2
     raise "Expected 2 transfers, got #{transfers.size}"
   end
@@ -662,5 +663,15 @@ begin
   puts "*"* 80
   puts "  SUCCESS: All TigerBeetle constants match expected values\n"
 ensure
-  client.deinit
+  status = client.deinit
+  client = nil
+
+  case status
+  when ClientStatus::OK
+    true
+  when ClientStatus::INVALID
+    raise "Client invalid"
+  else
+    raise "Unknown client status: #{status}"
+  end
 end
