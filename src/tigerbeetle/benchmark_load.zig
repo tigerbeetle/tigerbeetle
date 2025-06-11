@@ -944,7 +944,7 @@ fn print_percentiles_histogram(
             if (sum >= histogram_percentile) break bucket_index;
         } else histogram_buckets.len;
 
-        stdout.print("{s} latency p{} = {} ms{s}\n", .{
+        stdout.print("{s} latency p{: <3} = {} ms{s}\n", .{
             label,
             percentile,
             latency,
