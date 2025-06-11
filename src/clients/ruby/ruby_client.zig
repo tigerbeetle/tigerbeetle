@@ -366,7 +366,7 @@ fn tb_client_struct() type {
             ctx.result.size = result_len;
             if (result_len > 0) {
                 const data_alloc = c_allocator.alloc(u8, result_len) catch {
-                    ctx.result_error = error.OutOfMemory;
+                    ctx.result_error = Error.OutOfMemory;
                     return;
                 };
                 ctx.result.data = data_alloc.ptr;
