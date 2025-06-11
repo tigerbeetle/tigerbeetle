@@ -3,3 +3,8 @@ Makefile
 
 *.so
 *.time
+
+mkmf.log
+
+*.bundle
+*.bundle.dSYM/

@@ -1,6 +1,8 @@
 const std = @import("std");
 const vsr = @import("vsr");
 
+const ruby = @import("ruby_shims.zig");
+
 const exports = vsr.tb_client.exports;
 
 const assert = std.debug.assert;
@@ -13,7 +15,7 @@ const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const tb = vsr.tigerbeetle;
 
-const ruby = @cImport(@cInclude("ruby.h"));
+// const ruby = @cImport(@cInclude("stub_ruby.h"));
 
 const MAX_BATCH_SIZE = 8192;
 
@@ -79,7 +81,9 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
                 .dmark = null,
                 .dfree = free_fn,
                 .dsize = size_fn,
+                .reserved = .{ null, null },
             },
+            .parent = null,
             .data = null,
             .flags = ruby.RUBY_TYPED_FREE_IMMEDIATELY,
         };
@@ -94,7 +98,7 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
 
         fn free_fn(ptr: ?*anyopaque) callconv(.C) void {
             if (ptr) |p| {
-                ruby.xfree(p);
+                ruby.ruby_xfree(p);
             }
         }
 
@@ -114,7 +118,7 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
                 const field_value = @field(wrapper.*, field.name);
                 const field_name_cstr = field.name ++ "\x00";
                 const key_id = ruby.rb_intern(&field_name_cstr[0]);
-                const key_symbol = ruby.ID2SYM(key_id); // Convert ID to symbol
+                const key_symbol = ruby.wrapped_id2sym(key_id); // Convert ID to symbol
 
                 const value = zig_type_to_rb_value(@TypeOf(field_value), field_value);
 
@@ -155,7 +159,7 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
 
             var kwargs: ruby.VALUE = ruby.Qnil;
             _ = ruby.rb_scan_args(argc, argv, ":", &kwargs);
-            if (ruby.NIL_P(kwargs)) {
+            if (ruby.wrapped_nil_p(kwargs)) {
                 return self;
             }
 
@@ -191,20 +195,31 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
         }
 
         fn initialize_keyword_parameter_value(key: ruby.VALUE, value: ruby.VALUE, self: ruby.VALUE) callconv(.C) c_int {
-            if (!ruby.SYMBOL_P(key)) {
-                const key_class = ruby.rb_funcall(key, ruby.rb_intern("class"), 0);
-                const class_str = ruby.rb_funcall(key_class, ruby.rb_intern("to_s"), 0);
-                ruby.rb_raise(ruby.rb_eArgError, "keyword arguments must use symbol keys, got %s", ruby.RSTRING_PTR(class_str));
+            if (!ruby.wrapped_symbol_p(key)) {
+                ruby.rb_raise(ruby.rb_eArgError, "keyword arguments must use symbol keys");
                 return 1;
             }
 
             const key_str = ruby.rb_sym2str(key);
-            const setter_str = ruby.rb_str_plus(key_str, ruby.rb_str_new2("="));
-            const setter_cstr = ruby.RSTRING_PTR(setter_str);
-            const setter_id = ruby.rb_intern(setter_cstr);
+            const key_cstr = ruby.wrapped_rstring_ptr(key_str);
+            const key_len: usize = @intCast(ruby.wrapped_rstring_len(key_str));
+
+            // Allocate space for the setter name (key + "=" + null terminator)
+            var setter_name: [256]u8 = undefined; // Adjust size as needed
+            if (key_len + 2 > setter_name.len) {
+                ruby.rb_raise(ruby.rb_eArgError, "method name too long");
+                return 1;
+            }
+
+            // Copy the key and append "="
+            @memcpy(setter_name[0..key_len], key_cstr[0..key_len]);
+            setter_name[key_len] = '=';
+            setter_name[key_len + 1] = 0;
+
+            const setter_id = ruby.rb_intern(&setter_name[0]);
 
             if (ruby.rb_respond_to(self, setter_id) == 0) {
-                ruby.rb_raise(ruby.rb_eNoMethodError, "undefined method '%s' for object", setter_cstr);
+                ruby.rb_raise(ruby.rb_eNoMethodError, "undefined method '%s' for object", &setter_name[0]);
                 return 1;
             }
 
@@ -237,7 +252,7 @@ fn convert_to_module_enum(comptime ZigType: type, comptime ruby_name: []const u8
                         const ruby_value = @intFromEnum(enum_value);
 
                         const ruby_const_name = to_upper_case(field.name);
-                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(ruby_value));
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.wrapped_int2num(ruby_value));
                     }
                 },
                 .Struct => |struct_info| {
@@ -252,7 +267,7 @@ fn convert_to_module_enum(comptime ZigType: type, comptime ruby_name: []const u8
                             continue;
                         }
                         const ruby_const_name = to_upper_case(field.name);
-                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.UINT2NUM(1 << i));
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.wrapped_int2num(1 << i));
                     }
                 },
                 else => @compileError("Invalid conversion to enum: " ++ ZigType),
@@ -380,11 +395,11 @@ fn tb_client_struct() type {
         }
 
         fn init(self: ruby.VALUE, rb_addresses: ruby.VALUE, rb_cluster_id: ruby.VALUE) callconv(.C) ruby.VALUE {
-            if (ruby.NIL_P(rb_addresses) or !ruby.RB_TYPE_P(rb_addresses, ruby.T_STRING)) {
+            if (ruby.wrapped_nil_p(rb_addresses) or !ruby.wrapped_rb_type_p(rb_addresses, ruby.T_STRING)) {
                 ruby.rb_raise(ruby.rb_eArgError, "addresses must be a non-nil String");
                 return ruby.Qnil;
             }
-            if (ruby.NIL_P(rb_cluster_id)) {
+            if (ruby.wrapped_nil_p(rb_cluster_id)) {
                 ruby.rb_raise(ruby.rb_eArgError, "cluster_id must be a non-nil Integer");
                 return ruby.Qnil;
             }
@@ -393,7 +408,7 @@ fn tb_client_struct() type {
                 // rb_int_to_u128 will raise the ruby error if it fails
                 return ruby.Qnil;
             });
-            if (!ruby.RB_TYPE_P(self, ruby.T_DATA)) {
+            if (!ruby.wrapped_rb_type_p(self, ruby.T_DATA)) {
                 ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
                 return ruby.Qnil;
             }
@@ -403,17 +418,17 @@ fn tb_client_struct() type {
             const status = exports.init(
                 client,
                 &cluster_id,
-                @ptrCast(ruby.RSTRING_PTR(rb_addresses)),
-                @intCast(ruby.RSTRING_LEN(rb_addresses)),
+                @ptrCast(ruby.wrapped_rstring_ptr(rb_addresses)),
+                @intCast(ruby.wrapped_rstring_len(rb_addresses)),
                 0,
                 @ptrCast(&on_completion),
             );
 
-            return ruby.INT2NUM(@intFromEnum(status));
+            return ruby.wrapped_int2num(@intFromEnum(status));
         }
 
         fn deinit(self: ruby.VALUE) callconv(.C) ruby.VALUE {
-            if (!ruby.RB_TYPE_P(self, ruby.T_DATA)) {
+            if (!ruby.wrapped_rb_type_p(self, ruby.T_DATA)) {
                 ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
                 return ruby.Qnil;
             }
@@ -421,7 +436,7 @@ fn tb_client_struct() type {
             const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
             const status = exports.deinit(client);
-            return ruby.INT2NUM(@intFromEnum(status));
+            return ruby.wrapped_int2num(@intFromEnum(status));
         }
 
         fn get_parser(operation: Operation) !Parser {
@@ -434,16 +449,16 @@ fn tb_client_struct() type {
         }
 
         fn submit(self: ruby.VALUE, rb_operation: ruby.VALUE, rb_data: ruby.VALUE) callconv(.C) ruby.VALUE {
-            if (ruby.NIL_P(rb_operation) or !ruby.RB_TYPE_P(rb_operation, ruby.T_FIXNUM)) {
+            if (ruby.wrapped_nil_p(rb_operation) or !ruby.wrapped_rb_type_p(rb_operation, ruby.T_FIXNUM)) {
                 ruby.rb_raise(ruby.rb_eArgError, "operation must be a non-nil Integer object");
                 return ruby.Qnil;
             }
-            if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
+            if (ruby.wrapped_nil_p(rb_data) or !ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
                 ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
                 return ruby.Qnil;
             }
 
-            const operation: Operation = @enumFromInt(@as(u8, @intCast(ruby.NUM2INT(rb_operation))));
+            const operation: Operation = @enumFromInt(@as(u8, @intCast(ruby.wrapped_num2uint(rb_operation))));
             const parser = get_parser(operation) catch {
                 ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation: %d", @intFromEnum(operation));
                 return ruby.Qnil;
@@ -504,20 +519,23 @@ fn skip_field(comptime field_name: []const u8) bool {
 }
 
 fn rb_int_to_u128(value: ruby.VALUE) Error!u128 {
-    if (!ruby.RB_INTEGER_TYPE_P(value)) {
+    if (ruby.wrapped_rb_type_p(value, ruby.T_FIXNUM)) {
+        return @as(u128, @intCast(ruby.wrapped_num2ull(value)));
+    }
+
+    if (!ruby.wrapped_rb_type_p(value, ruby.T_BIGNUM)) {
         ruby.rb_raise(ruby.rb_eArgError, "expected Integer");
         return Error.ArgError;
     }
 
-    if (ruby.RTEST(ruby.rb_funcall(value, ruby.rb_intern("negative?"), 0))) {
-        ruby.rb_raise(ruby.rb_eRangeError, "negative numbers not supported");
+    var result: u128 = 0;
+    // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a01dccb3f948adab23275722f384ff5ed
+    const overflow = ruby.rb_integer_pack(value, &result, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_LITTLE_ENDIAN);
+
+    if (overflow == -1 or overflow == -2) {
+        ruby.rb_raise(ruby.rb_eRangeError, "negative integers not allowed");
         return Error.ArgError;
     }
-
-    var result: u128 = 0;
-
-    // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a01dccb3f948adab23275722f384ff5ed
-    const overflow = ruby.rb_integer_pack(value, &result, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_NATIVE_BYTE_ORDER);
 
     if (overflow == 2) {
         ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
@@ -533,10 +551,10 @@ fn uint_to_rb_value(comptime T: type, value: T) ruby.VALUE {
     }
 
     return switch (T) {
-        u8, u16, u32 => ruby.UINT2NUM(value),
-        u64 => ruby.ULONG2NUM(value),
+        u8, u16, u32 => ruby.wrapped_int2num(@intCast(value)),
+        u64 => ruby.wrapped_ull2num(value),
         // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a4f623845f4719716b70e4025508657fc
-        u128 => return ruby.rb_integer_unpack(&value, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_NATIVE_BYTE_ORDER),
+        u128 => return ruby.rb_integer_unpack(&value, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_LITTLE_ENDIAN),
         else => @compileError("Unsupported integer size: " ++ @typeName(T)),
     };
 }
@@ -577,10 +595,10 @@ fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) Error!T {
     }
 
     return switch (T) {
-        u8 => @intCast(ruby.NUM2UINT(value)),
-        u16 => @intCast(ruby.NUM2UINT(value)),
-        u32 => ruby.NUM2UINT(value),
-        u64 => @intCast(ruby.NUM2ULONG(value)),
+        u8 => @intCast(ruby.wrapped_num2uint(value)),
+        u16 => @intCast(ruby.wrapped_num2uint(value)),
+        u32 => ruby.wrapped_num2uint(value),
+        u64 => @intCast(ruby.wrapped_num2ulong(value)),
         u128 => try rb_int_to_u128(value),
         else => @compileError("Unsupported integer type: " ++ @typeName(T)),
     };
@@ -619,12 +637,12 @@ fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) Error!T {
 fn create_from_ruby(comptime InputType: type) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
     return struct {
         fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
-            if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
+            if (ruby.wrapped_nil_p(rb_data) or !ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
                 ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
                 return Error.ArgError;
             }
 
-            const data_array_len = ruby.RARRAY_LEN(rb_data);
+            const data_array_len = ruby.wrapped_rarray_len(rb_data);
             if (data_array_len == 0) {
                 ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
                 return Error.ArgError;
@@ -639,7 +657,7 @@ fn create_from_ruby(comptime InputType: type) *const fn (std.mem.Allocator, ruby
             };
             out_data.size = @intCast(data_array_len * @sizeOf(InputType));
             const data_block = allocator.alloc(u8, out_data.size) catch {
-                ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to allocate memory for data");
+                ruby.rb_raise(ruby.rb_eNoMemError, "Failed to allocate memory for data");
                 return Error.OutOfMemory;
             };
             out_data.data = data_block.ptr;
@@ -675,40 +693,40 @@ fn create_from_ruby(comptime InputType: type) *const fn (std.mem.Allocator, ruby
 
 fn create_to_ruby(comptime OutputType: type) *const fn (*ParsedData) ruby.VALUE {
     return struct {
-        fn to_ruby(data: *ParsedData) ruby.VALUE {
-            if (data.size == 0) {
-                return ruby.rb_ary_new();
+        fn to_ruby(parsed_data: *ParsedData) ruby.VALUE {
+            const result = ruby.rb_ary_new();
+
+            if (parsed_data.size == 0) {
+                return result;
             }
 
-            if (data.data == null) {
-                @panic("Result data is null, expected non-null data for Ruby conversion");
-            }
+            const data = parsed_data.data orelse {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Result data did not match data size");
+                return ruby.Qnil;
+            };
 
-            const result = data.data.?;
             const rb_tb_client = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TBClient"));
 
             const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
             const rb_class_name = rb_type_struct.rb_class_name;
             const rb_class = ruby.rb_const_get(rb_tb_client, ruby.rb_intern(&rb_class_name[0]));
 
-            const result_size = data.size / @sizeOf(OutputType);
-            const rb_result_array = ruby.rb_ary_new2(@intCast(result_size));
+            const result_size = parsed_data.size / @sizeOf(OutputType);
 
             const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
 
             for (0..result_size) |i| {
                 const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
 
-                const data_block = result[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
+                const data_block = data[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
                 const rb_data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
 
                 @memcpy(@as([*]u8, @ptrCast(rb_data))[0..@sizeOf(OutputType)], data_block);
 
-                _ = ruby.rb_ary_push(rb_result_array, rb_instance);
+                _ = ruby.rb_ary_push(result, rb_instance);
             }
 
-            std.debug.print("Returning Ruby array with {d} items\n", .{result_size});
-            return rb_result_array;
+            return result;
         }
     }.to_ruby;
 }

@@ -1487,57 +1487,44 @@ fn build_ruby_client(
     },
 ) void {
     inline for (platforms) |platform| {
-        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {} else {
-            // if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {} else {
-            continue;
-        }
-
         const cross_target = CrossTarget.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(cross_target);
 
-        const shared_lib = b.addSharedLibrary(.{
+        const static_lib = b.addStaticLibrary(.{
             .name = "rb_tigerbeetle",
             .root_source_file = b.path("src/clients/ruby/ruby_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
 
-        // TODO: Remove hardcoding link to Ruby library
-        if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-gnu.2.27")) {
-            shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0" });
-            shared_lib.addIncludePath(.{ .cwd_relative = "/home/trevor/.asdf/installs/ruby/3.4.1/include/ruby-3.4.0/x86_64-linux" });
-        } else if (comptime std.mem.eql(u8, platform[0], "aarch64-macos")) {
-            shared_lib.addIncludePath(.{ .cwd_relative = "/Users/tj/.asdf/installs/ruby/3.5-dev/include/ruby-3.5.0+1" });
-            shared_lib.addIncludePath(.{ .cwd_relative = "/Users/tj/.asdf/installs/ruby/3.5-dev/include/ruby-3.5.0+1/arm64-darwin24" });
-        }
+        static_lib.bundle_compiler_rt = true;
+        static_lib.linker_allow_shlib_undefined = true;
 
-        shared_lib.linker_allow_shlib_undefined = true;
-
-        shared_lib.linkLibC();
+        static_lib.linkLibC();
 
         if (resolved_target.result.os.tag == .windows) {
-            shared_lib.linkSystemLibrary("ws2_32");
-            shared_lib.linkSystemLibrary("advapi32");
+            static_lib.linkSystemLibrary("ws2_32");
+            static_lib.linkSystemLibrary("advapi32");
         }
 
-        shared_lib.root_module.addImport("vsr", options.vsr_module);
-        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
+        static_lib.root_module.addImport("vsr", options.vsr_module);
+        static_lib.root_module.addOptions("vsr_options", options.vsr_options);
 
-        // First, make sure the shared library compiles successfully
-        // Install the shared library (platform-specific path)
+        // First, make sure the static library compiles successfully
+        // Install the static library (platform-specific path)
         const lib_install = b.addInstallFile(
-            shared_lib.getEmittedBin(),
+            static_lib.getEmittedBin(),
             b.pathJoin(&.{
                 "../src/clients/ruby/ext/rb_tigerbeetle/",
                 platform[0],
-                shared_lib.out_filename,
+                static_lib.out_filename,
             }),
         );
 
-        lib_install.step.dependOn(&shared_lib.step);
+        lib_install.step.dependOn(&static_lib.step);
         step_clients_ruby.dependOn(&lib_install.step);
     }
 }

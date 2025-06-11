@@ -49,12 +49,10 @@ inc_dir = File.join(File.expand_path(File.dirname(__FILE__)), "..", "rb_tigerbee
 lib_dir = File.join(inc_dir, platform_dir)
 abort "Lib dir missing" unless Dir.exist?(lib_dir)
 
-lib_file = if platform_dir.include?('macos')
-  File.join(lib_dir, 'librb_tigerbeetle.dylib')
-elsif platform_dir.include?('windows')
-  File.join(lib_dir, 'rb_tigerbeetle.dll')
+lib_file = if platform_dir.include?('windows')
+  File.join(lib_dir, 'rb_tigerbeetle.lib')
 else
-  File.join(lib_dir, 'librb_tigerbeetle.so')
+  File.join(lib_dir, 'librb_tigerbeetle.a')
 end
 
 abort "#{lib_file} not found" unless File.exist?(lib_file)
@@ -62,7 +60,8 @@ abort "#{lib_file} not found" unless File.exist?(lib_file)
 dir_config("rb_tigerbeetle", inc_dir, lib_dir)
 
 # have_header("tb_bindings.h", nil, inc_dir) or abort "tb_bindings.h not found"
-have_library("rb_tigerbeetle", "initialize_ruby_client", "rb_tigerbeetle.h") or abort "rb_tigerbeetle library not found"
+$LIBS << " #{lib_file}"
+# have_library("rb_tigerbeetle", "initialize_ruby_client", "rb_tigerbeetle.h") or abort "rb_tigerbeetle library not found"
 
 append_ldflags("-Wl,-rpath,@loader_path") if platform_dir.include?("macos")
 
