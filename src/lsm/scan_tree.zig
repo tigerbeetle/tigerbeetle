@@ -9,7 +9,8 @@ const constants = @import("../constants.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const schema = @import("schema.zig");
 const binary_search = @import("binary_search.zig");
-const k_way_merge = @import("k_way_merge.zig");
+//const k_way_merge = @import("k_way_merge.zig");
+const k_way_merge = @import("k_way_merge_loser.zig");
 
 const Direction = @import("../direction.zig").Direction;
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -98,6 +99,7 @@ pub fn ScanTreeType(
                 // Precedence is: table_mutable > table_immutable > level 0 > level 1 > ...
                 fn precedence(scan: *const ScanTree, a: u32, b: u32) bool {
                     _ = scan;
+                    std.debug.print("a {} b {}\n", .{ a, b });
                     assert(a != b);
                     assert(a < KWayMergeStreams.streams_count);
                     assert(b < KWayMergeStreams.streams_count);
@@ -113,12 +115,13 @@ pub fn ScanTreeType(
                 }
             };
 
-            break :T k_way_merge.KWayMergeIteratorType(
+            break :T k_way_merge.LoserTreeTypeIterator(
                 ScanTree,
                 ScanTree.Key,
                 ScanTree.Value,
-                ScanTree.key_from_value,
                 KWayMergeStreams.streams_count,
+                false,
+                ScanTree.key_from_value,
                 stream.peek,
                 stream.pop,
                 stream.precedence,

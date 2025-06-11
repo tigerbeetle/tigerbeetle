@@ -499,3 +499,243 @@ test "k_way_merge: fuzz" {
     var prng = stdx.PRNG.from_seed(seed);
     try TestContextType(32).fuzz(&prng, 256);
 }
+
+// ---------------------------------------------------------------------------
+//  D R A I N   C O N T E X T   (random quotas)
+// ---------------------------------------------------------------------------
+fn DrainedContextType(comptime streams_max: u32) type {
+    return struct {
+        const Self = @This();
+
+        pub const Value = struct {
+            key: u32,
+            version: u32,
+            inline fn to_key(v: *const Value) u32 {
+                return v.key;
+            }
+        };
+
+        // ----------------------------------------------------------------
+        //  run‑time state
+        // ----------------------------------------------------------------
+        streams: [streams_max][]Value,
+        pos: [streams_max]usize, // next index per stream
+        quota: [streams_max]usize, // items remaining before Drained
+
+        pub fn init(
+            streams_in: [streams_max][]Value,
+            // every stream starts with a *non‑zero* quota
+            start_quota: usize,
+        ) Self {
+            assert(start_quota > 0);
+            return .{
+                .streams = streams_in,
+                .pos = [_]usize{0} ** streams_max,
+                .quota = [_]usize{start_quota} ** streams_max,
+            };
+        }
+
+        // --------------------------------------------------------------
+        //  Loser‑tree callbacks
+        // --------------------------------------------------------------
+        pub fn stream_peek(self: *const Self, idx: u32) error{ Empty, Drained }!u32 {
+            const i: usize = @intCast(idx);
+
+            if (self.pos[i] >= self.streams[i].len)
+                return error.Empty;
+
+            if (self.quota[i] == 0)
+                return error.Drained;
+
+            return self.streams[i][self.pos[i]].key;
+        }
+
+        pub fn stream_pop(self: *Self, idx: u32) Value {
+            const i: usize = @intCast(idx);
+            assert(self.quota[i] > 0); // invariant
+            const v = self.streams[i][self.pos[i]];
+            self.pos[i] += 1;
+            self.quota[i] -= 1;
+            return v;
+        }
+
+        pub fn stream_precedence(_: *const Self, a: u32, b: u32) bool {
+            return a > b; // “higher index wins”
+        }
+
+        /// Re‑fill any exhausted quotas with **1–5** new tickets.
+        pub fn refill_all(self: *Self, prng: *stdx.PRNG) void {
+            inline for (0..streams_max) |i| {
+                if (self.quota[i] == 0 and self.pos[i] < self.streams[i].len)
+                    self.quota[i] =
+                        prng.range_inclusive(usize, 1, 5);
+            }
+        }
+    };
+}
+
+// ---------------------------------------------------------------------------
+//  U N I T   T E S T   –   S I N G L E   R A N D O M   D R A I N
+// ---------------------------------------------------------------------------
+test "k_way_merge: drained basic (random quota)" {
+    const N = 2;
+    const Ctx = DrainedContextType(N);
+    const Value = Ctx.Value;
+
+    // Streams: [1,3,5] and [2,4,6]
+    var s0 = [_]Value{ .{ .key = 1, .version = 0 }, .{ .key = 3, .version = 0 }, .{ .key = 5, .version = 0 } };
+    var s1 = [_]Value{ .{ .key = 2, .version = 1 }, .{ .key = 4, .version = 1 }, .{ .key = 6, .version = 1 } };
+    const streams = .{ &s0, &s1 };
+
+    var dummy_prng = stdx.PRNG.from_seed(0xdead_beef);
+    var ctx = Ctx.init(streams, 2); // start with quota = 2
+
+    const KWay = KWayMergeIteratorType(
+        Ctx,
+        u32,
+        Value,
+        Value.to_key,
+        N,
+        Ctx.stream_peek,
+        Ctx.stream_pop,
+        Ctx.stream_precedence,
+    );
+
+    var it = KWay.init(&ctx, N, .ascending);
+
+    var actual = std.ArrayList(Value).init(std.testing.allocator);
+    defer actual.deinit();
+
+    while (true) {
+        const maybe_val = it.pop() catch |err| switch (err) {
+            error.Drained => {
+                ctx.refill_all(&dummy_prng);
+                continue;
+            },
+        };
+        if (maybe_val) |v| try actual.append(v) else break;
+    }
+
+    const expect = [_]Value{
+        .{ .key = 1, .version = 0 },
+        .{ .key = 2, .version = 1 },
+        .{ .key = 3, .version = 0 },
+        .{ .key = 4, .version = 1 },
+        .{ .key = 5, .version = 0 },
+        .{ .key = 6, .version = 1 },
+    };
+    try std.testing.expectEqualSlices(Value, &expect, actual.items);
+}
+
+// ---------------------------------------------------------------------------
+//  F U Z Z   T E S T   –   R A N D O M   Q U O T A S
+// ---------------------------------------------------------------------------
+test "k_way_merge: drained fuzz (random quotas)" {
+    const STREAMS_MAX = 32;
+    const KEYS_PER_STREAM_MAX = 256;
+    const Ctx = DrainedContextType(STREAMS_MAX);
+    const Value = Ctx.Value;
+
+    const seed = std.crypto.random.int(u64);
+    errdefer std.debug.print("\nDRAIN‑FUZZ seed = {}\n", .{seed});
+
+    var prng = stdx.PRNG.from_seed(seed);
+    const alloc = std.testing.allocator;
+
+    const streams_buf = try alloc.alloc(Value, STREAMS_MAX * KEYS_PER_STREAM_MAX);
+    defer alloc.free(streams_buf);
+
+    const expect_buf = try alloc.alloc(Value, STREAMS_MAX * KEYS_PER_STREAM_MAX);
+    defer alloc.free(expect_buf);
+
+    var k: u16 = 1;
+    while (k <= STREAMS_MAX) : (k += 1) {
+        var expect_len: usize = 0;
+
+        var streams: [STREAMS_MAX][]Value = undefined;
+
+        // ---------------- Build k random streams ------------------
+        for (0..k) |s| {
+            const len = prng.int_inclusive(u32, KEYS_PER_STREAM_MAX);
+            const slice = streams_buf[s * KEYS_PER_STREAM_MAX ..][0..len];
+
+            prng.fill(mem.sliceAsBytes(slice));
+            const key_cap = prng.range_inclusive(u32, 256, 2047);
+
+            for (slice) |*v| v.* = .{
+                .key = v.key % key_cap,
+                .version = @intCast(s),
+            };
+
+            mem.sort(Value, slice, {}, struct {
+                fn less(_: void, a: Value, b: Value) bool {
+                    return math.order(a.key, b.key) == .lt or
+                        (a.key == b.key and a.version > b.version);
+                }
+            }.less);
+
+            streams[s] = slice;
+
+            // accumulate reference data
+            for (slice) |v| {
+                expect_buf[expect_len] = v;
+                expect_len += 1;
+            }
+        }
+
+        // --------------- Expected global order --------------------
+        var expect_all = expect_buf[0..expect_len];
+        mem.sort(Value, expect_all, {}, struct {
+            fn less(_: void, a: Value, b: Value) bool {
+                return math.order(a.key, b.key) == .lt or
+                    (a.key == b.key and a.version < b.version);
+            }
+        }.less);
+
+        var write_i: usize = 0;
+
+        for (expect_buf[0..expect_len]) |item| {
+            if (write_i != 0 and item.key == expect_buf[write_i - 1].key) {
+                // same key as the one we just emitted → overwrite it
+                expect_buf[write_i - 1] = item; // last value wins
+            } else {
+                // new key → append
+                expect_buf[write_i] = item;
+                write_i += 1;
+            }
+        }
+
+        // new logical length of the slice
+        expect_len = write_i;
+        expect_all = expect_buf[0..expect_len];
+
+        // --------------- Run the iterator -------------------------
+        var ctx = Ctx.init(streams, 1); // quota starts at 1
+
+        const KWay = KWayMergeIteratorType(
+            Ctx,
+            u32,
+            Value,
+            Value.to_key,
+            STREAMS_MAX,
+            Ctx.stream_peek,
+            Ctx.stream_pop,
+            Ctx.stream_precedence,
+        );
+        var it = KWay.init(&ctx, k, .ascending);
+
+        var actual = std.ArrayList(Value).init(alloc);
+        defer actual.deinit();
+
+        while (true) {
+            const maybe_val = it.pop() catch |err| switch (err) {
+                error.Drained => {
+                    ctx.refill_all(&prng);
+                    continue;
+                },
+            };
+            if (maybe_val) |v| try actual.append(v) else break;
+        }
+        try std.testing.expectEqualSlices(Value, expect_all, actual.items);
+    }
+}
