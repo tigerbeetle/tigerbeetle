@@ -66,7 +66,7 @@ have_library("rb_tigerbeetle", "initialize_ruby_client", "rb_tigerbeetle.h") or 
 
 append_ldflags("-Wl,-rpath,@loader_path") if platform_dir.include?("macos")
 
-create_makefile("tigerbeetle/tigerbeetle")
+create_makefile("tb_client/tb_client")
 
 if platform_dir.include?("macos")
   modified_lines = File.readlines("Makefile").map do |line|

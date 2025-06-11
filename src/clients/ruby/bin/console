@@ -2,9 +2,9 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
-require "tigerbeetle"
+require "tb_client"
 
-puts "TigerBeetle version: #{TigerBeetle::VERSION}"
+puts "TBClient version: #{TBClient::VERSION}"
 
 require "irb"
 IRB.start(__FILE__)

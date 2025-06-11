@@ -50,15 +50,14 @@ const mappings_state_machine = .{
 const mappings_all = mappings_vsr ++ mappings_state_machine;
 
 pub export fn initialize_ruby_client() callconv(.C) void {
-    const m_tiger_beetle = ruby.rb_define_module("TigerBeetle");
-    const m_bindings = ruby.rb_define_module_under(m_tiger_beetle, "Bindings");
+    const rb_tb_client = ruby.rb_define_module("TBClient");
 
     inline for (mappings_all) |type_mapping| {
         const setup_struct = type_mapping[1];
-        setup_struct.init_methods(m_bindings);
+        setup_struct.init_methods(rb_tb_client);
     }
 
-    const rb_client = ruby.rb_const_get(m_bindings, ruby.rb_intern("Client"));
+    const rb_client = ruby.rb_const_get(rb_tb_client, ruby.rb_intern("Client"));
     tb_client_struct().init_methods(rb_client);
 }
 
@@ -686,12 +685,11 @@ fn create_to_ruby(comptime OutputType: type) *const fn (*ParsedData) ruby.VALUE 
             }
 
             const result = data.data.?;
-            const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
-            const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
+            const rb_tb_client = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TBClient"));
 
             const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
             const rb_class_name = rb_type_struct.rb_class_name;
-            const rb_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_class_name[0]));
+            const rb_class = ruby.rb_const_get(rb_tb_client, ruby.rb_intern(&rb_class_name[0]));
 
             const result_size = data.size / @sizeOf(OutputType);
             const rb_result_array = ruby.rb_ary_new2(@intCast(result_size));

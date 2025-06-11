@@ -2,7 +2,7 @@
 # frozen_string_literal: true
 
 require "bundler/setup"
-require "tigerbeetle"
+require "tb_client"
 
 require "securerandom"
 
@@ -21,7 +21,7 @@ class Integer
 end
 
 # load all the bindings
-include TigerBeetle::Bindings
+include TBClient
 
 # Constants from TigerBeetle C Bindings
 

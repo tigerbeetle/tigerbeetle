@@ -1,2 +1,5 @@
 Makefile
 *.gem
+
+*.so
+*.time
