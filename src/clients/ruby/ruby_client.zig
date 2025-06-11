@@ -298,15 +298,39 @@ fn type_mapping_from_zig_type(ZigType: type) type {
     };
 }
 
+const ParsedData = struct {
+    size: u32,
+    data: ?[*]const u8 = null,
+};
+
 const ResultContext = struct {
     mutex: std.Thread.Mutex = std.Thread.Mutex{},
     condition: std.Thread.Condition = std.Thread.Condition{},
 
-    result_data: ?[]u8 = null,
-    result_len: u32 = 0,
+    result: ParsedData = .{
+        .size = 0,
+        .data = null,
+    },
     waiting: bool = true,
     operation: Operation,
     result_error: ?Error = null,
+};
+
+const Error = error{
+    ArgError,
+    OutOfMemory,
+};
+
+const Parser = struct {
+    from_ruby: *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData,
+    to_ruby: *const fn (*ParsedData) ruby.VALUE,
+};
+
+const OperationParsers = .{
+    .{ .operation = Operation.lookup_accounts, .parser = Parser{ .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_account_t) } },
+    .{ .operation = Operation.create_accounts, .parser = Parser{ .from_ruby = create_from_ruby(exports.tb_account_t), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) } },
+    .{ .operation = Operation.lookup_transfers, .parser = Parser{ .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_transfer_t) } },
+    .{ .operation = Operation.create_transfers, .parser = Parser{ .from_ruby = create_from_ruby(exports.tb_transfer_t), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) } },
 };
 
 fn tb_client_struct() type {
@@ -333,24 +357,22 @@ fn tb_client_struct() type {
             _ = completion_ctx;
             _ = timestamp;
 
-            const result_context: *ResultContext = @ptrCast(@alignCast(packet.user_data));
+            const ctx: *ResultContext = @ptrCast(@alignCast(packet.user_data));
 
-            result_context.mutex.lock();
-            defer result_context.mutex.unlock();
+            ctx.mutex.lock();
+            defer ctx.mutex.unlock();
 
-            result_context.waiting = false;
-            result_context.result_len = result_len;
+            ctx.waiting = false;
+            ctx.result.size = result_len;
             if (result_len > 0) {
                 const data_alloc = c_allocator.alloc(u8, result_len) catch {
-                    result_context.result_error = error.OutOfMemory;
+                    ctx.result_error = error.OutOfMemory;
                     return;
                 };
-                result_context.result_data = data_alloc;
+                ctx.result.data = data_alloc.ptr;
                 @memcpy(data_alloc, result_ptr[0..result_len]);
-            } else {
-                result_context.result_data = null;
             }
-            result_context.condition.signal();
+            ctx.condition.signal();
         }
 
         fn init(self: ruby.VALUE, rb_addresses: ruby.VALUE, rb_cluster_id: ruby.VALUE) callconv(.C) ruby.VALUE {
@@ -398,20 +420,13 @@ fn tb_client_struct() type {
             return ruby.INT2NUM(@intFromEnum(status));
         }
 
-        const OperationParsers = .{
-            .{ .operation = Operation.lookup_accounts, .parser = create_parser(u128, exports.tb_account_t) },
-            .{ .operation = Operation.create_accounts, .parser = create_parser(exports.tb_account_t, exports.tb_create_accounts_result_t) },
-            .{ .operation = Operation.lookup_transfers, .parser = create_parser(u128, exports.tb_transfer_t) },
-            .{ .operation = Operation.create_transfers, .parser = create_parser(exports.tb_transfer_t, exports.tb_create_transfers_result_t) },
-        };
-
-        fn get_parser(operation: Operation) error{UnsupportedOp}!Parser {
+        fn get_parser(operation: Operation) !Parser {
             inline for (OperationParsers) |op| {
                 if (op.operation == operation) {
                     return op.parser;
                 }
             }
-            return error.UnsupportedOp;
+            return Error.ArgError;
         }
 
         fn submit(self: ruby.VALUE, rb_operation: ruby.VALUE, rb_data: ruby.VALUE) callconv(.C) ruby.VALUE {
@@ -424,11 +439,9 @@ fn tb_client_struct() type {
                 return ruby.Qnil;
             }
 
-            const operation_int: u8 = @intCast(ruby.NUM2INT(rb_operation));
-            const operation_enum: Operation = @enumFromInt(operation_int);
-
-            const parser = get_parser(operation_enum) catch {
-                ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation: %d", operation_int);
+            const operation: Operation = @enumFromInt(@as(u8, @intCast(ruby.NUM2INT(rb_operation))));
+            const parser = get_parser(operation) catch {
+                ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation: %d", @intFromEnum(operation));
                 return ruby.Qnil;
             };
 
@@ -441,7 +454,7 @@ fn tb_client_struct() type {
             const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
 
             var result_context = ResultContext{
-                .operation = operation_enum,
+                .operation = operation,
             };
 
             var packet = Packet{
@@ -449,19 +462,14 @@ fn tb_client_struct() type {
                 .data = @constCast(@ptrCast(parsed_data.data)),
                 .data_size = parsed_data.size,
                 .user_tag = 0, // Set by the client internally
-                .operation = @intFromEnum(operation_enum),
+                .operation = @intFromEnum(operation),
                 .status = exports.tb_packet_status.ok, // Initial status
             };
 
             const status = exports.submit(client, &packet);
 
             if (status != exports.tb_client_status.ok) {
-                var buf: [256]u8 = undefined;
-                const msg = std.fmt.bufPrintZ(&buf, "Failed to submit packet: {}", .{@intFromEnum(status)}) catch {
-                    ruby.rb_raise(ruby.rb_eArgError, "Failed to submit packet");
-                    return ruby.Qnil;
-                };
-                ruby.rb_raise(ruby.rb_eRuntimeError, msg.ptr);
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to submit packet, submit failed with status: %d", @intFromEnum(status));
                 return ruby.Qnil;
             }
 
@@ -472,15 +480,12 @@ fn tb_client_struct() type {
                 result_context.condition.wait(&result_context.mutex);
             }
 
-            if (result_context.result_error) |e| {
-                switch (e) {
-                    Error.OutOfMemory => ruby.rb_raise(ruby.rb_eRuntimeError, "Out of memory while processing request"),
-                    else => unreachable,
-                }
+            if (result_context.result_error != null) {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Out of memory while processing request");
                 return ruby.Qnil;
             }
 
-            return parser.to_ruby(&result_context);
+            return parser.to_ruby(&result_context.result);
         }
     };
 }
@@ -506,13 +511,9 @@ fn rb_int_to_u128(value: ruby.VALUE) Error!u128 {
     }
 
     var result: u128 = 0;
-    const overflow = ruby.rb_integer_pack(value, // val: the Ruby VALUE
-        &result, // words: pointer to output buffer
-        1, // numwords: we want 1 chunk of 16 bytes
-        @sizeOf(u128), // wordsize: 16 bytes
-        0, // nails: 0 (no nail bits)
-        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-    );
+
+    // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a01dccb3f948adab23275722f384ff5ed
+    const overflow = ruby.rb_integer_pack(value, &result, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_NATIVE_BYTE_ORDER);
 
     if (overflow == 2) {
         ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
@@ -520,19 +521,6 @@ fn rb_int_to_u128(value: ruby.VALUE) Error!u128 {
     }
 
     return result;
-}
-
-fn u128_to_rb_int(value: u128) ruby.VALUE {
-    if (value == 0) {
-        return ruby.UINT2NUM(0);
-    }
-
-    return ruby.rb_integer_unpack(&value, // ruby value
-        1, // numwords: we want 1 chunk of 16 bytes
-        @sizeOf(u128), // wordsize: 16 bytes
-        0, // nails: 0 (no nail bits)
-        ruby.INTEGER_PACK_NATIVE_BYTE_ORDER // flags
-    );
 }
 
 fn uint_to_rb_value(comptime T: type, value: T) ruby.VALUE {
@@ -543,7 +531,8 @@ fn uint_to_rb_value(comptime T: type, value: T) ruby.VALUE {
     return switch (T) {
         u8, u16, u32 => ruby.UINT2NUM(value),
         u64 => ruby.ULONG2NUM(value),
-        u128 => u128_to_rb_int(value),
+        // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a4f623845f4719716b70e4025508657fc
+        u128 => return ruby.rb_integer_unpack(&value, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_NATIVE_BYTE_ORDER),
         else => @compileError("Unsupported integer size: " ++ @typeName(T)),
     };
 }
@@ -623,24 +612,8 @@ fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) Error!T {
     };
 }
 
-const Error = error{
-    ArgError,
-    OutOfMemory,
-    UnsupportedOp,
-};
-
-const ParsedData = struct {
-    size: u32,
-    data: ?[*]const u8 = null,
-};
-
-const Parser = struct {
-    from_ruby: *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData,
-    to_ruby: *const fn (*ResultContext) ruby.VALUE,
-};
-
-fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
-    const impl = struct {
+fn create_from_ruby(comptime InputType: type) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
+    return struct {
         fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
             if (ruby.NIL_P(rb_data) or !ruby.RB_TYPE_P(rb_data, ruby.T_ARRAY)) {
                 ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
@@ -693,17 +666,21 @@ fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
 
             return out_data;
         }
+    }.from_ruby;
+}
 
-        fn to_ruby(ctx: *ResultContext) ruby.VALUE {
-            if (ctx.result_len == 0) {
+fn create_to_ruby(comptime OutputType: type) *const fn (*ParsedData) ruby.VALUE {
+    return struct {
+        fn to_ruby(data: *ParsedData) ruby.VALUE {
+            if (data.size == 0) {
                 return ruby.rb_ary_new();
             }
 
-            if (ctx.result_data == null) {
+            if (data.data == null) {
                 @panic("Result data is null, expected non-null data for Ruby conversion");
             }
 
-            const result = ctx.result_data.?;
+            const result = data.data.?;
             const m_tiger_beetle = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TigerBeetle"));
             const m_bindings = ruby.rb_const_get(m_tiger_beetle, ruby.rb_intern("Bindings"));
 
@@ -711,7 +688,7 @@ fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
             const rb_class_name = rb_type_struct.rb_class_name;
             const rb_class = ruby.rb_const_get(m_bindings, ruby.rb_intern(&rb_class_name[0]));
 
-            const result_size = ctx.result_len / @sizeOf(OutputType);
+            const result_size = data.size / @sizeOf(OutputType);
             const rb_result_array = ruby.rb_ary_new2(@intCast(result_size));
 
             const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
@@ -720,9 +697,9 @@ fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
                 const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
 
                 const data_block = result[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
-                const data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
+                const rb_data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
 
-                @memcpy(@as([*]u8, @ptrCast(data))[0..@sizeOf(OutputType)], data_block);
+                @memcpy(@as([*]u8, @ptrCast(rb_data))[0..@sizeOf(OutputType)], data_block);
 
                 _ = ruby.rb_ary_push(rb_result_array, rb_instance);
             }
@@ -730,10 +707,5 @@ fn create_parser(comptime InputType: type, comptime OutputType: type) Parser {
             std.debug.print("Returning Ruby array with {d} items\n", .{result_size});
             return rb_result_array;
         }
-    };
-
-    return Parser{
-        .from_ruby = impl.from_ruby,
-        .to_ruby = impl.to_ruby,
-    };
+    }.to_ruby;
 }
