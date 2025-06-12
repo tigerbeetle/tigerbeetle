@@ -933,7 +933,7 @@ fn print_percentiles_histogram(
     var histogram_total: u64 = 0;
     for (histogram_buckets) |bucket| histogram_total += bucket;
 
-    const percentiles = [_]u64{ 1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 99, 100 };
+    const percentiles = [_]u64{ 1, 50, 99, 100 };
     for (percentiles) |percentile| {
         const histogram_percentile: usize = @divTrunc(histogram_total * percentile, 100);
 
@@ -944,7 +944,7 @@ fn print_percentiles_histogram(
             if (sum >= histogram_percentile) break bucket_index;
         } else histogram_buckets.len;
 
-        stdout.print("{s} latency p{} = {} ms{s}\n", .{
+        stdout.print("{s} latency p{: <3} = {} ms{s}\n", .{
             label,
             percentile,
             latency,
