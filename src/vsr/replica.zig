@@ -6666,7 +6666,7 @@ pub fn ReplicaType(
         /// durable on a commit quorum of replicas. Instead, R2 waits till it commits op=23 and
         /// reaches op_checkpoint=19. Thereafter, it sends withheld prepare_oks for ops 28 → 31.
         fn op_prepare_ok_max(self: *const Replica) u64 {
-            if (!self.sync_content_done() and
+            if (!self.sync_grid_done() and
                 !vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max))
             {
                 //  A replica could sync to a checkpoint that is not yet durable on a quorum of
@@ -8134,7 +8134,7 @@ pub fn ReplicaType(
             assert(header.replica == self.primary_index(header.view));
             assert(header.view <= self.view);
             assert(header.op <= self.op or header.view < self.view);
-            maybe(!self.sync_content_done());
+            maybe(!self.sync_grid_done());
 
             if (self.status != .normal) {
                 log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
@@ -8156,7 +8156,7 @@ pub fn ReplicaType(
                 return;
             }
             if (header.op > self.op_prepare_ok_max()) {
-                if (!self.sync_content_done()) {
+                if (!self.sync_grid_done()) {
                     log.debug("{}: send_prepare_ok: not sending (syncing replica falsely " ++
                         "contributes to durability of the current checkpoint)", .{self.replica});
                 } else {
@@ -10030,26 +10030,34 @@ pub fn ReplicaType(
         }
 
         pub fn sync_content_done(self: *const Replica) bool {
-            if (self.superblock.staging.vsr_state.sync_op_max == 0) {
-                return true;
-            } else {
-                // Trailers/manifest haven't yet been synced.
-                if (!self.state_machine_opened) return false;
+            return self.sync_client_replies_done() and self.sync_grid_done();
+        }
 
-                for (0..constants.clients_max) |entry_slot| {
-                    if (!self.client_sessions.entries_present.is_set(entry_slot)) continue;
+        fn sync_client_replies_done(self: *const Replica) bool {
+            // Trailers/manifest haven't yet been synced.
+            if (!self.state_machine_opened) return false;
 
-                    const entry = &self.client_sessions.entries[entry_slot];
-                    if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
-                        entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
-                    {
-                        if (!self.client_replies.reply_durable(.{ .index = entry_slot })) {
-                            return false;
-                        }
+            for (0..constants.clients_max) |entry_slot| {
+                if (!self.client_sessions.entries_present.is_set(entry_slot)) continue;
+
+                const entry = &self.client_sessions.entries[entry_slot];
+                if (entry.header.op >= self.superblock.working.vsr_state.sync_op_min and
+                    entry.header.op <= self.superblock.working.vsr_state.sync_op_max)
+                {
+                    if (!self.client_replies.reply_durable(.{ .index = entry_slot })) {
+                        return false;
                     }
                 }
-                return self.sync_tables == null and self.grid_repair_tables.executing() == 0;
             }
+
+            return true;
+        }
+
+        fn sync_grid_done(self: *const Replica) bool {
+            // Trailers/manifest haven't yet been synced.
+            if (!self.state_machine_opened) return false;
+
+            return self.sync_tables == null and self.grid_repair_tables.executing() == 0;
         }
 
         /// State sync finished, and we must repair all of the tables we missed.
