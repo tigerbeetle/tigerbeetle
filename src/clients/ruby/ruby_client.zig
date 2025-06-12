@@ -342,14 +342,14 @@ const Parser = struct {
 };
 
 const SupportedOperationParsers = [_]Parser{
-    Parser{ .operation = Operation.lookup_accounts, .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_account_t) },
-    Parser{ .operation = Operation.create_accounts, .from_ruby = create_from_ruby(exports.tb_account_t), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) },
-    Parser{ .operation = Operation.lookup_transfers, .from_ruby = create_from_ruby(u128), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
-    Parser{ .operation = Operation.create_transfers, .from_ruby = create_from_ruby(exports.tb_transfer_t), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) },
-    // Parser{ .operation = Operation.get_account_transfers, .from_ruby = create_from_ruby(exports.tb_account_filter_t), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
-    // Parser{ .operation = Operation.get_account_balances, .from_ruby = create_from_ruby(exports.tb_account_filter_t), .to_ruby = create_to_ruby(exports.tb_account_balance_t) },
-    // Parser{ .operation = Operation.query_accounts, .from_ruby = create_from_ruby(exports.tb_query_filter_t), .to_ruby = create_to_ruby(exports.tb_account_t) },
-    // Parser{ .operation = Operation.query_transfers, .from_ruby = create_from_ruby(exports.tb_query_filter_t), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.lookup_accounts, .from_ruby = create_from_ruby(u128, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    Parser{ .operation = Operation.create_accounts, .from_ruby = create_from_ruby(exports.tb_account_t, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) },
+    Parser{ .operation = Operation.lookup_transfers, .from_ruby = create_from_ruby(u128, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.create_transfers, .from_ruby = create_from_ruby(exports.tb_transfer_t, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) },
+    Parser{ .operation = Operation.get_account_transfers, .from_ruby = create_from_ruby(exports.tb_account_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.get_account_balances, .from_ruby = create_from_ruby(exports.tb_account_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_account_balance_t) },
+    Parser{ .operation = Operation.query_accounts, .from_ruby = create_from_ruby(exports.tb_query_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    Parser{ .operation = Operation.query_transfers, .from_ruby = create_from_ruby(exports.tb_query_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
 };
 
 fn tb_client_struct() type {
@@ -453,8 +453,8 @@ fn tb_client_struct() type {
                 ruby.rb_raise(ruby.rb_eArgError, "operation must be a non-nil Integer object");
                 return ruby.Qnil;
             }
-            if (ruby.wrapped_nil_p(rb_data) or !ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
-                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
+            if (ruby.wrapped_nil_p(rb_data)) {
+                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil");
                 return ruby.Qnil;
             }
 
@@ -634,59 +634,84 @@ fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) Error!T {
     };
 }
 
-fn create_from_ruby(comptime InputType: type) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
+fn create_from_ruby(comptime InputType: type, comptime opts: anytype) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
     return struct {
+        fn validate_data(rb_data: ruby.VALUE) Error!void {
+            if (ruby.wrapped_nil_p(rb_data)) {
+                ruby.rb_raise(ruby.rb_eArgError, "data cannot be nil");
+                return Error.ArgError;
+            }
+
+            if (comptime opts.isArray) {
+                if (!ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
+                    ruby.rb_raise(ruby.rb_eArgError, "expected data to be an Array");
+                    return Error.ArgError;
+                }
+                const data_array_len = ruby.wrapped_rarray_len(rb_data);
+                if (data_array_len == 0) {
+                    ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
+                    return Error.ArgError;
+                } else if (data_array_len > MAX_BATCH_SIZE) {
+                    ruby.rb_raise(ruby.rb_eArgError, "data array size exceeds maximum allowed size of {}", .{MAX_BATCH_SIZE});
+                    return Error.ArgError;
+                }
+            }
+        }
+
+        fn get_zig_item(rb_item: ruby.VALUE) Error!InputType {
+            if (@typeInfo(InputType) == .Int) {
+                return try rb_value_to_uint(InputType, rb_item);
+            }
+
+            if (@typeInfo(InputType) == .Struct) {
+                if (!ruby.wrapped_rb_type_p(rb_item, ruby.T_DATA)) {
+                    const rb_class_name = comptime type_mapping_from_zig_type(InputType).rb_class_name;
+                    const my_type = ruby.wrapped_type(rb_item);
+                    ruby.rb_raise(ruby.rb_eArgError, "expected data item to be a: %s %d", &rb_class_name[0], my_type);
+                    return Error.ArgError;
+                }
+                const rb_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(InputType).get_rb_data_type_ptr();
+                const zig_item: *InputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_item, rb_type_t)));
+                return zig_item.*;
+            }
+
+            @panic("unreachable");
+        }
+
         fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
-            if (ruby.wrapped_nil_p(rb_data) or !ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
-                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil Array object");
-                return Error.ArgError;
+            try validate_data(rb_data);
+
+            var data_size: u32 = 0;
+            if (comptime opts.isArray) {
+                const data_array_len = ruby.wrapped_rarray_len(rb_data);
+                data_size = @intCast(data_array_len * @sizeOf(InputType));
+            } else {
+                data_size = @intCast(@sizeOf(InputType));
             }
 
-            const data_array_len = ruby.wrapped_rarray_len(rb_data);
-            if (data_array_len == 0) {
-                ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
-                return Error.ArgError;
-            } else if (data_array_len > MAX_BATCH_SIZE) {
-                ruby.rb_raise(ruby.rb_eArgError, "data array size exceeds maximum allowed size of {}", .{MAX_BATCH_SIZE});
-                return Error.ArgError;
-            }
-
-            var out_data: ParsedData = .{
-                .size = 0,
-                .data = null,
-            };
-            out_data.size = @intCast(data_array_len * @sizeOf(InputType));
-            const data_block = allocator.alloc(u8, out_data.size) catch {
+            const data_block = allocator.alloc(u8, data_size) catch {
                 ruby.rb_raise(ruby.rb_eNoMemError, "Failed to allocate memory for data");
                 return Error.OutOfMemory;
             };
-            out_data.data = data_block.ptr;
 
-            switch (@typeInfo(InputType)) {
-                .Int => {
-                    var i: usize = 0;
-                    while (i < data_array_len) : (i += 1) {
-                        const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
-                        const zig_value: InputType = try rb_value_to_uint(InputType, rb_item);
-
-                        const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
-                        @memcpy(dest_slice, std.mem.asBytes(&zig_value));
-                    }
-                },
-                .Struct => {
-                    const rb_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(InputType).get_rb_data_type_ptr();
-                    var i: usize = 0;
-                    while (i < data_array_len) : (i += 1) {
-                        const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
-                        const zig_item: *InputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_item, rb_type_t)));
-                        const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
-                        @memcpy(dest_slice, std.mem.asBytes(zig_item));
-                    }
-                },
-                else => @compileError("Unable to handle type " ++ @typeName(InputType)),
+            if (comptime opts.isArray) {
+                const items: u32 = data_size / @sizeOf(InputType);
+                var i: u32 = 0;
+                while (i < items) : (i += 1) {
+                    const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
+                    const zig_item: InputType = try get_zig_item(rb_item);
+                    const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
+                    @memcpy(dest_slice, std.mem.asBytes(&zig_item));
+                }
+            } else {
+                const zig_item: InputType = try get_zig_item(rb_data);
+                @memcpy(data_block, std.mem.asBytes(&zig_item));
             }
 
-            return out_data;
+            return ParsedData{
+                .size = data_size,
+                .data = data_block.ptr,
+            };
         }
     }.from_ruby;
 }

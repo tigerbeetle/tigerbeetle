@@ -617,7 +617,8 @@ begin
     id: 4201,
     code: 10,
     ledger: 1,
-    user_data_128: 4201
+    user_data_128: 4201,
+    flags: AccountFlags::HISTORY,
   )
   account2 = Account.new(
     id: 4202,
@@ -659,6 +660,22 @@ begin
   if transfers.size != 2
     raise "Expected 2 transfers, got #{transfers.size}"
   end
+
+  # AccountFilter not currently supported
+  filter = AccountFilter.new(account_id: account1.id)
+  transfers = client.submit(Operation::GET_ACCOUNT_TRANSFERS, filter)
+  raise "Transfers working???" unless transfers.empty?
+
+  balances = client.submit(Operation::GET_ACCOUNT_BALANCES, filter)
+  raise "Balances working???" unless balances.empty?
+
+  # QueryFilter not currently supported
+  query = QueryFilter.new(ledger: account1.ledger)
+  query_accounts = client.submit(Operation::QUERY_ACCOUNTS, query)
+  raise "Query Accounts working???" unless query_accounts.empty?
+
+  query_transfers = client.submit(Operation::QUERY_TRANSFERS, query)
+  raise "Query Transfers working???" unless query_transfers.empty?
 
   puts "*"* 80
   puts "  SUCCESS: All TigerBeetle constants match expected values\n"

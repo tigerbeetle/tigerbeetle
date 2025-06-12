@@ -53,6 +53,10 @@ bool wrapped_rtest(VALUE v) {
   return RTEST(v);
 }
 
+int wrapped_type(VALUE v) {
+  return TYPE(v);
+}
+
 const char* wrapped_rstring_ptr(VALUE str) {
     return RSTRING_PTR(str);
 }

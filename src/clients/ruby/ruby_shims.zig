@@ -87,3 +87,4 @@ pub extern fn wrapped_symbol_p(v: VALUE) bool;
 pub extern fn wrapped_uint2num(i: c_uint) VALUE;
 pub extern fn wrapped_ull2num(i: c_ulonglong) VALUE;
 pub extern fn wrapped_rb_type_p(v: VALUE, t: c_int) bool;
+pub extern fn wrapped_type(v: VALUE) c_int;
