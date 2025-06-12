@@ -395,12 +395,16 @@ test "recover smoke" {
     }
     try cluster.replica_format(0);
     try cluster.replica_format(1);
+    try cluster.replica_format(2);
     try cluster.workload_start(.{ .transfer_count = 200_000 });
     try cluster.replica_spawn(0);
     try cluster.replica_spawn(1);
+    try cluster.replica_spawn(2);
     std.time.sleep(2 * std.time.ns_per_s);
 
+    try cluster.replica_kill(2);
     try cluster.replica_reformat(2);
+
     try cluster.replica_kill(1);
     try cluster.replica_spawn(2);
     cluster.workload_finish();
@@ -528,6 +532,8 @@ const TmpCluster = struct {
     }
 
     fn replica_format(cluster: *TmpCluster, replica_index: usize) !void {
+        assert(cluster.replicas[replica_index] == null);
+
         try cluster.shell.exec(
             \\{tigerbeetle} format --cluster=0 --replica={replica} --replica-count=3 {datafile}
         , .{
@@ -538,6 +544,10 @@ const TmpCluster = struct {
     }
 
     fn replica_reformat(cluster: *TmpCluster, replica_index: usize) !void {
+        assert(cluster.replicas[replica_index] == null);
+
+        cluster.shell.cwd.deleteFile(cluster.replica_datafile[replica_index]) catch {};
+
         try cluster.shell.exec(
             \\{tigerbeetle} recover
             \\    --cluster=0
