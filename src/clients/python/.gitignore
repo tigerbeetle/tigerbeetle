@@ -3,3 +3,4 @@ dist/
 lib/
 .ruff_cache/
 .pytest_cache/
+python.lib
