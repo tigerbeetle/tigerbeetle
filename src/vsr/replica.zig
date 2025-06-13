@@ -4979,11 +4979,10 @@ pub fn ReplicaType(
             // NB: When a request comes in, it may be blocked by CPU work (likely, compaction) and
             // only get timestamped _after_ that work finishes. This adds some measurement error.
             const commit_completion_time_request_us = blk: {
-                const maybe_realtime = self.clock.realtime_synchronized();
-                if (maybe_realtime) |realtime| {
-                    assert(realtime >= self.commit_prepare.?.header.timestamp);
+                if (self.clock.realtime_synchronized()) |realtime| {
+                    maybe(realtime < self.commit_prepare.?.header.timestamp);
 
-                    break :blk @as(u64, @intCast(realtime)) -
+                    break :blk @as(u64, @intCast(realtime)) -|
                         self.commit_prepare.?.header.timestamp;
                 } else {
                     break :blk 0;
@@ -5205,11 +5204,10 @@ pub fn ReplicaType(
                     self.send_reply_message_to_client(reply);
 
                     const commit_execute_time_request_us = blk: {
-                        const maybe_realtime = self.clock.realtime_synchronized();
-                        if (maybe_realtime) |realtime| {
-                            assert(realtime >= self.commit_prepare.?.header.timestamp);
+                        if (self.clock.realtime_synchronized()) |realtime| {
+                            maybe(realtime < self.commit_prepare.?.header.timestamp);
 
-                            break :blk @as(u64, @intCast(realtime)) -
+                            break :blk @as(u64, @intCast(realtime)) -|
                                 self.commit_prepare.?.header.timestamp;
                         } else {
                             break :blk 0;
