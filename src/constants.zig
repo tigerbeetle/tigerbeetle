@@ -658,8 +658,8 @@ comptime {
 // runtime-known number of free blocks.
 //
 // For simplicity for now, size IOPS to always be available.
-pub const lsm_compaction_queue_read_max = 8;
-pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_queue_read_max = 16;
+pub const lsm_compaction_queue_write_max = 16;
 pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
 pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
 

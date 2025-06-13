@@ -472,6 +472,10 @@ const Environment = struct {
 
     fn half_bar_complete(env: *Environment) !void {
         env.manifest_log.compact_end();
+        if (env.manifest_log.grid_reservation) |grid_reservation| {
+            env.manifest_log.grid.forfeit(grid_reservation);
+            env.manifest_log.grid_reservation = null;
+        }
     }
 
     fn checkpoint(env: *Environment) !void {
