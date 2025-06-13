@@ -704,6 +704,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                .CANCELED => error.Canceled,
                                 else => |errno| stdx.unexpected_errno("send", errno),
                             };
                             break :blk err;
@@ -1126,6 +1127,7 @@ pub const IO = struct {
         BrokenPipe,
         ConnectionTimedOut,
         ConnectionRefused,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn send(
