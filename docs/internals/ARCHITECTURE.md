@@ -562,9 +562,10 @@ ordering of requests is observed.
 
 ## Conclusion
 
-TigerBeetle is designed to deliver mission-critical safety and 1000x performance. Presently focused
-on financial transactions, it fundamentally solves the challenge of cost-efficiency OLTP at scale
-in a world and future becoming exponentially more transactional.
+TigerBeetle is designed to deliver mission-critical safety and 1000x performance, and power the
+world's transactions. Presently focused on financial transactions, it fundamentally solves the
+challenge of cost-efficient OLTP at scale in a world becoming exponentially more transactional and
+real-time.
 
 ## References
 
@@ -576,7 +577,6 @@ The collection of logical and magical art behind TigerBeetle:
 
 - [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java -
   2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
-
   - Sam Adams on the high-level design of LMAX.
 
 - [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf) - A high
