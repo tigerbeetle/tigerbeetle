@@ -930,7 +930,7 @@ pub const Instant = struct {
 pub const Duration = struct {
     ns: u64,
 
-    // Duration in microseconds, μs, 1/1_000_000 of a second. 
+    // Duration in microseconds, μs, 1/1_000_000 of a second.
     pub fn us(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_us);
     }
@@ -942,6 +942,10 @@ pub const Duration = struct {
 
     pub fn min(lhs: Duration, rhs: Duration) Duration {
         return .{ .ns = @min(lhs.ns, rhs.ns) };
+    }
+
+    pub fn max(lhs: Duration, rhs: Duration) Duration {
+        return .{ .ns = @max(lhs.ns, rhs.ns) };
     }
 
     pub const sort = struct {

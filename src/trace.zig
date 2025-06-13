@@ -371,18 +371,18 @@ pub fn TracerType(comptime Time: type) type {
 
                 const timing_existing = event_timing_existing.values;
                 event_timing_existing.values = .{
-                    .duration_min_us = @min(timing_existing.duration_min_us, duration.us()),
-                    .duration_max_us = @max(timing_existing.duration_max_us, duration.us()),
-                    .duration_sum_us = timing_existing.duration_sum_us +| duration.us(),
+                    .duration_min = timing_existing.duration_min.min(duration),
+                    .duration_max = timing_existing.duration_min.max(duration),
+                    .duration_sum = .{ .ns = timing_existing.duration_sum.ns +| duration.ns },
                     .count = timing_existing.count +| 1,
                 };
             } else {
                 tracer.events_timing[timing_slot] = .{
                     .event = event_timing,
                     .values = .{
-                        .duration_min_us = duration.us(),
-                        .duration_max_us = duration.us(),
-                        .duration_sum_us = duration.us(),
+                        .duration_min = duration,
+                        .duration_max = duration,
+                        .duration_sum = duration,
                         .count = 1,
                     },
                 };
@@ -446,7 +446,7 @@ test "timing overflow" {
     const aggregate = trace.events_timing[event.slot()].?;
 
     assert(aggregate.values.count == 2);
-    assert(aggregate.values.duration_min_us == value);
-    assert(aggregate.values.duration_max_us == value);
-    assert(aggregate.values.duration_sum_us == std.math.maxInt(u64));
+    assert(aggregate.values.duration_min.ns == value.ns);
+    assert(aggregate.values.duration_max.ns == value.ns);
+    assert(aggregate.values.duration_sum.ns == std.math.maxInt(u64));
 }
