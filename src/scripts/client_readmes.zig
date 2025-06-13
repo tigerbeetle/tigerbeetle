@@ -169,7 +169,8 @@ fn readme_root(ctx: *Context) !void {
             \\starts the TigerBeetle cluster.
             \\
             \\Clients are thread-safe and a single instance should be shared
-            \\between multiple concurrent tasks.
+            \\between multiple concurrent tasks. This allows events to be 
+            \\[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
             \\
             \\Multiple clients are useful when connecting to more than
             \\one TigerBeetle cluster.
