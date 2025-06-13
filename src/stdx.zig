@@ -930,11 +930,13 @@ pub const Instant = struct {
 pub const Duration = struct {
     ns: u64,
 
-    pub fn microseconds(duration: Duration) u64 {
+    // Duration in microseconds, μs, 1/1_000_000 of a second. 
+    pub fn us(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_us);
     }
 
-    pub fn milliseconds(duration: Duration) u64 {
+    // Duration in milliseconds, ms, 1/1_000 of a second.
+    pub fn ms(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_ms);
     }
 
@@ -957,8 +959,8 @@ test "Instant/Duration" {
 
     const duration = instant_2.duration_since(instant_1);
     assert(duration.ns == 1_000_000_000);
-    assert(duration.microseconds() == 1_000_000);
-    assert(duration.milliseconds() == 1_000);
+    assert(duration.us() == 1_000_000);
+    assert(duration.ms() == 1_000);
 }
 
 // DateTime in UTC, intended primarily for logging.
