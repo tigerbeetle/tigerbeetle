@@ -244,7 +244,7 @@ pub fn TracerType(comptime Time: type) type {
                 .thread_id = event_tracing.stack(),
                 .category = @tagName(event),
                 .event = 'B',
-                .timestamp = time_elapsed.microseconds(),
+                .timestamp = time_elapsed.us(),
                 .event_tracing = event_tracing,
                 .event_timing = event_timing,
                 .args = std.json.Formatter(Event){ .value = event, .options = .{} },
@@ -284,13 +284,13 @@ pub fn TracerType(comptime Time: type) type {
                 event_tracing,
                 event_timing,
                 if (event_duration.ns < us_log_threshold_ns)
-                    event_duration.microseconds()
+                    event_duration.us()
                 else
-                    event_duration.milliseconds(),
+                    event_duration.ms(),
                 if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
             });
 
-            tracer.timing(event_timing, event_duration.microseconds());
+            tracer.timing(event_timing, event_duration.us());
 
             tracer.write_stop(stack, event_duration);
         }
@@ -326,7 +326,7 @@ pub fn TracerType(comptime Time: type) type {
                     .process_id = tracer.replica_index,
                     .thread_id = stack,
                     .event = 'E',
-                    .timestamp = time_elapsed.microseconds(),
+                    .timestamp = time_elapsed.us(),
                 },
             ) catch unreachable;
 
