@@ -3,6 +3,43 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.45
+
+Released: 2025-06-13
+
+### Safety And Performance
+
+- [#3023](https://github.com/tigerbeetle/tigerbeetle/pull/3023)
+
+  Fix a liveness bug related to when replicas are syncing.
+
+- [#3022](https://github.com/tigerbeetle/tigerbeetle/pull/3022)
+
+  Fix a crash related to timing when measuring commit timing.
+
+
+### Features
+
+- [#2907](https://github.com/tigerbeetle/tigerbeetle/pull/2907)
+
+  Add documentation on how to monitor TigerBeetle, track requests end-to-end for better monitoring.
+
+- [#3019](https://github.com/tigerbeetle/tigerbeetle/pull/3019)
+
+  Improve the compatibility of our new CDC plugin by supporting signed integer types. Thanks
+  @alvinyan-bond for your feedback!
+
+### Internals
+
+- [#3018](https://github.com/tigerbeetle/tigerbeetle/pull/3018)
+
+  Add a recovery smoke test.
+
+
+### TigerTracks 🎧
+
+- [The Grid](https://open.spotify.com/track/64VYy2f9QBx26P1YjNQrEc?si=d09a228548b14989)
+
 ## TigerBeetle 0.16.44
 
 Released: 2025-06-06
