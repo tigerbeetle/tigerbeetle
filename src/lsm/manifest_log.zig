@@ -851,9 +851,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
 
-            if (manifest_log.grid_reservation) |grid_reservation| {
-                manifest_log.grid.forfeit(grid_reservation);
-                manifest_log.grid_reservation = null;
+            if (manifest_log.grid_reservation) |_| {
+                // Grid reservation is is forfeited by the forest.
             } else {
                 // Compaction was skipped for this half-bar.
                 assert(manifest_log.entry_count == 0);

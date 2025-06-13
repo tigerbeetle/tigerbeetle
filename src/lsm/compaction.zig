@@ -66,15 +66,16 @@ pub const compaction_tables_input_max = 1 + constants.lsm_growth_factor;
 /// In the "worst" case, no keys are overwritten/merged, and no tombstones are dropped.
 pub const compaction_tables_output_max = compaction_tables_input_max;
 
-/// The maximum number of blocks that a compaction is allowed to carry over between the beats.
-/// This is just a single block --- the index block of the output tables. The input tables will be
-/// re-read in the next beat, and the compaction is paced in such a way as to end the beat only when
-/// an output value block is full.
-pub const compaction_block_count_bar_max: u32 = 1;
-
-// The minimum number of blocks required for a single beat of a single compaction:
-// one index and one value block for two input and one output table.
-pub const compaction_block_count_beat_min: u32 = (1 + 1) * 3;
+/// The minimum number of blocks required for a single beat of a single compaction.
+///
+/// Counterintuitively, this number isn't 6 (one value and index block for the two input tables and
+/// one output table). Instead it is:
+/// One index and one value block for the output table, one index block for the two input tables,
+/// and `lsm_compaction_queue_read_max/2` value blocks for the two input tables.
+///
+/// The reason is that we carry over the output index block and all input blocks to the next beat.
+pub const compaction_block_count_beat_min: u32 =
+    (1 + 1) + (1 + 1) + constants.lsm_compaction_queue_read_max;
 
 const half_bar_beat_count = @divExact(constants.lsm_compaction_ops, 2);
 
@@ -147,11 +148,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 write_value_block,
                 write_index_block,
             },
-            // The index block is freed immediately after the read for the last value block is
-            // submitted so, by the time merge consumes a value block, the index block is gone
-            // already. Use this field to mark the spots when the compaction position should advance
-            // to the next index block.
-            last_block_in_the_table: bool,
 
             link: StackType(Block).Link,
         };
@@ -170,7 +166,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 block.* = .{
                     .ptr = try allocate_block(allocator),
                     .stage = .free,
-                    .last_block_in_the_table = false,
                     .link = .{},
                 };
                 blocks_allocated += 1;
@@ -208,7 +203,6 @@ pub fn ResourcePoolType(comptime Grid: type) type {
                 block.* = .{
                     .ptr = block.ptr,
                     .stage = .free,
-                    .last_block_in_the_table = false,
                     .link = .{},
                 };
                 pool.blocks.push(block);
@@ -236,14 +230,12 @@ pub fn ResourcePoolType(comptime Grid: type) type {
             const block = pool.blocks.pop() orelse return null;
             assert(block.stage == .free);
             assert(block.link.next == null);
-            assert(!block.last_block_in_the_table);
             return block;
         }
 
         fn block_release(pool: *@This(), block: *Block) void {
             assert(block.stage == .free);
             assert(block.link.next == null);
-            assert(!block.last_block_in_the_table);
             pool.blocks.push(block);
         }
 
@@ -350,17 +342,14 @@ pub fn CompactionType(
         /// `dropped` values can vary between the replicas.
         ///
         /// Counters obey accounting equation of compaction:
-        ///     out = in - (dropped + wasted)
+        ///     out = in - dropped
         counters: struct {
             in: u64 = 0,
             dropped: u64 = 0, // Tombstones.
-            // Counts values needlessly read from disk. Wastage can happen both at the end and at
-            // the start of a beat (when part of the value block was already merged previously).
-            wasted: u64 = 0,
             out: u64 = 0,
 
             fn consistent(counters: @This()) bool {
-                return counters.out == counters.in - counters.dropped - counters.wasted;
+                return counters.out == counters.in - counters.dropped;
             }
         } = .{},
 
@@ -415,11 +404,12 @@ pub fn CompactionType(
         // Beat-scoped fields:
         // ------------------
         pool: ?*ResourcePool = null,
-        callback: ?*const fn (*ResourcePool) void = null,
+        callback: ?*const fn (*ResourcePool, u64) void = null,
 
         grid_reservation: ?Grid.Reservation = null,
         table_builder_value_block: ?*ResourcePool.Block = null,
 
+        values_in_beat: u32 = 0,
         // IO queues:
         //
         // Compaction structure is such that the data can be read (and written) concurrently, but
@@ -436,7 +426,7 @@ pub fn CompactionType(
         // when switching between the tables.
         //
         // Note that level_{a,b}_position fields track the logical, deterministic progression of
-        // compaction. To track which block should be read next, separate `_next` fields are used.
+        // compaction.
         //
         // For output blocks:
         // - the order of completions doesn't matter,
@@ -451,22 +441,18 @@ pub fn CompactionType(
         level_a_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
-        level_a_index_block_next: u32 = 0,
 
         level_a_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
-        level_a_value_block_next: u32 = 0,
 
         level_b_index_block: RingBufferType(*ResourcePool.Block, .{
             .array = 1,
         }) = .{ .buffer = undefined },
-        level_b_index_block_next: u32 = 0,
 
         level_b_value_block: RingBufferType(*ResourcePool.Block, .{
             .array = @divExact(constants.lsm_compaction_queue_read_max, 2),
         }) = .{ .buffer = undefined },
-        level_b_value_block_next: u32 = 0,
 
         output_blocks: RingBufferType(void, .{
             .array = constants.lsm_compaction_queue_write_max,
@@ -495,25 +481,26 @@ pub fn CompactionType(
         pub fn assert_between_bars(compaction: *const Compaction) void {
             assert(compaction.stage == .inactive);
             assert(compaction.idle());
+            assert(compaction.block_queues_empty_output());
+            assert(compaction.block_queues_empty_input());
+
             assert(compaction.table_builder_index_block == null);
             assert(compaction.manifest_entries.empty());
         }
 
-        pub fn idle(compaction: *const Compaction) bool {
-            return compaction.pool == null and compaction.callback == null and
-                // level_a
-                compaction.level_a_index_block.count == 0 and
-                compaction.level_a_index_block_next == 0 and
-                compaction.level_a_value_block.count == 0 and
-                compaction.level_a_value_block_next == 0 and
-                // level_b
-                compaction.level_b_index_block.count == 0 and
-                compaction.level_b_index_block_next == 0 and
-                compaction.level_b_value_block.count == 0 and
-                compaction.level_b_value_block_next == 0 and
-                // output
-                compaction.table_builder_value_block == null and
-                compaction.output_blocks.count == 0;
+        fn idle(compaction: *const Compaction) bool {
+            return compaction.callback == null and compaction.table_builder_value_block == null;
+        }
+
+        fn block_queues_empty_output(compaction: *const Compaction) bool {
+            return compaction.output_blocks.empty();
+        }
+
+        fn block_queues_empty_input(compaction: *const Compaction) bool {
+            return compaction.level_a_index_block.empty() and
+                compaction.level_a_value_block.empty() and
+                compaction.level_b_index_block.empty() and
+                compaction.level_b_value_block.empty();
         }
 
         /// Plan the work for the bar:
@@ -522,13 +509,28 @@ pub fn CompactionType(
         ///   compacted,
         /// - compute the bar quota (just the total number of values in all input tables),
         /// - execute move table optimization if range_b turns out to be empty.
-        pub fn bar_commence(compaction: *Compaction, op: u64) void {
+        pub fn bar_commence(compaction: *Compaction, op: u64, pool: *ResourcePool) u64 {
             assert(compaction.idle());
+            assert(compaction.block_queues_empty_output());
+            assert(compaction.block_queues_empty_input());
+
             assert(compaction.stage == .inactive);
             assert(op == compaction_op_min(op));
 
+            assert(
+                pool.blocks_free() >=
+                    // Input index & value blocks that can be carried over to the subsequent beat.
+                    compaction.level_a_index_block.buffer.len +
+                    compaction.level_a_value_block.buffer.len +
+                    compaction.level_b_index_block.buffer.len +
+                    compaction.level_b_value_block.buffer.len +
+                    // At least one output index & value block.
+                    (1 + 1),
+            );
+
             compaction.stage = .paused;
             compaction.op_min = op;
+            compaction.pool = pool;
 
             if (compaction.level_b == 0) {
                 // Do not start compaction if the immutable table does not require compaction.
@@ -539,7 +541,7 @@ pub fn CompactionType(
                         compaction.tree.config.name,
                         compaction.level_b,
                     });
-                    return;
+                    return 0;
                 }
 
                 const table_value_count_limit = Table.value_count_max;
@@ -580,7 +582,7 @@ pub fn CompactionType(
                             mutable_count_half_bar_last,
                             table_value_count_limit,
                         });
-                        return;
+                        return 0;
                     }
                 }
 
@@ -609,7 +611,7 @@ pub fn CompactionType(
                         compaction.tree.config.name,
                         compaction.level_b,
                     });
-                    return;
+                    return 0;
                 };
 
                 compaction.table_info_a = .{ .disk = table_range.table_a };
@@ -648,6 +650,15 @@ pub fn CompactionType(
                 .beat = 0,
                 .bar = quota_bar,
             };
+
+            log.debug("{s}:{}: bar_commence: " ++
+                "quota_done={} quota_beat={} quota_bar={}", .{
+                compaction.tree.config.name,
+                compaction.level_b,
+                compaction.quotas.done,
+                compaction.quotas.beat,
+                compaction.quotas.bar,
+            });
             compaction.move_table = compaction.table_info_a.? == .disk and
                 compaction.range_b.?.tables.empty();
             compaction.drop_tombstones = compaction.tree.manifest
@@ -675,6 +686,9 @@ pub fn CompactionType(
                 compaction.quotas.beat = compaction.table_info_a.?.disk.table_info.value_count;
                 assert(compaction.quotas.beat_done());
                 assert(compaction.quotas.bar_done());
+                return 0;
+            } else {
+                return compaction.quotas.bar;
             }
         }
 
@@ -682,6 +696,9 @@ pub fn CompactionType(
         /// tables that are now invisible.
         pub fn bar_complete(compaction: *Compaction) void {
             assert(compaction.idle());
+            assert(compaction.block_queues_empty_output());
+            assert(compaction.block_queues_empty_input());
+
             assert(compaction.stage == .paused);
             assert(compaction.counters.consistent());
             assert(compaction.quotas.bar_done());
@@ -731,13 +748,12 @@ pub fn CompactionType(
             }
 
             log.debug("{s}:{}: bar_complete: " ++
-                "values_in={} values_out={} values_dropped={} values_wasted={}", .{
+                "values_in={} values_out={} values_dropped={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
                 compaction.counters.in,
                 compaction.counters.out,
                 compaction.counters.dropped,
-                compaction.counters.wasted,
             });
 
             // Mark the immutable table as flushed, if we were compacting into level 0.
@@ -796,8 +812,7 @@ pub fn CompactionType(
                 assert(manifest_added_value_count > 0);
             } else {
                 assert(manifest_added_value_count == compaction.counters.out);
-                assert(manifest_removed_value_count ==
-                    compaction.counters.in - compaction.counters.wasted);
+                assert(manifest_removed_value_count == compaction.counters.in);
                 assert(manifest_removed_value_count - manifest_added_value_count ==
                     compaction.counters.dropped);
             }
@@ -819,43 +834,61 @@ pub fn CompactionType(
             }
         }
 
-        /// Plan the work for the beat:
-        /// - determine our quota in terms of minimum number of input values to process,
-        /// - reserve grid blocks for the output.
+        /// The entry point to the actual compaction work for the beat. Called by the forest.
         pub fn beat_commence(
             compaction: *Compaction,
-            beats_remaining: u64,
-        ) void {
+            options: struct {
+                callback: *const fn (*ResourcePool, u64) void,
+                values_count: u64,
+            },
+        ) enum { active, ceased } {
             assert(compaction.idle());
+            assert(compaction.block_queues_empty_output());
+            // We may be carrying over some blocks from the previous beat.
+            maybe(compaction.block_queues_empty_input());
+
             assert(compaction.stage == .paused);
             if (compaction.move_table) assert(compaction.quotas.bar_done());
             assert(compaction.quotas.done >= compaction.quotas.beat);
-            defer assert(compaction.quotas.done <= compaction.quotas.beat);
 
-            assert(beats_remaining > 0);
-            assert(beats_remaining <= half_bar_beat_count);
+            if (compaction.quotas.bar_done()) {
+                log.debug("{}: {s}:{}: beat_commence: bar quota={} fulfilled, done={}", .{
+                    compaction.grid.superblock.replica_index.?,
+                    compaction.tree.config.name,
+                    compaction.level_b,
+                    compaction.quotas.done,
+                    compaction.quotas.bar,
+                });
+                return .ceased;
+            }
+
+            assert(!compaction.move_table);
+            assert(compaction.pool.?.idle());
 
             // Calculate how many values we have to compact each beat, to self-correct our pacing.
             // Pacing will have imperfections due to rounding up to fill target value blocks and
             // immutable table filtering duplicate values.
-            const values_remaining = compaction.quotas.bar - compaction.quotas.done;
-            const beat_values_quota = stdx.div_ceil(values_remaining, beats_remaining);
+            const values_remaining = (compaction.quotas.bar - compaction.quotas.done);
+            const beat_values_quota = @min(options.values_count, values_remaining);
+
             compaction.quotas.beat = compaction.quotas.done + beat_values_quota;
             assert(compaction.quotas.done <= compaction.quotas.beat);
             assert(compaction.quotas.beat <= compaction.quotas.bar);
-            if (beats_remaining == 1) {
-                assert(compaction.quotas.beat == compaction.quotas.bar);
-            }
 
             if (compaction.quotas.beat_done()) {
-                assert(compaction.stage == .paused);
-                log.debug("{s}:{}: beat_commence: quota fulfilled", .{
+                log.debug("{s}:{}: beat_commence: beat quota fulfilled", .{
                     compaction.tree.config.name,
                     compaction.level_b,
                 });
-                return;
+                return .ceased;
             }
-            assert(!compaction.move_table);
+
+            compaction.grid.trace.start(.{ .compact_beat = .{
+                .tree = @enumFromInt(compaction.tree.config.id),
+                .level_b = compaction.level_b,
+            } });
+
+            compaction.callback = options.callback;
             compaction.stage = .beat;
 
             // The +1 is for imperfections in pacing our immutable table, which might cause us
@@ -876,22 +909,8 @@ pub fn CompactionType(
             assert(compaction.grid_reservation == null);
             compaction.grid_reservation = compaction.grid.reserve(beat_blocks_max);
 
-            // These values were already processed during the previous beat and add to wastage.
-            if (compaction.table_info_a.? == .disk) {
-                compaction.counters.wasted += compaction.level_a_position.value;
-            }
-            compaction.counters.wasted += compaction.level_b_position.value;
-
-            log.debug("{s}:{}: beat_commence: quota_done={} quota_beat={} quota_bar={} " ++
-                "blocks_reserved={} values_wasted={}", .{
-                compaction.tree.config.name,
-                compaction.level_b,
-                compaction.quotas.done,
-                compaction.quotas.beat,
-                compaction.quotas.bar,
-                beat_blocks_max,
-                compaction.counters.wasted,
-            });
+            compaction.compaction_dispatch();
+            return .active;
         }
 
         // While beat_commence is called by the forest sequentially for each compaction, to get
@@ -910,17 +929,16 @@ pub fn CompactionType(
                     .merge => unreachable,
                 }
             }
-            assert(compaction.level_a_index_block.empty());
-            assert(compaction.level_a_value_block.empty());
-            assert(compaction.level_b_index_block.empty());
-            assert(compaction.level_b_value_block.empty());
-            assert(compaction.output_blocks.empty());
+
+            assert(compaction.block_queues_empty_output());
+            // We may be carrying over some input blocks to the next beat.
+            maybe(compaction.block_queues_empty_input());
 
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
+
             assert(compaction.grid_reservation != null);
-            compaction.grid.forfeit(compaction.grid_reservation.?);
-            compaction.grid_reservation = null;
+            // Grid reservation is is forfeited by the forest.
 
             assert(compaction.counters.consistent());
 
@@ -933,60 +951,27 @@ pub fn CompactionType(
             if (compaction.quotas.bar_done()) {
                 assert(compaction.table_builder.state == .no_blocks);
                 assert(compaction.table_builder_index_block == null);
+                assert(compaction.block_queues_empty_input());
             }
 
             compaction.stage = .paused;
             const pool = compaction.pool.?;
             const callback = compaction.callback.?;
-            compaction.pool = null;
+            const values_in = compaction.values_in_beat;
+
             compaction.callback = null;
+            compaction.values_in_beat = 0;
+
             assert(compaction.idle());
             assert(pool.idle());
-            log.debug("{s}:{}: beat_complete: quota_done={} quota_beat={} quota_bar={} " ++
-                "values_wasted={}", .{
+            log.debug("{s}:{}: beat_complete: quota_done={} quota_beat={} quota_bar={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
                 compaction.quotas.done,
                 compaction.quotas.beat,
                 compaction.quotas.bar,
-                compaction.counters.wasted,
             });
-            callback(pool);
-        }
-
-        /// The entry point to the actual compaction work for the beat. Called by the forest.
-        pub fn compaction_dispatch_enter(
-            compaction: *Compaction,
-            pool: *ResourcePool,
-            callback: *const fn (*ResourcePool) void,
-        ) enum { active, beat_finished } {
-            assert(compaction.idle());
-            switch (compaction.stage) {
-                .inactive => unreachable,
-                .paused => {
-                    assert(compaction.quotas.beat_done());
-                    return .beat_finished;
-                },
-                .beat => {},
-                .beat_quota_done, .beat_table_done => unreachable,
-            }
-            assert(pool.idle());
-            compaction.pool = pool;
-            compaction.callback = callback;
-            assert(
-                pool.blocks_free() >= compaction_block_count_beat_min -
-                    @intFromBool(compaction.table_builder_index_block != null),
-            );
-            compaction.grid.trace.start(.{ .compact_beat = .{
-                .tree = @enumFromInt(compaction.tree.config.id),
-                .level_b = compaction.level_b,
-            } });
-            compaction.level_a_index_block_next = compaction.level_a_position.index_block;
-            compaction.level_a_value_block_next = compaction.level_a_position.value_block;
-            compaction.level_b_index_block_next = compaction.level_b_position.index_block;
-            compaction.level_b_value_block_next = compaction.level_b_position.value_block;
-            compaction.compaction_dispatch();
-            return .active;
+            callback(pool, values_in * @sizeOf(Value));
         }
 
         // Compaction is a lot of work: read input tables from both levels, merge their value
@@ -1062,11 +1047,24 @@ pub fn CompactionType(
                     }
                 }
 
+                const level_a_index_block_next =
+                    compaction.level_a_position.index_block +
+                    @as(u32, @intCast(compaction.level_a_index_block.count));
+                const level_b_index_block_next =
+                    compaction.level_b_position.index_block +
+                    @as(u32, @intCast(compaction.level_b_index_block.count));
+                const level_a_value_block_next =
+                    compaction.level_a_position.value_block +
+                    @as(u32, @intCast(compaction.level_a_value_block.count));
+                const level_b_value_block_next =
+                    compaction.level_b_position.value_block +
+                    @as(u32, @intCast(compaction.level_b_value_block.count));
+
                 // Read level A index block (for level_b > 0).
                 if (compaction.table_info_a.? == .disk) {
                     assert(compaction.level_b > 0);
                     if (!compaction.level_a_index_block.full() and
-                        compaction.level_a_index_block_next < 1)
+                        level_a_index_block_next < 1)
                     {
                         if (compaction.pool.?.block_acquire()) |block| {
                             const read = compaction.pool.?.reads.acquire().?;
@@ -1086,7 +1084,7 @@ pub fn CompactionType(
 
                 // Read level B index block.
                 if (!compaction.level_b_index_block.full() and
-                    compaction.level_b_index_block_next < compaction.range_b.?.tables.count())
+                    level_b_index_block_next < compaction.range_b.?.tables.count())
                 {
                     if (compaction.pool.?.block_acquire()) |block| {
                         const read = compaction.pool.?.reads.acquire().?;
@@ -1109,21 +1107,14 @@ pub fn CompactionType(
                     assert(compaction.level_a_index_block.count == 0);
                 } else {
                     if (compaction.level_a_index_block.head()) |index_block| {
-                        assert(index_block.stage == .read_index_block or
-                            index_block.stage == .read_index_block_done);
+                        if (index_block.stage == .read_index_block_done) {
+                            const index_schema = schema.TableIndex.from(index_block.ptr);
+                            const data_blocks_count =
+                                index_schema.data_blocks_used(index_block.ptr);
 
-                        const level_a_priority = compaction.level_b_index_block.count == 0 or
-                            compaction.level_a_value_block.count <
-                                compaction.level_b_value_block.count;
-                        if (index_block.stage == .read_index_block_done and
-                            !compaction.level_a_value_block.full() and
-                            level_a_priority)
-                        {
-                            if (compaction.stage == .beat_quota_done and
-                                compaction.level_a_value_block.count >= 2)
+                            if (!compaction.level_a_value_block.full() and
+                                level_a_value_block_next < data_blocks_count)
                             {
-                                // Avoid over-read at the end of the beat.
-                            } else {
                                 if (compaction.pool.?.block_acquire()) |block| {
                                     const read = compaction.pool.?.reads.acquire().?;
 
@@ -1138,26 +1129,22 @@ pub fn CompactionType(
                                         compaction.output_blocks.count > 0);
                                 }
                             }
+                        } else {
+                            assert(index_block.stage == .read_index_block);
                         }
                     }
                 }
 
                 // Read level B value block.
                 if (compaction.level_b_index_block.head()) |index_block| {
-                    assert(index_block.stage == .read_index_block or
-                        index_block.stage == .read_index_block_done);
-                    const level_b_priority = compaction.level_a_index_block.count == 0 or
-                        compaction.level_b_value_block.count <=
-                            compaction.level_a_value_block.count;
-                    if (index_block.stage == .read_index_block_done and
-                        !compaction.level_b_value_block.full() and
-                        level_b_priority)
-                    {
-                        if (compaction.stage == .beat_quota_done and
-                            compaction.level_b_value_block.count >= 2)
+                    if (index_block.stage == .read_index_block_done) {
+                        const index_schema = schema.TableIndex.from(index_block.ptr);
+                        const data_blocks_count =
+                            index_schema.data_blocks_used(index_block.ptr);
+
+                        if (!compaction.level_b_value_block.full() and
+                            level_b_value_block_next < data_blocks_count)
                         {
-                            // Avoid over-read at the end of the beat.
-                        } else {
                             if (compaction.pool.?.block_acquire()) |block| {
                                 const read = compaction.pool.?.reads.acquire().?;
 
@@ -1172,6 +1159,8 @@ pub fn CompactionType(
                                     compaction.output_blocks.count > 0);
                             }
                         }
+                    } else {
+                        assert(index_block.stage == .read_index_block);
                     }
                 }
 
@@ -1295,68 +1284,34 @@ pub fn CompactionType(
                 .index_and_data_block => unreachable,
             }
 
-            while (compaction.level_a_value_block.head()) |block| {
-                if (block.stage == .read_value_block) {
-                    return;
-                }
+            var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
+            while (level_a_value_block_iterator.next()) |block| {
+                if (block.stage == .read_value_block) return;
+
                 assert(block.stage == .read_value_block_done);
-                compaction.counters.wasted +=
-                    Table.data_block_values_used(block.ptr).len;
-
-                _ = compaction.level_a_value_block.pop();
-                block.stage = .free;
-                block.last_block_in_the_table = false;
-                compaction.pool.?.block_release(block);
             }
-            assert(compaction.level_a_value_block.count == 0);
-            compaction.level_a_value_block_next = 0;
 
-            while (compaction.level_a_index_block.head()) |block| {
-                if (block.stage == .read_index_block) {
-                    return;
-                }
+            var level_a_index_block_iterator = compaction.level_a_index_block.iterator();
+            while (level_a_index_block_iterator.next()) |block| {
+                if (block.stage == .read_index_block) return;
+
                 assert(block.stage == .read_index_block_done);
-                _ = compaction.level_a_index_block.pop();
-                block.stage = .free;
-                compaction.pool.?.block_release(block);
             }
-            assert(compaction.level_a_index_block.count == 0);
-            compaction.level_a_index_block_next = 0;
 
-            while (compaction.level_b_value_block.head()) |block| {
-                if (block.stage == .read_value_block) {
-                    return;
-                }
+            var level_b_value_block_iterator = compaction.level_b_value_block.iterator();
+            while (level_b_value_block_iterator.next()) |block| {
+                if (block.stage == .read_value_block) return;
+
                 assert(block.stage == .read_value_block_done);
-                compaction.counters.wasted +=
-                    Table.data_block_values_used(block.ptr).len;
-
-                _ = compaction.level_b_value_block.pop();
-                block.stage = .free;
-                block.last_block_in_the_table = false;
-                compaction.pool.?.block_release(block);
             }
-            assert(compaction.level_b_value_block.count == 0);
-            compaction.level_b_value_block_next = 0;
 
-            while (compaction.level_b_index_block.head()) |block| {
-                if (block.stage == .read_index_block) {
-                    return;
-                }
+            var level_b_index_block_iterator = compaction.level_b_index_block.iterator();
+            while (level_b_index_block_iterator.next()) |block| {
+                if (block.stage == .read_index_block) return;
+
                 assert(block.stage == .read_index_block_done);
-                _ = compaction.level_b_index_block.pop();
-                block.stage = .free;
-                compaction.pool.?.block_release(block);
             }
-            assert(compaction.level_b_index_block.count == 0);
-            compaction.level_b_index_block_next = 0;
 
-            // When computing wastage from over-read blocks, we don't bother accounting for
-            // partially consumed blocks and instead compensate here.
-            if (compaction.table_info_a.? == .disk) {
-                compaction.counters.wasted -= compaction.level_a_position.value;
-            }
-            compaction.counters.wasted -= compaction.level_b_position.value;
             compaction.grid.trace.stop(.{ .compact_beat = .{
                 .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
@@ -1370,18 +1325,23 @@ pub fn CompactionType(
             read: *ResourcePool.BlockRead,
             index_block: *ResourcePool.Block,
         ) void {
+            const level_b_index_block_next =
+                compaction.level_b_position.index_block +
+                @as(u32, @intCast(compaction.level_b_index_block.count));
+
             assert(compaction.stage == .beat or compaction.stage == .beat_quota_done);
             assert(index_block.stage == .read_index_block);
             switch (level) {
                 .level_a => assert(compaction.level_a_position.index_block == 0),
-                .level_b => assert(
-                    compaction.level_b_index_block_next < compaction.range_b.?.tables.count(),
-                ),
+                .level_b => {
+                    assert(level_b_index_block_next - 1 < compaction.range_b.?.tables.count());
+                    assert(level_b_index_block_next > 0);
+                },
             }
 
             const table_ref = switch (level) {
                 .level_a => compaction.table_info_a.?.disk,
-                .level_b => compaction.range_b.?.tables.get(compaction.level_b_index_block_next),
+                .level_b => compaction.range_b.?.tables.get(level_b_index_block_next - 1),
             };
             read.block = index_block;
             read.compaction = compaction;
@@ -1392,10 +1352,6 @@ pub fn CompactionType(
                 table_ref.table_info.checksum,
                 .{ .cache_read = true, .cache_write = true },
             );
-            switch (level) {
-                .level_a => compaction.level_a_index_block_next += 1,
-                .level_b => compaction.level_b_index_block_next += 1,
-            }
         }
 
         fn read_index_block_callback(grid_read: *Grid.Read, index_block: BlockPtrConst) void {
@@ -1424,9 +1380,25 @@ pub fn CompactionType(
                 .level_a => compaction.level_a_index_block.head().?,
                 .level_b => compaction.level_b_index_block.head().?,
             };
-            const value_block_index = switch (level) {
-                .level_a => compaction.level_a_value_block_next,
-                .level_b => compaction.level_b_value_block_next,
+
+            const level_a_value_block_next =
+                compaction.level_a_position.value_block +
+                @as(u32, @intCast(compaction.level_a_value_block.count));
+            const level_b_value_block_next =
+                compaction.level_b_position.value_block +
+                @as(u32, @intCast(compaction.level_b_value_block.count));
+
+            const value_block_index = blk: {
+                switch (level) {
+                    .level_a => {
+                        assert(level_a_value_block_next > 0);
+                        break :blk level_a_value_block_next - 1;
+                    },
+                    .level_b => {
+                        assert(level_b_value_block_next > 0);
+                        break :blk level_b_value_block_next - 1;
+                    },
+                }
             };
 
             const index_schema = schema.TableIndex.from(index_block.ptr);
@@ -1445,41 +1417,6 @@ pub fn CompactionType(
                 value_block_checksum.value,
                 .{ .cache_read = true, .cache_write = true },
             );
-
-            switch (level) {
-                .level_a => {
-                    compaction.level_a_value_block_next += 1;
-                    if (compaction.level_a_value_block_next ==
-                        index_schema.data_blocks_used(index_block.ptr))
-                    {
-                        value_block.last_block_in_the_table = true;
-                        const pop = compaction.level_a_index_block.pop().?;
-                        assert(pop.ptr == index_block.ptr);
-                        assert(index_block.stage == .read_index_block_done);
-
-                        compaction.read_value_block_release_table(index_block.ptr);
-                        index_block.stage = .free;
-                        compaction.pool.?.block_release(index_block);
-                        compaction.level_a_value_block_next = 0;
-                    }
-                },
-                .level_b => {
-                    compaction.level_b_value_block_next += 1;
-                    if (compaction.level_b_value_block_next ==
-                        index_schema.data_blocks_used(index_block.ptr))
-                    {
-                        value_block.last_block_in_the_table = true;
-                        const pop = compaction.level_b_index_block.pop().?;
-                        assert(pop.ptr == index_block.ptr);
-                        assert(index_block.stage == .read_index_block_done);
-
-                        compaction.read_value_block_release_table(index_block.ptr);
-                        index_block.stage = .free;
-                        compaction.pool.?.block_release(index_block);
-                        compaction.level_b_value_block_next = 0;
-                    }
-                },
-            }
         }
 
         // TODO: Support for LSM snapshots would require us to only remove blocks
@@ -1513,7 +1450,6 @@ pub fn CompactionType(
             assert(block.stage == .read_value_block);
             stdx.copy_disjoint(.exact, u8, block.ptr, value_block);
             block.stage = .read_value_block_done;
-            compaction.counters.in += Table.data_block_values_used(block.ptr).len;
             compaction.compaction_dispatch();
         }
 
@@ -1619,12 +1555,12 @@ pub fn CompactionType(
             assert(compaction.level_b_position.value <= Table.data.value_count_max);
             assert(compaction.table_builder.value_count <= Table.data.value_count_max);
 
-            if (compaction.table_info_a.? == .immutable) {
-                compaction.counters.in += merge_result.consumed_a;
-            }
+            const consumed_total = merge_result.consumed_a + merge_result.consumed_b;
+            compaction.quotas.done += consumed_total;
+            compaction.counters.in += consumed_total;
             compaction.counters.dropped += merge_result.dropped;
+            compaction.values_in_beat += consumed_total;
 
-            compaction.quotas.done += merge_result.consumed_a + merge_result.consumed_b;
             assert(compaction.quotas.done <= compaction.quotas.bar);
 
             compaction.merge_advance_position();
@@ -1715,17 +1651,28 @@ pub fn CompactionType(
                         Table.data_block_values_used(value_block.ptr).len)
                     {
                         _ = compaction.level_a_value_block.pop();
+
                         compaction.level_a_position.value_block += 1;
                         compaction.level_a_position.value = 0;
 
-                        if (value_block.last_block_in_the_table) {
+                        const index_block = compaction.level_a_index_block.head().?;
+                        assert(index_block.stage == .read_index_block_done);
+                        const index_schema = schema.TableIndex.from(index_block.ptr);
+                        const data_blocks_count =
+                            index_schema.data_blocks_used(index_block.ptr);
+                        if (compaction.level_a_position.value_block == data_blocks_count) {
                             compaction.level_a_position.index_block += 1;
                             assert(compaction.level_a_position.index_block == 1);
                             compaction.level_a_position.value_block = 0;
+
+                            const popped = compaction.level_a_index_block.pop().?;
+                            assert(popped == index_block);
+                            compaction.read_value_block_release_table(index_block.ptr);
+                            index_block.stage = .free;
+                            compaction.pool.?.block_release(index_block);
                         }
 
                         value_block.stage = .free;
-                        value_block.last_block_in_the_table = false;
                         compaction.pool.?.block_release(value_block);
                     } else {
                         value_block.stage = .read_value_block_done;
@@ -1744,13 +1691,24 @@ pub fn CompactionType(
                     compaction.level_b_position.value_block += 1;
                     compaction.level_b_position.value = 0;
 
-                    if (value_block.last_block_in_the_table) {
+                    const index_block = compaction.level_b_index_block.head().?;
+                    assert(index_block.stage == .read_index_block_done);
+                    const index_schema = schema.TableIndex.from(index_block.ptr);
+                    const data_blocks_count =
+                        index_schema.data_blocks_used(index_block.ptr);
+                    if (compaction.level_b_position.value_block == data_blocks_count) {
                         compaction.level_b_position.index_block += 1;
                         compaction.level_b_position.value_block = 0;
+
+                        const popped = compaction.level_b_index_block.pop().?;
+                        assert(popped == index_block);
+                        compaction.read_value_block_release_table(index_block.ptr);
+                        index_block.stage = .free;
+
+                        compaction.pool.?.block_release(index_block);
                     }
 
                     value_block.stage = .free;
-                    value_block.last_block_in_the_table = false;
                     compaction.pool.?.block_release(value_block);
                 } else {
                     value_block.stage = .read_value_block_done;
