@@ -146,7 +146,7 @@ const Environment = struct {
 
         env.scan_lookup_buffer = try gpa.alloc(
             tb.Account,
-            StateMachine.constants.batch_max.create_accounts,
+            StateMachine.machine_constants.batch_max.create_accounts,
         );
 
         env.forest = undefined;
