@@ -1,17 +1,23 @@
 import ctypes
-import dataclasses
 import platform
+import sys
 from pathlib import Path
+from typing import Any
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 
 class NativeError(Exception):
     pass
 
+
 class IntegerOverflowError(ValueError):
     pass
 
 
-def _load_tbclient():
+def _load_tbclient() -> ctypes.CDLL:
     prefix = ""
     arch = ""
     system = ""
@@ -50,39 +56,35 @@ def _load_tbclient():
 
     source_path = Path(__file__)
     source_dir = source_path.parent
-    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"{prefix}tb_client{suffix}"
+    library_path = (
+        source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"{prefix}tb_client{suffix}"
+    )
     return ctypes.CDLL(str(library_path))
 
 
-def validate_uint(*, bits: int, name: str, number: int):
+def validate_uint(*, bits: int, name: str, number: int) -> None:
     if number > 2**bits - 1:
         raise IntegerOverflowError(f"{name}=={number} is too large to fit in {bits} bits")
     if number < 0:
         raise IntegerOverflowError(f"{name}=={number} cannot be negative")
 
 
-class c_uint128(ctypes.Structure): # noqa: N801
-    _fields_ = [("_low", ctypes.c_uint64), ("_high", ctypes.c_uint64)] # noqa: RUF012
+class c_uint128(ctypes.Structure):  # noqa: N801
+    _fields_ = [("_low", ctypes.c_uint64), ("_high", ctypes.c_uint64)]  # noqa: RUF012
 
     @classmethod
-    def from_param(cls, obj):
-        return cls(_high=obj >> 64, _low=obj & 0xffffffffffffffff)
+    def from_param(cls, obj: int) -> Self:
+        return cls(_high=obj >> 64, _low=obj & 0xFFFFFFFFFFFFFFFF)
 
-    def to_python(self):
-        return self._high << 64 | self._low
+    def to_python(self) -> int:
+        return int(self._high << 64 | self._low)
 
-
-# Use slots=True if the version of Python is new enough (3.10+) to support it.
-try:
-    dataclass = dataclasses.dataclass(slots=True)
-except TypeError:
-    dataclass = dataclasses.dataclass()
-
-def tb_assert(value):
+def tb_assert(value: Any) -> None:
     """
     Python's built-in assert can be silently disabled if Python is run with -O.
     """
     if not value:
         raise AssertionError()
+
 
 tbclient = _load_tbclient()
