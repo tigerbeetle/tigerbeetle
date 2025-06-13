@@ -63,7 +63,10 @@ pub fn main(shell: *Shell, _: std.mem.Allocator, cli_args: CLIArgs) !void {
     const images = comptime std.enums.values(Image);
     inline for (images) |image| {
         try build_image(shell, image, cli_args.tag);
-        if (cli_args.push) {
+    }
+
+    if (cli_args.push) {
+        inline for (images) |image| {
             try push_image(shell, image, cli_args.tag);
         }
     }
@@ -353,6 +356,7 @@ const docker_compose_contents =
     \\     ipam:
     \\       config:
     \\         - subnet: 10.20.20.0/24
+    \\
 ;
 
 const replica_run_contents =
@@ -392,4 +396,5 @@ const replica_run_contents =
     \\exec ./tigerbeetle start \
     \\  --addresses="$ADDRESSES" \
     \\  "${datafile}"
+    \\
 ;
