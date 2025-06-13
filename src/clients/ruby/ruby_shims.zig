@@ -29,6 +29,8 @@ pub extern var rb_eTypeError: VALUE;
 // Constants
 // https://github.com/ruby/ruby/blob/master/include/ruby/internal/core/rtypeddata.h#L111
 pub const RUBY_TYPED_FREE_IMMEDIATELY: VALUE = 1 << 0;
+pub const RUBY_TYPED_WB_PROTECTED: VALUE = 1 << 5;
+
 // https://github.com/ruby/ruby/blob/master/include/ruby/internal/intern/bignum.h#L567
 pub const INTEGER_PACK_LITTLE_ENDIAN: c_int = 0x22;
 

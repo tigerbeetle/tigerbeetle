@@ -68,6 +68,11 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
         @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
     }
 
+    const StructFlags: ruby.VALUE = comptime if (ZigType == exports.tb_client_t)
+        ruby.RUBY_TYPED_FREE_IMMEDIATELY | ruby.RUBY_TYPED_WB_PROTECTED
+    else
+        ruby.RUBY_TYPED_FREE_IMMEDIATELY;
+
     return struct {
         const Self = @This();
         const type_info = @typeInfo(ZigType);
@@ -85,7 +90,7 @@ fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8)
             },
             .parent = null,
             .data = null,
-            .flags = ruby.RUBY_TYPED_FREE_IMMEDIATELY,
+            .flags = StructFlags,
         };
 
         pub fn get_rb_data_type_ptr() *const ruby.rb_data_type_t {
