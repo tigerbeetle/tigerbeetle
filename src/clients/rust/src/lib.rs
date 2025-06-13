@@ -24,6 +24,9 @@ mod tb_client;
 use tb_client as tbc;
 
 mod conversions;
+mod time_based_id;
+
+pub use time_based_id::id;
 
 /// The tb_client completion context is unused by the Rust bindings.
 /// This is just a magic number to jump out of logs.
@@ -32,6 +35,9 @@ const COMPLETION_CONTEXT: usize = 0xAB;
 pub struct Client {
     client: *mut tbc::tb_client_t,
 }
+
+unsafe impl Send for Client {}
+unsafe impl Sync for Client {}
 
 impl Client {
     pub fn new(cluster_id: u128, addresses: &str) -> Result<Client, InitStatus> {
@@ -373,6 +379,7 @@ pub struct Account {
 bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct AccountFlags: u16 {
         const None = 0;
         const Linked = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED;
@@ -405,6 +412,7 @@ pub struct Transfer {
 bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct TransferFlags: u16 {
         const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED;
         const Pending = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING;
@@ -436,6 +444,7 @@ pub struct AccountFilter {
 bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct AccountFilterFlags: u32 {
         const Debits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_DEBITS;
         const Credits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_CREDITS;
@@ -472,12 +481,13 @@ pub struct QueryFilter {
 bitflags! {
     #[repr(transparent)]
     #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Eq, PartialEq, Ord, PartialOrd, Hash)]
     pub struct QueryFilterFlags: u32 {
         const Reversed = tbc::TB_QUERY_FILTER_FLAGS_TB_QUERY_FILTER_REVERSED;
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum CreateAccountResult {
     Ok,
@@ -557,7 +567,7 @@ impl core::fmt::Display for CreateAccountResult {
     }
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum CreateTransferResult {
     Ok,
@@ -749,7 +759,7 @@ impl core::fmt::Display for CreateTransferResult {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum InitStatus {
     Unexpected,
@@ -776,7 +786,7 @@ impl core::fmt::Display for InitStatus {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum ClientStatus {
     Invalid,
@@ -793,7 +803,7 @@ impl core::fmt::Display for ClientStatus {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
 pub enum PacketStatus {
     TooMuchData,
@@ -822,7 +832,7 @@ impl core::fmt::Display for PacketStatus {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct NotFound;
 
 impl std::error::Error for NotFound {}
@@ -833,7 +843,7 @@ impl core::fmt::Display for NotFound {
 }
 
 #[repr(transparent)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Reserved<const N: usize>([u8; N]);
 
 impl<const N: usize> Default for Reserved<N> {
