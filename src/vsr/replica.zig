@@ -19,6 +19,7 @@ const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
+const Duration = stdx.Duration;
 const marks = @import("../testing/marks.zig");
 
 const vsr = @import("../vsr.zig");
@@ -4972,14 +4973,13 @@ pub fn ReplicaType(
             //
             // NB: When a request comes in, it may be blocked by CPU work (likely, compaction) and
             // only get timestamped _after_ that work finishes. This adds some measurement error.
-            const commit_completion_time_request_us = blk: {
+            const commit_completion_time_request: Duration = blk: {
                 if (self.clock.realtime_synchronized()) |realtime| {
                     maybe(realtime < self.commit_prepare.?.header.timestamp);
-
-                    break :blk @as(u64, @intCast(realtime)) -|
-                        self.commit_prepare.?.header.timestamp;
+                    const realtime_ns: u64 = @intCast(realtime);
+                    break :blk .{ .ns = realtime_ns -| self.commit_prepare.?.header.timestamp };
                 } else {
-                    break :blk 0;
+                    break :blk .{ .ns = 0 };
                 }
             };
 
@@ -4995,11 +4995,11 @@ pub fn ReplicaType(
                 )) |operation| {
                     self.trace.timing(
                         .{ .replica_request_local = .{ .operation = operation } },
-                        commit_completion_time_local.us(),
+                        commit_completion_time_local,
                     );
                     self.trace.timing(
                         .{ .replica_request = .{ .operation = operation } },
-                        commit_completion_time_request_us,
+                        commit_completion_time_request,
                     );
                 }
             }
@@ -5197,14 +5197,15 @@ pub fn ReplicaType(
                     });
                     self.send_reply_message_to_client(reply);
 
-                    const commit_execute_time_request_us = blk: {
+                    const commit_execute_time_request: Duration = blk: {
                         if (self.clock.realtime_synchronized()) |realtime| {
                             maybe(realtime < self.commit_prepare.?.header.timestamp);
-
-                            break :blk @as(u64, @intCast(realtime)) -|
-                                self.commit_prepare.?.header.timestamp;
+                            const realtime_ns: u64 = @intCast(realtime);
+                            break :blk .{
+                                .ns = realtime_ns -| self.commit_prepare.?.header.timestamp,
+                            };
                         } else {
-                            break :blk 0;
+                            break :blk .{ .ns = 0 };
                         }
                     };
 
@@ -5216,7 +5217,7 @@ pub fn ReplicaType(
                         )) |operation| {
                             self.trace.timing(
                                 .{ .replica_request_execute = .{ .operation = operation } },
-                                commit_execute_time_request_us,
+                                commit_execute_time_request,
                             );
                         }
                     }
@@ -6814,10 +6815,7 @@ pub fn ReplicaType(
                     )) |operation| {
                         self.trace.timing(
                             .{ .client_request_round_trip = .{ .operation = operation } },
-                            @divFloor(
-                                request.message.header.previous_request_latency,
-                                std.time.ns_per_us,
-                            ),
+                            .{ .ns = request.message.header.previous_request_latency },
                         );
                     }
                 }
