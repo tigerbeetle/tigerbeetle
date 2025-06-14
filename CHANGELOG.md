@@ -7,6 +7,10 @@ to receive notifications about breaking changes!
 
 Released: 2025-06-13
 
+This release changes the CDC message header to use AMQP signed integers.
+The new encoding will be handled transparently by RabbitMQ/AMQP clients. However, code changes
+might be necessary if the consumer explicitly relies on the unsigned data type.
+
 ### Safety And Performance
 
 - [#3023](https://github.com/tigerbeetle/tigerbeetle/pull/3023)
@@ -17,24 +21,25 @@ Released: 2025-06-13
 
   Fix a crash related to timing when measuring commit timing.
 
-
 ### Features
 
 - [#2907](https://github.com/tigerbeetle/tigerbeetle/pull/2907)
 
   Add documentation on how to monitor TigerBeetle, track requests end-to-end for better monitoring.
 
-- [#3019](https://github.com/tigerbeetle/tigerbeetle/pull/3019)
+- [#3019](https://github.com/tigerbeetle/tigerbeetle/pull/3019),
+  [#3029](https://github.com/tigerbeetle/tigerbeetle/pull/3029)
 
-  Improve the compatibility of our new CDC plugin by supporting signed integer types. Thanks
-  @alvinyan-bond for your feedback!
+  Improves compatibility of our new CDC connector by supporting AMQP signed integer types, and
+  fixes an assertion that previously overlooked the possibility of receiving an asynchronous
+  `basic_ack` while publishing a batch of messages.
+  Thanks @alvinyan-bond for your feedback!
 
 ### Internals
 
 - [#3018](https://github.com/tigerbeetle/tigerbeetle/pull/3018)
 
   Add a recovery smoke test.
-
 
 ### TigerTracks 🎧
 
