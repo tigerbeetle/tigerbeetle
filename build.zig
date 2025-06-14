@@ -477,6 +477,8 @@ fn build_ci(
     }
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
         if (default or mode == .clients or mode == language) {
+            // Client tests expect vortex to exist.
+            build_ci_step(b, step_ci, .{"vortex"});
             build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)});
         }
         if (all or mode == .clients or mode == language) {
