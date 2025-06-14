@@ -1,0 +1,762 @@
+const std = @import("std");
+const vsr = @import("vsr");
+
+const ruby = @import("ruby_shims.zig");
+
+const exports = vsr.tb_client.exports;
+
+const assert = std.debug.assert;
+
+const constants = vsr.constants;
+const IO = vsr.io.IO;
+
+const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Storage = vsr.storage.StorageType(IO, Tracer);
+const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
+const tb = vsr.tigerbeetle;
+
+// const ruby = @cImport(@cInclude("stub_ruby.h"));
+
+const MAX_BATCH_SIZE = 8192;
+
+const SKIP_PREFIXES = [_][]const u8{ "reserved", "opaque", "deprecated" };
+
+const Operation = exports.tb_operation;
+
+const mappings_vsr = .{
+    .{ Operation, build_rb_setup_struct(Operation, "Operation") },
+    .{ exports.tb_packet_status, build_rb_setup_struct(exports.tb_packet_status, "PacketStatus") },
+    .{ exports.tb_client_t, build_rb_setup_struct(exports.tb_client_t, "Client") },
+    .{ exports.tb_init_status, build_rb_setup_struct(exports.tb_init_status, "InitStatus") },
+    .{ exports.tb_client_status, build_rb_setup_struct(exports.tb_client_status, "ClientStatus") },
+    .{ exports.tb_log_level, build_rb_setup_struct(exports.tb_log_level, "LogLevel") },
+    .{ exports.tb_register_log_callback_status, build_rb_setup_struct(exports.tb_register_log_callback_status, "RegisterLogCallbackStatus") },
+};
+
+const mappings_state_machine = .{
+    .{ exports.tb_account_t, build_rb_setup_struct(exports.tb_account_t, "Account") },
+    .{ exports.tb_transfer_t, build_rb_setup_struct(exports.tb_transfer_t, "Transfer") },
+    .{ exports.tb_account_flags, build_rb_setup_struct(exports.tb_account_flags, "AccountFlags") },
+    .{ exports.tb_transfer_flags, build_rb_setup_struct(exports.tb_transfer_flags, "TransferFlags") },
+    .{ exports.tb_create_account_result, build_rb_setup_struct(exports.tb_create_account_result, "CreateAccountResult") },
+    .{ exports.tb_create_transfer_result, build_rb_setup_struct(exports.tb_create_transfer_result, "CreateTransferResult") },
+    .{ exports.tb_create_accounts_result_t, build_rb_setup_struct(exports.tb_create_accounts_result_t, "CreateAccountsResult") },
+    .{ exports.tb_create_transfers_result_t, build_rb_setup_struct(exports.tb_create_transfers_result_t, "CreateTransfersResult") },
+    .{ exports.tb_account_filter_t, build_rb_setup_struct(exports.tb_account_filter_t, "AccountFilter") },
+    .{ exports.tb_account_filter_flags, build_rb_setup_struct(exports.tb_account_filter_flags, "AccountFilterFlags") },
+    .{ exports.tb_account_balance_t, build_rb_setup_struct(exports.tb_account_balance_t, "AccountBalance") },
+    .{ exports.tb_query_filter_t, build_rb_setup_struct(exports.tb_query_filter_t, "QueryFilter") },
+    .{ exports.tb_query_filter_flags, build_rb_setup_struct(exports.tb_query_filter_flags, "QueryFilterFlags") },
+};
+
+const mappings_all = mappings_vsr ++ mappings_state_machine;
+
+pub export fn initialize_ruby_client() callconv(.C) void {
+    const rb_tb_client = ruby.rb_define_module("TBClient");
+
+    inline for (mappings_all) |type_mapping| {
+        const setup_struct = type_mapping[1];
+        setup_struct.init_methods(rb_tb_client);
+    }
+
+    const rb_client = ruby.rb_const_get(rb_tb_client, ruby.rb_intern("Client"));
+    tb_client_struct().init_methods(rb_client);
+}
+
+fn convert_to_ruby_class(comptime ZigType: type, comptime ruby_name: []const u8) type {
+    if (@typeInfo(ZigType) != .Struct) {
+        @compileError("Expected a struct type for Ruby C struct conversion, got: " ++ @typeInfo(ZigType));
+    }
+
+    const StructFlags: ruby.VALUE = comptime if (ZigType == exports.tb_client_t)
+        ruby.RUBY_TYPED_FREE_IMMEDIATELY | ruby.RUBY_TYPED_WB_PROTECTED
+    else
+        ruby.RUBY_TYPED_FREE_IMMEDIATELY;
+
+    return struct {
+        const Self = @This();
+        const type_info = @typeInfo(ZigType);
+        const type_name = @typeName(ZigType) ++ "\x00";
+
+        pub const rb_class_name = ruby_name ++ "\x00";
+
+        const rb_data_type = ruby.rb_data_type_t{
+            .wrap_struct_name = &type_name[0],
+            .function = .{
+                .dmark = null,
+                .dfree = free_fn,
+                .dsize = size_fn,
+                .reserved = .{ null, null },
+            },
+            .parent = null,
+            .data = null,
+            .flags = StructFlags,
+        };
+
+        pub fn get_rb_data_type_ptr() *const ruby.rb_data_type_t {
+            return &rb_data_type;
+        }
+
+        fn alloc_fn(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            return ruby.rb_data_typed_object_zalloc(self, @sizeOf(ZigType), &rb_data_type);
+        }
+
+        fn free_fn(ptr: ?*anyopaque) callconv(.C) void {
+            if (ptr) |p| {
+                ruby.ruby_xfree(p);
+            }
+        }
+
+        fn size_fn(ptr: ?*const anyopaque) callconv(.C) usize {
+            _ = ptr;
+            return @sizeOf(ZigType);
+        }
+
+        fn convert_to_ruby_hash(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
+            const hash: ruby.VALUE = ruby.rb_hash_new();
+
+            inline for (type_info.Struct.fields) |field| {
+                if (comptime skip_field(field.name)) {
+                    continue;
+                }
+                const field_value = @field(wrapper.*, field.name);
+                const field_name_cstr = field.name ++ "\x00";
+                const key_id = ruby.rb_intern(&field_name_cstr[0]);
+                const key_symbol = ruby.wrapped_id2sym(key_id); // Convert ID to symbol
+
+                const value = zig_type_to_rb_value(@TypeOf(field_value), field_value);
+
+                _ = ruby.rb_hash_aset(hash, key_symbol, value);
+            }
+
+            return hash;
+        }
+
+        pub fn init_methods(parent: ruby.VALUE) void {
+            const class = ruby.rb_define_class_under(parent, &rb_class_name[0], ruby.rb_cObject);
+            ruby.rb_define_alloc_func(class, alloc_fn);
+            ruby.rb_define_method(class, "initialize", @ptrCast(&rb_initialize), -1);
+            ruby.rb_define_method(class, "to_h", @ptrCast(&convert_to_ruby_hash), 0);
+
+            define_getters_and_setters(class);
+        }
+
+        fn define_getters_and_setters(class: ruby.VALUE) void {
+            const fields = type_info.Struct.fields;
+
+            inline for (fields) |field| {
+                if (comptime skip_field(field.name)) {
+                    continue;
+                }
+
+                const getter_name = field.name ++ "\x00";
+                const setter_name = field.name ++ "=\x00";
+
+                ruby.rb_define_method(class, &getter_name[0], @ptrCast(&make_getter_fn(field.name)), 0);
+                ruby.rb_define_method(class, &setter_name[0], @ptrCast(&make_setter_fn(field.name)), 1);
+            }
+        }
+
+        // This defines the Object.new function
+        fn rb_initialize(argc: c_int, argv: [*]ruby.VALUE, self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            _ = ruby.rb_check_typeddata(self, &rb_data_type);
+
+            var kwargs: ruby.VALUE = ruby.Qnil;
+            _ = ruby.rb_scan_args(argc, argv, ":", &kwargs);
+            if (ruby.wrapped_nil_p(kwargs)) {
+                return self;
+            }
+
+            _ = ruby.rb_hash_foreach(kwargs, initialize_keyword_parameter_value, self);
+
+            return self;
+        }
+
+        // ruby getter function to fetch the value fromt he tb struct and return it as a ruby value
+        fn make_getter_fn(comptime field_name: []const u8) fn (ruby.VALUE) callconv(.C) ruby.VALUE {
+            return struct {
+                fn get(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
+                    const field_value = @field(wrapper.*, field_name);
+                    return zig_type_to_rb_value(@TypeOf(field_value), field_value);
+                }
+            }.get;
+        }
+
+        // ruby setter function to set the value in the tb struct from a ruby value
+        fn make_setter_fn(comptime field_name: []const u8) fn (ruby.VALUE, ruby.VALUE) callconv(.C) ruby.VALUE {
+            return struct {
+                fn set(self: ruby.VALUE, value: ruby.VALUE) callconv(.C) ruby.VALUE {
+                    const wrapper: *ZigType = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, &rb_data_type)));
+                    const FieldType = @TypeOf(@field(wrapper.*, field_name));
+                    @field(wrapper.*, field_name) = rb_value_to_zig_type(FieldType, value) catch {
+                        // We have already triggered the error, just need to return for the compiler
+                        return ruby.Qnil;
+                    };
+                    return value;
+                }
+            }.set;
+        }
+
+        fn initialize_keyword_parameter_value(key: ruby.VALUE, value: ruby.VALUE, self: ruby.VALUE) callconv(.C) c_int {
+            if (!ruby.wrapped_symbol_p(key)) {
+                ruby.rb_raise(ruby.rb_eArgError, "keyword arguments must use symbol keys");
+                return 1;
+            }
+
+            const key_str = ruby.rb_sym2str(key);
+            const key_cstr = ruby.wrapped_rstring_ptr(key_str);
+            const key_len: usize = @intCast(ruby.wrapped_rstring_len(key_str));
+
+            // Allocate space for the setter name (key + "=" + null terminator)
+            var setter_name: [256]u8 = undefined; // Adjust size as needed
+            if (key_len + 2 > setter_name.len) {
+                ruby.rb_raise(ruby.rb_eArgError, "method name too long");
+                return 1;
+            }
+
+            // Copy the key and append "="
+            @memcpy(setter_name[0..key_len], key_cstr[0..key_len]);
+            setter_name[key_len] = '=';
+            setter_name[key_len + 1] = 0;
+
+            const setter_id = ruby.rb_intern(&setter_name[0]);
+
+            if (ruby.rb_respond_to(self, setter_id) == 0) {
+                ruby.rb_raise(ruby.rb_eNoMethodError, "undefined method '%s' for object", &setter_name[0]);
+                return 1;
+            }
+
+            _ = ruby.rb_funcall(self, setter_id, 1, value);
+            return 0;
+        }
+    };
+}
+
+fn convert_to_module_enum(comptime ZigType: type, comptime ruby_name: []const u8) type {
+    if (@typeInfo(ZigType) != .Enum and @typeInfo(ZigType) != .Struct) {
+        @compileError("Expected an enum or struct type for Ruby module conversion, got: " ++ @typeInfo(ZigType));
+    }
+
+    return struct {
+        const class_name = ruby_name ++ "\x00";
+
+        pub fn init_methods(module: ruby.VALUE) void {
+            const ruby_enum = ruby.rb_define_module_under(module, &class_name[0]);
+
+            switch (@typeInfo(ZigType)) {
+                .Enum => |enum_info| {
+                    _ = ruby.rb_define_const(ruby_enum, "ENUM_PACKED", ruby.Qfalse);
+
+                    inline for (enum_info.fields) |field| {
+                        if (comptime skip_field(field.name)) {
+                            continue;
+                        }
+                        const enum_value = @field(ZigType, field.name);
+                        const ruby_value = @intFromEnum(enum_value);
+
+                        const ruby_const_name = to_upper_case(field.name);
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.wrapped_int2num(ruby_value));
+                    }
+                },
+                .Struct => |struct_info| {
+                    const layout = struct_info.layout;
+                    if (layout != .@"packed") {
+                        @compileError("Only packed structs can be converted to Ruby enums: " ++ @typeName(ZigType));
+                    }
+                    _ = ruby.rb_define_const(ruby_enum, "ENUM_PACKED", ruby.Qtrue);
+
+                    inline for (struct_info.fields, 0..) |field, i| {
+                        if (comptime skip_field(field.name)) {
+                            continue;
+                        }
+                        const ruby_const_name = to_upper_case(field.name);
+                        _ = ruby.rb_define_const(ruby_enum, &ruby_const_name, ruby.wrapped_int2num(1 << i));
+                    }
+                },
+                else => @compileError("Invalid conversion to enum: " ++ ZigType),
+            }
+        }
+    };
+}
+
+fn to_upper_case(comptime input: []const u8) [input.len + 1:0]u8 {
+    var result: [input.len + 1:0]u8 = undefined;
+    _ = std.ascii.upperString(result[0..input.len], input);
+    result[input.len] = 0; // null terminator
+    return result;
+}
+
+fn build_rb_setup_struct(comptime ZigType: type, comptime ruby_name: []const u8) type {
+    return switch (@typeInfo(ZigType)) {
+        .Enum => {
+            return convert_to_module_enum(ZigType, ruby_name);
+        },
+        .Struct => |info| switch (info.layout) {
+            .@"packed" => {
+                return convert_to_module_enum(ZigType, ruby_name);
+            },
+            .@"extern" => {
+                return convert_to_ruby_class(ZigType, ruby_name);
+            },
+            else => @compileError("Unsupported struct layout: " ++ info),
+        },
+        else => @compileError("Unsupported Zig type for Ruby mapping: " ++ @typeInfo(ZigType)),
+    };
+}
+
+fn type_mapping_from_zig_type(ZigType: type) type {
+    return comptime blk: {
+        for (mappings_all) |type_mapping| {
+            if (type_mapping[0] == ZigType) {
+                break :blk type_mapping[1];
+            }
+        }
+        @compileError("No mappings found for " ++ @typeName(ZigType));
+    };
+}
+
+const ParsedData = struct {
+    size: u32,
+    data: ?[*]const u8 = null,
+};
+
+const ResultContext = struct {
+    mutex: std.Thread.Mutex = std.Thread.Mutex{},
+    condition: std.Thread.Condition = std.Thread.Condition{},
+
+    result: ParsedData = .{
+        .size = 0,
+        .data = null,
+    },
+    waiting: bool = true,
+    operation: Operation,
+    result_error: ?Error = null,
+};
+
+const Error = error{
+    ArgError,
+    OutOfMemory,
+};
+
+const Parser = struct {
+    operation: Operation,
+    from_ruby: *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData,
+    to_ruby: *const fn (*ParsedData) ruby.VALUE,
+};
+
+const SupportedOperationParsers = [_]Parser{
+    Parser{ .operation = Operation.lookup_accounts, .from_ruby = create_from_ruby(u128, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    Parser{ .operation = Operation.create_accounts, .from_ruby = create_from_ruby(exports.tb_account_t, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_create_accounts_result_t) },
+    Parser{ .operation = Operation.lookup_transfers, .from_ruby = create_from_ruby(u128, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.create_transfers, .from_ruby = create_from_ruby(exports.tb_transfer_t, .{ .isArray = true }), .to_ruby = create_to_ruby(exports.tb_create_transfers_result_t) },
+    Parser{ .operation = Operation.get_account_transfers, .from_ruby = create_from_ruby(exports.tb_account_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+    Parser{ .operation = Operation.get_account_balances, .from_ruby = create_from_ruby(exports.tb_account_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_account_balance_t) },
+    Parser{ .operation = Operation.query_accounts, .from_ruby = create_from_ruby(exports.tb_query_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_account_t) },
+    Parser{ .operation = Operation.query_transfers, .from_ruby = create_from_ruby(exports.tb_query_filter_t, .{ .isArray = false }), .to_ruby = create_to_ruby(exports.tb_transfer_t) },
+};
+
+fn tb_client_struct() type {
+    const Client = exports.tb_client_t;
+    const Packet = exports.tb_packet_t;
+
+    const rb_client_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(Client).get_rb_data_type_ptr();
+    const c_allocator = std.heap.c_allocator;
+
+    return struct {
+        pub fn init_methods(rb_client: ruby.VALUE) void {
+            _ = ruby.rb_define_method(rb_client, "init", @ptrCast(&init), 2);
+            _ = ruby.rb_define_method(rb_client, "deinit", @ptrCast(&deinit), 0);
+            _ = ruby.rb_define_method(rb_client, "submit", @ptrCast(&submit), 2);
+        }
+
+        fn on_completion(
+            completion_ctx: usize,
+            packet: *Packet,
+            timestamp: u64,
+            result_ptr: [*]const u8,
+            result_len: u32,
+        ) callconv(.C) void {
+            _ = completion_ctx;
+            _ = timestamp;
+
+            const ctx: *ResultContext = @ptrCast(@alignCast(packet.user_data));
+
+            ctx.mutex.lock();
+            defer ctx.mutex.unlock();
+
+            ctx.waiting = false;
+            ctx.result.size = result_len;
+            if (result_len > 0) {
+                const data_alloc = c_allocator.alloc(u8, result_len) catch {
+                    ctx.result_error = Error.OutOfMemory;
+                    return;
+                };
+                ctx.result.data = data_alloc.ptr;
+                @memcpy(data_alloc, result_ptr[0..result_len]);
+            }
+            ctx.condition.signal();
+        }
+
+        fn init(self: ruby.VALUE, rb_addresses: ruby.VALUE, rb_cluster_id: ruby.VALUE) callconv(.C) ruby.VALUE {
+            if (ruby.wrapped_nil_p(rb_addresses) or !ruby.wrapped_rb_type_p(rb_addresses, ruby.T_STRING)) {
+                ruby.rb_raise(ruby.rb_eArgError, "addresses must be a non-nil String");
+                return ruby.Qnil;
+            }
+            if (ruby.wrapped_nil_p(rb_cluster_id)) {
+                ruby.rb_raise(ruby.rb_eArgError, "cluster_id must be a non-nil Integer");
+                return ruby.Qnil;
+            }
+
+            const cluster_id: [16]u8 = @bitCast(rb_int_to_u128(rb_cluster_id) catch {
+                // rb_int_to_u128 will raise the ruby error if it fails
+                return ruby.Qnil;
+            });
+            if (!ruby.wrapped_rb_type_p(self, ruby.T_DATA)) {
+                ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
+                return ruby.Qnil;
+            }
+
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+
+            const status = exports.init(
+                client,
+                &cluster_id,
+                @ptrCast(ruby.wrapped_rstring_ptr(rb_addresses)),
+                @intCast(ruby.wrapped_rstring_len(rb_addresses)),
+                0,
+                @ptrCast(&on_completion),
+            );
+
+            return ruby.wrapped_int2num(@intFromEnum(status));
+        }
+
+        fn deinit(self: ruby.VALUE) callconv(.C) ruby.VALUE {
+            if (!ruby.wrapped_rb_type_p(self, ruby.T_DATA)) {
+                ruby.rb_raise(ruby.rb_eTypeError, "Expected a Client object");
+                return ruby.Qnil;
+            }
+
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+
+            const status = exports.deinit(client);
+            return ruby.wrapped_int2num(@intFromEnum(status));
+        }
+
+        fn get_parser(operation: Operation) !Parser {
+            inline for (SupportedOperationParsers) |parser| {
+                if (parser.operation == operation) {
+                    return parser;
+                }
+            }
+            return Error.ArgError;
+        }
+
+        fn submit(self: ruby.VALUE, rb_operation: ruby.VALUE, rb_data: ruby.VALUE) callconv(.C) ruby.VALUE {
+            if (ruby.wrapped_nil_p(rb_operation) or !ruby.wrapped_rb_type_p(rb_operation, ruby.T_FIXNUM)) {
+                ruby.rb_raise(ruby.rb_eArgError, "operation must be a non-nil Integer object");
+                return ruby.Qnil;
+            }
+            if (ruby.wrapped_nil_p(rb_data)) {
+                ruby.rb_raise(ruby.rb_eArgError, "data must be a non-nil");
+                return ruby.Qnil;
+            }
+
+            const operation: Operation = @enumFromInt(@as(u8, @intCast(ruby.wrapped_num2uint(rb_operation))));
+            const parser = get_parser(operation) catch {
+                ruby.rb_raise(ruby.rb_eArgError, "Unsupported operation: %d", @intFromEnum(operation));
+                return ruby.Qnil;
+            };
+
+            const parsed_data: ParsedData = parser.from_ruby(c_allocator, rb_data) catch {
+                // #from_ruby will raise the ruby error if it fails
+                return ruby.Qnil;
+            };
+            defer c_allocator.free(parsed_data.data.?[0..parsed_data.size]);
+
+            const client: *Client = @ptrCast(@alignCast(ruby.rb_check_typeddata(self, rb_client_type_t)));
+
+            var result_context = ResultContext{
+                .operation = operation,
+            };
+
+            var packet = Packet{
+                .user_data = @ptrCast(&result_context),
+                .data = @constCast(@ptrCast(parsed_data.data)),
+                .data_size = parsed_data.size,
+                .user_tag = 0, // Set by the client internally
+                .operation = @intFromEnum(operation),
+                .status = exports.tb_packet_status.ok, // Initial status
+            };
+
+            const status = exports.submit(client, &packet);
+
+            if (status != exports.tb_client_status.ok) {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Failed to submit packet, submit failed with status: %d", @intFromEnum(status));
+                return ruby.Qnil;
+            }
+
+            result_context.mutex.lock();
+            defer result_context.mutex.unlock();
+
+            while (result_context.waiting) {
+                result_context.condition.wait(&result_context.mutex);
+            }
+
+            if (result_context.result_error != null) {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Out of memory while processing request");
+                return ruby.Qnil;
+            }
+
+            return parser.to_ruby(&result_context.result);
+        }
+    };
+}
+
+fn skip_field(comptime field_name: []const u8) bool {
+    inline for (SKIP_PREFIXES) |prefix| {
+        if (comptime std.mem.startsWith(u8, field_name, prefix)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+fn rb_int_to_u128(value: ruby.VALUE) Error!u128 {
+    if (ruby.wrapped_rb_type_p(value, ruby.T_FIXNUM)) {
+        return @as(u128, @intCast(ruby.wrapped_num2ull(value)));
+    }
+
+    if (!ruby.wrapped_rb_type_p(value, ruby.T_BIGNUM)) {
+        ruby.rb_raise(ruby.rb_eArgError, "expected Integer");
+        return Error.ArgError;
+    }
+
+    var result: u128 = 0;
+    // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a01dccb3f948adab23275722f384ff5ed
+    const overflow = ruby.rb_integer_pack(value, &result, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_LITTLE_ENDIAN);
+
+    if (overflow == -1 or overflow == -2) {
+        ruby.rb_raise(ruby.rb_eRangeError, "negative integers not allowed");
+        return Error.ArgError;
+    }
+
+    if (overflow == 2) {
+        ruby.rb_raise(ruby.rb_eRangeError, "integer too big for u128");
+        return Error.ArgError;
+    }
+
+    return result;
+}
+
+fn uint_to_rb_value(comptime T: type, value: T) ruby.VALUE {
+    if (@typeInfo(T) != .Int) {
+        @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+    }
+
+    return switch (T) {
+        u8, u16, u32 => ruby.wrapped_int2num(@intCast(value)),
+        u64 => ruby.wrapped_ull2num(value),
+        // https://docs.ruby-lang.org/capi/en/master/df/d5e/include_2ruby_2internal_2intern_2bignum_8h.html#a4f623845f4719716b70e4025508657fc
+        u128 => return ruby.rb_integer_unpack(&value, 1, @sizeOf(u128), 0, ruby.INTEGER_PACK_LITTLE_ENDIAN),
+        else => @compileError("Unsupported integer size: " ++ @typeName(T)),
+    };
+}
+
+fn zig_type_to_rb_value(comptime T: type, value: T) ruby.VALUE {
+    return switch (@typeInfo(T)) {
+        .Int => uint_to_rb_value(T, value),
+        .Enum => |info| {
+            const tag_type = info.tag_type;
+            return switch (@typeInfo(tag_type)) {
+                .Int => {
+                    const int_value = @intFromEnum(value);
+                    return uint_to_rb_value(tag_type, int_value);
+                },
+                else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
+            };
+        },
+        .Struct => |info| {
+            if (info.layout == .@"packed") {
+                if (info.backing_integer) |backing_type| {
+                    const int_value: backing_type = @bitCast(value);
+                    return uint_to_rb_value(backing_type, int_value);
+                } else {
+                    @compileError("Packed struct has no backing integer type");
+                }
+            }
+            @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+        },
+        else => {
+            @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
+        },
+    };
+}
+
+fn rb_value_to_uint(comptime T: type, value: ruby.VALUE) Error!T {
+    if (@typeInfo(T) != .Int) {
+        @compileError("Expected an integer type for Ruby conversion, got: " ++ @typeInfo(T));
+    }
+
+    return switch (T) {
+        u8 => @intCast(ruby.wrapped_num2uint(value)),
+        u16 => @intCast(ruby.wrapped_num2uint(value)),
+        u32 => ruby.wrapped_num2uint(value),
+        u64 => @intCast(ruby.wrapped_num2ulong(value)),
+        u128 => try rb_int_to_u128(value),
+        else => @compileError("Unsupported integer type: " ++ @typeName(T)),
+    };
+}
+
+fn rb_value_to_zig_type(comptime T: type, value: ruby.VALUE) Error!T {
+    return switch (@typeInfo(T)) {
+        .Int => try rb_value_to_uint(T, value),
+        .Enum => |info| {
+            const tag_type = info.tag_type;
+            return switch (@typeInfo(tag_type)) {
+                .Int => {
+                    const int_value = try rb_value_to_uint(tag_type, value);
+                    return @enumFromInt(int_value);
+                },
+                else => @compileError("Unsupported enum type: " ++ @typeName(tag_type)),
+            };
+        },
+        .Struct => |info| {
+            if (info.layout == .@"packed") {
+                if (info.backing_integer) |backing_type| {
+                    const int_value = try rb_value_to_uint(backing_type, value);
+                    return @bitCast(int_value);
+                } else {
+                    @compileError("Packed struct has no backing integer type");
+                }
+            }
+            @compileError("Unsupported struct layout for Ruby conversion: " ++ @typeName(T));
+        },
+        else => {
+            @compileError("Unsupported type for Ruby conversion: " ++ @typeName(T));
+        },
+    };
+}
+
+fn create_from_ruby(comptime InputType: type, comptime opts: anytype) *const fn (std.mem.Allocator, ruby.VALUE) Error!ParsedData {
+    return struct {
+        fn validate_data(rb_data: ruby.VALUE) Error!void {
+            if (ruby.wrapped_nil_p(rb_data)) {
+                ruby.rb_raise(ruby.rb_eArgError, "data cannot be nil");
+                return Error.ArgError;
+            }
+
+            if (comptime opts.isArray) {
+                if (!ruby.wrapped_rb_type_p(rb_data, ruby.T_ARRAY)) {
+                    ruby.rb_raise(ruby.rb_eArgError, "expected data to be an Array");
+                    return Error.ArgError;
+                }
+                const data_array_len = ruby.wrapped_rarray_len(rb_data);
+                if (data_array_len == 0) {
+                    ruby.rb_raise(ruby.rb_eArgError, "data array cannot be empty");
+                    return Error.ArgError;
+                } else if (data_array_len > MAX_BATCH_SIZE) {
+                    ruby.rb_raise(ruby.rb_eArgError, "data array size exceeds maximum allowed size of {}", .{MAX_BATCH_SIZE});
+                    return Error.ArgError;
+                }
+            }
+        }
+
+        fn get_zig_item(rb_item: ruby.VALUE) Error!InputType {
+            if (@typeInfo(InputType) == .Int) {
+                return try rb_value_to_uint(InputType, rb_item);
+            }
+
+            if (@typeInfo(InputType) == .Struct) {
+                if (!ruby.wrapped_rb_type_p(rb_item, ruby.T_DATA)) {
+                    const rb_class_name = comptime type_mapping_from_zig_type(InputType).rb_class_name;
+                    const my_type = ruby.wrapped_type(rb_item);
+                    ruby.rb_raise(ruby.rb_eArgError, "expected data item to be a: %s %d", &rb_class_name[0], my_type);
+                    return Error.ArgError;
+                }
+                const rb_type_t: *const ruby.rb_data_type_t = comptime type_mapping_from_zig_type(InputType).get_rb_data_type_ptr();
+                const zig_item: *InputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_item, rb_type_t)));
+                return zig_item.*;
+            }
+
+            @panic("unreachable");
+        }
+
+        fn from_ruby(allocator: std.mem.Allocator, rb_data: ruby.VALUE) Error!ParsedData {
+            try validate_data(rb_data);
+
+            var data_size: u32 = 0;
+            if (comptime opts.isArray) {
+                const data_array_len = ruby.wrapped_rarray_len(rb_data);
+                data_size = @intCast(data_array_len * @sizeOf(InputType));
+            } else {
+                data_size = @intCast(@sizeOf(InputType));
+            }
+
+            const data_block = allocator.alloc(u8, data_size) catch {
+                ruby.rb_raise(ruby.rb_eNoMemError, "Failed to allocate memory for data");
+                return Error.OutOfMemory;
+            };
+
+            if (comptime opts.isArray) {
+                const items: u32 = data_size / @sizeOf(InputType);
+                var i: u32 = 0;
+                while (i < items) : (i += 1) {
+                    const rb_item = ruby.rb_ary_entry(rb_data, @intCast(i));
+                    const zig_item: InputType = try get_zig_item(rb_item);
+                    const dest_slice = data_block[i * @sizeOf(InputType) .. (i + 1) * @sizeOf(InputType)];
+                    @memcpy(dest_slice, std.mem.asBytes(&zig_item));
+                }
+            } else {
+                const zig_item: InputType = try get_zig_item(rb_data);
+                @memcpy(data_block, std.mem.asBytes(&zig_item));
+            }
+
+            return ParsedData{
+                .size = data_size,
+                .data = data_block.ptr,
+            };
+        }
+    }.from_ruby;
+}
+
+fn create_to_ruby(comptime OutputType: type) *const fn (*ParsedData) ruby.VALUE {
+    return struct {
+        fn to_ruby(parsed_data: *ParsedData) ruby.VALUE {
+            const result = ruby.rb_ary_new();
+
+            if (parsed_data.size == 0) {
+                return result;
+            }
+
+            const data = parsed_data.data orelse {
+                ruby.rb_raise(ruby.rb_eRuntimeError, "Result data did not match data size");
+                return ruby.Qnil;
+            };
+
+            const rb_tb_client = ruby.rb_const_get(ruby.rb_cObject, ruby.rb_intern("TBClient"));
+
+            const rb_type_struct = comptime type_mapping_from_zig_type(OutputType);
+            const rb_class_name = rb_type_struct.rb_class_name;
+            const rb_class = ruby.rb_const_get(rb_tb_client, ruby.rb_intern(&rb_class_name[0]));
+
+            const result_size = parsed_data.size / @sizeOf(OutputType);
+
+            const rb_data_t: *const ruby.rb_data_type_t = rb_type_struct.get_rb_data_type_ptr();
+
+            for (0..result_size) |i| {
+                const rb_instance = ruby.rb_class_new_instance(0, null, rb_class);
+
+                const data_block = data[i * @sizeOf(OutputType) .. (i + 1) * @sizeOf(OutputType)];
+                const rb_data: *OutputType = @ptrCast(@alignCast(ruby.rb_check_typeddata(rb_instance, rb_data_t)));
+
+                @memcpy(@as([*]u8, @ptrCast(rb_data))[0..@sizeOf(OutputType)], data_block);
+
+                _ = ruby.rb_ary_push(result, rb_instance);
+            }
+
+            return result;
+        }
+    }.to_ruby;
+}

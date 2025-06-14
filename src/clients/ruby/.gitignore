@@ -1,0 +1,10 @@
+Makefile
+*.gem
+
+*.so
+*.time
+
+mkmf.log
+
+*.bundle
+*.bundle.dSYM/
