@@ -93,7 +93,10 @@ pub const Client = struct {
         publish_enqueue: struct {
             count: u32 = 0,
         },
-        publish: Callback,
+        publish: struct {
+            callback: Callback,
+            phase: enum { sending, awaiting_confirmation } = .sending,
+        },
     } = .none,
 
     awaiter: union(enum) {
@@ -519,29 +522,14 @@ pub const Client = struct {
         assert(self.action.publish_enqueue.count > 0);
 
         self.publish_confirms.wait(self.action.publish_enqueue.count);
-        self.action = .{ .publish = callback };
-        self.send_and_await_reply(
-            .current,
-            &struct {
-                fn dispatch(context: *Client, reply: spec.ClientMethod) Decoder.Error!void {
-                    assert(reply == .basic_ack);
-                    assert(context.action == .publish);
-                    if (context.publish_confirms.confirm(reply.basic_ack)) {
-                        const publish_callback = context.action.publish;
-                        context.action = .none;
-                        publish_callback(context);
-                        return;
-                    }
-                    // Continue waiting if there are still messages to be confirmed by the server.
-                    assert(context.awaiter == .none);
-                    context.awaiter = .{ .send_and_await_reply = .{
-                        .channel = .current,
-                        .state = .{ .awaiting = .{} },
-                        .callback = &@This().dispatch,
-                    } };
-                }
-            }.dispatch,
-        );
+        self.action = .{ .publish = .{ .callback = callback } };
+        self.send_and_forget(&struct {
+            fn dispatch(context: *Client) void {
+                assert(context.action == .publish);
+                assert(context.action.publish.phase == .sending);
+                context.action.publish.phase = .awaiting_confirmation;
+            }
+        }.dispatch);
     }
 
     /// Uses a polling model to retrieve a message (`Basic.Get`).
@@ -884,9 +872,28 @@ pub const Client = struct {
             .connection_blocked,
             .connection_unblocked,
             .basic_deliver,
-            .basic_nack,
             => fatal(
                 "AMQP operation not supported: {s} channel={}",
+                .{ @tagName(client_method), frame_header.channel },
+            ),
+            .basic_ack => |basic_ack| {
+                // Processing acks in "publish confirms" mode.
+                if (self.action == .publish) {
+                    const publish = &self.action.publish;
+                    // Confirmations can be received while sending a batch of messages.
+                    if (publish.phase == .sending) assert(self.awaiter == .send_and_forget);
+                    if (self.publish_confirms.confirm(basic_ack)) {
+                        assert(self.awaiter == .none);
+                        assert(publish.phase == .awaiting_confirmation);
+                        const publish_callback = publish.callback;
+                        self.action = .none;
+                        publish_callback(self);
+                    }
+                    return;
+                }
+            },
+            .basic_nack => fatal(
+                "Message was rejected by the AMQP server: {s} channel={}",
                 .{ @tagName(client_method), frame_header.channel },
             ),
             else => {},
@@ -894,8 +901,9 @@ pub const Client = struct {
 
         switch (self.awaiter) {
             .send_and_await_reply => |awaiter| {
-                if (awaiter.channel == frame_header.channel) {
-                    assert(awaiter.state == .awaiting);
+                if (awaiter.state == .awaiting and
+                    awaiter.channel == frame_header.channel)
+                {
                     self.awaiter = .none;
                     return try awaiter.callback(self, client_method);
                 }
@@ -1167,8 +1175,7 @@ fn log_table(name: []const u8, table: Decoder.Table) Decoder.Error!void {
     var iterator = table.iterator();
     while (try iterator.next()) |entry| {
         switch (entry.value) {
-            .string,
-            => |str| log.info("{s} {s}:{s}", .{
+            .string => |str| log.info("{s} {s}:{s}", .{
                 name,
                 entry.key,
                 str,
