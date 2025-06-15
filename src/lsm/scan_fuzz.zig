@@ -947,10 +947,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         constants.storage_size_limit_default,
         Storage.Options{
             .seed = prng.int(u64),
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = .{ .ns = 0 },
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = .{ .ns = 0 },
             .crash_fault_probability = Ratio.zero(),
         },
     );
