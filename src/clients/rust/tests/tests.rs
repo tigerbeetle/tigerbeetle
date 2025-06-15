@@ -307,9 +307,32 @@ fn close() -> anyhow::Result<()> {
     let client = test_client()?;
 
     block_on(async {
-        // Let's at least talk to the server before dropping
         let _ = client.create_accounts(&[]).await?;
         client.close().await;
+        Ok(())
+    })
+}
+
+// Send a request and immediately drop the client.
+// Should still clean up correctly.
+#[test]
+fn dtor_no_wait() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let _ = client.create_accounts(&[]);
+        drop(client);
+        Ok(())
+    })
+}
+
+#[test]
+fn close_no_wait() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let _ = client.create_accounts(&[]);
+        let _ = client.close();
         Ok(())
     })
 }
