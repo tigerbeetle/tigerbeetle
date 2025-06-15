@@ -2,128 +2,76 @@ use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Barrier, LazyLock};
 
 use futures::executor::block_on;
 
 use tigerbeetle as tb;
 
-// Using the std hasher for rng to avoid the dep on rand crate.
-fn random_u64() -> u64 {
-    std::hash::Hasher::finish(&std::hash::BuildHasher::build_hasher(
-        &std::collections::hash_map::RandomState::new(),
-    ))
+// Singleton test database.
+static TEST_DB: LazyLock<TestDb> =
+    LazyLock::new(|| TestDb::new().expect("couldn't start test database"));
+
+struct TestDb {
+    port: u16,
+    // Keep the server's stdin handle open as long as the test process is running,
+    // at which point the server will terminate and delete its backing file.
+    _server: Child,
 }
 
-fn random_u128() -> u128 {
-    let a = random_u64();
-    let b = random_u64();
-    let a = a as u128;
-    let b = b as u128;
-    a | b << 64
-}
-
-// Prevent multiple tests from running in parallel -
-// tests run a full tigerbeetle and that's a lot of resources.
-static TEST_MUTEX: Mutex<()> = Mutex::new(());
-
-struct TestHarness {
-    tigerbeetle_bin: String,
-    temp_dir: PathBuf,
-    server: Option<Child>,
-    // nb: needs to be dropped last
-    mutex_guard: Option<MutexGuard<'static, ()>>,
-}
-
-impl TestHarness {
-    fn new(name: &str) -> anyhow::Result<TestHarness> {
-        let mutex_guard = Some(TEST_MUTEX.lock().expect("nopoison"));
-
+impl TestDb {
+    fn new() -> anyhow::Result<TestDb> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
-
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let test_dir = format!("test-{name}-{}", random_u64());
-        let temp_dir = format!("{work_dir}/{test_dir}");
-        let temp_dir = PathBuf::from(temp_dir);
-        std::fs::create_dir_all(&temp_dir)?;
+        let database_name = format!("0_0.{:016x}.tigerbeetle", tb::id() as u64);
 
-        Ok(TestHarness {
-            tigerbeetle_bin,
-            temp_dir,
-            server: None,
-            mutex_guard,
-        })
-    }
-
-    fn prepare_database(&self) -> anyhow::Result<()> {
-        let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(&self.temp_dir);
+        let mut cmd = Command::new(&tigerbeetle_bin);
+        cmd.current_dir(&work_dir);
         cmd.args([
             "format",
             "--replica-count=1",
             "--replica=0",
             "--cluster=0",
-            "0_0.tigerbeetle",
+            &database_name,
         ]);
         let status = cmd.status()?;
 
         assert!(status.success());
 
-        Ok(())
-    }
-
-    fn serve(&mut self) -> anyhow::Result<u16> {
-        assert!(self.server.is_none());
-
-        let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(&self.temp_dir);
+        let mut cmd = Command::new(&tigerbeetle_bin);
+        cmd.current_dir(&work_dir);
         cmd.args([
             "start",
-            "--addresses=0", // tell us the port to use
-            "0_0.tigerbeetle",
+            // magic address 0: tell us the port to use,
+            // shutdown and delete db when stdin closes
+            "--addresses=0",
+            &database_name,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
-        let mut child = cmd.spawn()?;
-        let child_stdout = mem::take(&mut child.stdout).unwrap();
-        let mut child_stdout = BufReader::new(child_stdout);
+
+        let mut server = cmd.spawn()?;
+        let server_stdout = mem::take(&mut server.stdout).unwrap();
+        let mut server_stdout = BufReader::new(server_stdout);
         let mut first_line = String::new();
-        child_stdout.read_line(&mut first_line)?;
-        let port_number = first_line.trim().parse()?;
+        server_stdout.read_line(&mut first_line)?;
+        let port = first_line.trim().parse()?;
 
-        self.server = Some(child);
-
-        Ok(port_number)
+        Ok(TestDb {
+            port,
+            _server: server,
+        })
     }
 }
 
-impl Drop for TestHarness {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.server.take() {
-            child.kill().expect("kill");
-            let _ = child.wait().expect("wait");
-        }
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-        if let Some(mutex_guard) = self.mutex_guard.take() {
-            drop(mutex_guard)
-        }
-    }
-}
-
-fn server_and_client() -> anyhow::Result<(TestHarness, tb::Client)> {
-    let mut harness = TestHarness::new("smoke")?;
-    harness.prepare_database()?;
-    let port_number = harness.serve()?;
-
-    let address = &format!("127.0.0.1:{}", port_number);
+fn test_client() -> anyhow::Result<tb::Client> {
+    let address = &format!("127.0.0.1:{}", TEST_DB.port);
     let client = tb::Client::new(0, address)?;
 
-    Ok((harness, client))
+    Ok(client)
 }
 
 const TEST_LEDGER: u32 = 10;
@@ -131,15 +79,15 @@ const TEST_CODE: u16 = 20;
 
 #[test]
 fn smoke() -> anyhow::Result<()> {
-    let account_id1 = 1;
-    let account_id2 = 2;
-    let transfer_id1 = 3;
+    let account_id1 = tb::id();
+    let account_id2 = tb::id();
+    let transfer_id1 = tb::id();
 
     let account_id2_user_data_32 = 4;
     let transfer_id1_user_data_32 = 5;
 
     block_on(async {
-        let (_harness, client) = server_and_client()?;
+        let client = test_client()?;
 
         {
             let result = client
@@ -335,9 +283,6 @@ fn smoke() -> anyhow::Result<()> {
 
 #[test]
 fn ctor_fail() -> anyhow::Result<()> {
-    let harness = TestHarness::new("smoke")?;
-    harness.prepare_database()?;
-
     let client = tb::Client::new(0, "hey");
 
     assert!(matches!(client, Err(tb::InitStatus::AddressInvalid)));
@@ -347,7 +292,7 @@ fn ctor_fail() -> anyhow::Result<()> {
 
 #[test]
 fn dtor() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     block_on(async {
         // Let's at least talk to the server before dropping
@@ -359,7 +304,7 @@ fn dtor() -> anyhow::Result<()> {
 
 #[test]
 fn close() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     block_on(async {
         // Let's at least talk to the server before dropping
@@ -371,7 +316,7 @@ fn close() -> anyhow::Result<()> {
 
 #[test]
 fn too_many_events() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     block_on(async {
         let accounts = lots_of_accounts();
@@ -386,9 +331,9 @@ fn too_many_events() -> anyhow::Result<()> {
 fn lots_of_accounts() -> Vec<tb::Account> {
     let mut accounts = vec![];
     let num_accounts = 10_000;
-    for i in 0..num_accounts {
+    for _ in 0..num_accounts {
         let account = tb::Account {
-            id: i + 1,
+            id: tb::id(),
             debits_pending: 0,
             debits_posted: 0,
             credits_pending: 0,
@@ -409,7 +354,7 @@ fn lots_of_accounts() -> Vec<tb::Account> {
 
 #[test]
 fn zero_events() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     block_on(async {
         let result = client.create_accounts(&[]).await?;
@@ -424,13 +369,13 @@ fn zero_events() -> anyhow::Result<()> {
 // correlates (possibly-empty) results with the request array.
 #[test]
 fn result_correlation() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     block_on(async {
         let result = client
             .create_accounts(&[
                 tb::Account {
-                    id: 1,
+                    id: tb::id(),
                     debits_pending: 0,
                     debits_posted: 0,
                     credits_pending: 0,
@@ -445,7 +390,7 @@ fn result_correlation() -> anyhow::Result<()> {
                     timestamp: 0,
                 },
                 tb::Account {
-                    id: 2,
+                    id: tb::id(),
                     debits_pending: 0,
                     debits_posted: 0,
                     credits_pending: 0,
@@ -460,7 +405,7 @@ fn result_correlation() -> anyhow::Result<()> {
                     timestamp: 0,
                 },
                 tb::Account {
-                    id: 3,
+                    id: tb::id(),
                     debits_pending: 0,
                     debits_posted: 0,
                     credits_pending: 0,
@@ -475,7 +420,7 @@ fn result_correlation() -> anyhow::Result<()> {
                     timestamp: 0,
                 },
                 tb::Account {
-                    id: 4,
+                    id: tb::id(),
                     debits_pending: 0,
                     debits_posted: 0,
                     credits_pending: 0,
@@ -490,7 +435,7 @@ fn result_correlation() -> anyhow::Result<()> {
                     timestamp: 0,
                 },
                 tb::Account {
-                    id: 5,
+                    id: tb::id(),
                     debits_pending: 0,
                     debits_posted: 0,
                     credits_pending: 0,
@@ -521,7 +466,7 @@ fn result_correlation() -> anyhow::Result<()> {
 
 #[test]
 fn multithread() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
     let client = Arc::new(client);
 
     let num_threads = 16;
@@ -538,7 +483,7 @@ fn multithread() -> anyhow::Result<()> {
                 for _ in 0..num_requests {
                     let results = client
                         .create_accounts(&[tb::Account {
-                            id: random_u128(),
+                            id: tb::id(),
                             debits_pending: 0,
                             debits_posted: 0,
                             credits_pending: 0,
@@ -583,13 +528,13 @@ fn multithread() -> anyhow::Result<()> {
 
 #[test]
 fn concurrent_requests() -> anyhow::Result<()> {
-    let (_harness, client) = server_and_client()?;
+    let client = test_client()?;
 
     let mut responses = Vec::new();
 
     for _ in 0..10 {
         let response = client.create_accounts(&[tb::Account {
-            id: random_u128(),
+            id: tb::id(),
             debits_pending: 0,
             debits_posted: 0,
             credits_pending: 0,
