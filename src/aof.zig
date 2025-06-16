@@ -387,6 +387,8 @@ pub fn AOFType(comptime IO: type) type {
                         .session = 0,
                         .request = 0,
                         .release = header.release,
+                        .previous_request_timestamp = 0,
+                        .previous_request_latency = 0,
                     };
 
                     self.client.raw_request(

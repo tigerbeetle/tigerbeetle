@@ -88,6 +88,8 @@ pub const Event = union(enum) {
 
     metrics_emit: void,
 
+    client_request_round_trip: struct { operation: Operation },
+
     pub const Tag = std.meta.Tag(Event);
 
     /// Normally, Zig would stringify a union(enum) like this as `{"compact_beat": {"tree": ...}}`.
@@ -157,6 +159,8 @@ pub const EventTiming = union(Event.Tag) {
 
     metrics_emit,
 
+    client_request_round_trip: struct { operation: Operation },
+
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = enum_max(CommitStage.Tag),
         .replica_aof_write = 1,
@@ -176,6 +180,7 @@ pub const EventTiming = union(Event.Tag) {
         .grid_read = 1,
         .grid_write = 1,
         .metrics_emit = 1,
+        .client_request_round_trip = enum_max(Operation),
     });
 
     pub const slot_bases = array: {
@@ -217,6 +222,7 @@ pub const EventTiming = union(Event.Tag) {
             inline .replica_request,
             .replica_request_execute,
             .replica_request_local,
+            .client_request_round_trip,
             => |data| {
                 const operation = @intFromEnum(data.operation);
                 assert(operation < slot_limits.get(event.*));
@@ -300,6 +306,8 @@ pub const EventTracing = union(Event.Tag) {
 
     metrics_emit,
 
+    client_request_round_trip,
+
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
         .replica_aof_write = 1,
@@ -319,6 +327,7 @@ pub const EventTracing = union(Event.Tag) {
         .grid_read = constants.grid_iops_read_max,
         .grid_write = constants.grid_iops_write_max,
         .metrics_emit = 1,
+        .client_request_round_trip = 1,
     });
 
     pub const stack_bases = array: {
@@ -601,6 +610,9 @@ test "EventTiming slot doesn't have collisions" {
             .grid_read => .grid_read,
             .grid_write => .grid_write,
             .metrics_emit => .metrics_emit,
+            .client_request_round_trip => .{ .client_request_round_trip = .{
+                .operation = g.enum_value(Operation),
+            } },
         };
         try stacks.append(allocator, event.slot());
     }

@@ -6811,6 +6811,24 @@ pub fn ReplicaType(
                 request.message.header.checksum,
                 request.message.header.client,
             });
+            if (request.message.header.previous_request_latency != 0) {
+                assert(request.message.header.previous_request_timestamp != 0);
+                if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
+                    self.status == .normal)
+                {
+                    if (StateMachine.operation_from_vsr(
+                        request.message.header.operation,
+                    )) |operation| {
+                        self.trace.timing(
+                            .{ .client_request_round_trip = .{ .operation = operation } },
+                            @divFloor(
+                                request.message.header.previous_request_latency,
+                                std.time.ns_per_us,
+                            ),
+                        );
+                    }
+                }
+            }
 
             // Guard against the wall clock going backwards by taking the max with timestamps
             // issued:
@@ -10677,6 +10695,8 @@ pub fn ReplicaType(
                 .parent = 0,
                 .client = 0,
                 .session = 0,
+                .previous_request_timestamp = 0,
+                .previous_request_latency = 0,
             };
 
             request.header.set_checksum_body(request.body_used());

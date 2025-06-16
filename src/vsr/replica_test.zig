@@ -1640,6 +1640,8 @@ test "Cluster: client: empty command=request operation=register body" {
                 .command = .request,
                 .operation = .register,
                 .release = client_release,
+                .previous_request_timestamp = 0,
+                .previous_request_latency = 0,
             };
             request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
             request_header.set_checksum();

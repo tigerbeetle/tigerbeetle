@@ -122,7 +122,7 @@ pub const Packet = extern struct {
             },
             .complete => {
                 // The packet pointer isn't available after completed,
-                // it may be dealocated by the user;
+                // it may be deallocated by the user;
                 unreachable;
             },
         }
