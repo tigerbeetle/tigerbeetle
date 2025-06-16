@@ -303,10 +303,7 @@ fn run_fuzzers(
                     fuzzer.seed.branch,
                 ).?;
                 task.runtime_ticks += 1;
-                // Us a large (arbitrary) constant as the numerator to avoid rounding errors.
-                // Also this ensures that the initial +=1 when starting the process has relatively
-                // little impact, to avoid biasing scheduling in favor of long-running fuzzers.
-                task.runtime_virtual += @divFloor(1000, task.weight);
+                task.runtime_virtual += @divFloor(Tasks.runtime_virtual_unit, task.weight);
             }
         }
 
@@ -434,8 +431,12 @@ const Tasks = struct {
         runtime_virtual: u64,
     };
 
+    // One tick worth of runtime of a task with weight=1.
+    // It needs to be a relatively large constant, because it is divided by weight.
+    const runtime_virtual_unit = 1_000_000_000;
+
     generation: u64 = 1,
-    runtime_init: u64 = 1,
+    runtime_virtual_init: u64 = 1,
 
     list: List,
     map: Map,
@@ -532,8 +533,8 @@ const Tasks = struct {
             assert(task_existing.seed_template.fuzzer == seed_template.fuzzer);
             assert(std.mem.eql(u8, task_existing.working_directory, working_directory));
 
-            if (tasks.runtime_init < task_existing.runtime_virtual) {
-                tasks.runtime_init = task_existing.runtime_virtual;
+            if (tasks.runtime_virtual_init < task_existing.runtime_virtual) {
+                tasks.runtime_virtual_init = task_existing.runtime_virtual;
             } else {
                 if (task_existing.generation == tasks.generation - 1) {
                     // For tasks that were already active, leave their low `runtime_virtual`
@@ -541,7 +542,7 @@ const Tasks = struct {
                 } else {
                     // For tasks which were active in the past, but not in the latest generation,
                     // ensure that they are not starved in the new generation.
-                    task_existing.runtime_virtual = tasks.runtime_init;
+                    task_existing.runtime_virtual = tasks.runtime_virtual_init;
                 }
             }
             task_existing.generation = tasks.generation;
@@ -552,7 +553,7 @@ const Tasks = struct {
                 .generation = tasks.generation,
                 .weight = 0, // To be initialized later.
                 .runtime_ticks = 0,
-                .runtime_virtual = tasks.runtime_init,
+                .runtime_virtual = tasks.runtime_virtual_init,
             });
 
             try tasks.map.putNoClobber(.{
@@ -724,6 +725,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
                     .pull => @divFloor(weight_pull, task_count_pull),
                     .release => @divFloor(weight_release, task_count_release),
                 } * multiplier;
+                assert(task.weight * 10 < Tasks.runtime_virtual_unit);
             }
         }
     }
