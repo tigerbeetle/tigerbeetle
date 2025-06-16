@@ -1266,14 +1266,14 @@ internal unsafe struct TBClient
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 internal unsafe struct TBPacket
 {
-    public const int SIZE = 56;
+    public const int SIZE = 72;
 
 
     [StructLayout(LayoutKind.Sequential, Size = OpaqueData.SIZE)]
     private unsafe struct OpaqueData
     {
-        public const int SIZE = 32;
-        private const int LENGTH = 32;
+        public const int SIZE = 48;
+        private const int LENGTH = 48;
 
         private fixed byte raw[LENGTH];
 

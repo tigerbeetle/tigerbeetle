@@ -242,7 +242,7 @@ pub struct tb_packet_t {
     pub user_tag: u16,
     pub operation: u8,
     pub status: u8,
-    pub opaque: [u8; 32],
+    pub opaque: [u8; 48],
 }
 
 pub type TB_OPERATION = u8;
