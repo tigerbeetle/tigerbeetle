@@ -7,7 +7,8 @@ const constants = @import("../constants.zig");
 
 const ScanState = @import("scan_state.zig").ScanState;
 const Direction = @import("../direction.zig").Direction;
-const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+//const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+const KWayMergeIteratorType = @import("k_way_merge_loser.zig").LoserTreeTypeIterator;
 const ZigZagMergeIteratorType = @import("zig_zag_merge.zig").ZigZagMergeIteratorType;
 const ScanType = @import("scan_builder.zig").ScanType;
 
@@ -93,8 +94,9 @@ fn ScanMergeType(
             ScanMerge,
             u64,
             u64,
-            key_from_value,
             constants.lsm_scans_max,
+            false,
+            key_from_value,
             merge_stream_peek,
             merge_stream_pop,
             merge_stream_precedence,

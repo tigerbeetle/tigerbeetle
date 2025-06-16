@@ -60,7 +60,6 @@ pub fn LoserTreeTypeIterator(
         state: enum { loading, iterating },
 
         direction: Direction,
-        value_popped: ?Value,
         key_popped: ?Key,
 
         // NOTE:
@@ -88,7 +87,6 @@ pub fn LoserTreeTypeIterator(
                     .sentinel = true,
                 },
             };
-            std.debug.print("init {} {} {any}\n", .{ streams_count, stream_max, direction });
 
             return .{
                 .context = context,
@@ -96,7 +94,6 @@ pub fn LoserTreeTypeIterator(
                 .node_count = 0,
                 .challenger = sentinel,
                 .nodes_loser = undefined,
-                .value_popped = null,
                 .key_popped = null,
                 .direction = direction,
                 .active_streams = undefined,
@@ -110,27 +107,24 @@ pub fn LoserTreeTypeIterator(
         }
 
         pub fn reset(self: *Self) void {
-            std.debug.print("reset called \n", .{});
             self.* = .{
                 .context = self.context,
                 .height = 0,
                 .node_count = 0,
                 .challenger = self.sentinel,
                 .nodes_loser = undefined,
-                .value_popped = self.value_popped,
-                .key_popped = self.key_popped,
                 .direction = self.direction,
                 .active_streams = self.active_streams,
                 .sentinel = self.sentinel,
                 .streams_count = self.streams_count,
                 .state = .loading,
+                .key_popped = self.key_popped,
             };
         }
 
         fn loading(
             self: *Self,
         ) error{Drained}!void {
-            std.debug.print("{} loading called \n", .{@intFromPtr(self)});
             errdefer self.reset();
 
             // 1. Collect the non‑empty batches as initial “competitors”.
@@ -139,7 +133,6 @@ pub fn LoserTreeTypeIterator(
             for (0..self.streams_count) |id| {
                 const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
                     error.Drained => {
-                        std.debug.print("{} loading drained \n", .{@intFromPtr(self)});
                         return error.Drained;
                     },
                     error.Empty => {
@@ -147,7 +140,6 @@ pub fn LoserTreeTypeIterator(
                         continue;
                     },
                 };
-                std.debug.print("{} peek here {} \n", .{ @intFromPtr(self), key });
                 competitors[id] = .{
                     .key = key,
                     .sorted_run_id = @intCast(id),
@@ -191,13 +183,11 @@ pub fn LoserTreeTypeIterator(
                 }
             }
 
-            const value_winner = stream_pop(self.context, competitors[0].sorted_run_id);
-
             self.challenger = competitors[0];
-            self.value_popped = value_winner;
             self.node_count = node_count;
             self.active_streams = competitors_count;
             self.height = height;
+            self.key_popped = self.key_popped;
             self.state = .iterating;
         }
 
@@ -216,11 +206,9 @@ pub fn LoserTreeTypeIterator(
                 };
             } else |err| switch (err) {
                 error.Drained => {
-                    std.debug.print("drained next \n", .{});
                     return error.Drained;
                 },
                 error.Empty => {
-                    std.debug.print("{} empty next \n", .{@intFromPtr(self)});
                     self.active_streams -= 1;
                     return self.sentinel;
                 },
@@ -231,68 +219,41 @@ pub fn LoserTreeTypeIterator(
         pub fn pop(self: *Self) error{Drained}!?Value {
             if (self.state == .loading) try self.loading();
             assert(self.state == .iterating);
-            std.debug.print("{any} active_streams {}\n", .{ @intFromPtr(self), self.active_streams });
             // handle duplicates here.
             while (self.active_streams > 0) {
                 if (try self.next()) |value| {
                     if (allow_duplicates) {} else {
-                        if (key_from_value(&value) == self.key_popped) {
-                            std.debug.print("{any} skip key {}", .{ @intFromPtr(self), value });
-                            continue;
+                        if (self.key_popped) |previous| {
+                            if (key_from_value(&value) == previous) {
+                                continue;
+                            }
                         }
                     }
                     self.key_popped = key_from_value(&value);
-                    std.debug.print("{any} return value {any}\n", .{ @intFromPtr(self), value });
                     return value;
                 } else return null;
             }
             return null;
         }
 
-        inline fn sentinel_check(
-            node_a: *const Node,
-            node_b: *const Node,
-        ) bool {
-            return node_a.sentinel or !node_b.sentinel;
-        }
-        // important to inline
-        // very hot loop
-        inline fn ordered(
-            ascending: bool,
-            context: *const Context,
-            node_a: *const Node,
-            node_b: *const Node,
-        ) bool {
-            // --- NEW: explicit sentinel rule ----------------------------------
-            // If only one of the two is a sentinel the real value always wins.
-            if (node_a.sentinel != node_b.sentinel) {
-                // "true" means *a* loses -> *b* is promoted.
-                return node_a.sentinel;
-            }
-            if (node_a.sentinel and node_b.sentinel) {
-                return node_b.sentinel;
-            }
-            assert(node_a.sorted_run_id < std.math.maxInt(u8));
-            assert(node_b.sorted_run_id < std.math.maxInt(u8));
-            const smaller = if (ascending) node_b.key < node_a.key else node_b.key > node_a.key;
+        inline fn ordered(ascending: bool, ctx: *const Context, a: *const Node, b: *const Node) bool {
+            // a sentinel always loses
+            if (a.sentinel) return true;
+            if (b.sentinel) return false;
 
-            // When is it stabler
-            const stabler =
-                node_a.key == node_b.key and
-                // this should allow to have a special sorted run.
-                // we should make sure that we do not have run count of max int.
-                stream_precedence(
-                context,
-                node_b.sorted_run_id,
-                node_a.sorted_run_id,
-            );
-            return smaller or stabler;
+            //const smaller = ascending ? b.key < a.key : b.key > a.key;
+            const smaller = if (ascending) b.key < a.key else b.key > a.key;
+            const stabler = (a.key == b.key) and
+                stream_precedence(ctx, b.sorted_run_id, a.sorted_run_id);
+            return smaller or stabler; // “true”  means  a  loses
         }
 
+        fn choose(has_new_winner: bool, parent_ptr: *Node, winner: *Node) *Node {
+            // value-level `if` – no side effects inside the branches
+            return if (has_new_winner) parent_ptr else winner;
+        }
         fn next(self: *Self) error{Drained}!?Value {
-            if (self.value_popped == null) return null; // already dry
             if (self.challenger.sentinel) { // just became dry
-                self.value_popped = null;
                 return null;
             }
 
@@ -301,36 +262,27 @@ pub fn LoserTreeTypeIterator(
             assert(run_id < std.math.maxInt(u8));
 
             self.challenger = try self.next_challenger(run_id);
-            const previous_winner = self.value_popped orelse return null;
-            //std.debug.print("run id {} \n", .{run_id});
 
             const ascending = if (self.direction == .ascending) true else false;
 
             // Start at our own id and find the first challenger in the loop.
             var opponent_id = (self.nodes_loser.len + run_id);
-            //var opponent_id = (self.node_count + run_id);
 
             // Leaf to root traversal to find the champion.
             // TODO: build turth table
             for (0..self.height) |_| {
                 opponent_id = (opponent_id - 1) / 2;
                 const opponent = &self.nodes_loser[opponent_id];
-
                 const new_challenger = ordered(ascending, self.context, &self.challenger, opponent);
-                const sentinel = sentinel_check(&self.challenger, opponent);
-
-                // Code structured in a way so that `cmov` generation is likely.
-                const winner: *Node = if (sentinel and new_challenger) opponent else &self.challenger;
+                const winner: *Node = choose(new_challenger, opponent, &self.challenger);
                 swap_struct(Node, winner, &self.challenger);
             }
 
-            // Todo: we could use active streams
             if (self.challenger.sentinel) {
-                self.value_popped = null;
-            } else {
-                self.value_popped = stream_pop(self.context, self.challenger.sorted_run_id);
+                return null;
             }
-            return previous_winner;
+
+            return stream_pop(self.context, self.challenger.sorted_run_id);
         }
     };
 }

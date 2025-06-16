@@ -661,7 +661,6 @@ const Environment = struct {
         query_spec: *const QuerySpec,
         model_matches: *const std.DynamicBitSetUnmanaged,
     ) !u32 {
-        std.debug.print("new query \n", .{});
         assert(model_matches.bit_length >= env.model.items.len);
 
         var timestamp_previous: u64 = switch (query_spec.direction) {
@@ -712,7 +711,6 @@ const Environment = struct {
                     // - The results are ordered correctly.
                     const query_result = &query_results[results_index];
                     const model_result = &env.model.items[model_index];
-                    std.debug.print("q {any} m {any}", .{ query_result, model_result });
                     assert(stdx.equal_bytes(Thing, model_result, query_result));
 
                     timestamp_previous = query_result.timestamp;
