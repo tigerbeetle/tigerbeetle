@@ -359,7 +359,7 @@ fn assert_abi_compatibility() {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Account {
     pub id: u128,
     pub debits_pending: u128,
@@ -392,7 +392,7 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct Transfer {
     pub id: u128,
     pub debit_account_id: u128,
@@ -427,7 +427,7 @@ bitflags! {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct AccountFilter {
     pub account_id: u128,
     pub user_data_128: u128,
@@ -464,7 +464,7 @@ pub struct AccountBalance {
 }
 
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Default)]
 pub struct QueryFilter {
     pub user_data_128: u128,
     pub user_data_64: u64,
