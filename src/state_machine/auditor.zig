@@ -24,8 +24,8 @@ pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Or
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
-const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
-const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
+const accounts_batch_size_max = StateMachine.machine_constants.batch_max.create_accounts;
+const transfers_batch_size_max = StateMachine.machine_constants.batch_max.create_transfers;
 
 const InFlightKey = struct {
     client_index: usize,
