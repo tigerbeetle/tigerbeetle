@@ -77,6 +77,7 @@ pub fn build(b: *std.Build) !void {
         .clients_java = b.step("clients:java", "Build Java client shared library"),
         .clients_node = b.step("clients:node", "Build Node client shared library"),
         .clients_python = b.step("clients:python", "Build Python client library"),
+        .clients_ruby = b.step("clients:ruby", "Build Ruby client library"),
         .docs = b.step("docs", "Build docs"),
         .fuzz = b.step("fuzz", "Run non-VOPR fuzzers"),
         .fuzz_build = b.step("fuzz:build", "Build non-VOPR fuzzers"),
@@ -303,6 +304,12 @@ pub fn build(b: *std.Build) !void {
     build_node_client(b, build_steps.clients_node, .{
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
+        .mode = mode,
+    });
+    build_ruby_client(b, build_steps.clients_ruby, .{
+        .vsr_module = vsr_module,
+        .vsr_options = vsr_options,
+        .tb_client_header = tb_client_header.path,
         .mode = mode,
     });
     build_python_client(b, build_steps.clients_python, .{
@@ -1470,6 +1477,63 @@ fn build_node_client(
     }
 }
 
+fn build_ruby_client(
+    b: *std.Build,
+    step_clients_ruby: *std.Build.Step,
+    options: struct {
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        tb_client_header: std.Build.LazyPath,
+        mode: Mode,
+    },
+) void {
+    const ruby_bindings_generator = b.addExecutable(.{
+        .name = "ruby_bindings",
+        .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
+        .target = b.graph.host,
+    });
+    ruby_bindings_generator.root_module.addImport("vsr", options.vsr_module);
+    ruby_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
+    const bindings = Generated.file(b, .{
+        .generator = ruby_bindings_generator,
+        .path = "./src/clients/ruby/lib/tb_client.rb",
+    });
+
+    inline for (platforms) |platform| {
+        const cross_target = CrossTarget.parse(.{
+            .arch_os_abi = platform[0],
+            .cpu_features = platform[2],
+        }) catch unreachable;
+        const resolved_target = b.resolveTargetQuery(cross_target);
+
+        const shared_lib = b.addSharedLibrary(.{
+            .name = "tb_client",
+            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+        shared_lib.linkLibC();
+
+        if (resolved_target.result.os.tag == .windows) {
+            shared_lib.linkSystemLibrary("ws2_32");
+            shared_lib.linkSystemLibrary("advapi32");
+        }
+
+        shared_lib.root_module.addImport("vsr", options.vsr_module);
+        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
+
+        step_clients_ruby.dependOn(&b.addInstallFile(
+            shared_lib.getEmittedBin(),
+            b.pathJoin(&.{
+                "../src/clients/ruby/ext/tb_client/",
+                platform[0],
+                shared_lib.out_filename,
+            }),
+        ).step);
+    }
+
+    step_clients_ruby.dependOn(&bindings.step);
+}
 fn build_python_client(
     b: *std.Build,
     step_clients_python: *std.Build.Step,
