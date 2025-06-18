@@ -1487,6 +1487,14 @@ fn build_ruby_client(
         mode: Mode,
     },
 ) void {
+    const ruby_signatures_generator = b.addExecutable(.{
+        .name = "ruby_signatures",
+        .root_source_file = b.path("src/clients/ruby/ruby_sigs.zig"),
+        .target = b.graph.host,
+    });
+    ruby_signatures_generator.root_module.addImport("vsr", options.vsr_module);
+    ruby_signatures_generator.root_module.addOptions("vsr_options", options.vsr_options);
+
     const ruby_bindings_generator = b.addExecutable(.{
         .name = "ruby_bindings",
         .root_source_file = b.path("src/clients/ruby/ruby_bindings.zig"),
@@ -1494,6 +1502,12 @@ fn build_ruby_client(
     });
     ruby_bindings_generator.root_module.addImport("vsr", options.vsr_module);
     ruby_bindings_generator.root_module.addOptions("vsr_options", options.vsr_options);
+
+    const signatures = Generated.file(b, .{
+        .generator = ruby_signatures_generator,
+        .path = "./src/clients/ruby/sig/tb_client.rbs",
+    });
+
     const bindings = Generated.file(b, .{
         .generator = ruby_bindings_generator,
         .path = "./src/clients/ruby/lib/tb_client.rb",
@@ -1532,6 +1546,7 @@ fn build_ruby_client(
         ).step);
     }
 
+    step_clients_ruby.dependOn(&signatures.step);
     step_clients_ruby.dependOn(&bindings.step);
 }
 fn build_python_client(
