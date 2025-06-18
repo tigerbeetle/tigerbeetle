@@ -77,6 +77,7 @@ const CLIArgs = struct {
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
     replica_missing: ?u8 = null,
+    replica_missing_until_request: ?u32 = null,
     requests_max: ?u32 = null,
 
     positional: struct {
@@ -109,6 +110,9 @@ pub fn main() !void {
     }
     if (cli_args.replica_missing != null and !cli_args.performance) {
         return vsr.fatal(.cli, "--replica-missing requires --performance", .{});
+    }
+    if (cli_args.replica_missing == null and cli_args.replica_missing_until_request != null) {
+        return vsr.fatal(.cli, "--replica-missing-until-request requires --replica-missing", .{});
     }
 
     log_performance_mode = cli_args.performance;
@@ -146,6 +150,7 @@ pub fn main() !void {
         options_swarm(&prng);
 
     options.replica_missing = cli_args.replica_missing;
+    options.replica_missing_until_request = cli_args.replica_missing_until_request;
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
     }
@@ -270,7 +275,9 @@ pub fn main() !void {
         if (requests_done and upgrades_done) break;
     }
 
-    if (cli_args.lite or cli_args.performance) {
+    if (cli_args.lite or
+        (cli_args.performance and cli_args.replica_missing_until_request == null))
+    {
         // Don't care about convergence.
     } else {
         const core = if (requests_done and upgrades_done)
@@ -621,8 +628,10 @@ pub const Simulator = struct {
         /// (immediately before being restarted).
         replica_reformat_probability: Ratio,
 
-        // A replica permanently missing from the cluster, used in performance mode.
+        // A replica permanently or temporarily missing from the cluster, used in performance mode.
         replica_missing: ?u8 = null,
+        /// Restart `replica_missing` after the specified request has received its reply.
+        replica_missing_until_request: ?u32 = null,
 
         replica_pause_probability: Ratio,
         replica_pause_stability: u32,
@@ -809,6 +818,13 @@ pub const Simulator = struct {
         simulator.tick_upgrade();
         simulator.tick_crash();
         simulator.tick_pause();
+
+        if (simulator.options.replica_missing_until_request) |request| {
+            if (simulator.requests_replied >= request) {
+                simulator.options.replica_missing_until_request = null;
+                simulator.replica_crash_stability[simulator.options.replica_missing.?] = 1;
+            }
+        }
     }
 
     pub fn cluster_recoverable(simulator: *Simulator, gpa: std.mem.Allocator) !bool {
