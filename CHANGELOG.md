@@ -3,6 +3,26 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.46
+
+Released: 2025-06-19
+
+### Safety And Performance
+
+- [#3030](https://github.com/tigerbeetle/tigerbeetle/pull/3030)
+
+  Always build tb_client for Rust client in release mode.
+
+### Internals
+
+- [#3031](https://github.com/tigerbeetle/tigerbeetle/pull/3031)
+
+  Prioritize more important fuzzers in CFO.
+
+### TigerTracks 🎧
+
+- [Geef Mij Maar Amsterdam](https://open.spotify.com/track/2eiYJEuVh8axfumgEGvyPz?si=9821ae99edf24415)
+
 ## TigerBeetle 0.16.45
 
 Released: 2025-06-13
