@@ -1,115 +1,93 @@
-use futures::executor::block_on;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
-use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Barrier, LazyLock};
+
+use futures::executor::block_on;
 
 use tigerbeetle as tb;
 
-fn random_seed() -> u64 {
-    std::hash::Hasher::finish(&std::hash::BuildHasher::build_hasher(
-        &std::collections::hash_map::RandomState::new(),
-    ))
+// Singleton test database.
+static TEST_DB: LazyLock<TestDb> =
+    LazyLock::new(|| TestDb::new().expect("couldn't start test database"));
+
+struct TestDb {
+    port: u16,
+    // Keep the server's stdin handle open as long as the test process is running,
+    // at which point the server will terminate and delete its backing file.
+    _server: Child,
 }
 
-struct TestHarness {
-    tigerbeetle_bin: String,
-    temp_dir: PathBuf,
-    server: Option<Child>,
-}
-
-impl TestHarness {
-    fn new(name: &str) -> anyhow::Result<TestHarness> {
+impl TestDb {
+    fn new() -> anyhow::Result<TestDb> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
-
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let test_dir = format!("test-{name}-{}", random_seed());
-        let temp_dir = format!("{work_dir}/{test_dir}");
-        let temp_dir = PathBuf::from(temp_dir);
-        std::fs::create_dir_all(&temp_dir)?;
+        let database_name = format!("0_0.{:016x}.tigerbeetle", tb::id() as u64);
 
-        Ok(TestHarness {
-            tigerbeetle_bin,
-            temp_dir,
-            server: None,
-        })
-    }
-
-    fn prepare_database(&self) -> anyhow::Result<()> {
-        let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(&self.temp_dir);
+        let mut cmd = Command::new(&tigerbeetle_bin);
+        cmd.current_dir(&work_dir);
         cmd.args([
             "format",
             "--replica-count=1",
             "--replica=0",
             "--cluster=0",
-            "0_0.tigerbeetle",
+            &database_name,
         ]);
         let status = cmd.status()?;
 
         assert!(status.success());
 
-        Ok(())
-    }
-
-    fn serve(&mut self) -> anyhow::Result<u16> {
-        assert!(self.server.is_none());
-
-        let mut cmd = Command::new(&self.tigerbeetle_bin);
-        cmd.current_dir(&self.temp_dir);
+        let mut cmd = Command::new(&tigerbeetle_bin);
+        cmd.current_dir(&work_dir);
         cmd.args([
             "start",
-            "--addresses=0", // tell us the port to use
-            "0_0.tigerbeetle",
+            // magic address 0: tell us the port to use,
+            // shutdown and delete db when stdin closes
+            "--addresses=0",
+            &database_name,
         ])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped());
-        let mut child = cmd.spawn()?;
-        let child_stdout = mem::take(&mut child.stdout).unwrap();
-        let mut child_stdout = BufReader::new(child_stdout);
+
+        let mut server = cmd.spawn()?;
+        let server_stdout = mem::take(&mut server.stdout).unwrap();
+        let mut server_stdout = BufReader::new(server_stdout);
         let mut first_line = String::new();
-        child_stdout.read_line(&mut first_line)?;
-        let port_number = first_line.trim().parse()?;
+        server_stdout.read_line(&mut first_line)?;
+        let port = first_line.trim().parse()?;
 
-        self.server = Some(child);
-
-        Ok(port_number)
+        Ok(TestDb {
+            port,
+            _server: server,
+        })
     }
 }
 
-impl Drop for TestHarness {
-    fn drop(&mut self) {
-        if let Some(mut child) = self.server.take() {
-            child.kill().expect("kill");
-            let _ = child.wait().expect("wait");
-        }
-        let _ = std::fs::remove_dir_all(&self.temp_dir);
-    }
+fn test_client() -> anyhow::Result<tb::Client> {
+    let address = &format!("127.0.0.1:{}", TEST_DB.port);
+    let client = tb::Client::new(0, address)?;
+
+    Ok(client)
 }
+
+const TEST_LEDGER: u32 = 10;
+const TEST_CODE: u16 = 20;
 
 #[test]
 fn smoke() -> anyhow::Result<()> {
-    let ledger = 1;
-    let code = 1;
-
-    let account_id1 = 1;
-    let account_id2 = 2;
-    let transfer_id1 = 3;
+    let account_id1 = tb::id();
+    let account_id2 = tb::id();
+    let transfer_id1 = tb::id();
 
     let account_id2_user_data_32 = 4;
     let transfer_id1_user_data_32 = 5;
 
     block_on(async {
-        let mut harness = TestHarness::new("smoke")?;
-        harness.prepare_database()?;
-        let port_number = harness.serve()?;
-
-        let address = &format!("127.0.0.1:{}", port_number);
-        let client = tb::Client::new(0, address)?;
+        let client = test_client()?;
 
         {
             let result = client
@@ -124,8 +102,8 @@ fn smoke() -> anyhow::Result<()> {
                         user_data_64: 0,
                         user_data_32: 0,
                         reserved: tb::Reserved::default(),
-                        ledger,
-                        code,
+                        ledger: TEST_LEDGER,
+                        code: TEST_CODE,
                         flags: tb::AccountFlags::History,
                         timestamp: 0,
                     },
@@ -139,8 +117,8 @@ fn smoke() -> anyhow::Result<()> {
                         user_data_64: 0,
                         user_data_32: account_id2_user_data_32,
                         reserved: tb::Reserved::default(),
-                        ledger,
-                        code,
+                        ledger: TEST_LEDGER,
+                        code: TEST_CODE,
                         flags: tb::AccountFlags::History,
                         timestamp: 0,
                     },
@@ -165,8 +143,8 @@ fn smoke() -> anyhow::Result<()> {
                     user_data_64: 0,
                     user_data_32: transfer_id1_user_data_32,
                     timeout: 0,
-                    ledger,
-                    code,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
                     flags: tb::TransferFlags::default(),
                     timestamp: 0,
                 }])
@@ -210,7 +188,7 @@ fn smoke() -> anyhow::Result<()> {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: 0,
-                    code,
+                    code: TEST_CODE,
                     reserved: tb::Reserved::default(),
                     timestamp_min: 0,
                     timestamp_max: 0,
@@ -236,7 +214,7 @@ fn smoke() -> anyhow::Result<()> {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: 0,
-                    code,
+                    code: TEST_CODE,
                     reserved: tb::Reserved::default(),
                     timestamp_min: 0,
                     timestamp_max: 0,
@@ -259,8 +237,8 @@ fn smoke() -> anyhow::Result<()> {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: account_id2_user_data_32,
-                    ledger,
-                    code,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
                     reserved: tb::Reserved::default(),
                     timestamp_min: 0,
                     timestamp_max: 0,
@@ -282,8 +260,8 @@ fn smoke() -> anyhow::Result<()> {
                     user_data_128: 0,
                     user_data_64: 0,
                     user_data_32: transfer_id1_user_data_32,
-                    ledger,
-                    code,
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
                     reserved: tb::Reserved::default(),
                     timestamp_min: 0,
                     timestamp_max: 0,
@@ -301,4 +279,307 @@ fn smoke() -> anyhow::Result<()> {
 
         Ok(())
     })
+}
+
+#[test]
+fn ctor_fail() -> anyhow::Result<()> {
+    let client = tb::Client::new(0, "hey");
+
+    assert!(matches!(client, Err(tb::InitStatus::AddressInvalid)));
+
+    Ok(())
+}
+
+#[test]
+fn dtor() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        // Let's at least talk to the server before dropping
+        let _ = client.create_accounts(&[]).await?;
+        drop(client);
+        Ok(())
+    })
+}
+
+#[test]
+fn close() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let _ = client.create_accounts(&[]).await?;
+        client.close().await;
+        Ok(())
+    })
+}
+
+// Send a request and immediately drop the client.
+// Should still clean up correctly.
+#[test]
+fn dtor_no_wait() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let _ = client.create_accounts(&[]);
+        drop(client);
+        Ok(())
+    })
+}
+
+#[test]
+fn close_no_wait() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let _ = client.create_accounts(&[]);
+        let _ = client.close();
+        Ok(())
+    })
+}
+
+#[test]
+fn too_many_events() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let accounts = lots_of_accounts();
+        let result = client.create_accounts(&accounts).await;
+
+        assert_eq!(result, Err(tb::PacketStatus::TooMuchData));
+
+        Ok(())
+    })
+}
+
+fn lots_of_accounts() -> Vec<tb::Account> {
+    let mut accounts = vec![];
+    let num_accounts = 10_000;
+    for _ in 0..num_accounts {
+        let account = tb::Account {
+            id: tb::id(),
+            debits_pending: 0,
+            debits_posted: 0,
+            credits_pending: 0,
+            credits_posted: 0,
+            user_data_128: 0,
+            user_data_64: 0,
+            user_data_32: 0,
+            reserved: tb::Reserved::default(),
+            ledger: TEST_LEDGER,
+            code: TEST_CODE,
+            flags: tb::AccountFlags::History,
+            timestamp: 0,
+        };
+        accounts.push(account);
+    }
+    return accounts;
+}
+
+#[test]
+fn zero_events() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let result = client.create_accounts(&[]).await?;
+
+        assert!(result.is_empty());
+
+        Ok(())
+    })
+}
+
+// Test that the `collect_results` helper correctly
+// correlates (possibly-empty) results with the request array.
+#[test]
+fn result_correlation() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let result = client
+            .create_accounts(&[
+                tb::Account {
+                    id: tb::id(),
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: tb::id(),
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: 0, // err
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: tb::id(),
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: tb::id(),
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: 0, // err
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: tb::id(),
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+            ])
+            .await?;
+
+        assert_eq!(result.len(), 5);
+
+        assert_eq!(result[0], tb::CreateAccountResult::Ok);
+        assert_eq!(result[1], tb::CreateAccountResult::LedgerMustNotBeZero);
+        assert_eq!(result[2], tb::CreateAccountResult::Ok);
+        assert_eq!(result[3], tb::CreateAccountResult::CodeMustNotBeZero);
+        assert_eq!(result[4], tb::CreateAccountResult::Ok);
+
+        Ok(())
+    })
+}
+
+#[test]
+fn multithread() -> anyhow::Result<()> {
+    let client = test_client()?;
+    let client = Arc::new(client);
+
+    let num_threads = 16;
+    let num_requests = 1_000;
+
+    let barrier = Arc::new(Barrier::new(num_threads));
+
+    let join_handles = std::iter::repeat(()).take(num_threads).map(|_| {
+        let client = client.clone();
+        let barrier = barrier.clone();
+        std::thread::spawn(move || -> anyhow::Result<()> {
+            barrier.wait();
+            block_on(async {
+                for _ in 0..num_requests {
+                    let results = client
+                        .create_accounts(&[tb::Account {
+                            id: tb::id(),
+                            debits_pending: 0,
+                            debits_posted: 0,
+                            credits_pending: 0,
+                            credits_posted: 0,
+                            user_data_128: 0,
+                            user_data_64: 0,
+                            user_data_32: 0,
+                            reserved: tb::Reserved::default(),
+                            ledger: TEST_LEDGER,
+                            code: TEST_CODE,
+                            flags: tb::AccountFlags::History,
+                            timestamp: 0,
+                        }])
+                        .await?;
+
+                    for result in results {
+                        assert_eq!(result, tb::CreateAccountResult::Ok);
+                    }
+                }
+
+                Ok(())
+            })
+        })
+    });
+
+    // collect the handles to evaluate the thread::spawns
+    let join_handles = join_handles.collect::<Vec<_>>();
+
+    for join_handle in join_handles {
+        let res = join_handle.join().expect("no panic");
+        assert!(!res.is_err());
+    }
+
+    block_on(async {
+        let client = Arc::into_inner(client).expect("arc");
+
+        client.close().await;
+
+        Ok(())
+    })
+}
+
+#[test]
+fn concurrent_requests() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    let mut responses = Vec::new();
+
+    for _ in 0..10 {
+        let response = client.create_accounts(&[tb::Account {
+            id: tb::id(),
+            debits_pending: 0,
+            debits_posted: 0,
+            credits_pending: 0,
+            credits_posted: 0,
+            user_data_128: 0,
+            user_data_64: 0,
+            user_data_32: 0,
+            reserved: tb::Reserved::default(),
+            ledger: TEST_LEDGER,
+            code: TEST_CODE,
+            flags: tb::AccountFlags::History,
+            timestamp: 0,
+        }]);
+        responses.push(response);
+    }
+
+    for response in responses {
+        let response = block_on(async { response.await })?;
+        for result in response {
+            assert_eq!(result, tb::CreateAccountResult::Ok);
+        }
+    }
+
+    Ok(())
 }
