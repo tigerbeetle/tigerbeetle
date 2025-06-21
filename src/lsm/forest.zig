@@ -18,7 +18,6 @@ const ScanBufferPool = @import("scan_buffer.zig").ScanBufferPool;
 const ResourcePoolType = @import("compaction.zig").ResourcePoolType;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
-const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
 const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 const compaction_input_tables_max = @import("compaction.zig").compaction_tables_input_max;
 
@@ -219,7 +218,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             /// memory.
             compaction_block_count: u32,
 
-            pub const compaction_block_count_min: u32 = CompactionSchedule.forest_block_count_min;
+            pub const compaction_block_count_min: u32 = compaction_block_count_beat_min;
         };
 
         progress: ?union(enum) {
@@ -258,7 +257,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             grooves_options: GroovesOptions,
         ) !void {
             assert(options.compaction_block_count >= Options.compaction_block_count_min);
-
             forest.* = .{
                 .grid = grid,
                 .grooves = undefined,
@@ -481,7 +479,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(forest.compaction_progress.?.manifest_log_done);
             assert(forest.compaction_schedule.pool.idle());
             assert(forest.compaction_schedule.pool.blocks_acquired() <=
-                CompactionSchedule.forest_block_count_bar_max);
+                compaction_block_count_beat_min);
 
             forest.verify_table_extents();
 
@@ -498,15 +496,19 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             {
                 // No compaction was run.
             } else {
-                // Apply the changes to the manifest. This will run at the target compaction beat
-                // that is requested.
-                if (last_beat or last_half_beat) {
-                    for (0..constants.lsm_levels) |level_b| {
-                        if (level_active(.{ .level_b = level_b, .op = op })) {
-                            inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                                forest.compaction_schedule.compaction_at(level_b, tree_id)
-                                    .bar_complete();
+                for (0..constants.lsm_levels) |level_b| {
+                    if (level_active(.{ .level_b = level_b, .op = op })) {
+                        inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
+                            const compaction =
+                                forest.compaction_schedule.compaction_at(level_b, tree_id);
+
+                            if (compaction.grid_reservation) |reservation| {
+                                compaction.grid.forfeit(reservation);
+                                compaction.grid_reservation = null;
                             }
+                            // Apply the changes to the manifest. This will run at the target
+                            // compaction beat that is requested.
+                            if (last_beat or last_half_beat) compaction.bar_complete();
                         }
                     }
                 }
@@ -536,6 +538,10 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             // On the last beat of the bar, make sure that manifest log compaction is finished.
             if ((last_beat or last_half_beat) and op > constants.lsm_compaction_ops) {
                 forest.manifest_log.compact_end();
+                if (forest.manifest_log.grid_reservation) |grid_reservation| {
+                    forest.manifest_log.grid.forfeit(grid_reservation);
+                    forest.manifest_log.grid_reservation = null;
+                }
             }
 
             const callback = forest.progress.?.compact.callback;
@@ -592,6 +598,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             assert(tree_info.tree_id == @intFromEnum(tree_id));
 
             return tree_info.Tree;
+        }
+
+        pub fn tree_info_for_id(comptime tree_id: TreeID) TreeInfo {
+            const tree_info = tree_infos[@intFromEnum(tree_id) - tree_id_range.min];
+            assert(tree_info.tree_id == @intFromEnum(tree_id));
+
+            return tree_info;
         }
 
         pub fn tree_for_id(forest: *Forest, comptime tree_id: TreeID) *TreeForIdType(tree_id) {
@@ -808,19 +821,11 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
         pool: ResourcePool,
         next_tick: Grid.NextTick = undefined,
         callback: ?*const fn (*Forest) void = null,
+        bar_input_bytes_count: u64 = 0,
+        beat_input_bytes_count: u64 = 0,
 
         const CompactionSchedule = @This();
         const ResourcePool = ResourcePoolType(Grid);
-
-        const forest_compactions_concurrent_max =
-            stdx.div_ceil(constants.lsm_levels, 2) * Forest.tree_infos.len;
-        const forest_block_count_bar_max =
-            forest_compactions_concurrent_max * compaction_block_count_bar_max;
-        /// The minimum number of blocks required to complete all compactions. This is the sum of
-        /// blocks reserved between the bars plus enough blocks to complete a single beat.
-        const forest_block_count_min = forest_block_count_bar_max +
-            // beat_min includes bar_max for that beat.
-            (compaction_block_count_beat_min - compaction_block_count_bar_max);
 
         pub fn init(
             self: *CompactionSchedule,
@@ -829,7 +834,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
             forest: *Forest,
             block_count: u32,
         ) !void {
-            assert(block_count >= CompactionSchedule.forest_block_count_min);
+            assert(block_count >= compaction_block_count_beat_min);
 
             self.* = .{ .grid = grid, .forest = forest, .pool = undefined };
             self.pool = try ResourcePool.init(allocator, block_count);
@@ -872,38 +877,29 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
             const first_beat = compaction_beat == 0;
             const half_beat = compaction_beat == half_bar;
 
-            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
-            const last_half_beat = compaction_beat == half_bar - 1;
-
-            if (first_beat or half_beat) assert(self.pool.blocks_acquired() == 0);
-
             if (first_beat or half_beat) {
+                assert(self.pool.blocks_acquired() == 0);
                 for (0..constants.lsm_levels) |level_b| {
                     if (level_active(.{ .level_b = level_b, .op = op })) {
                         inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                            self.compaction_at(level_b, tree_id)
-                                .bar_commence(op);
+                            const tree = Forest.tree_info_for_id(tree_id);
+                            const Value = tree.Tree.Table.Value;
+                            const compaction = self.compaction_at(level_b, tree_id);
+
+                            const bar_input_values = compaction.bar_commence(op, &self.pool);
+                            self.bar_input_bytes_count += (bar_input_values * @sizeOf(Value));
                         }
                     }
                 }
             }
 
-            for (0..constants.lsm_levels) |level_b| {
-                if (level_active(.{ .level_b = level_b, .op = op })) {
-                    inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                        const beats_total = half_bar;
-                        const beats_done = compaction_beat % half_bar;
-                        const beats_remaining = beats_total - beats_done;
-                        self.compaction_at(level_b, tree_id)
-                            .beat_commence(beats_remaining);
-                        if (last_beat or last_half_beat) {
-                            const quotas = self.compaction_at(level_b, tree_id).quotas;
-                            assert(beats_remaining == 1);
-                            assert(quotas.beat == quotas.bar);
-                        }
-                    }
-                }
-            }
+            const beats_total = half_bar;
+            const beats_done = compaction_beat % half_bar;
+            const beats_remaining = beats_total - beats_done;
+            self.beat_input_bytes_count = stdx.div_ceil(
+                self.bar_input_bytes_count,
+                beats_remaining,
+            );
 
             self.beat_resume();
         }
@@ -912,25 +908,43 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
             assert(self.callback != null);
 
             const op = self.forest.progress.?.compact.op;
+
+            if (self.beat_input_bytes_count == 0) {
+                self.beat_finish();
+                return;
+            }
+
             for (0..constants.lsm_levels) |level_b| {
                 if (level_active(.{ .level_b = level_b, .op = op })) {
                     inline for (comptime std.enums.values(Forest.TreeID)) |tree_id| {
-                        const resumed = self.compaction_at(level_b, tree_id)
-                            .compaction_dispatch_enter(&self.pool, beat_resume_callback);
+                        const tree = Forest.tree_info_for_id(tree_id);
+                        const Value = tree.Tree.Table.Value;
+                        const compaction = self.compaction_at(level_b, tree_id);
+
+                        const resumed = compaction.beat_commence(.{
+                            .callback = beat_resume_callback,
+                            .values_count = stdx.div_ceil(
+                                self.beat_input_bytes_count,
+                                @sizeOf(Value),
+                            ),
+                        });
 
                         switch (resumed) {
-                            .beat_finished => {},
+                            .ceased => {},
                             .active => return,
                         }
                     }
                 }
             }
-            self.beat_finish();
         }
 
-        fn beat_resume_callback(pool: *ResourcePool) void {
+        fn beat_resume_callback(pool: *ResourcePool, input_bytes_consumed: u64) void {
             const self: *CompactionSchedule = @fieldParentPtr("pool", pool);
             assert(self.callback != null);
+
+            self.bar_input_bytes_count -= input_bytes_consumed;
+            self.beat_input_bytes_count -|= input_bytes_consumed;
+
             self.beat_resume();
         }
 
