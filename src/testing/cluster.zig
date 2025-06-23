@@ -89,6 +89,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             releases: []const Release,
             client_release: vsr.Release,
             state_machine: StateMachine.Options,
+            replicate_options: Replica.ReplicateOptions = .{},
         };
 
         pub const Callbacks = struct {
@@ -714,6 +715,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release_execute = replica_release_execute_soon,
                     .release_execute_context = null,
                     .test_context = cluster,
+                    .replicate_options = cluster.options.replicate_options,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);

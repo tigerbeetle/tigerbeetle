@@ -407,6 +407,10 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
                 .cache_entries_transfers_pending = if (prng.boolean()) 256 else 0,
             },
         },
+        .replicate_options = .{
+            .closed_loop = prng.chance(ratio(1, 5)),
+            .star = prng.chance(ratio(1, 5)),
+        },
     };
 
     const network_options: Cluster.NetworkOptions = .{
