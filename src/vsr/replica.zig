@@ -152,7 +152,7 @@ pub fn ReplicaType(
         const ForestTableIterator = ForestTableIteratorType(Forest);
         const Tracer = Storage.Tracer;
 
-        const ReplicateOptions = struct {
+        pub const ReplicateOptions = struct {
             closed_loop: bool = false,
             star: bool = false,
         };
