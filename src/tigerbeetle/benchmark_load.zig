@@ -74,10 +74,6 @@ pub fn main(
         .{ constants.clients_max, cli_args.clients },
     );
 
-    if (cli_args.clients > 1 and cli_args.transfer_batch_delay_us > 0) {
-        vsr.fatal(.cli, "--clients: mutually exclusive with --transfer-batch-delay-us", .{});
-    }
-
     const cluster_id: u128 = 0;
 
     var io = try IO.init(32, 0);
@@ -109,6 +105,9 @@ pub fn main(
     const request_latency_histogram = try allocator.alloc(u64, 10_001);
     @memset(request_latency_histogram, 0);
     defer allocator.free(request_latency_histogram);
+
+    const client_timeouts = try allocator.alloc(Benchmark.Timeout, clients.count());
+    defer allocator.free(client_timeouts);
 
     const client_requests = try allocator.alignedAlloc(
         [constants.message_body_size_max]u8,
@@ -161,6 +160,7 @@ pub fn main(
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),
         .clients = clients.slice(),
+        .client_timeouts = client_timeouts,
         .client_requests = client_requests,
         .client_replies = client_replies,
         .request_latency_histogram = request_latency_histogram,
@@ -271,6 +271,7 @@ const Benchmark = struct {
     clients_request_ns: [constants.clients_max]u64 = .{undefined} ** constants.clients_max,
     client_requests: []align(constants.sector_size) [constants.message_body_size_max]u8,
     client_replies: []align(constants.sector_size) [constants.message_body_size_max]u8,
+    client_timeouts: []Timeout,
     request_latency_histogram: []u64,
     request_index: usize = 0,
     account_index: usize = 0,
@@ -278,6 +279,12 @@ const Benchmark = struct {
     transfers_created: usize = 0,
     query_index: usize = 0,
     stage: Stage = .idle,
+
+    const Timeout = struct {
+        benchmark: *Benchmark,
+        client_index: u32,
+        completion: IO.Completion = undefined,
+    };
 
     const Stage = enum {
         idle,
@@ -424,6 +431,7 @@ const Benchmark = struct {
     }
 
     fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(!b.clients_busy.is_set(client_index));
         const create_transfers_results = stdx.bytes_as_slice(
             .exact,
             tb.CreateTransfersResult,
@@ -447,8 +455,33 @@ const Benchmark = struct {
             });
         }
 
-        std.time.sleep(b.transfer_batch_delay_us * std.time.ns_per_us);
-        b.create_transfers(client_index);
+        b.client_timeouts[client_index] = .{ .benchmark = b, .client_index = client_index };
+        b.clients_busy.set(client_index);
+        b.io.timeout(
+            *Timeout,
+            &b.client_timeouts[client_index],
+            create_transfers_next,
+            &b.client_timeouts[client_index].completion,
+            @intCast(b.transfer_batch_delay_us * std.time.ns_per_us),
+        );
+    }
+
+    fn create_transfers_next(
+        timeout: *Timeout,
+        completion: *IO.Completion,
+        result: IO.TimeoutError!void,
+    ) void {
+        assert(completion == &timeout.completion);
+        _ = result catch |e| switch (e) {
+            error.Canceled => unreachable,
+            error.Unexpected => unreachable,
+        };
+
+        const b = timeout.benchmark;
+        assert(b.clients_busy.is_set(timeout.client_index));
+
+        b.clients_busy.unset(timeout.client_index);
+        b.create_transfers(timeout.client_index);
     }
 
     fn create_transfers_finish(b: *Benchmark) void {
