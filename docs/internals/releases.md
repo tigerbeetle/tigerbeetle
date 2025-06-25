@@ -8,7 +8,9 @@ The motivation for specific steps follows after.
 
 ## Release Manager Algorithm
 
-1. On Friday, open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
+### Friday
+
+1. Open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
    - you are the release manager for the week
    - that the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
@@ -69,20 +71,22 @@ The motivation for specific steps follows after.
 
 7. From this point on, the CFO will be fuzzing the release branch over the weekend.
 
-8. On Monday (different release manager!) check that there are no VOPR failures on the release
+8. Ping release manager for the next week in Slack.
+
+### Monday
+
+1. On Monday (different release manager!) check that there are no VOPR failures on the release
    branch.
 
-9. Trigger the release workflow via
+2. Trigger the release workflow via
    [GitHub web interface](https://github.com/tigerbeetle/tigerbeetle/actions/workflows/release.yml).
    Be sure to trigger workflow from the `release` branch, otherwise the release will fail due to
    permissions.
 
-10. Ask someone else to approve the GitHub workflow.
+3. Ask someone else to approve the GitHub workflow.
 
-11. Add the new release sketch to the corresponding release page on
+4. Add the new release sketch to the corresponding release page on
     <https://github.com/tigerbeetle/tigerbeetle/releases>.
-
-12. Ping release manager for the next week in Slack.
 
 ### Error Handling
 
