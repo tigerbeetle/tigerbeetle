@@ -120,7 +120,6 @@ pub fn EchoClientType(
                 .command = .request,
                 .operation = .register,
                 .release = vsr.Release.minimum,
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 
@@ -160,7 +159,6 @@ pub fn EchoClientType(
                 .release = vsr.Release.minimum,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 

@@ -242,7 +242,7 @@ typedef struct tb_packet_t {
     uint16_t user_tag;
     uint8_t operation;
     uint8_t status;
-    uint8_t opaque[48];
+    uint8_t opaque[64];
 } tb_packet_t;
 
 typedef enum TB_OPERATION {

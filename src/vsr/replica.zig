@@ -6812,7 +6812,6 @@ pub fn ReplicaType(
                 request.message.header.client,
             });
             if (request.message.header.previous_request_latency != 0) {
-                assert(request.message.header.previous_request_timestamp != 0);
                 if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
                     self.status == .normal)
                 {
@@ -10695,7 +10694,6 @@ pub fn ReplicaType(
                 .parent = 0,
                 .client = 0,
                 .session = 0,
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 

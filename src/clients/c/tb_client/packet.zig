@@ -27,7 +27,7 @@ pub const Packet = extern struct {
         user_tag: u16,
         operation: u8,
         status: Status,
-        @"opaque": [48]u8 = [_]u8{0} ** 48,
+        @"opaque": [64]u8 = [_]u8{0} ** 64,
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
@@ -61,7 +61,7 @@ pub const Packet = extern struct {
     multi_batch_event_count: u16,
     multi_batch_result_count_expected: u16,
     phase: Phase,
-    reserved: u8 = 0,
+    reserved: [17]u8 = .{0} ** 17,
 
     pub fn cast(self: *Packet) *Extern {
         return @ptrCast(self);
@@ -85,7 +85,7 @@ pub const Packet = extern struct {
         assert(packet.phase == expected);
         assert(packet.data_size == 0 or packet.data != null);
         assert((packet.multi_batch_time_real == 0) == (packet.multi_batch_time_monotonic == 0));
-        assert(packet.reserved == 0);
+        assert(stdx.zeroed(&packet.reserved));
         maybe(packet.user_data == null);
         maybe(packet.user_tag == 0);
 

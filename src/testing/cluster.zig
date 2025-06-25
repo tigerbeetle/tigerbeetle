@@ -877,7 +877,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, request_operation),
                 .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 

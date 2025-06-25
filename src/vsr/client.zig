@@ -274,7 +274,6 @@ pub fn ClientType(
                 .command = .request,
                 .operation = .register,
                 .release = self.release,
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 
@@ -333,7 +332,6 @@ pub fn ClientType(
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 

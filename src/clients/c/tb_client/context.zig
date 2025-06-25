@@ -206,7 +206,6 @@ pub fn ContextType(
         eviction_reason: ?vsr.Header.Eviction.Reason,
         thread: std.Thread,
 
-        previous_request_timestamp: ?i64 = null,
         previous_request_instant: ?stdx.Instant = null,
         previous_request_latency: ?stdx.Duration = null,
 
@@ -657,7 +656,6 @@ pub fn ContextType(
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @sizeOf(vsr.Header) + request_size,
-                .previous_request_timestamp = self.previous_request_timestamp orelse 0,
                 .previous_request_latency = @intCast(@min(
                     previous_request_latency.ns,
                     std.math.maxInt(u32),
@@ -665,11 +663,8 @@ pub fn ContextType(
             };
 
             assert((self.previous_request_instant == null) ==
-                (self.previous_request_timestamp == null));
-            assert((self.previous_request_instant == null) ==
                 (self.previous_request_latency == null));
             self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
-            self.previous_request_timestamp = packet_list.multi_batch_time_real;
 
             packet_list.phase = .sent;
             self.client.raw_request(

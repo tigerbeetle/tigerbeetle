@@ -120,7 +120,6 @@ pub fn ReplicaReformatType(
                 .release = reformat.client.release,
                 .operation = .noop,
                 .size = @sizeOf(vsr.Header),
-                .previous_request_timestamp = 0,
                 .previous_request_latency = 0,
             };
 
