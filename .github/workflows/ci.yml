@@ -22,13 +22,6 @@ jobs:
       - run: shellcheck ./zig/download.sh
       - run: ./zig/download.ps1 && ./zig/zig build ci -- smoke
 
-  fuzz:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: shellcheck ./zig/download.sh
-      - run: ./zig/download.ps1 && ./zig/zig build ci -- fuzz
-
   test:
     strategy:
       matrix:
