@@ -1,3 +1,5 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
 require "bundler/setup"
 require "tb_client"
 
@@ -12,29 +14,38 @@ require "tb_client"
 ADDRESS = ENV.fetch("TB_ADDRESS", "3000")
 CLUSTER_ID = ENV.fetch("TB_CLUSTER_ID", 0).to_i
 
-include TBClient
 
-cluster_id_ptr = UINT128.new
-cluster_id_ptr[:lo] = CLUSTER_ID % 2**64
-cluster_id_ptr[:hi] = CLUSTER_ID >> 64
+class SampleClient
+  include TBClient
 
-client = Client.new
+  attr_accessor :client
 
-def completion(client_id, packet, timestamp, result_ptr, result_len)
-  # request_id = packet[:user_data].read_uint64
-  # request = inflight_requests[request_id]
-  # result = deserialize(result_ptr, request.converter, result_len)
-  # request.block.call(result)
-  # inflight_requests.delete(request_id)
+  def initialize(address, cluster_id)
+    @client = Client.new
+    @callback = Proc.new { |*args| completion(*args) }
+
+    cluster_id_ptr = UINT128.new
+    cluster_id_ptr[:lo] = CLUSTER_ID % 2**64
+    cluster_id_ptr[:hi] = CLUSTER_ID >> 64
+
+    init_status = TBClient.tb_client_init(client, cluster_id_ptr, address, address.length, 1, &@callback)
+    raise "Unable to initialize client: #{init_status}" if init_status != :SUCCESS
+  end
+
+  def completion(client_id, packet, timestamp, result_ptr, result_len)
+    # request_id = packet[:user_data].read_uint64
+    # request = inflight_requests[request_id]
+    # result = deserialize(result_ptr, request.converter, result_len)
+    # request.block.call(result)
+    # inflight_requests.delete(request_id)
+  end
 end
 
-callback = Proc.new { |*args| completion(*args) }
+@sample_client = nil
+begin
+  @sample_client = SampleClient.new(ADDRESS, CLUSTER_ID)
 
-init_status = tb_client_init(client, cluster_id_ptr, ADDRESS, ADDRESS.length, 0, &callback)
-
-if InitStatus.find(init_status) == :SUCCESS
-  puts "Conected"
-else
-  puts "Could not connect, status: #{InitStatus.find(init_status)}"
-  exit 1
+ensure
+  TBClient.tb_client_deinit(@sample_client.client) if @sample_client
 end
+
