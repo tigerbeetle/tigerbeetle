@@ -199,14 +199,27 @@ pub fn TracerType(comptime Time: type) type {
             tracer.* = undefined;
         }
 
-        /// Gauges work on a last-set wins. Multiple calls to .record_gauge() followed by an emit
-        /// will result in only the last value being submitted.
+        /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will
+        /// result in only the last value being submitted.
         pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
             const timing_slot = event.slot();
             tracer.events_metric[timing_slot] = .{
                 .event = event,
                 .value = value,
             };
+        }
+
+        /// Counters are cumulative values that only increase.
+        pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
+            const timing_slot = event.slot();
+            if (tracer.events_metric[timing_slot]) |*metric| {
+                metric.value +|= value;
+            } else {
+                tracer.events_metric[timing_slot] = .{
+                    .event = event,
+                    .value = value,
+                };
+            }
         }
 
         pub fn start(tracer: *Tracer, event: Event) void {
