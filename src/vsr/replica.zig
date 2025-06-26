@@ -1606,6 +1606,7 @@ pub fn ReplicaType(
                 @tagName(self.status),
                 message.header,
             });
+            self.trace.count(.{ .replica_messages_in = .{ .command = message.header.command } }, 1);
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: on_message: invalid (command={}, {s})", .{
@@ -8595,6 +8596,9 @@ pub fn ReplicaType(
                     });
                 },
             }
+            self.trace.count(.{ .replica_messages_out = .{
+                .command = message.header.command,
+            } }, 1);
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });

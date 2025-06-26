@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 
+const Command = @import("../vsr.zig").Command;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const Operation = @import("../tigerbeetle.zig").Operation;
 
@@ -422,6 +423,8 @@ pub const EventMetric = union(enum) {
     replica_sync_stage,
     replica_sync_op_min,
     replica_sync_op_max,
+    replica_messages_in: struct { command: Command },
+    replica_messages_out: struct { command: Command },
     journal_dirty,
     journal_faulty,
     grid_blocks_acquired,
@@ -445,6 +448,8 @@ pub const EventMetric = union(enum) {
         .replica_sync_stage = 1,
         .replica_sync_op_min = 1,
         .replica_sync_op_max = 1,
+        .replica_messages_in = enum_max(Command),
+        .replica_messages_out = enum_max(Command),
         .journal_dirty = 1,
         .journal_faulty = 1,
         .grid_blocks_acquired = 1,
@@ -478,6 +483,13 @@ pub const EventMetric = union(enum) {
             inline .table_count_visible, .table_count_visible_max => |data| {
                 const tree_id = @intFromEnum(data.tree);
                 const offset = tree_id;
+                assert(offset < slot_limits.get(event.*));
+
+                return slot_bases.get(event.*) + @as(u32, @intCast(offset));
+            },
+            inline .replica_messages_in, .replica_messages_out => |data| {
+                const command = @intFromEnum(data.command);
+                const offset = command;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + @as(u32, @intCast(offset));
@@ -553,6 +565,12 @@ test "EventMetric slot doesn't have collisions" {
             } },
             .table_count_visible_max => .{ .table_count_visible_max = .{
                 .tree = g.enum_value(TreeEnum),
+            } },
+            .replica_messages_in => .{ .replica_messages_in = .{
+                .command = g.enum_value(Command),
+            } },
+            .replica_messages_out => .{ .replica_messages_out = .{
+                .command = g.enum_value(Command),
             } },
             inline else => |tag| tag,
         };
