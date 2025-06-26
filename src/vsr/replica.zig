@@ -1299,87 +1299,89 @@ pub fn ReplicaType(
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
                     .id = replica_index,
-                    .after = 100,
+                    .after = 1_000 / constants.tick_ms,
                 },
                 .prepare_timeout = Timeout{
                     .name = "prepare_timeout",
                     .id = replica_index,
-                    .after = options.timeout_prepare_ticks orelse 25,
+                    .after = options.timeout_prepare_ticks orelse (250 / constants.tick_ms),
                 },
                 .primary_abdicate_timeout = Timeout{
                     .name = "primary_abdicate_timeout",
                     .id = replica_index,
-                    .after = 1000,
+                    .after = 10_000 / constants.tick_ms,
                 },
                 .commit_message_timeout = Timeout{
                     .name = "commit_message_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 500 / constants.tick_ms,
                 },
                 .normal_heartbeat_timeout = Timeout{
                     .name = "normal_heartbeat_timeout",
                     .id = replica_index,
-                    .after = 500,
+                    .after = 5_000 / constants.tick_ms,
                 },
                 .start_view_change_window_timeout = Timeout{
                     .name = "start_view_change_window_timeout",
                     .id = replica_index,
-                    .after = 500,
+                    .after = 5_000 / constants.tick_ms,
                 },
                 .start_view_change_message_timeout = Timeout{
                     .name = "start_view_change_message_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 500 / constants.tick_ms,
                 },
                 .view_change_status_timeout = Timeout{
                     .name = "view_change_status_timeout",
                     .id = replica_index,
-                    .after = 500,
+                    .after = 5_000 / constants.tick_ms,
                 },
                 .do_view_change_message_timeout = Timeout{
                     .name = "do_view_change_message_timeout",
                     .id = replica_index,
-                    .after = 50,
+                    .after = 500 / constants.tick_ms,
                 },
                 .request_start_view_message_timeout = Timeout{
                     .name = "request_start_view_message_timeout",
                     .id = replica_index,
-                    .after = 100,
+                    .after = 1_000 / constants.tick_ms,
                 },
                 .repair_timeout = Timeout{
                     .name = "repair_timeout",
                     .id = replica_index,
-                    .after = 10,
+                    .after = 100 / constants.tick_ms,
                 },
                 .repair_sync_timeout = Timeout{
                     .name = "repair_sync_timeout",
                     .id = replica_index,
-                    .after = 500,
+                    .after = 5_000 / constants.tick_ms,
                 },
                 .grid_repair_message_timeout = Timeout{
                     .name = "grid_repair_message_timeout",
                     .id = replica_index,
-                    .after = options.timeout_grid_repair_message_ticks orelse 50,
+                    .after = options.timeout_grid_repair_message_ticks orelse
+                        (500 / constants.tick_ms),
                 },
                 .grid_scrub_timeout = Timeout{
                     .name = "grid_scrub_timeout",
                     .id = replica_index,
-                    .after = 50, // (`after` will be adjusted at runtime to tune the scrubber pace.)
+                    // (`after` will be adjusted at runtime to tune the scrubber pace.)
+                    .after = 500 / constants.tick_ms,
                 },
                 .pulse_timeout = Timeout{
                     .name = "pulse_timeout",
                     .id = replica_index,
-                    .after = 10,
+                    .after = 100 / constants.tick_ms,
                 },
                 .upgrade_timeout = Timeout{
                     .name = "upgrade_timeout",
                     .id = replica_index,
-                    .after = 500,
+                    .after = 5_000 / constants.tick_ms,
                 },
                 .trace_emit_timeout = Timeout{
                     .name = "trace_emit_timeout",
                     .id = replica_index,
-                    .after = 1000,
+                    .after = 10_000 / constants.tick_ms,
                 },
                 .prng = stdx.PRNG.from_seed(replica_index),
 
