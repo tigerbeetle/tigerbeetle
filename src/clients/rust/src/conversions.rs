@@ -137,19 +137,6 @@ impl From<i32> for InitStatus {
     }
 }
 
-impl From<i32> for ClientStatus {
-    fn from(other: i32) -> ClientStatus {
-        use tbc::*;
-        use ClientStatus::*;
-
-        match other {
-            TB_CLIENT_STATUS_TB_CLIENT_OK => panic!(),
-            TB_CLIENT_STATUS_TB_CLIENT_INVALID => Invalid,
-            v => Unknown(v),
-        }
-    }
-}
-
 impl From<u8> for PacketStatus {
     fn from(other: u8) -> PacketStatus {
         use tbc::*;

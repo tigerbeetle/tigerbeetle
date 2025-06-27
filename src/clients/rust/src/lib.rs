@@ -788,23 +788,6 @@ impl core::fmt::Display for InitStatus {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 #[non_exhaustive]
-pub enum ClientStatus {
-    Invalid,
-    Unknown(i32),
-}
-
-impl std::error::Error for ClientStatus {}
-impl core::fmt::Display for ClientStatus {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        match self {
-            Self::Invalid => f.write_str("invalid"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
-#[non_exhaustive]
 pub enum PacketStatus {
     TooMuchData,
     ClientEvicted,
