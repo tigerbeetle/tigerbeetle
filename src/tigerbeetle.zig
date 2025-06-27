@@ -137,7 +137,9 @@ pub const TransferFlags = packed struct(u16) {
     closing_debit: bool = false,
     closing_credit: bool = false,
     imported: bool = false,
-    padding: u7 = 0,
+    balancing_debit_with_pending: bool = false,
+    balancing_credit_with_pending: bool = false,
+    padding: u5 = 0,
 
     comptime {
         assert(@sizeOf(TransferFlags) == @sizeOf(u16));
