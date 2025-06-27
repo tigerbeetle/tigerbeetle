@@ -116,6 +116,9 @@ const Prepare = struct {
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
     ok_from_all_replicas: QuorumCounter = quorum_counter_null,
 
+    /// Minimum commit_min of any replica which acked this prepare.
+    commit_min_min: u64 = std.math.maxInt(u64),
+
     /// Whether a quorum of prepare_ok messages has been received for this prepare.
     ok_quorum_received: bool = false,
 };
@@ -2121,6 +2124,11 @@ pub fn ReplicaType(
                     self.primary_abdicate_timeout.reset();
                 }
             }
+
+            prepare.commit_min_min = @min(
+                prepare.commit_min_min,
+                message.header.commit_min,
+            );
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -8212,7 +8220,7 @@ pub fn ReplicaType(
                         .epoch = header.epoch,
                         .view = self.view,
                         .op = header.op,
-                        .commit = header.commit,
+                        .commit_min = self.commit_min,
                         .timestamp = header.timestamp,
                         .operation = header.operation,
                     }),
@@ -11445,7 +11453,6 @@ const PipelineQueue = struct {
         // A prepare may be committed in the same view or in a newer view:
         assert(prepare.message.header.view <= ok.header.view);
         assert(prepare.message.header.op == ok.header.op);
-        assert(prepare.message.header.commit == ok.header.commit);
         assert(prepare.message.header.timestamp == ok.header.timestamp);
         assert(prepare.message.header.operation == ok.header.operation);
         assert(prepare.message.header.checkpoint_id == ok.header.checkpoint_id);

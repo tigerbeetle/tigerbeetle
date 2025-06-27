@@ -825,7 +825,7 @@ pub const Header = extern struct {
         checkpoint_id: u128,
         client: u128,
         op: u64,
-        commit: u64,
+        commit_min: u64,
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
@@ -848,7 +848,6 @@ pub const Header = extern struct {
                     }
                     if (self.request != 0) return "root: request != 0";
                     if (self.op != 0) return "root: op != 0";
-                    if (self.commit != 0) return "root: commit != 0";
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
@@ -860,7 +859,6 @@ pub const Header = extern struct {
                         if (self.client == 0) return "client == 0";
                     }
                     if (self.op == 0) return "op == 0";
-                    if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
                     if (self.operation == .register or
                         self.operation == .upgrade)
