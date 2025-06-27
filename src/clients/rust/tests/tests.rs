@@ -376,11 +376,50 @@ fn lots_of_accounts() -> Vec<tb::Account> {
 }
 
 #[test]
-fn zero_events() -> anyhow::Result<()> {
+fn zero_events_create_accounts() -> anyhow::Result<()> {
     let client = test_client()?;
 
     block_on(async {
         let result = client.create_accounts(&[]).await?;
+
+        assert!(result.is_empty());
+
+        Ok(())
+    })
+}
+
+#[test]
+fn zero_events_create_transfers() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let result = client.create_transfers(&[]).await?;
+
+        assert!(result.is_empty());
+
+        Ok(())
+    })
+}
+
+#[test]
+fn zero_events_lookup_accounts() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let result = client.lookup_accounts(&[]).await?;
+
+        assert!(result.is_empty());
+
+        Ok(())
+    })
+}
+
+#[test]
+fn zero_events_lookup_transfers() -> anyhow::Result<()> {
+    let client = test_client()?;
+
+    block_on(async {
+        let result = client.lookup_transfers(&[]).await?;
 
         assert!(result.is_empty());
 
