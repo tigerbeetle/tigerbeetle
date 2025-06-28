@@ -6,6 +6,8 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Barrier, LazyLock};
 
 use futures::executor::block_on;
+use futures::pin_mut;
+use futures::{Stream, StreamExt};
 
 use tigerbeetle as tb;
 
@@ -619,6 +621,215 @@ fn concurrent_requests() -> anyhow::Result<()> {
             assert_eq!(result, tb::CreateAccountResult::Ok);
         }
     }
+
+    Ok(())
+}
+
+/// Query multiple transfers for a single account, with paging.
+///
+/// This handles the case where there are too many results to fit into
+/// a single batch, by making multiple sequential queries, incrementing
+/// the timestamp range (or decrementing for reverse queries).
+///
+/// The [`AccountFilter`]'s `limit` field should be set to greater than 1
+/// to set the page size. `limit` must be less than or equal to the build-time
+/// configuration of the TigerBeetle server's batch size (default 8189).
+///
+/// To perform a reverse query set [`AccountFilterFlag::Reversed`].
+//
+// NB: If you change this also change the paging example in the crate docs!
+fn get_account_transfers_paged<'s>(
+    client: &'s tb::Client,
+    event: tb::AccountFilter,
+) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + use<'s> {
+    assert!(
+        event.limit > 1,
+        "paged queries should use an explicit limit"
+    );
+
+    enum State {
+        Start,
+        Continue(u64),
+        End,
+    }
+
+    let is_reverse = event.flags.contains(tb::AccountFilterFlags::Reversed);
+
+    futures::stream::unfold(State::Start, move |state| async move {
+        let event = match state {
+            State::Start => event,
+            State::Continue(timestamp_begin) => {
+                if !is_reverse {
+                    tb::AccountFilter {
+                        timestamp_min: timestamp_begin,
+                        ..event
+                    }
+                } else {
+                    tb::AccountFilter {
+                        timestamp_max: timestamp_begin,
+                        ..event
+                    }
+                }
+            }
+            State::End => return None,
+        };
+        let result_next = client.get_account_transfers(event).await;
+        match result_next {
+            Ok(result_next) => {
+                let result_len = u32::try_from(result_next.len()).expect("u32");
+                let must_page = result_len == event.limit;
+                if must_page {
+                    let timestamp_first = result_next.first().expect("item").timestamp;
+                    let timestamp_last = result_next.last().expect("item").timestamp;
+                    let (timestamp_begin_next, should_continue) = if !is_reverse {
+                        assert!(timestamp_first < timestamp_last);
+                        let timestamp_begin_next = timestamp_last.checked_add(1).expect("overflow");
+                        assert_ne!(timestamp_begin_next, u64::max_value());
+                        let should_continue =
+                            timestamp_begin_next <= event.timestamp_max || event.timestamp_max == 0;
+                        (timestamp_begin_next, should_continue)
+                    } else {
+                        assert!(timestamp_first > timestamp_last);
+                        let timestamp_begin_next = timestamp_last.checked_sub(1).expect("overflow");
+                        assert_ne!(timestamp_begin_next, 0);
+                        let should_continue =
+                            timestamp_begin_next >= event.timestamp_min || event.timestamp_min == 0;
+                        (timestamp_begin_next, should_continue)
+                    };
+                    if should_continue {
+                        Some((Ok(result_next), State::Continue(timestamp_begin_next)))
+                    } else {
+                        Some((Ok(result_next), State::End))
+                    }
+                } else {
+                    Some((Ok(result_next), State::End))
+                }
+            }
+            Err(result_next) => Some((Err(result_next), State::End)),
+        }
+    })
+}
+
+struct PagingTestParams {
+    account_id1: u128,
+    #[allow(unused)]
+    account_id2: u128,
+    transfer_count: usize,
+}
+
+fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestParams> {
+    let batch_size: usize = 1234;
+    let transfer_count: usize = 5678;
+    let account_id1 = tb::id();
+    let account_id2 = tb::id();
+
+    let account1 = tb::Account {
+        id: account_id1,
+        ledger: TEST_LEDGER,
+        code: TEST_CODE,
+        ..Default::default()
+    };
+    let account2 = tb::Account {
+        id: account_id2,
+        ledger: TEST_LEDGER,
+        code: TEST_CODE,
+        ..Default::default()
+    };
+
+    let transfers: Vec<_> = std::iter::from_fn(|| {
+        Some(tb::Transfer {
+            id: tb::id(),
+            debit_account_id: account_id1,
+            credit_account_id: account_id2,
+            amount: 100,
+            ledger: TEST_LEDGER,
+            code: TEST_CODE,
+            ..Default::default()
+        })
+    })
+    .take(transfer_count)
+    .collect();
+
+    block_on(async {
+        let account_results = client.create_accounts(&[account1, account2]).await?;
+        assert_eq!(account_results[0], tb::CreateAccountResult::Ok);
+        assert_eq!(account_results[1], tb::CreateAccountResult::Ok);
+
+        for transfers in transfers.chunks(batch_size) {
+            let transfer_results = client.create_transfers(transfers).await?;
+            assert!(transfer_results
+                .into_iter()
+                .all(|t| t == tb::CreateTransferResult::Ok));
+        }
+
+        Ok(PagingTestParams {
+            account_id1,
+            account_id2,
+            transfer_count,
+        })
+    })
+}
+
+#[test]
+fn paging_forward() -> anyhow::Result<()> {
+    let client = test_client()?;
+    let test_params = make_paging_test_transfers(&client)?;
+
+    let query_results = get_account_transfers_paged(
+        &client,
+        tb::AccountFilter {
+            account_id: test_params.account_id1,
+            limit: 1000,
+            flags: tb::AccountFilterFlags::Debits,
+            ..Default::default()
+        },
+    );
+
+    pin_mut!(query_results);
+
+    let mut batches = 0;
+    let mut transfer_count = 0;
+
+    while let Some(query_results) = block_on(query_results.next()) {
+        let query_results = query_results?;
+        batches += 1;
+        transfer_count += query_results.len();
+    }
+
+    assert!(batches > 1);
+    assert_eq!(transfer_count, test_params.transfer_count);
+
+    Ok(())
+}
+
+#[test]
+fn paging_reverse() -> anyhow::Result<()> {
+    let client = test_client()?;
+    let test_params = make_paging_test_transfers(&client)?;
+
+    let query_results = get_account_transfers_paged(
+        &client,
+        tb::AccountFilter {
+            account_id: test_params.account_id1,
+            limit: 1000,
+            flags: tb::AccountFilterFlags::Debits | tb::AccountFilterFlags::Reversed,
+            ..Default::default()
+        },
+    );
+
+    pin_mut!(query_results);
+
+    let mut batches = 0;
+    let mut transfer_count = 0;
+
+    while let Some(query_results) = block_on(query_results.next()) {
+        let query_results = query_results?;
+        batches += 1;
+        transfer_count += query_results.len();
+    }
+
+    assert!(batches > 1);
+    assert_eq!(transfer_count, test_params.transfer_count);
 
     Ok(())
 }

@@ -114,6 +114,85 @@
 //! [`query_accounts`]: `Client::query_accounts`
 //! [`query_transfers`]: `Client::query_transfers`
 //!
+//! Here is an example of paging to get started with:
+//!
+//! ```no_run
+//! use tigerbeetle as tb;
+//! use futures::{stream, Stream};
+//!
+//! fn get_account_transfers_paged<'s>(
+//!     client: &'s tb::Client,
+//!     event: tb::AccountFilter,
+//! ) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + use<'s> {
+//!     assert!(
+//!         event.limit > 1,
+//!         "paged queries should use an explicit limit"
+//!     );
+//!
+//!     enum State {
+//!         Start,
+//!         Continue(u64),
+//!         End,
+//!     }
+//!
+//!     let is_reverse = event.flags.contains(tb::AccountFilterFlags::Reversed);
+//!
+//!     futures::stream::unfold(State::Start, move |state| async move {
+//!         let event = match state {
+//!             State::Start => event,
+//!             State::Continue(timestamp_begin) => {
+//!                 if !is_reverse {
+//!                     tb::AccountFilter {
+//!                         timestamp_min: timestamp_begin,
+//!                         ..event
+//!                     }
+//!                 } else {
+//!                     tb::AccountFilter {
+//!                         timestamp_max: timestamp_begin,
+//!                         ..event
+//!                     }
+//!                 }
+//!             }
+//!             State::End => return None,
+//!         };
+//!         let result_next = client.get_account_transfers(event).await;
+//!         match result_next {
+//!             Ok(result_next) => {
+//!                 let result_len = u32::try_from(result_next.len()).expect("u32");
+//!                 let must_page = result_len == event.limit;
+//!                 if must_page {
+//!                     let timestamp_first = result_next.first().expect("item").timestamp;
+//!                     let timestamp_last = result_next.last().expect("item").timestamp;
+//!                     let (timestamp_begin_next, should_continue) = if !is_reverse {
+//!                         assert!(timestamp_first < timestamp_last);
+//!                         let timestamp_begin_next = timestamp_last.checked_add(1).expect("overflow");
+//!                         assert_ne!(timestamp_begin_next, u64::max_value());
+//!                         let should_continue =
+//!                             timestamp_begin_next <= event.timestamp_max || event.timestamp_max == 0;
+//!                         (timestamp_begin_next, should_continue)
+//!                     } else {
+//!                         assert!(timestamp_first > timestamp_last);
+//!                         let timestamp_begin_next = timestamp_last.checked_sub(1).expect("overflow");
+//!                         assert_ne!(timestamp_begin_next, 0);
+//!                         let should_continue =
+//!                             timestamp_begin_next >= event.timestamp_min || event.timestamp_min == 0;
+//!                         (timestamp_begin_next, should_continue)
+//!                     };
+//!                     if should_continue {
+//!                         Some((Ok(result_next), State::Continue(timestamp_begin_next)))
+//!                     } else {
+//!                         Some((Ok(result_next), State::End))
+//!                     }
+//!                 } else {
+//!                     Some((Ok(result_next), State::End))
+//!                 }
+//!             }
+//!             Err(result_next) => Some((Err(result_next), State::End)),
+//!         }
+//!     })
+//! }
+//! ```
+//!
 //!
 //! # Concurrency and multithreading
 //!
