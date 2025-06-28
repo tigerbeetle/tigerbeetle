@@ -120,6 +120,7 @@ pub fn ReplicaReformatType(
                 .release = reformat.client.release,
                 .operation = .noop,
                 .size = @sizeOf(vsr.Header),
+                .previous_request_latency = 0,
             };
 
             const user_data = @intFromPtr(reformat);

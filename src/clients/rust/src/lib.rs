@@ -905,7 +905,7 @@ where
         user_tag: 0xABCD,
         operation: op,
         status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
-        opaque: Default::default(),
+        opaque: [0; 64],
     });
 
     (packet, rx)

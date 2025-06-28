@@ -553,7 +553,12 @@ pub const Header = extern struct {
         /// A client is allowed to have at most one request inflight at a time.
         request: u32,
         operation: Operation,
-        reserved: [59]u8 = [_]u8{0} ** 59,
+        previous_request_latency_padding: [3]u8 = [_]u8{0} ** 3,
+        /// Nanosecond interval measuring the time between when the client first began to construct
+        /// the previous request's body and the time that the client received the corresponding
+        /// reply.
+        previous_request_latency: u32,
+        reserved: [52]u8 = [_]u8{0} ** 52,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -617,6 +622,7 @@ pub const Header = extern struct {
                     // the check requires the StateMachine type.
                 },
             }
+            if (!stdx.zeroed(&self.previous_request_latency_padding)) return "padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }

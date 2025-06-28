@@ -206,6 +206,9 @@ pub fn ContextType(
         eviction_reason: ?vsr.Header.Eviction.Reason,
         thread: std.Thread,
 
+        previous_request_instant: ?stdx.Instant = null,
+        previous_request_latency: ?stdx.Duration = null,
+
         pub fn init(
             root_allocator: std.mem.Allocator,
             client_out: *ClientInterface,
@@ -509,6 +512,7 @@ pub fn ContextType(
             if (self.client.request_inflight == null) {
                 assert(self.pending.count() == 0);
                 packet.phase = .pending;
+                packet.multi_batch_time_monotonic = self.client.time.monotonic();
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
                 packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -566,6 +570,7 @@ pub fn ContextType(
 
             // Couldn't batch with existing packet so push to pending directly.
             packet.phase = .pending;
+            packet.multi_batch_time_monotonic = self.client.time.monotonic();
             packet.multi_batch_count = 1;
             packet.multi_batch_event_count = @intCast(batch.event_count);
             packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -639,6 +644,8 @@ pub fn ContextType(
             assert(reply_size_max <= constants.message_body_size_max);
 
             // Sending the request.
+            const previous_request_latency =
+                self.previous_request_latency orelse stdx.Duration{ .ns = 0 };
             message.header.* = .{
                 .release = self.client.release,
                 .client = self.client.id,
@@ -647,7 +654,15 @@ pub fn ContextType(
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @sizeOf(vsr.Header) + request_size,
+                .previous_request_latency = @intCast(@min(
+                    previous_request_latency.ns,
+                    std.math.maxInt(u32),
+                )),
             };
+
+            assert((self.previous_request_instant == null) ==
+                (self.previous_request_latency == null));
+            self.previous_request_instant = .{ .ns = packet_list.multi_batch_time_monotonic };
 
             packet_list.phase = .sent;
             self.client.raw_request(
@@ -748,6 +763,10 @@ pub fn ContextType(
             assert(packet_list.operation == @intFromEnum(operation));
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
+
+            const current_timestamp = self.client.time.monotonic_instant();
+            self.previous_request_latency =
+                current_timestamp.duration_since(self.previous_request_instant.?);
 
             // Submit the next pending packet (if any) now that VSR has completed this one.
             assert(self.client.request_inflight == null);
@@ -854,6 +873,7 @@ pub fn ContextType(
                 .user_tag = packet_extern.user_tag,
                 .status = .ok,
                 .link = .{},
+                .multi_batch_time_monotonic = 0,
                 .multi_batch_next = null,
                 .multi_batch_tail = null,
                 .multi_batch_count = 0,

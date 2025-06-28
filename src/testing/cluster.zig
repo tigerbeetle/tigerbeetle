@@ -879,6 +879,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, request_operation),
                 .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
+                .previous_request_latency = cluster.prng.int(u32),
             };
 
             client.raw_request(

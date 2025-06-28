@@ -17,11 +17,12 @@ const log = stdx.log.scoped(.client);
 pub fn ClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time: type,
+    comptime Time_: type,
 ) type {
     return struct {
         const Client = @This();
 
+        pub const Time = Time_;
         pub const StateMachine = StateMachine_;
         pub const Request = struct {
             pub const Callback = *const fn (
@@ -273,6 +274,7 @@ pub fn ClientType(
                 .command = .request,
                 .operation = .register,
                 .release = self.release,
+                .previous_request_latency = 0,
             };
 
             std.mem.bytesAsValue(
@@ -330,6 +332,7 @@ pub fn ClientType(
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
+                .previous_request_latency = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);
