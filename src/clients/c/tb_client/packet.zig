@@ -53,7 +53,6 @@ pub const Packet = extern struct {
 
     link: Queue.Link,
 
-    multi_batch_time_real: i64,
     multi_batch_time_monotonic: u64,
     multi_batch_next: ?*Packet,
     multi_batch_tail: ?*Packet,
@@ -61,7 +60,7 @@ pub const Packet = extern struct {
     multi_batch_event_count: u16,
     multi_batch_result_count_expected: u16,
     phase: Phase,
-    reserved: [17]u8 = .{0} ** 17,
+    reserved: [25]u8 = .{0} ** 25,
 
     pub fn cast(self: *Packet) *Extern {
         return @ptrCast(self);
@@ -84,7 +83,6 @@ pub const Packet = extern struct {
     pub inline fn assert_phase(packet: *const Packet, expected: Phase) void {
         assert(packet.phase == expected);
         assert(packet.data_size == 0 or packet.data != null);
-        assert((packet.multi_batch_time_real == 0) == (packet.multi_batch_time_monotonic == 0));
         assert(stdx.zeroed(&packet.reserved));
         maybe(packet.user_data == null);
         maybe(packet.user_tag == 0);
@@ -97,7 +95,6 @@ pub const Packet = extern struct {
                 assert(packet.multi_batch_count == 0);
                 assert(packet.multi_batch_event_count == 0);
                 assert(packet.multi_batch_result_count_expected == 0);
-                assert(packet.multi_batch_time_real == 0);
                 assert(packet.multi_batch_time_monotonic == 0);
             },
             .pending => {
@@ -108,7 +105,6 @@ pub const Packet = extern struct {
                 maybe(packet.multi_batch_event_count == 0);
                 maybe(packet.multi_batch_result_count_expected == 0);
                 maybe(packet.link.next == null);
-                assert(packet.multi_batch_time_real != 0);
                 assert(packet.multi_batch_time_monotonic != 0);
             },
             .batched => {
@@ -118,7 +114,6 @@ pub const Packet = extern struct {
                 assert(packet.multi_batch_event_count == 0);
                 assert(packet.multi_batch_result_count_expected == 0);
                 maybe(packet.multi_batch_next != null);
-                assert(packet.multi_batch_time_real == 0);
                 assert(packet.multi_batch_time_monotonic == 0);
             },
             .sent => {
@@ -128,7 +123,6 @@ pub const Packet = extern struct {
                 assert((packet.multi_batch_next == null) == (packet.multi_batch_tail == null));
                 maybe(packet.multi_batch_event_count == 0);
                 maybe(packet.multi_batch_result_count_expected == 0);
-                assert(packet.multi_batch_time_real != 0);
                 assert(packet.multi_batch_time_monotonic != 0);
             },
             .complete => {
