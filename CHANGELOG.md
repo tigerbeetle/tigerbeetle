@@ -3,6 +3,36 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.47
+
+Released: 2025-06-27
+
+### Safety And Performance
+
+- [#3032](https://github.com/tigerbeetle/tigerbeetle/pull/3032)
+
+  Fix ABI assertions in Rust client.
+
+- [#3039](https://github.com/tigerbeetle/tigerbeetle/pull/3039)
+
+  Swarm test different replication configurations in VOPR.
+
+### Features
+
+- [#3043](https://github.com/tigerbeetle/tigerbeetle/pull/3043)
+
+  Support `--clients` alongside `--transfer-batch-delay-us` in `tigerbeetle benchmark`.
+
+### Internals
+
+- [#3045](https://github.com/tigerbeetle/tigerbeetle/pull/3045)
+
+  Define timeouts in terms of `tick_ms`.
+
+### TigerTracks 🎧
+
+- [Wishmaster](https://www.youtube.com/watch?v=XCGQiGEYl4Y)
+
 ## TigerBeetle 0.16.46
 
 Released: 2025-06-19
