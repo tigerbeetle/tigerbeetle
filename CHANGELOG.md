@@ -19,6 +19,10 @@ Released: 2025-06-27
 
 ### Features
 
+- [#3038](https://github.com/tigerbeetle/tigerbeetle/pull/3038)
+
+  Add `client_request_round_trip` metric to track end-to-end client request latency.
+
 - [#3043](https://github.com/tigerbeetle/tigerbeetle/pull/3043)
 
   Support `--clients` alongside `--transfer-batch-delay-us` in `tigerbeetle benchmark`.
