@@ -292,7 +292,7 @@ pub fn TracerType(comptime Time: type) type {
 
             tracer.timing(event_timing, event_duration.microseconds());
 
-            tracer.write_stop(stack, event_duration);
+            tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
         }
 
         pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
@@ -300,10 +300,10 @@ pub fn TracerType(comptime Time: type) type {
             const cardinality = EventTracing.stack_limits.get(event_tag);
             const event_end = tracer.time.monotonic_instant();
             for (stack_base..stack_base + cardinality) |stack| {
-                if (tracer.events_started[stack]) |event_start| {
+                if (tracer.events_started[stack]) |_| {
                     log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
 
-                    const event_duration = event_end.duration_since(event_start);
+                    const event_duration = event_end.duration_since(tracer.time_start);
 
                     tracer.events_started[stack] = null;
                     tracer.write_stop(@intCast(stack), event_duration);
@@ -418,7 +418,7 @@ test "trace json" {
         \\[
         \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
         \\{"pid":0,"tid":7,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":7,"ph":"E","ts":20000},
+        \\{"pid":0,"tid":7,"ph":"E","ts":30000},
         \\{"pid":0,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);
