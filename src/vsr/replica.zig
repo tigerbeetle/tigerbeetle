@@ -94,6 +94,8 @@ pub const CommitStage = union(enum) {
     prefetch,
     /// Ensure that the ClientReplies has at least one Write available.
     reply_setup,
+    /// Primary delays committing as backpressure, to allow backups to catch up.
+    stall,
     /// Execute state machine logic.
     execute,
     /// Every vsr_checkpoint_ops, mark the current checkpoint as durable.
@@ -114,6 +116,9 @@ const Prepare = struct {
 
     /// Unique prepare_ok messages for the same view, op number and checksum from ALL replicas.
     ok_from_all_replicas: QuorumCounter = quorum_counter_null,
+
+    /// Minimum commit_min of any replica which acked this prepare.
+    commit_min_min: u64 = std.math.maxInt(u64),
 
     /// Whether a quorum of prepare_ok messages has been received for this prepare.
     ok_quorum_received: bool = false,
@@ -572,6 +577,11 @@ pub fn ReplicaType(
         /// The number of ticks before checking whether we are ready to begin an upgrade.
         /// (status=normal primary)
         upgrade_timeout: Timeout,
+
+        /// The number of ticks until we resume committing.
+        /// The tick count is dynamic, based on how far behind the backups are.
+        /// (commit_stage=stall)
+        commit_stall_timeout: Timeout,
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the replica's index number.
@@ -1383,6 +1393,12 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 10_000 / constants.tick_ms,
                 },
+                .commit_stall_timeout = Timeout{
+                    .name = "commit_stall_timeout",
+                    .id = replica_index,
+                    // (`after` will be adjusted at runtime each time before it is started.)
+                    .after = 10 / constants.tick_ms,
+                },
                 .prng = stdx.PRNG.from_seed(replica_index),
 
                 .trace = self.trace,
@@ -1496,6 +1512,7 @@ pub fn ReplicaType(
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
                 .{ &self.trace_emit_timeout, on_trace_emit_timeout },
+                .{ &self.commit_stall_timeout, on_commit_stall_timeout },
             };
 
             inline for (timeouts) |timeout| {
@@ -2118,6 +2135,11 @@ pub fn ReplicaType(
                     self.primary_abdicate_timeout.reset();
                 }
             }
+
+            prepare.commit_min_min = @min(
+                prepare.commit_min_min,
+                message.header.commit_min,
+            );
 
             const count = self.count_message_and_receive_quorum_exactly_once(
                 &prepare.ok_from_all_replicas,
@@ -3856,6 +3878,13 @@ pub fn ReplicaType(
             }
         }
 
+        fn on_commit_stall_timeout(self: *Replica) void {
+            assert(self.commit_stage == .stall);
+
+            self.commit_stall_timeout.stop();
+            self.commit_dispatch_resume();
+        }
+
         fn primary_receive_do_view_change(
             self: *Replica,
             message: *Message.DoViewChange,
@@ -4189,7 +4218,7 @@ pub fn ReplicaType(
 
             if (self.syncing == .canceling_commit) {
                 switch (self.commit_stage) {
-                    .start, .reply_setup, .checkpoint_data, .checkpoint_superblock => {
+                    .start, .reply_setup, .stall, .checkpoint_data, .checkpoint_superblock => {
                         self.sync_dispatch(.canceling_grid);
                         return;
                     },
@@ -4234,6 +4263,17 @@ pub fn ReplicaType(
                 }
 
                 if (self.commit_stage == .reply_setup) {
+                    self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
+                    self.commit_stage = .stall;
+                    self.trace.start(.{ .replica_commit = .{
+                        .stage = self.commit_stage,
+                        .op = self.commit_prepare.?.header.op,
+                    } });
+
+                    if (self.commit_stall() == .pending) return;
+                }
+
+                if (self.commit_stage == .stall) {
                     self.trace.stop(.{ .replica_commit = .{ .stage = self.commit_stage } });
                     self.commit_stage = .execute;
                     self.trace.start(.{ .replica_commit = .{
@@ -4561,6 +4601,47 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
             assert(self.client_replies.writes.available() > 0);
             return self.commit_dispatch_resume();
+        }
+
+        fn commit_stall(self: *Replica) enum { ready, pending } {
+            assert(self.commit_stage == .stall);
+            assert(!self.commit_stall_timeout.ticking);
+            assert(self.commit_prepare.?.header.op == self.commit_min + 1);
+
+            if (self.status == .normal and self.primary()) {
+                const prepare = self.pipeline.queue.prepare_queue.head_ptr().?;
+                assert(prepare.message == self.commit_prepare.?);
+
+                const prepare_ok_count = prepare.ok_from_all_replicas.count();
+                assert(prepare_ok_count >= self.quorum_replication);
+
+                const commit_lag = self.commit_min - prepare.commit_min_min;
+
+                if (prepare_ok_count < self.replica_count or
+                    constants.pipeline_prepare_queue_max < commit_lag)
+                {
+                    log.debug("{}: commit_stall op={} (oks={b} commit_lag={})", .{
+                        self.replica,
+                        prepare.message.header.op,
+                        prepare.ok_from_all_replicas.bits,
+                        commit_lag,
+                    });
+                    // "Stall 10ms for every 200 commits lagged, but no more than 30ms".
+                    // TODO Once repair+sync is faster, we can reduce the stall duration.
+                    // TODO Choose the growth rate in a more principled way. This current
+                    // configuration does seem to allow lagged replicas to recover automatically.
+                    // It also reduced the chance of normal operations leading to lagged replicas,
+                    // but it still happens sometimes.
+                    const stall_ms = std.math.clamp((commit_lag * 10) / 200, 10, 30);
+                    self.commit_stall_timeout.after = stall_ms / constants.tick_ms;
+                    self.commit_stall_timeout.start();
+                    return .pending;
+                } else {
+                    return .ready;
+                }
+            } else {
+                return .ready;
+            }
         }
 
         fn commit_execute(self: *Replica) void {
@@ -8224,7 +8305,7 @@ pub fn ReplicaType(
                         .epoch = header.epoch,
                         .view = self.view,
                         .op = header.op,
-                        .commit = header.commit,
+                        .commit_min = self.commit_min,
                         .timestamp = header.timestamp,
                         .operation = header.operation,
                     }),
@@ -9805,6 +9886,7 @@ pub fn ReplicaType(
                 // Uninterruptible states:
                 .start,
                 .reply_setup,
+                .stall,
                 .checkpoint_data,
                 .checkpoint_superblock,
                 => self.sync_dispatch(.canceling_commit),
@@ -11453,7 +11535,6 @@ const PipelineQueue = struct {
         // A prepare may be committed in the same view or in a newer view:
         assert(prepare.message.header.view <= ok.header.view);
         assert(prepare.message.header.op == ok.header.op);
-        assert(prepare.message.header.commit == ok.header.commit);
         assert(prepare.message.header.timestamp == ok.header.timestamp);
         assert(prepare.message.header.operation == ok.header.operation);
         assert(prepare.message.header.checkpoint_id == ok.header.checkpoint_id);
