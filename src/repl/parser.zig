@@ -293,7 +293,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -313,7 +313,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,
@@ -889,7 +889,7 @@ test "parser.zig: Parser account filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .get_account_transfers,
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -967,7 +967,7 @@ test "parser.zig: Parser query filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .query_transfers,
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,

@@ -46,10 +46,10 @@ const statsd_line_size_max = line_size_max: {
                 struct_size_max(EventTimingInner.type),
             ),
             .values = .{
-                .duration_min_us = std.math.maxInt(EventTimingAggregate.ValueType),
-                .duration_max_us = std.math.maxInt(EventTimingAggregate.ValueType),
-                .duration_sum_us = std.math.maxInt(EventTimingAggregate.ValueType),
-                .count = std.math.maxInt(EventTimingAggregate.ValueType),
+                .duration_min = .{ .ns = std.math.maxInt(u64) },
+                .duration_max = .{ .ns = std.math.maxInt(u64) },
+                .duration_sum = .{ .ns = std.math.maxInt(u64) },
+                .count = std.math.maxInt(u64),
             },
         };
     }
@@ -331,11 +331,11 @@ fn format_metric(
         .metric => |data| .{ "", "g", data.aggregate.value },
         .timing => |data| switch (data.stat) {
             .count => .{ "_us.count", "c", data.aggregate.values.count },
-            .sum => .{ "_us.sum", "c", data.aggregate.values.duration_sum_us },
-            .min => .{ "_us.min", "g", data.aggregate.values.duration_min_us },
-            .max => .{ "_us.max", "g", data.aggregate.values.duration_max_us },
+            .sum => .{ "_us.sum", "c", data.aggregate.values.duration_sum.us() },
+            .min => .{ "_us.min", "g", data.aggregate.values.duration_min.us() },
+            .max => .{ "_us.max", "g", data.aggregate.values.duration_max.us() },
             .avg => .{ "_us.avg", "g", @divFloor(
-                data.aggregate.values.duration_sum_us,
+                data.aggregate.values.duration_sum.us(),
                 data.aggregate.values.count,
             ) },
         },
