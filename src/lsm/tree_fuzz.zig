@@ -400,7 +400,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }
         }
 
-        fn compact_callback(pool: *ResourcePool, _: u64) void {
+        fn compact_callback(pool: *ResourcePool, _: u16, _: u64) void {
             const env: *Environment = @fieldParentPtr("pool", pool);
             env.change_state(.tree_compact, .fuzzing);
         }

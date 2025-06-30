@@ -68,12 +68,9 @@ pub const compaction_tables_output_max = compaction_tables_input_max;
 
 /// The minimum number of blocks required for a single beat of a single compaction.
 ///
-/// Counterintuitively, this number isn't 6 (one value and index block for the two input tables and
-/// one output table). Instead it is:
+/// Compaction needs to carry over the output index block and all input blocks to the next beat:
 /// One index and one value block for the output table, one index block for the two input tables,
 /// and `lsm_compaction_queue_read_max/2` value blocks for the two input tables.
-///
-/// The reason is that we carry over the output index block and all input blocks to the next beat.
 pub const compaction_block_count_beat_min: u32 =
     (1 + 1) + (1 + 1) + constants.lsm_compaction_queue_read_max;
 
@@ -404,7 +401,7 @@ pub fn CompactionType(
         // Beat-scoped fields:
         // ------------------
         pool: ?*ResourcePool = null,
-        callback: ?*const fn (*ResourcePool, u64) void = null,
+        callback: ?*const fn (*ResourcePool, u16, u64) void = null,
 
         grid_reservation: ?Grid.Reservation = null,
         table_builder_value_block: ?*ResourcePool.Block = null,
@@ -838,7 +835,7 @@ pub fn CompactionType(
         pub fn beat_commence(
             compaction: *Compaction,
             options: struct {
-                callback: *const fn (*ResourcePool, u64) void,
+                callback: *const fn (*ResourcePool, u16, u64) void,
                 values_count: u64,
             },
         ) enum { active, ceased } {
@@ -971,7 +968,7 @@ pub fn CompactionType(
                 compaction.quotas.beat,
                 compaction.quotas.bar,
             });
-            callback(pool, values_in * @sizeOf(Value));
+            callback(pool, compaction.tree.config.id, values_in);
         }
 
         // Compaction is a lot of work: read input tables from both levels, merge their value

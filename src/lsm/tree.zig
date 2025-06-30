@@ -37,13 +37,14 @@ pub const TreeConfig = struct {
 
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     const Key = TreeTable.Key;
-    const Value = TreeTable.Value;
     const tombstone = TreeTable.tombstone;
 
     return struct {
         const Tree = @This();
 
         pub const Table = TreeTable;
+        pub const Value = Table.Value;
+
         pub const TableMemory = @import("table_memory.zig").TableMemoryType(Table);
         pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
