@@ -169,7 +169,7 @@ The CDC job requires TigerBeetle cluster version `0.16.43` or greater.
 
 The same [upgrade planning](./upgrading.md#planning-for-upgrades) recommended for clients applies
 to the CDC job. The CDC job version must not be newer than the cluster version, as it will fail
-with an error message if it is.
+with an error message if so.
 
 Any transactions _originally_ created by TigerBeetle versions before `0.16.29` have the following
 limitations for CDC processing:

@@ -4998,7 +4998,6 @@ fn ChangeEventsScanLookupType(
                     .former => |former| if (former.dr_account_id == 0 or
                         former.cr_account_id == 0)
                     {
-                        assert(former.timestamp > 0);
                         continue;
                     },
                 }
@@ -7740,15 +7739,18 @@ test "get_change_events" {
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
         \\ commit create_accounts
 
         // First phase.
-        \\ transfer   T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _ _ _ ok // Not pending.
-        \\ transfer   T2 A1 A2   11   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Timeout zero will never expire.
-        \\ transfer   T3 A1 A2   12   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will expire.
-        \\ transfer   T4 A1 A2   13   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will be posted.
-        \\ transfer   T5 A1 A2   14   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _ _   _ _ _ ok // Will be voided.
-        \\ transfer   T6 A1 A3    0   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ _ CCR _ _ ok // Closes the credit account.
+        \\ transfer   T1 A1 A2   10   _  _  _  _    _ L1 C1   _   _   _   _   _   _  _   _   _ _ _ ok // Not pending.
+        \\ transfer   T2 A1 A2   11   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ ok // Timeout zero will never expire.
+        \\ transfer   T3 A1 A2   12   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ ok // Will expire.
+        \\ transfer   T4 A1 A2   13   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ ok // Will be posted.
+        \\ transfer   T5 A1 A2   14   _  _  _  _    2 L1 C1   _ PEN   _   _   _   _  _   _   _ _ _ ok // Will be voided.
+        // Closes the debit and credit accounts.
+        \\ transfer   T6 A3 A1    0   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _ CDR   _ _ _ ok
+        \\ transfer   T7 A1 A4    0   _  _  _  _    0 L1 C1   _ PEN   _   _   _   _  _   _ CCR _ _ ok
         \\ commit create_transfers
 
         // Bump the state machine time in +1s for testing the timeout expiration.
@@ -7757,6 +7759,9 @@ test "get_change_events" {
         // Second phase.
         \\ transfer  T14 A0 A0   -0  T4  _  _  _    _ L0 C0   _   _ POS   _   _   _  _ _ _ _ _ ok // Posts T4.
         \\ transfer  T15 A0 A0    0  T5  _  _  _    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ ok // Voids T5.
+        // Reopens the debit and credit accounts.
+        \\ transfer  T16 A0 A0    0  T6  _  _  _    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ ok
+        \\ transfer  T17 A0 A0    0  T7  _  _  _    _ L0 C0   _   _   _ VOI   _   _  _ _ _ _ _ ok
         \\ commit create_transfers
 
         // Check the events.
@@ -7769,10 +7774,13 @@ test "get_change_events" {
         \\ commit get_change_events
         \\
         \\ get_change_events T6 _ -0
-        \\ get_change_events_result PEN  T6  0  _ D1 50 10  0  0 _ C3  0  0  0  0 CLSD
-        \\ get_change_events_result EXP   _ 12 T3 D1 38 10  0  0 _ C2  0  0 38 10 _
-        \\ get_change_events_result POS T14 13 T4 D1 25 23  0  0 _ C2  0  0 25 23 _
-        \\ get_change_events_result VOI T15 14 T5 D1 11 23  0  0 _ C2  0  0 11 23 _
+        \\ get_change_events_result PEN  T6  0  _ D3  0  0  0  0 CLSD A1 50 10  0  0 _
+        \\ get_change_events_result PEN  T7  0  _ D1 50 10  0  0    _ C4  0  0  0  0 CLSD
+        \\ get_change_events_result EXP   _ 12 T3 D1 38 10  0  0    _ C2  0  0 38 10 _
+        \\ get_change_events_result POS T14 13 T4 D1 25 23  0  0    _ C2  0  0 25 23 _
+        \\ get_change_events_result VOI T15 14 T5 D1 11 23  0  0    _ C2  0  0 11 23 _
+        \\ get_change_events_result VOI T16  0 T6 D3  0  0  0  0    _ C1 11 23  0  0 _
+        \\ get_change_events_result VOI T17  0 T7 D1 11 23  0  0    _ C4  0  0  0  0 _
         \\ commit get_change_events
     );
 }
