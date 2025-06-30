@@ -94,7 +94,7 @@ const CLIArgs = union(enum) {
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
         /// log consisting of logged requests. Much like a redis AOF with fsync=on.
         /// Enabling this will have performance implications.
-        aof: bool = false,
+        aof: ?[:0]const u8 = null,
     };
 
     const Version = struct {
@@ -494,7 +494,7 @@ pub const Command = union(enum) {
         experimental: bool,
         replicate_closed_loop: bool,
         replicate_star: bool,
-        aof: bool,
+        aof: ?[:0]const u8,
         path: [:0]const u8,
         log_debug: bool,
         statsd: ?std.net.Address,
@@ -912,6 +912,12 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
                 vsr.stdx.fmt_int_size_bin_exact(constants.block_size),
             },
         );
+    }
+
+    if (start.aof) |aof_path| {
+        if (!std.mem.endsWith(u8, aof_path, ".aof")) {
+            vsr.fatal(.cli, "AOF path must end with .aof: '{s}'", .{aof_path});
+        }
     }
 
     const lsm_forest_compaction_block_count: u32 =
