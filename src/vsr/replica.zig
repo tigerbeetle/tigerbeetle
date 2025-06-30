@@ -4983,8 +4983,10 @@ pub fn ReplicaType(
                 if (self.clock.realtime_synchronized()) |realtime| {
                     maybe(realtime < self.commit_prepare.?.header.timestamp);
 
-                    break :blk @as(u64, @intCast(realtime)) -|
-                        self.commit_prepare.?.header.timestamp;
+                    break :blk @divFloor(
+                        @as(u64, @intCast(realtime)) -| self.commit_prepare.?.header.timestamp,
+                        std.time.ns_per_us,
+                    );
                 } else {
                     break :blk 0;
                 }
@@ -5208,8 +5210,11 @@ pub fn ReplicaType(
                         if (self.clock.realtime_synchronized()) |realtime| {
                             maybe(realtime < self.commit_prepare.?.header.timestamp);
 
-                            break :blk @as(u64, @intCast(realtime)) -|
-                                self.commit_prepare.?.header.timestamp;
+                            break :blk @divFloor(
+                                @as(u64, @intCast(realtime)) -|
+                                    self.commit_prepare.?.header.timestamp,
+                                std.time.ns_per_us,
+                            );
                         } else {
                             break :blk 0;
                         }
