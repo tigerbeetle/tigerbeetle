@@ -13,8 +13,6 @@ comptime {
     assert(constants.storage_size_limit_max == tigerbeetle_config.process.storage_size_limit_max);
 }
 
-const MiB = 1024 * 1024;
-
 pub const std_options: std.Options = .{
     .log_level = .info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
@@ -59,9 +57,28 @@ const CLIArgs = struct {
 
 pub fn main() !void {
     fuzz.limit_ram();
-    probe_stack(3 * MiB);
 
     var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    // Disable "hint" argument for mmap call, which was observed to cause stack overflow.
+    // See https://ziggit.dev/t/stack-probe-puzzle/10291/3 for the full story.
+    gpa_allocator.backing_allocator = .{
+        .ptr = std.heap.page_allocator.ptr,
+        .vtable = &comptime .{
+            .alloc = struct {
+                fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+                    @atomicStore(
+                        @TypeOf(std.heap.next_mmap_addr_hint),
+                        &std.heap.next_mmap_addr_hint,
+                        null,
+                        .monotonic,
+                    );
+                    return std.heap.page_allocator.vtable.alloc(ctx, len, ptr_align, ret_addr);
+                }
+            }.alloc,
+            .resize = std.heap.page_allocator.vtable.resize,
+            .free = std.heap.page_allocator.vtable.free,
+        },
+    };
     const gpa = gpa_allocator.allocator();
 
     var args = try std.process.argsWithAllocator(gpa);
@@ -77,27 +94,6 @@ pub fn main() !void {
         },
         else => try main_single(gpa, cli_args),
     }
-}
-
-// See https://ziggit.dev/t/stack-probe-puzzle/10291 for the full story of why this is here.
-//
-// TL;DR: on CFO, we observed forest_fuzz segfaulting in the stack probe, despite using only
-// half a MiB of stack, because, for some reason, a heap allocation was mmapped into the stack
-// region. The root cause of this is unclear. It looks like `forest_fuzz` does a lot of mmap/munmap
-// when simulating crash/restart, and that somehow confuses the kernel into picking a wrong address
-// for mmap. As a work-around, we eagerly probe the stack at the start.
-//
-// If you are from the future, consider removing this and seeing if the issue reproduces. Chances
-// are a kernel upgrade can fix it? The CFO kernel at the time of writing is 6.1.0-25-amd64.
-noinline fn probe_stack(comptime size: usize) void {
-    var big: [size]u8 = undefined;
-    touch(&big);
-    assert(big[0] == 92 and big[size - 1] == 92);
-}
-
-noinline fn touch(slice: []u8) void {
-    slice[0] = 92;
-    slice[slice.len - 1] = 92;
 }
 
 fn main_smoke(gpa: std.mem.Allocator) !void {
