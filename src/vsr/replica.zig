@@ -1555,6 +1555,9 @@ pub fn ReplicaType(
                     assert(request_header.client != 0 or constants.aof_recovery);
                 }
 
+                self.trace.count(.{ .replica_messages_in = .{
+                    .command = message.header.command,
+                } }, 1);
                 self.on_message(message);
             }
 
@@ -1606,7 +1609,6 @@ pub fn ReplicaType(
                 @tagName(self.status),
                 message.header,
             });
-            self.trace.count(.{ .replica_messages_in = .{ .command = message.header.command } }, 1);
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: on_message: invalid (command={}, {s})", .{

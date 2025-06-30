@@ -102,7 +102,7 @@ const packet_count_max = stdx.div_ceil(
 comptime {
     // Sanity-check:
     assert(packet_count_max > 0);
-    assert(packet_count_max < 557);
+    assert(packet_count_max < 564);
 }
 
 pub const StatsD = struct {
