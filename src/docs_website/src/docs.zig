@@ -174,7 +174,7 @@ fn run_pandoc(
 ) std.Build.LazyPath {
     const pandoc_step = std.Build.Step.Run.create(b, "run pandoc");
     pandoc_step.addFileArg(pandoc_bin);
-    pandoc_step.addArgs(&.{ "--from", "gfm+smart", "--to", "html5" });
+    pandoc_step.addArgs(&.{ "--from", "gfm+smart-tex_math_dollars", "--to", "html5" });
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/markdown-links.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/anchor-links.lua"));
     pandoc_step.addPrefixedFileArg("--lua-filter=", b.path("pandoc/table-wrapper.lua"));
