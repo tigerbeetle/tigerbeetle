@@ -138,6 +138,17 @@ fn main_inspect(
 }
 
 fn inspect_constants(output: std.io.AnyWriter) !void {
+    try output.print("VSR:\n", .{});
+    try print_header(output, 0, "prepare_queue");
+    try output.print("{}\n", .{constants.pipeline_prepare_queue_max});
+    try print_header(output, 0, "request_queue");
+    try output.print("{}\n", .{constants.pipeline_request_queue_max});
+    try print_header(output, 0, "prepare_cache");
+    try output.print("{}\n", .{
+        constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max,
+    });
+    try output.print("\n", .{});
+
     try output.print("Data File Layout:\n", .{});
     inline for (comptime std.enums.values(vsr.Zone)) |zone| {
         try print_header(output, 0, @tagName(zone));
