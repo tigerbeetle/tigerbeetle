@@ -162,3 +162,21 @@ However, during crash recovery, the CDC job may replay unacknowledged messages t
 been already delivered to consumers.
 
 It is the consumer's responsibility to perform **idempotency checks** when processing messages.
+
+## Upgrading
+
+The CDC job requires TigerBeetle cluster version `0.16.43` or greater.
+
+The same [upgrade planning](./upgrading.md#planning-for-upgrades) recommended for clients applies
+to the CDC job. The CDC job version must not be newer than the cluster version, as it will fail
+with an error message if so.
+
+Any transactions _originally_ created by TigerBeetle versions before `0.16.29` have the following
+limitations for CDC processing:
+
+- Events of type `two_phase_expired` are **not** supported.
+- Only transfers where both the debit and credit accounts have the
+  [`flags.history`](../reference/account.md#flagshistory) enabled are visible to CDC.
+
+Transactions committed after version `0.16.29` are fully compatible with CDC and do not require
+the `history` flag.

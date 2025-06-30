@@ -17,6 +17,12 @@ Released: 2025-06-27
 
   Swarm test different replication configurations in VOPR.
 
+- [#3053](https://github.com/tigerbeetle/tigerbeetle/pull/3053)
+
+  Supports CDC processing for transfers created by versions earlier than `0.16.29`.
+  Fixes a liveness bug that would crash the replicar if a CDC query encountered objects
+  created with a schema before [#2507](https://github.com/tigerbeetle/tigerbeetle/pull/2507).
+
 ### Features
 
 - [#3038](https://github.com/tigerbeetle/tigerbeetle/pull/3038)
@@ -27,11 +33,19 @@ Released: 2025-06-27
 
   Support `--clients` alongside `--transfer-batch-delay-us` in `tigerbeetle benchmark`.
 
+- [#3056](https://github.com/tigerbeetle/tigerbeetle/pull/3056)
+
+  The command `tigerbeetle inspect constants` prints VSR queue sizes.
+
 ### Internals
 
 - [#3045](https://github.com/tigerbeetle/tigerbeetle/pull/3045)
 
   Define timeouts in terms of `tick_ms`.
+
+- [#3042](https://github.com/tigerbeetle/tigerbeetle/pull/3042)
+
+  Disable "hint" argument for mmap call, which was observed to cause stack overflow.
 
 ### TigerTracks 🎧
 
