@@ -403,6 +403,56 @@ pub fn StateMachineType(
             transfer_pending_status: TransferPendingStatus,
             reserved: [11]u8 = [_]u8{0} ** 11,
 
+            /// Previous schema before the changes introduced by PR #2507.
+            const Former = extern struct {
+                dr_account_id: u128,
+                dr_debits_pending: u128,
+                dr_debits_posted: u128,
+                dr_credits_pending: u128,
+                dr_credits_posted: u128,
+                cr_account_id: u128,
+                cr_debits_pending: u128,
+                cr_debits_posted: u128,
+                cr_credits_pending: u128,
+                cr_credits_posted: u128,
+                timestamp: u64 = 0,
+                reserved: [88]u8 = [_]u8{0} ** 88,
+
+                comptime {
+                    assert(stdx.no_padding(Former));
+                    assert(@sizeOf(Former) == @sizeOf(AccountEvent));
+                    assert(@alignOf(Former) == @alignOf(AccountEvent));
+                }
+            };
+
+            /// Checks the object and returns whether it was created
+            /// using the current or the former schema.
+            fn schema(self: *const AccountEvent) union(enum) {
+                current,
+                former: *const AccountEvent.Former,
+            } {
+                const former: *const AccountEvent.Former = @ptrCast(self);
+                if (stdx.zeroed(&former.reserved)) {
+                    // Only accounts with `flags.history == true` are stored.
+                    maybe(former.dr_account_id == 0);
+                    maybe(former.cr_account_id == 0);
+
+                    return .{ .former = former };
+                }
+
+                assert(self.dr_account_timestamp != 0);
+                assert(self.dr_account_id != 0);
+                assert(self.cr_account_timestamp != 0);
+                assert(self.cr_account_id != 0);
+                assert(self.ledger != 0);
+                switch (self.transfer_pending_status) {
+                    .none, .pending => assert(self.transfer_pending_id == 0),
+                    .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
+                }
+                assert(stdx.zeroed(&self.reserved));
+                return .current;
+            }
+
             comptime {
                 assert(stdx.no_padding(AccountEvent));
                 assert(@sizeOf(AccountEvent) == 256);
@@ -438,7 +488,7 @@ pub fn StateMachineType(
             Storage,
         );
 
-        const AccountEventsScanLookup = AccountEventsScanLookupType(AccountEventsGroove, Storage);
+        const ChangeEventsScanLookup = ChangeEventsScanLookupType(AccountEventsGroove, Storage);
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
             if (operation == .pulse) return .pulse;
@@ -767,7 +817,7 @@ pub fn StateMachineType(
             accounts: AccountsScanLookup,
             account_balances: AccountBalancesScanLookup,
             expire_pending_transfers: ExpirePendingTransfers.ScanLookup,
-            account_events: AccountEventsScanLookup,
+            change_events: ChangeEventsScanLookup,
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
@@ -2294,7 +2344,7 @@ pub fn StateMachineType(
             });
 
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
-            if (self.get_scan_from_event_filter(filter)) |scan_lookup| {
+            if (self.get_scan_from_change_events_filter(filter)) |scan_lookup| {
                 assert(self.forest.scan_buffer_pool.scan_buffer_used > 0);
 
                 const scan_buffer = stdx.bytes_as_slice(
@@ -2358,10 +2408,10 @@ pub fn StateMachineType(
         }
 
         fn prefetch_get_change_events_scan_callback(
-            scan_lookup: *AccountEventsScanLookup,
+            scan_lookup: *ChangeEventsScanLookup,
             results: []const AccountEvent,
         ) void {
-            const self: *StateMachine = ScanLookup.parent(.account_events, scan_lookup);
+            const self: *StateMachine = ScanLookup.parent(.change_events, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_change_events);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
@@ -2376,22 +2426,37 @@ pub fn StateMachineType(
 
             if (results.len == 0) return self.prefetch_finish();
 
+            const accounts: *AccountsGroove = &self.forest.grooves.accounts;
+            const transfers: *TransfersGroove = &self.forest.grooves.transfers;
             for (results) |result| {
-                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
-                    result.dr_account_timestamp,
-                );
-                self.forest.grooves.accounts.prefetch_enqueue_by_timestamp(
-                    result.cr_account_timestamp,
-                );
-                if (result.transfer_pending_status == .expired) {
-                    // For expiry events, the timestamp isn't associated with any transfer.
-                    // Instead, the original pending transfer is prefetched.
-                    self.forest.grooves.transfers.prefetch_enqueue(result.transfer_pending_id);
-                } else {
-                    self.forest.grooves.transfers.prefetch_enqueue_by_timestamp(result.timestamp);
+                switch (result.schema()) {
+                    .current => {
+                        assert(result.dr_account_timestamp != 0);
+                        assert(result.cr_account_timestamp != 0);
+
+                        accounts.prefetch_enqueue_by_timestamp(result.dr_account_timestamp);
+                        accounts.prefetch_enqueue_by_timestamp(result.cr_account_timestamp);
+                        if (result.transfer_pending_status == .expired) {
+                            // For expiry events, the timestamp isn't associated with any transfer.
+                            // Instead, the original pending transfer is prefetched.
+                            assert(result.transfer_pending_id != 0);
+                            transfers.prefetch_enqueue(result.transfer_pending_id);
+                        } else {
+                            transfers.prefetch_enqueue_by_timestamp(result.timestamp);
+                        }
+                    },
+                    .former => |former| {
+                        assert(former.dr_account_id != 0);
+                        assert(former.cr_account_id != 0);
+
+                        accounts.prefetch_enqueue(former.dr_account_id);
+                        accounts.prefetch_enqueue(former.cr_account_id);
+                        transfers.prefetch_enqueue_by_timestamp(former.timestamp);
+                    },
                 }
             }
-            self.forest.grooves.accounts.prefetch(
+
+            accounts.prefetch(
                 prefetch_get_change_events_callback_accounts,
                 self.prefetch_context.get(.accounts),
             );
@@ -2436,10 +2501,10 @@ pub fn StateMachineType(
             return filter;
         }
 
-        fn get_scan_from_event_filter(
+        fn get_scan_from_change_events_filter(
             self: *StateMachine,
             filter: *const ChangeEventsFilter,
-        ) ?*AccountEventsScanLookup {
+        ) ?*ChangeEventsScanLookup {
             assert(self.forest.scan_buffer_pool.scan_buffer_used == 0);
 
             const filter_valid =
@@ -2465,7 +2530,7 @@ pub fn StateMachineType(
             };
             assert(timestamp_range.min <= timestamp_range.max);
 
-            const scan_lookup: *AccountEventsScanLookup = self.scan_lookup.get(.account_events);
+            const scan_lookup: *ChangeEventsScanLookup = self.scan_lookup.get(.change_events);
             scan_lookup.init(
                 &self.forest.grooves.account_events.objects,
                 self.forest.scan_buffer_pool.acquire_assume_capacity(),
@@ -3345,111 +3410,191 @@ pub fn StateMachineType(
             for (scan_results) |*result| {
                 assert(TimestampRange.valid(result.timestamp));
                 assert(result.dr_account_id != result.cr_account_id);
-
-                // Getting the transfer by `timestamp`,
-                // except for expiries where there is no transfer associated with the timestamp.
-                const transfer: Transfer = switch (result.transfer_pending_status) {
-                    .none,
-                    .pending,
-                    .posted,
-                    .voided,
-                    => switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
-                        .found_object => |t| t,
-                        .found_orphaned_id, .not_found => unreachable,
-                    },
-                    .expired => self.get_transfer(result.transfer_pending_id).?,
-                };
-                const dr_account = self.get_account(result.dr_account_id).?;
-                const cr_account = self.get_account(result.cr_account_id).?;
-                assert(transfer.debit_account_id == dr_account.id);
-                assert(transfer.credit_account_id == cr_account.id);
-                assert(transfer.ledger == result.ledger);
-                assert(dr_account.ledger == result.ledger);
-                assert(cr_account.ledger == result.ledger);
-
-                const event_type: ChangeEventType = event_type: {
-                    switch (result.transfer_pending_status) {
-                        .none => {
-                            assert(transfer.timestamp == result.timestamp);
-                            assert(!transfer.flags.pending);
-                            assert(!transfer.flags.post_pending_transfer);
-                            assert(!transfer.flags.void_pending_transfer);
-                            assert(transfer.pending_id == 0);
-                            break :event_type .single_phase;
-                        },
-                        .pending => {
-                            assert(transfer.timestamp == result.timestamp);
-                            assert(transfer.flags.pending);
-                            assert(transfer.pending_id == 0);
-                            break :event_type .two_phase_pending;
-                        },
-                        .posted => {
-                            assert(transfer.timestamp == result.timestamp);
-                            assert(transfer.flags.post_pending_transfer);
-                            assert(transfer.pending_id == result.transfer_pending_id);
-                            break :event_type .two_phase_posted;
-                        },
-                        .voided => {
-                            assert(transfer.timestamp == result.timestamp);
-                            assert(transfer.flags.void_pending_transfer);
-                            assert(transfer.pending_id == result.transfer_pending_id);
-                            break :event_type .two_phase_voided;
-                        },
-                        .expired => {
-                            assert(transfer.flags.pending);
-                            assert(transfer.id == result.transfer_pending_id);
-                            assert(transfer.timeout > 0);
-                            assert(transfer.timestamp < result.timestamp);
-                            break :event_type .two_phase_expired;
-                        },
-                    }
-                };
-
-                output_slice[output_count] = .{
-                    .transfer_id = transfer.id,
-                    .transfer_amount = result.amount,
-                    .transfer_pending_id = transfer.pending_id,
-                    .transfer_user_data_128 = transfer.user_data_128,
-                    .transfer_user_data_64 = transfer.user_data_64,
-                    .transfer_user_data_32 = transfer.user_data_32,
-                    .transfer_timeout = transfer.timeout,
-
-                    .ledger = result.ledger,
-                    .transfer_code = transfer.code,
-                    .transfer_flags = transfer.flags,
-                    .type = event_type,
-
-                    .debit_account_id = dr_account.id,
-                    .debit_account_debits_pending = result.dr_debits_pending,
-                    .debit_account_debits_posted = result.dr_debits_posted,
-                    .debit_account_credits_pending = result.dr_credits_pending,
-                    .debit_account_credits_posted = result.dr_credits_posted,
-                    .debit_account_user_data_128 = dr_account.user_data_128,
-                    .debit_account_user_data_64 = dr_account.user_data_64,
-                    .debit_account_user_data_32 = dr_account.user_data_32,
-                    .debit_account_code = dr_account.code,
-                    .debit_account_flags = dr_account.flags,
-
-                    .credit_account_id = cr_account.id,
-                    .credit_account_debits_pending = result.cr_debits_pending,
-                    .credit_account_debits_posted = result.cr_debits_posted,
-                    .credit_account_credits_pending = result.cr_credits_pending,
-                    .credit_account_credits_posted = result.cr_credits_posted,
-                    .credit_account_user_data_128 = cr_account.user_data_128,
-                    .credit_account_user_data_64 = cr_account.user_data_64,
-                    .credit_account_user_data_32 = cr_account.user_data_32,
-                    .credit_account_code = cr_account.code,
-                    .credit_account_flags = cr_account.flags,
-
-                    .timestamp = result.timestamp,
-                    .transfer_timestamp = transfer.timestamp,
-                    .debit_account_timestamp = dr_account.timestamp,
-                    .credit_account_timestamp = cr_account.timestamp,
+                output_slice[output_count] = switch (result.schema()) {
+                    .current => self.get_change_event(result),
+                    .former => |former| self.get_change_event_former(former),
                 };
                 output_count += 1;
             }
 
             return output_count * @sizeOf(ChangeEvent);
+        }
+
+        fn get_change_event(
+            self: *StateMachine,
+            result: *const AccountEvent,
+        ) ChangeEvent {
+            // Getting the transfer by `timestamp`,
+            // except for expiries where there is no transfer associated with the timestamp.
+            const transfer: Transfer = switch (result.transfer_pending_status) {
+                .none,
+                .pending,
+                .posted,
+                .voided,
+                => switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
+                    .found_object => |transfer| transfer,
+                    .found_orphaned_id, .not_found => unreachable,
+                },
+                .expired => self.get_transfer(result.transfer_pending_id).?,
+            };
+            const dr_account = self.get_account(result.dr_account_id).?;
+            const cr_account = self.get_account(result.cr_account_id).?;
+            assert(transfer.debit_account_id == dr_account.id);
+            assert(transfer.credit_account_id == cr_account.id);
+            assert(transfer.ledger == result.ledger);
+            assert(dr_account.ledger == result.ledger);
+            assert(cr_account.ledger == result.ledger);
+
+            const event_type: ChangeEventType = event_type: {
+                switch (result.transfer_pending_status) {
+                    .none => {
+                        assert(transfer.timestamp == result.timestamp);
+                        assert(!transfer.flags.pending);
+                        assert(!transfer.flags.post_pending_transfer);
+                        assert(!transfer.flags.void_pending_transfer);
+                        assert(transfer.pending_id == 0);
+                        break :event_type .single_phase;
+                    },
+                    .pending => {
+                        assert(transfer.timestamp == result.timestamp);
+                        assert(transfer.flags.pending);
+                        assert(transfer.pending_id == 0);
+                        break :event_type .two_phase_pending;
+                    },
+                    .posted => {
+                        assert(transfer.timestamp == result.timestamp);
+                        assert(transfer.flags.post_pending_transfer);
+                        assert(transfer.pending_id == result.transfer_pending_id);
+                        break :event_type .two_phase_posted;
+                    },
+                    .voided => {
+                        assert(transfer.timestamp == result.timestamp);
+                        assert(transfer.flags.void_pending_transfer);
+                        assert(transfer.pending_id == result.transfer_pending_id);
+                        break :event_type .two_phase_voided;
+                    },
+                    .expired => {
+                        assert(transfer.flags.pending);
+                        assert(transfer.id == result.transfer_pending_id);
+                        assert(transfer.timeout > 0);
+                        assert(transfer.timestamp < result.timestamp);
+                        break :event_type .two_phase_expired;
+                    },
+                }
+            };
+
+            return .{
+                .transfer_id = transfer.id,
+                .transfer_amount = result.amount,
+                .transfer_pending_id = transfer.pending_id,
+                .transfer_user_data_128 = transfer.user_data_128,
+                .transfer_user_data_64 = transfer.user_data_64,
+                .transfer_user_data_32 = transfer.user_data_32,
+                .transfer_timeout = transfer.timeout,
+
+                .ledger = result.ledger,
+                .transfer_code = transfer.code,
+                .transfer_flags = transfer.flags,
+                .type = event_type,
+
+                .debit_account_id = dr_account.id,
+                .debit_account_debits_pending = result.dr_debits_pending,
+                .debit_account_debits_posted = result.dr_debits_posted,
+                .debit_account_credits_pending = result.dr_credits_pending,
+                .debit_account_credits_posted = result.dr_credits_posted,
+                .debit_account_user_data_128 = dr_account.user_data_128,
+                .debit_account_user_data_64 = dr_account.user_data_64,
+                .debit_account_user_data_32 = dr_account.user_data_32,
+                .debit_account_code = dr_account.code,
+                .debit_account_flags = result.dr_account_flags,
+
+                .credit_account_id = cr_account.id,
+                .credit_account_debits_pending = result.cr_debits_pending,
+                .credit_account_debits_posted = result.cr_debits_posted,
+                .credit_account_credits_pending = result.cr_credits_pending,
+                .credit_account_credits_posted = result.cr_credits_posted,
+                .credit_account_user_data_128 = cr_account.user_data_128,
+                .credit_account_user_data_64 = cr_account.user_data_64,
+                .credit_account_user_data_32 = cr_account.user_data_32,
+                .credit_account_code = cr_account.code,
+                .credit_account_flags = result.cr_account_flags,
+
+                .timestamp = result.timestamp,
+                .transfer_timestamp = transfer.timestamp,
+                .debit_account_timestamp = dr_account.timestamp,
+                .credit_account_timestamp = cr_account.timestamp,
+            };
+        }
+
+        fn get_change_event_former(
+            self: *StateMachine,
+            result: *const AccountEvent.Former,
+        ) ChangeEvent {
+            assert(result.dr_account_id != 0);
+            assert(result.cr_account_id != 0);
+            const transfer: Transfer =
+                switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
+                .found_object => |transfer| transfer,
+                .found_orphaned_id, .not_found => unreachable,
+            };
+            const dr_account = self.get_account(result.dr_account_id).?;
+            const cr_account = self.get_account(result.cr_account_id).?;
+            assert(transfer.debit_account_id == dr_account.id);
+            assert(transfer.credit_account_id == cr_account.id);
+            assert(transfer.ledger == dr_account.ledger);
+            assert(transfer.ledger == cr_account.ledger);
+
+            const event_type: ChangeEventType = event_type: {
+                if (transfer.flags.pending) break :event_type .two_phase_pending;
+                if (transfer.flags.post_pending_transfer) break :event_type .two_phase_posted;
+                if (transfer.flags.void_pending_transfer) break :event_type .two_phase_voided;
+                break :event_type .single_phase;
+            };
+
+            return .{
+                .transfer_id = transfer.id,
+                .transfer_amount = transfer.amount,
+                .transfer_pending_id = transfer.pending_id,
+                .transfer_user_data_128 = transfer.user_data_128,
+                .transfer_user_data_64 = transfer.user_data_64,
+                .transfer_user_data_32 = transfer.user_data_32,
+                .transfer_timeout = transfer.timeout,
+
+                .ledger = transfer.ledger,
+                .transfer_code = transfer.code,
+
+                .type = event_type,
+
+                .debit_account_id = dr_account.id,
+                .debit_account_debits_pending = result.dr_debits_pending,
+                .debit_account_debits_posted = result.dr_debits_posted,
+                .debit_account_credits_pending = result.dr_credits_pending,
+                .debit_account_credits_posted = result.dr_credits_posted,
+                .debit_account_user_data_128 = dr_account.user_data_128,
+                .debit_account_user_data_64 = dr_account.user_data_64,
+                .debit_account_user_data_32 = dr_account.user_data_32,
+                .debit_account_code = dr_account.code,
+
+                .credit_account_id = cr_account.id,
+                .credit_account_debits_pending = result.cr_debits_pending,
+                .credit_account_debits_posted = result.cr_debits_posted,
+                .credit_account_credits_pending = result.cr_credits_pending,
+                .credit_account_credits_posted = result.cr_credits_posted,
+                .credit_account_user_data_128 = cr_account.user_data_128,
+                .credit_account_user_data_64 = cr_account.user_data_64,
+                .credit_account_user_data_32 = cr_account.user_data_32,
+                .credit_account_code = cr_account.code,
+
+                // Not present in the former schema, returning the most current flags.
+                .transfer_flags = transfer.flags,
+                .debit_account_flags = dr_account.flags,
+                .credit_account_flags = cr_account.flags,
+
+                .timestamp = result.timestamp,
+                .transfer_timestamp = transfer.timestamp,
+                .debit_account_timestamp = dr_account.timestamp,
+                .credit_account_timestamp = cr_account.timestamp,
+            };
         }
 
         fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
@@ -4767,7 +4912,7 @@ fn ExpirePendingTransfersType(
 /// Iterates directly over the `ScanTree` since this query doesn't use secondary indexes.
 /// No additional lookups are necessary, as the `ScanTree` iteration already yields the
 /// object values.
-fn AccountEventsScanLookupType(
+fn ChangeEventsScanLookupType(
     comptime AccountEventsGroove: type,
     comptime Storage: type,
 ) type {
@@ -4845,6 +4990,21 @@ fn AccountEventsScanLookupType(
                 },
             }) |object| {
                 assert(self.state.scan.buffer_produced_len < self.state.scan.buffer.len);
+
+                // The previous schema only saved balances for accounts with the `history` flag.
+                // Skipping those objects, as they are not useful for CDC.
+                switch (object.schema()) {
+                    .current => {},
+                    .former => |former| if (former.dr_account_id == 0 or
+                        former.cr_account_id == 0)
+                    {
+                        assert(former.timestamp > 0);
+                        continue;
+                    },
+                }
+                assert(object.dr_account_id != 0);
+                assert(object.cr_account_id != 0);
+
                 self.state.scan.buffer[self.state.scan.buffer_produced_len] = object;
                 self.state.scan.buffer_produced_len += 1;
                 if (self.state.scan.buffer_produced_len == self.state.scan.buffer.len) break;
