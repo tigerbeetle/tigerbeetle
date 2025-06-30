@@ -415,7 +415,7 @@ pub fn StateMachineType(
                 cr_debits_posted: u128,
                 cr_credits_pending: u128,
                 cr_credits_posted: u128,
-                timestamp: u64 = 0,
+                timestamp: u64,
                 reserved: [88]u8 = [_]u8{0} ** 88,
 
                 comptime {
@@ -431,11 +431,14 @@ pub fn StateMachineType(
                 current,
                 former: *const AccountEvent.Former,
             } {
+                assert(self.timestamp != 0);
+
                 const former: *const AccountEvent.Former = @ptrCast(self);
                 if (stdx.zeroed(&former.reserved)) {
-                    // Only accounts with `flags.history == true` are stored.
-                    maybe(former.dr_account_id == 0);
-                    maybe(former.cr_account_id == 0);
+                    // In the former schema:
+                    // Balances for accounts without the `history` flag weren’t stored.
+                    // If neither side had the `history` flag, the entire object wasn’t stored.
+                    assert(former.dr_account_id != 0 or former.cr_account_id != 0);
 
                     return .{ .former = former };
                 }
@@ -2446,6 +2449,10 @@ pub fn StateMachineType(
                         }
                     },
                     .former => |former| {
+                        // In the former schema:
+                        // If either the debit or credit account ID is zero (one side without
+                        // the history flag), the lookup would have already omitted the event
+                        // from the results.
                         assert(former.dr_account_id != 0);
                         assert(former.cr_account_id != 0);
 
@@ -4990,15 +4997,19 @@ fn ChangeEventsScanLookupType(
                 },
             }) |object| {
                 assert(self.state.scan.buffer_produced_len < self.state.scan.buffer.len);
+                assert(object.timestamp != 0);
 
-                // The previous schema only saved balances for accounts with the `history` flag.
-                // Skipping those objects, as they are not useful for CDC.
                 switch (object.schema()) {
                     .current => {},
-                    .former => |former| if (former.dr_account_id == 0 or
-                        former.cr_account_id == 0)
-                    {
-                        continue;
+                    .former => |former| {
+                        // In the former schema:
+                        // Only accounts with the `history` flag enabled had their balance stored.
+                        assert(former.dr_account_id != 0 or former.cr_account_id != 0);
+                        if (former.dr_account_id == 0 or former.cr_account_id == 0) {
+                            // Skipping events with the balance of just one side,
+                            // as they are not useful for `get_change_events`.
+                            continue;
+                        }
                     },
                 }
                 assert(object.dr_account_id != 0);
