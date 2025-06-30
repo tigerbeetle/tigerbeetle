@@ -422,6 +422,21 @@ pub fn StateMachineType(
                     assert(stdx.no_padding(Former));
                     assert(@sizeOf(Former) == @sizeOf(AccountEvent));
                     assert(@alignOf(Former) == @alignOf(AccountEvent));
+
+                    // Asserting the fields are identical.
+                    for (std.meta.fields(Former)) |field_former| {
+                        if (std.mem.eql(u8, field_former.name, "reserved")) continue;
+                        const field = std.meta.fields(AccountEvent)[
+                            std.meta.fieldIndex(
+                                AccountEvent,
+                                field_former.name,
+                            ).?
+                        ];
+                        assert(field_former.type == field.type);
+                        assert(field_former.alignment == field.alignment);
+                        assert(@offsetOf(AccountEvent, field_former.name) ==
+                            @offsetOf(Former, field_former.name));
+                    }
                 }
             };
 
