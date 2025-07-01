@@ -9906,7 +9906,7 @@ pub fn ReplicaType(
             self.client_sessions.reset();
 
             if (self.aof) |aof| aof.sync();
-            // Faulty bits will be set in sync_content().
+            // Faulty bits will be set in client_sessions_open_callback().
             while (self.client_replies.faulty.first_set()) |slot| {
                 self.client_replies.faulty.unset(slot);
             }
