@@ -345,14 +345,14 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: ?AOF = if (args.aof) |aof_path| blk: {
-            const aof_dir = std.fs.path.dirname(aof_path) orelse ".";
+        var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
+            const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
             const aof_dir_fd = try IO.open_dir(aof_dir);
             defer std.posix.close(aof_dir_fd);
 
             break :blk try AOF.init(&command.io, .{
                 .dir_fd = aof_dir_fd,
-                .relative_path = std.fs.path.basename(aof_path),
+                .relative_path = std.fs.path.basename(aof_file.const_slice()),
             });
         } else null;
         defer if (aof != null) aof.?.close();
