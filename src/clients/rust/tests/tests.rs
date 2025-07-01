@@ -90,8 +90,8 @@ fn smoke() -> anyhow::Result<()> {
     let account_id2 = tb::id();
     let transfer_id1 = tb::id();
 
-    let account_id2_user_data_32 = 4;
-    let transfer_id1_user_data_32 = 5;
+    let account_id2_user_data_128 = tb::id();
+    let transfer_id1_user_data_128 = tb::id();
 
     block_on(async {
         let client = test_client()?;
@@ -120,9 +120,9 @@ fn smoke() -> anyhow::Result<()> {
                         debits_posted: 0,
                         credits_pending: 0,
                         credits_posted: 0,
-                        user_data_128: 0,
+                        user_data_128: account_id2_user_data_128,
                         user_data_64: 0,
-                        user_data_32: account_id2_user_data_32,
+                        user_data_32: 0,
                         reserved: tb::Reserved::default(),
                         ledger: TEST_LEDGER,
                         code: TEST_CODE,
@@ -146,9 +146,9 @@ fn smoke() -> anyhow::Result<()> {
                     credit_account_id: account_id2,
                     amount: 10,
                     pending_id: 0,
-                    user_data_128: 0,
+                    user_data_128: transfer_id1_user_data_128,
                     user_data_64: 0,
-                    user_data_32: transfer_id1_user_data_32,
+                    user_data_32: 0,
                     timeout: 0,
                     ledger: TEST_LEDGER,
                     code: TEST_CODE,
@@ -241,9 +241,9 @@ fn smoke() -> anyhow::Result<()> {
         {
             let result = client
                 .query_accounts(tb::QueryFilter {
-                    user_data_128: 0,
+                    user_data_128: account_id2_user_data_128,
                     user_data_64: 0,
-                    user_data_32: account_id2_user_data_32,
+                    user_data_32: 0,
                     ledger: TEST_LEDGER,
                     code: TEST_CODE,
                     reserved: tb::Reserved::default(),
@@ -264,9 +264,9 @@ fn smoke() -> anyhow::Result<()> {
         {
             let result = client
                 .query_transfers(tb::QueryFilter {
-                    user_data_128: 0,
+                    user_data_128: transfer_id1_user_data_128,
                     user_data_64: 0,
-                    user_data_32: transfer_id1_user_data_32,
+                    user_data_32: 0,
                     ledger: TEST_LEDGER,
                     code: TEST_CODE,
                     reserved: tb::Reserved::default(),
