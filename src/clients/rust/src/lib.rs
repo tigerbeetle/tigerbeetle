@@ -405,7 +405,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results(
+            collect_results::<Account, tbc::tb_create_accounts_result_t, CreateAccountResult>(
                 msg,
                 |next_result: &tbc::tb_create_accounts_result_t,
                  _next_event: &Account,
@@ -459,7 +459,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results(
+            collect_results::<Transfer, tbc::tb_create_transfers_result_t, CreateTransferResult>(
                 msg,
                 |next_result: &tbc::tb_create_transfers_result_t,
                  _next_event: &Transfer,
@@ -508,7 +508,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results(
+            collect_results::<u128, Account, Result<Account, NotFound>>(
                 msg,
                 |next_result: &Account, next_event: &u128, _event_index: usize| -> bool {
                     next_result.id == *next_event
@@ -556,7 +556,7 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results(
+            collect_results::<u128, Transfer, Result<Transfer, NotFound>>(
                 msg,
                 |next_result: &Transfer, next_event: &u128, _event_index: usize| -> bool {
                     next_result.id == *next_event
@@ -1489,71 +1489,62 @@ fn handle_message<'stack, CEvent, CResult>(
     Ok(result)
 }
 
-/// Collect a vector of C-API tigerbeetle query results
-/// into a vector of Rust values, one for each input event.
+/// Collect a vector of TigerBeetle query results into a vector of Rust values,
+/// one for each input event.
 ///
-/// Queries like account_lookup accept a vector of events,
-/// and the server returns a vector of results.
+/// Queries like account_lookup accept a vector of events, and the server
+/// returns a vector of results.
 ///
-/// These results though have "holes" in them, empty result
-/// values that need to be interpreted in a specific way.
-/// Instead of having the user interpret the holes in the results,
-/// we do it for them for every type of request.
+/// These results though have "holes" in them, empty result values that need to
+/// be interpreted in a specific way. Instead of having the user interpret the
+/// holes in the results, we do it for them for every type of request.
 ///
-/// This method does parallel iteration over the input events
-/// and the output results as returned by tb_client,
-/// correlates the results to the events, converts the C result
-/// types to a Rust result type, and inserts new Rust result types
-/// for each "hole" returned by the server.
+/// This method does parallel iteration over the input events and the output
+/// results as returned by tb_client, correlates the results to the events,
+/// converts the result types to a Rust result type, and inserts new Rust
+/// result types for each "hole" returned by the server.
 ///
 /// # Type parameters
 ///
-/// - `CEvent` - the input event type in the C API,
-///   e.g. `tb_account_t`
-/// - `CResult` - the result returned by the server,
-///   e.g. `tb_create_accounts_result_t`
-/// - `RustResult` - the corresponding Rust definition for `CResult`.
-///   Note this is not a Rust `Result` type, the "Result" name is
-///   in relation to the `CResult` type, which have `_result` names
-///   in the C API.
-///   e.g. `CreateAccountResult`
-/// - `RustResultWrapper` - the final response for each event, created
-///   from `RustResult`. This probably _is_ a Rust `Result` type!
-fn collect_results<Event, CResult, RustResult, RustResultWrapper>(
+/// - `Event` - the input event type in the C API, e.g. `Account`
+/// - `EventResponse` - the per-event result returned by the server, e.g.
+///   `tb_create_accounts_result_t`
+/// - `EventResult` - the final type returned by the Rust API, e.g.
+///   `CreateAccountResult`
+fn collect_results<Event, EventResponse, EventResult>(
     msg: CompletionMessage<Event>,
-    result_is_for_event: fn(&CResult, &Event, usize) -> bool,
-    empty_result: RustResultWrapper,
-    nonempty_result: fn(RustResult) -> RustResultWrapper,
-) -> Result<Vec<RustResultWrapper>, PacketStatus>
+    response_is_for_event: fn(&EventResponse, &Event, usize) -> bool,
+    empty_result: EventResult,
+    nonempty_result: fn(EventResponse) -> EventResult,
+) -> Result<Vec<EventResult>, PacketStatus>
 where
-    CResult: Copy,
-    RustResult: From<CResult>,
-    RustResultWrapper: Copy,
+    EventResponse: Copy,
+    EventResult: Copy,
 {
-    let result: &[CResult] = handle_message(&msg)?;
+    let responses: &[EventResponse] = handle_message(&msg)?;
     let events = &msg.events;
 
-    let mut result_accum: Vec<RustResultWrapper> = Vec::new();
+    let mut result_accum: Vec<EventResult> = Vec::new();
     {
         let mut events_iter = events.iter().enumerate();
-        let mut result_iter = result.iter();
+        let mut response_iter = responses.iter();
 
-        let mut next_result = result_iter.next();
+        let mut next_response = response_iter.next();
 
         loop {
             let next_event = events_iter.next();
 
             let Some((event_index, next_event)) = next_event else {
-                assert!(next_result.is_none());
+                assert!(next_response.is_none());
                 break;
             };
 
-            if let Some(next_result_) = next_result {
-                let result_is_for_event =
-                    result_is_for_event(next_result_, next_event, event_index);
-                if result_is_for_event {
-                    result_accum.push(nonempty_result((*next_result_).into()));
-                    next_result = result_iter.next();
+            if let Some(next_response_) = next_response {
+                let response_is_for_event =
+                    response_is_for_event(next_response_, next_event, event_index);
+                if response_is_for_event {
+                    result_accum.push(nonempty_result(*next_response_));
+                    next_response = response_iter.next();
                 } else {
                     result_accum.push(empty_result);
                 }
