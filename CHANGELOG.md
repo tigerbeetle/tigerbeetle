@@ -3,9 +3,31 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.48
+
+Released: 2025-07-01
+
+### Internals
+
+- [#3062](https://github.com/tigerbeetle/tigerbeetle/pull/3062)
+
+  Updates the publishing process for the Java client to conform to the Maven Central Repository
+  due to the [OSSRH service end-of-life](https://central.sonatype.org/news/20250326_ossrh_sunset/).
+
+- [#3048](https://github.com/tigerbeetle/tigerbeetle/pull/3048),
+  [#3047](https://github.com/tigerbeetle/tigerbeetle/pull/3047)
+
+  Fixes and improvements for tracing and metrics.
+
+### TigerTracks 🎧
+
+- [All Shook Up](https://www.youtube.com/watch?v=23zLefwiii4&list=RD23zLefwiii4)
+
 ## TigerBeetle 0.16.47
 
 Released: 2025-06-27
+
+Note: This release is missing some client libraries in their respective package managers.
 
 ### Safety And Performance
 
@@ -20,7 +42,7 @@ Released: 2025-06-27
 - [#3053](https://github.com/tigerbeetle/tigerbeetle/pull/3053)
 
   Supports CDC processing for transfers created by versions earlier than `0.16.29`.
-  Fixes a liveness bug that would crash the replicar if a CDC query encountered objects
+  Fixes a liveness bug that would crash the replica if a CDC query encountered objects
   created with a schema before [#2507](https://github.com/tigerbeetle/tigerbeetle/pull/2507).
 
 ### Features
