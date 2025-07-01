@@ -918,13 +918,13 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
                         const compaction = self.compaction_at(level_b, tree_id);
 
                         const resumed = compaction.beat_commence(.{
-                            .callback = beat_resume_callback,
                             .values_count = stdx.div_ceil(self.beat_input_size, @sizeOf(Value)),
+                            .callback = beat_resume_callback,
                         });
 
                         switch (resumed) {
-                            .ceased => {},
-                            .active => return,
+                            .pending => return,
+                            .ready => {},
                         }
                     }
                 }

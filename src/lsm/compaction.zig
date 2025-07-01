@@ -358,18 +358,20 @@ pub fn CompactionType(
         /// At the start of the bar, the total number of input values is known. The beat quota is
         /// then set based on the number of values left and beats left.
         quotas: struct {
-            done: u64 = 0,
             beat: u64 = 0,
+            beat_done: u64 = 0,
             bar: u64 = 0,
+            bar_done: u64 = 0,
 
-            fn beat_done(quotas: @This()) bool {
-                assert(quotas.done <= quotas.bar);
-                return quotas.done >= quotas.beat;
+            fn beat_exhausted(quotas: @This()) bool {
+                assert(quotas.beat_done <= quotas.bar_done);
+                assert(quotas.bar_done <= quotas.bar);
+                return quotas.beat_done >= quotas.beat;
             }
 
-            fn bar_done(quotas: @This()) bool {
-                assert(quotas.done <= quotas.bar);
-                return quotas.done == quotas.bar;
+            fn bar_exhausted(quotas: @This()) bool {
+                assert(quotas.bar_done <= quotas.bar);
+                return quotas.bar_done == quotas.bar;
             }
         } = .{},
 
@@ -401,12 +403,11 @@ pub fn CompactionType(
         // Beat-scoped fields:
         // ------------------
         pool: ?*ResourcePool = null,
-        callback: ?*const fn (*ResourcePool, u16, u64) void = null,
+        callback: ?*const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void = null,
 
         grid_reservation: ?Grid.Reservation = null,
         table_builder_value_block: ?*ResourcePool.Block = null,
 
-        values_in_beat: u32 = 0,
         // IO queues:
         //
         // Compaction structure is such that the data can be read (and written) concurrently, but
@@ -486,7 +487,8 @@ pub fn CompactionType(
         }
 
         fn idle(compaction: *const Compaction) bool {
-            return compaction.callback == null and compaction.table_builder_value_block == null;
+            return compaction.callback == null and compaction.table_builder_value_block == null and
+                compaction.quotas.beat_exhausted();
         }
 
         fn block_queues_empty_output(compaction: *const Compaction) bool {
@@ -533,7 +535,7 @@ pub fn CompactionType(
                 // Do not start compaction if the immutable table does not require compaction.
                 if (compaction.tree.table_immutable.mutability.immutable.flushed) {
                     assert(compaction.quotas.bar == 0);
-                    assert(compaction.quotas.bar_done());
+                    assert(compaction.quotas.bar_exhausted());
                     log.debug("{s}:{}: bar_commence: immutable table flushed", .{
                         compaction.tree.config.name,
                         compaction.level_b,
@@ -569,7 +571,7 @@ pub fn CompactionType(
 
                     if (!last_half_bar_of_checkpoint) {
                         assert(compaction.quotas.bar == 0);
-                        assert(compaction.quotas.bar_done());
+                        assert(compaction.quotas.bar_exhausted());
                         log.debug("{s}:{}: bar_commence: immutable table flush skipped " ++
                             "({}+{}+{} ≤ {})", .{
                             compaction.tree.config.name,
@@ -603,7 +605,7 @@ pub fn CompactionType(
                 // Do not start compaction if level A does not require compaction.
                 const table_range = compaction.tree.manifest.compaction_table(level_a) orelse {
                     assert(compaction.quotas.bar == 0);
-                    assert(compaction.quotas.bar_done());
+                    assert(compaction.quotas.bar_exhausted());
                     log.debug("{s}:{}: bar_commence: nothing to compact", .{
                         compaction.tree.config.name,
                         compaction.level_b,
@@ -643,17 +645,16 @@ pub fn CompactionType(
                 quota_bar += table.table_info.value_count;
             }
             compaction.quotas = .{
-                .done = 0,
                 .beat = 0,
+                .beat_done = 0,
                 .bar = quota_bar,
+                .bar_done = 0,
             };
 
-            log.debug("{s}:{}: bar_commence: " ++
-                "quota_done={} quota_beat={} quota_bar={}", .{
+            log.debug("{s}:{}: bar_commence: quota_bar_done={} quota_bar={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
-                compaction.quotas.done,
-                compaction.quotas.beat,
+                compaction.quotas.bar_done,
                 compaction.quotas.bar,
             });
             compaction.move_table = compaction.table_info_a.? == .disk and
@@ -679,10 +680,16 @@ pub fn CompactionType(
                     .operation = .move_to_level_b,
                     .table = compaction.table_info_a.?.disk.table_info.*,
                 });
-                compaction.quotas.done = compaction.table_info_a.?.disk.table_info.value_count;
-                compaction.quotas.beat = compaction.table_info_a.?.disk.table_info.value_count;
-                assert(compaction.quotas.beat_done());
-                assert(compaction.quotas.bar_done());
+
+                const value_count = compaction.table_info_a.?.disk.table_info.value_count;
+
+                compaction.quotas.beat = value_count;
+                compaction.quotas.beat_done = value_count;
+                compaction.quotas.bar_done = value_count;
+
+                assert(compaction.quotas.beat_exhausted());
+                assert(compaction.quotas.bar_exhausted());
+
                 return 0;
             } else {
                 return compaction.quotas.bar;
@@ -698,7 +705,7 @@ pub fn CompactionType(
 
             assert(compaction.stage == .paused);
             assert(compaction.counters.consistent());
-            assert(compaction.quotas.bar_done());
+            assert(compaction.quotas.bar_exhausted());
             // Assert blocks have been released back to the pipeline.
             assert(compaction.table_builder.state == .no_blocks);
             assert(compaction.table_builder_index_block == null);
@@ -835,28 +842,28 @@ pub fn CompactionType(
         pub fn beat_commence(
             compaction: *Compaction,
             options: struct {
-                callback: *const fn (*ResourcePool, u16, u64) void,
                 values_count: u64,
+                callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
             },
-        ) enum { active, ceased } {
+        ) enum { pending, ready } {
             assert(compaction.idle());
+
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some blocks from the previous beat.
             maybe(compaction.block_queues_empty_input());
 
             assert(compaction.stage == .paused);
-            if (compaction.move_table) assert(compaction.quotas.bar_done());
-            assert(compaction.quotas.done >= compaction.quotas.beat);
+            if (compaction.move_table) assert(compaction.quotas.bar_exhausted());
 
-            if (compaction.quotas.bar_done()) {
+            if (compaction.quotas.bar_exhausted()) {
                 log.debug("{}: {s}:{}: beat_commence: bar quota={} fulfilled, done={}", .{
                     compaction.grid.superblock.replica_index.?,
                     compaction.tree.config.name,
                     compaction.level_b,
-                    compaction.quotas.done,
                     compaction.quotas.bar,
+                    compaction.quotas.bar_done,
                 });
-                return .ceased;
+                return .ready;
             }
 
             assert(!compaction.move_table);
@@ -865,19 +872,19 @@ pub fn CompactionType(
             // Calculate how many values we have to compact each beat, to self-correct our pacing.
             // Pacing will have imperfections due to rounding up to fill target value blocks and
             // immutable table filtering duplicate values.
-            const values_remaining = (compaction.quotas.bar - compaction.quotas.done);
-            const beat_values_quota = @min(options.values_count, values_remaining);
+            const values_remaining = (compaction.quotas.bar - compaction.quotas.bar_done);
+            const quota_beat = @min(options.values_count, values_remaining);
 
-            compaction.quotas.beat = compaction.quotas.done + beat_values_quota;
-            assert(compaction.quotas.done <= compaction.quotas.beat);
+            compaction.quotas.beat_done = 0;
+            compaction.quotas.beat = quota_beat;
             assert(compaction.quotas.beat <= compaction.quotas.bar);
 
-            if (compaction.quotas.beat_done()) {
+            if (compaction.quotas.beat_exhausted()) {
                 log.debug("{s}:{}: beat_commence: beat quota fulfilled", .{
                     compaction.tree.config.name,
                     compaction.level_b,
                 });
-                return .ceased;
+                return .ready;
             }
 
             compaction.grid.trace.start(.{ .compact_beat = .{
@@ -892,7 +899,7 @@ pub fn CompactionType(
             // to overshoot by a single block (limited to 1 due to how the immutable table values
             // are consumed.)
             const beat_value_blocks_max = stdx.div_ceil(
-                beat_values_quota,
+                quota_beat,
                 Table.layout.block_value_count_max,
             ) + 1;
 
@@ -907,7 +914,7 @@ pub fn CompactionType(
             compaction.grid_reservation = compaction.grid.reserve(beat_blocks_max);
 
             compaction.compaction_dispatch();
-            return .active;
+            return .pending;
         }
 
         // While beat_commence is called by the forest sequentially for each compaction, to get
@@ -934,41 +941,47 @@ pub fn CompactionType(
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
 
+            // Grid reservation is forfeited by the forest after both ManifestLog and Forest
+            // compactions for this beat are finished. This is because both ManifestLog and Forest
+            // compactions may have active reservations against the grid, and our
+            // reservation-forfeiting logic ensures that once we forfeit one out of multiple active
+            // reservations, we can't reserve a new one (see `forfeit` in free_set.zig). So, if this
+            // reservation is forfeited, another tree's compaction may not be able to reserve blocks
+            // during this beat.
             assert(compaction.grid_reservation != null);
-            // Grid reservation is is forfeited by the forest.
 
             assert(compaction.counters.consistent());
 
-            assert(compaction.quotas.beat_done());
             assert(compaction.table_builder.data_block_empty());
             assert(compaction.table_builder_value_block == null);
             assert(compaction.table_builder.state == .no_blocks or
                 !compaction.table_builder.index_block_full());
 
-            if (compaction.quotas.bar_done()) {
+            if (compaction.quotas.bar_exhausted()) {
                 assert(compaction.table_builder.state == .no_blocks);
                 assert(compaction.table_builder_index_block == null);
                 assert(compaction.block_queues_empty_input());
             }
 
-            compaction.stage = .paused;
             const pool = compaction.pool.?;
             const callback = compaction.callback.?;
-            const values_in = compaction.values_in_beat;
 
+            compaction.stage = .paused;
             compaction.callback = null;
-            compaction.values_in_beat = 0;
 
             assert(compaction.idle());
             assert(pool.idle());
-            log.debug("{s}:{}: beat_complete: quota_done={} quota_beat={} quota_bar={}", .{
+            log.debug("{s}:{}: beat_complete: quota_beat_done={} quota_beat={} " ++
+                "quota_bar_done={} quota_bar={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
-                compaction.quotas.done,
+                compaction.quotas.beat_done,
                 compaction.quotas.beat,
+                compaction.quotas.bar_done,
                 compaction.quotas.bar,
             });
-            callback(pool, compaction.tree.config.id, values_in);
+
+            callback(pool, compaction.tree.config.id, compaction.quotas.beat_done);
         }
 
         // Compaction is a lot of work: read input tables from both levels, merge their value
@@ -1181,7 +1194,9 @@ pub fn CompactionType(
                 const level_b_exhausted =
                     compaction.level_b_index_block.count == 0 and
                     compaction.level_b_value_block.count == 0;
-                assert((level_a_exhausted and level_b_exhausted) == (compaction.quotas.bar_done()));
+                const levels_exhausted = level_a_exhausted and level_b_exhausted;
+
+                assert(levels_exhausted == compaction.quotas.bar_exhausted());
 
                 if (compaction.table_builder.state == .index_and_data_block) {
                     if (level_a_exhausted and level_b_exhausted) {
@@ -1225,7 +1240,7 @@ pub fn CompactionType(
 
             if (compaction.table_builder.state == .index_and_data_block) {
                 if (!compaction.table_builder.data_block_full()) {
-                    assert(compaction.quotas.bar_done());
+                    assert(compaction.quotas.bar_exhausted());
                 }
                 if (compaction.table_builder.data_block_empty()) {
                     const value_block = compaction.table_builder_value_block.?;
@@ -1248,10 +1263,10 @@ pub fn CompactionType(
             }
 
             if (compaction.table_builder.state == .index_block and
-                (compaction.table_builder.index_block_full() or compaction.quotas.bar_done()))
+                (compaction.table_builder.index_block_full() or compaction.quotas.bar_exhausted()))
             {
                 if (compaction.table_builder.index_block_empty()) {
-                    assert(compaction.quotas.bar_done());
+                    assert(compaction.quotas.bar_exhausted());
                     const index_block = compaction.table_builder_index_block.?;
                     compaction.table_builder_index_block = null;
                     compaction.table_builder.state = .no_blocks;
@@ -1276,7 +1291,7 @@ pub fn CompactionType(
                 .no_blocks => {},
                 .index_block => {
                     assert(!compaction.table_builder.index_block_full());
-                    assert(!compaction.quotas.bar_done());
+                    assert(!compaction.quotas.bar_exhausted());
                 },
                 .index_and_data_block => unreachable,
             }
@@ -1451,7 +1466,7 @@ pub fn CompactionType(
         }
 
         fn merge(compaction: *Compaction, cpu: *ResourcePool.CPU) void {
-            assert(!compaction.quotas.bar_done());
+            assert(!compaction.quotas.bar_exhausted());
 
             if (compaction.table_info_a.? == .immutable) {
                 if (compaction.level_a_immutable_stage == .ready) {
@@ -1553,12 +1568,14 @@ pub fn CompactionType(
             assert(compaction.table_builder.value_count <= Table.data.value_count_max);
 
             const consumed_total = merge_result.consumed_a + merge_result.consumed_b;
-            compaction.quotas.done += consumed_total;
-            compaction.counters.in += consumed_total;
-            compaction.counters.dropped += merge_result.dropped;
-            compaction.values_in_beat += consumed_total;
 
-            assert(compaction.quotas.done <= compaction.quotas.bar);
+            compaction.quotas.bar_done += consumed_total;
+            compaction.quotas.beat_done += consumed_total;
+            compaction.counters.in += consumed_total;
+
+            compaction.counters.dropped += merge_result.dropped;
+
+            assert(compaction.quotas.bar_done <= compaction.quotas.bar);
 
             compaction.merge_advance_position();
 
@@ -1714,14 +1731,16 @@ pub fn CompactionType(
                 assert(compaction.level_b_position.value == 0); // Level B exhausted.
             }
 
-            if (compaction.quotas.beat_done()) {
+            if (compaction.quotas.beat_exhausted()) {
                 assert(
                     compaction.stage == .beat or
                         compaction.stage == .beat_quota_done,
                 );
                 compaction.stage = .beat_quota_done;
 
-                if (compaction.table_builder.data_block_full() or compaction.quotas.bar_done()) {
+                if (compaction.table_builder.data_block_full() or
+                    compaction.quotas.bar_exhausted())
+                {
                     compaction.stage = .beat_table_done;
                 }
             }
