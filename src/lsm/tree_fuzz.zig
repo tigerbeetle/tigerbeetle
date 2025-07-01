@@ -350,15 +350,16 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 if (first_beat or half_beat) _ = compaction.bar_commence(op, &env.pool);
 
-                const input_values_remaining_bar = compaction.quotas.bar - compaction.quotas.done;
+                const input_values_remaining_bar =
+                    compaction.quotas.bar - compaction.quotas.bar_done;
                 const input_values_remaining_beat =
                     stdx.div_ceil(input_values_remaining_bar, beats_remaining);
                 switch (compaction.beat_commence(.{
                     .values_count = input_values_remaining_beat,
                     .callback = compact_callback,
                 })) {
-                    .active => env.tick_until_state_change(.tree_compact, .fuzzing),
-                    .ceased => env.change_state(.tree_compact, .fuzzing),
+                    .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
+                    .ready => env.change_state(.tree_compact, .fuzzing),
                 }
 
                 if (compaction.grid_reservation) |grid_reservation| {
