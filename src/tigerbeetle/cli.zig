@@ -94,7 +94,11 @@ const CLIArgs = union(enum) {
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
         /// log consisting of logged requests. Much like a redis AOF with fsync=on.
         /// Enabling this will have performance implications.
-        aof: ?[:0]const u8 = null,
+        aof_file: ?[:0]const u8 = null,
+
+        /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
+        /// setting aof_file to '<data file path>.aof'.
+        aof: bool = false,
     };
 
     const Version = struct {
@@ -451,6 +455,7 @@ const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constan
 ///  appropriate).
 pub const Command = union(enum) {
     const Addresses = stdx.BoundedArrayType(std.net.Address, constants.members_max);
+    const Path = stdx.BoundedArrayType(u8, std.fs.max_path_bytes);
 
     pub const Format = struct {
         cluster: u128,
@@ -494,7 +499,7 @@ pub const Command = union(enum) {
         experimental: bool,
         replicate_closed_loop: bool,
         replicate_star: bool,
-        aof: ?[:0]const u8,
+        aof_file: ?Path,
         path: [:0]const u8,
         log_debug: bool,
         statsd: ?std.net.Address,
@@ -914,16 +919,42 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         );
     }
 
-    if (start.aof) |aof_path| {
-        if (!std.mem.endsWith(u8, aof_path, ".aof")) {
-            vsr.fatal(.cli, "AOF path must end with .aof: '{s}'", .{aof_path});
-        }
-    }
-
     const lsm_forest_compaction_block_count: u32 =
         @intCast(@divExact(lsm_compaction_block_memory.bytes(), constants.block_size));
     const lsm_forest_node_count: u32 =
         @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
+
+    const aof_file: ?Command.Path = if (start.aof) blk: {
+        if (start.aof_file != null) {
+            vsr.fatal(.cli, "--aof is mutually exclusive with --aof-file", .{});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len + 4) {
+            vsr.fatal(.cli, "data file path is too long for --aof. use --aof-file", .{});
+        }
+        aof_file.append_slice_assume_capacity(start.positional.path);
+        aof_file.append_slice_assume_capacity(".aof");
+
+        std.log.warn(
+            "--aof is deprecated. consider switching to '--aof-file={s}'",
+            .{aof_file.const_slice()},
+        );
+
+        break :blk aof_file;
+    } else if (start.aof_file) |start_aof_file| blk: {
+        if (!std.mem.endsWith(u8, start_aof_file, ".aof")) {
+            vsr.fatal(.cli, "--aof-file must end with .aof: '{s}'", .{start_aof_file});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len) {
+            vsr.fatal(.cli, "--aof-file path is too long", .{});
+        }
+        aof_file.append_slice_assume_capacity(start_aof_file);
+
+        break :blk aof_file;
+    } else null;
 
     return .{
         .addresses = addresses,
@@ -971,7 +1002,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .trace = start.trace,
         .replicate_closed_loop = start.replicate_closed_loop,
         .replicate_star = start.replicate_star,
-        .aof = start.aof,
+        .aof_file = aof_file,
         .path = start.positional.path,
         .log_debug = start.log_debug,
         .statsd = if (start.statsd) |statsd_address|
