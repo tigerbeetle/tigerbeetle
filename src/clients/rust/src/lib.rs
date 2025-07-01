@@ -412,7 +412,7 @@ impl Client {
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateAccountResult::Ok,
-                std::convert::identity,
+                |r: tbc::tb_create_accounts_result_t| r.result.into(),
             )
         }
     }
@@ -466,7 +466,7 @@ impl Client {
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateTransferResult::Ok,
-                std::convert::identity,
+                |r: tbc::tb_create_transfers_result_t| r.result.into(),
             )
         }
     }

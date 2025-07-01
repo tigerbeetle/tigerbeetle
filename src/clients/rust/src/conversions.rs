@@ -1,12 +1,12 @@
 pub use super::*;
 
 #[rustfmt::skip]
-impl From<tbc::tb_create_accounts_result_t> for CreateAccountResult {
-    fn from(other: tbc::tb_create_accounts_result_t) -> CreateAccountResult {
+impl From<u32> for CreateAccountResult {
+    fn from(other: u32) -> CreateAccountResult {
         use tbc::*;
         use CreateAccountResult::*;
 
-        match other.result {
+        match other {
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK => panic!(),
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
@@ -40,12 +40,12 @@ impl From<tbc::tb_create_accounts_result_t> for CreateAccountResult {
 }
 
 #[rustfmt::skip]
-impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
-    fn from(other: tbc::tb_create_transfers_result_t) -> CreateTransferResult {
+impl From<u32> for CreateTransferResult {
+    fn from(other: u32) -> CreateTransferResult {
         use tbc::*;
         use CreateTransferResult::*;
 
-        match other.result {
+        match other {
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK => panic!(),
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
