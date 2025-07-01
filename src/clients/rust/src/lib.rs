@@ -86,8 +86,9 @@
 //! events in a single request at once as TigerBeetle will only reach its
 //! performance limits when events are received in large batches. The client
 //! _does_ implement its own internal batching and will attempt to create them
-//! efficiently, but it is best for applications to create their own batches
-//! based on understanding of their own architectural needs and limitations.
+//! efficiently, but it is more efficient for applications to create their own
+//! batches based on understanding of their own architectural needs and
+//! limitations.
 //!
 //! In TigerBeetle's standard build-time configuration **the maximum number of
 //! events per batch is 8189**. If the events in a request exceed this number
@@ -166,7 +167,7 @@
 //!                     let (timestamp_begin_next, should_continue) = if !is_reverse {
 //!                         assert!(timestamp_first < timestamp_last);
 //!                         let timestamp_begin_next = timestamp_last.checked_add(1).expect("overflow");
-//!                         assert_ne!(timestamp_begin_next, u64::max_value());
+//!                         assert_ne!(timestamp_begin_next, u64::MAX);
 //!                         let should_continue =
 //!                             timestamp_begin_next <= event.timestamp_max || event.timestamp_max == 0;
 //!                         (timestamp_begin_next, should_continue)
@@ -208,9 +209,24 @@
 //! across multiple threads or async tasks, e.g. by placing it into an [`Arc`].
 //! In some cases this may be useful because it allows the client to leverage
 //! its internal request batching to batch events from multiple threads (or
-//! tasks).
+//! tasks), but otherwise it provides no performance advantage.
 //!
 //! [`Arc`]: `std::sync::Arc`
+//!
+//!
+//! # TigerBeetle time-based identifiers
+//!
+//! Accounts and transfers must have globally unique identifiers. The generation
+//! of these is application-specific, and any scheme that guarantees unique IDs
+//! will work. Barring other constraints, TigerBeetle recommends using
+//! [TigerBeetle time-based identifiers][tbid]. This crate provides an
+//! implementation in the [`id`] function.
+//!
+//! For additional considerations when choosing an ID scheme
+//! see [the TigerBeetle documentation on data modeling][tbdataid].
+//!
+//! [tbid]: https://docs.tigerbeetle.com/coding/data-modeling/#tigerbeetle-time-based-identifiers-recommended
+//! [tbdataid]: https://docs.tigerbeetle.com/coding/data-modeling/#id
 //!
 //!
 //! # Use in non-async codebases
@@ -248,21 +264,6 @@
 //! to integrate TigerBeetle into an existing synchronous application.
 //!
 //!
-//! # TigerBeetle time-based identifiers
-//!
-//! Accounts and transfers must have globally unique identifiers. The generation
-//! of these is application-specific, and any scheme that guarantees unique IDs
-//! will work. Barring other constraints, TigerBeetle recommends using
-//! [TigerBeetle time-based identifiers][tbid]. This crate provides an
-//! implementation in the [`id`] function.
-//!
-//! For additional considerations when choosing an ID scheme
-//! see [the TigerBeetle documentation on data modeling][tbdataid].
-//!
-//! [tbid]: https://docs.tigerbeetle.com/coding/data-modeling/#tigerbeetle-time-based-identifiers-recommended
-//! [tbdataid]: https://docs.tigerbeetle.com/coding/data-modeling/#id
-//!
-//!
 //! # Rust structure binary representation and the TigerBeetle protocol
 //!
 //! Many types in this library are ABI-compatible with the underlying protocol
@@ -279,7 +280,7 @@
 //! - [`QueryFilter`] and [`QueryFilterFlags`]
 //!
 //! Note that status enums are not ABI-compatible with the protocol's status codes
-//! and must to be converted with [`TryFrom`].
+//! and must be converted with [`TryFrom`].
 //!
 //!
 //! # References
