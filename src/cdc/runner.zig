@@ -869,9 +869,9 @@ const Metrics = struct {
     const TimingSummary = struct {
         timer: std.time.Timer,
 
-        duration_min_ms: ?u64 = null,
-        duration_max_ms: ?u64 = null,
-        duration_sum_ms: u64 = 0,
+        duration_min_ns: ?u64 = null,
+        duration_max_ns: ?u64 = null,
+        duration_sum_ns: u64 = 0,
         event_count: u64 = 0,
         count: u64 = 0,
 
@@ -879,12 +879,14 @@ const Metrics = struct {
             metrics: *TimingSummary,
             event_count: u64,
         ) void {
-            const duration_ms: u64 = @divFloor(metrics.timer.read(), std.time.ns_per_ms);
+            const duration_ns: u64 = metrics.timer.read();
+            assert(duration_ns > 0);
+            maybe(event_count == 0);
 
-            metrics.duration_min_ms =
-                @min(duration_ms, metrics.duration_min_ms orelse std.math.maxInt(u64));
-            metrics.duration_max_ms = @max(duration_ms, metrics.duration_max_ms orelse 0);
-            metrics.duration_sum_ms += duration_ms;
+            metrics.duration_min_ns =
+                @min(duration_ns, metrics.duration_min_ns orelse std.math.maxInt(u64));
+            metrics.duration_max_ns = @max(duration_ns, metrics.duration_max_ns orelse 0);
+            metrics.duration_sum_ns += duration_ns;
             metrics.count += 1;
             metrics.event_count += event_count;
         }
@@ -911,26 +913,33 @@ const Metrics = struct {
             const summary: *TimingSummary = &@field(metrics, @tagName(field));
             if (summary.count > 0) {
                 assert(runner.state == .last);
+                assert(summary.duration_sum_ns > 0);
+                assert(summary.duration_min_ns != null);
+                assert(summary.duration_max_ns != null);
+
                 const timestamp_last = switch (field) {
                     .consumer => runner.state.last.consumer_timestamp,
                     .producer => runner.state.last.producer_timestamp,
                 };
                 const event_rate = @divTrunc(
-                    summary.event_count * std.time.ms_per_s,
-                    summary.duration_sum_ms,
+                    summary.event_count * std.time.ns_per_s,
+                    summary.duration_sum_ns,
                 );
-                log.info("{s}: p0={?}ms mean={}ms p100={?}ms " ++
+                log.info("{s}: p0={}ms mean={}ms p100={?}ms " ++
                     "event_count={} throughput={} op/s " ++
                     "last timestamp={} ({})", .{
                     @tagName(field),
-                    summary.duration_min_ms,
-                    @divFloor(summary.duration_sum_ms, summary.count),
-                    summary.duration_max_ms,
+                    @divTrunc(summary.duration_min_ns.?, std.time.ns_per_ms),
+                    @divFloor(
+                        @divTrunc(summary.duration_sum_ns, std.time.ns_per_ms),
+                        summary.count,
+                    ),
+                    @divTrunc(summary.duration_max_ns.?, std.time.ns_per_ms),
                     summary.event_count,
                     event_rate,
                     timestamp_last,
                     stdx.DateTimeUTC.from_timestamp_ms(
-                        timestamp_last / std.time.ns_per_ms,
+                        @divTrunc(timestamp_last, std.time.ns_per_ms),
                     ),
                 });
             }
