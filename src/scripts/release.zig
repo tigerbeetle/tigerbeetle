@@ -680,10 +680,15 @@ fn publish(
         });
     }
 
+    // Java's Maven Central is particularly flaky, and was observed several times to be down during
+    // TigerBeetle's release process. Apply offensive programming here and try to publish the Java
+    // client first, such that, if it fails, no other client is published and the entire release
+    // process is safely retried after manually removing the draft release from GitHub.
+    if (languages.contains(.java)) try publish_java(shell, info);
+
     if (languages.contains(.docker)) try publish_docker(shell, info);
     if (languages.contains(.dotnet)) try publish_dotnet(shell, info);
     if (languages.contains(.go)) try publish_go(shell, info);
-    if (languages.contains(.java)) try publish_java(shell, info);
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
 
