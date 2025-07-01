@@ -739,7 +739,10 @@ const VSRContext = struct {
 
         self.buffer = try gpa.alloc(tb.ChangeEvent, StateMachine.operation_result_max(
             .get_change_events,
-            @divFloor(StateMachine.constants.message_body_size_max, @sizeOf(tb.ChangeEvent)),
+            @divFloor(
+                StateMachine.machine_constants.message_body_size_max,
+                @sizeOf(tb.ChangeEvent),
+            ),
         ));
         errdefer gpa.free(self.buffer);
         assert(!self.busy);

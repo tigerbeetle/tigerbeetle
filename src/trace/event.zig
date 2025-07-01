@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
@@ -6,6 +7,7 @@ const constants = @import("../constants.zig");
 const Command = @import("../vsr.zig").Command;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const Operation = @import("../tigerbeetle.zig").Operation;
+const Duration = stdx.Duration;
 
 const TreeEnum = tree_enum: {
     const tree_ids = @import("../state_machine.zig").tree_ids;
@@ -534,15 +536,13 @@ pub fn format_data(
 }
 
 pub const EventTimingAggregate = struct {
-    pub const ValueType = u64;
-
     event: EventTiming,
     values: struct {
-        duration_min_us: ValueType,
-        duration_max_us: ValueType,
-        duration_sum_us: ValueType,
+        duration_min: Duration,
+        duration_max: Duration,
+        duration_sum: Duration,
 
-        count: ValueType,
+        count: u64,
     },
 };
 

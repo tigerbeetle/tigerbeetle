@@ -19,6 +19,7 @@ const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
+const Duration = stdx.Duration;
 const marks = @import("../testing/marks.zig");
 
 const vsr = @import("../vsr.zig");
@@ -417,7 +418,7 @@ pub fn ReplicaType(
 
         /// Measures the time taken to commit a prepare, across the following stages:
         /// prefetch → reply_setup → execute → compact → checkpoint_data → checkpoint_superblock
-        commit_completion_timer: std.time.Timer,
+        commit_started: ?stdx.Instant = null,
 
         /// Whether we are reading a prepare from storage to construct the pipeline.
         pipeline_repairing: bool = false,
@@ -1246,7 +1247,6 @@ pub fn ReplicaType(
             self.* = .{
                 .static_allocator = self.static_allocator,
                 .cluster = options.cluster,
-                .commit_completion_timer = try std.time.Timer.start(),
                 .replica_count = replica_count,
                 .standby_count = standby_count,
                 .node_count = node_count,
@@ -4218,7 +4218,7 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
 
-                    self.commit_completion_timer.reset();
+                    self.commit_started = self.clock.time.monotonic_instant();
                     self.trace.start(.{ .replica_commit = .{
                         .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
@@ -4314,6 +4314,7 @@ pub fn ReplicaType(
             assert(self.commit_stage == .check_prepare);
             assert(self.commit_prepare == null);
             assert(self.commit_dispatch_entered);
+            assert(self.commit_started == null);
             self.commit_stage = .idle;
             self.commit_dispatch_entered = false;
 
@@ -4351,6 +4352,7 @@ pub fn ReplicaType(
             self.commit_prepare = null;
             self.commit_stage = .idle;
             self.commit_dispatch_entered = false;
+            self.commit_started = null;
         }
 
         fn commit_start(self: *Replica) enum { ready, pending } {
@@ -4956,21 +4958,16 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_local_us = @divFloor(
-                self.commit_completion_timer.read(),
-                std.time.ns_per_us,
-            );
-            const commit_completion_time_local_ms = @divFloor(
-                commit_completion_time_local_us,
-                std.time.us_per_ms,
-            );
-            if (commit_completion_time_local_ms > constants.client_request_completion_warn_ms) {
+            const commit_completion_time_local = self.clock.time.monotonic_instant()
+                .duration_since(self.commit_started.?);
+            self.commit_started = null;
+            if (commit_completion_time_local.ms() > constants.client_request_completion_warn_ms) {
                 log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.replica,
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
                     self.commit_prepare.?.header.operation.tag_name(StateMachine),
-                    commit_completion_time_local_ms,
+                    commit_completion_time_local.ms(),
                 });
             }
 
@@ -4979,15 +4976,9 @@ pub fn ReplicaType(
             //
             // NB: When a request comes in, it may be blocked by CPU work (likely, compaction) and
             // only get timestamped _after_ that work finishes. This adds some measurement error.
-            const commit_completion_time_request_us = blk: {
-                if (self.clock.realtime_synchronized()) |realtime| {
-                    maybe(realtime < self.commit_prepare.?.header.timestamp);
-
-                    break :blk @as(u64, @intCast(realtime)) -|
-                        self.commit_prepare.?.header.timestamp;
-                } else {
-                    break :blk 0;
-                }
+            const commit_completion_time_request: Duration = .{
+                .ns = @as(u64, @intCast(self.clock.realtime())) -|
+                    self.commit_prepare.?.header.timestamp,
             };
 
             // Only time operations when:
@@ -5002,11 +4993,11 @@ pub fn ReplicaType(
                 )) |operation| {
                     self.trace.timing(
                         .{ .replica_request_local = .{ .operation = operation } },
-                        commit_completion_time_local_us,
+                        commit_completion_time_local,
                     );
                     self.trace.timing(
                         .{ .replica_request = .{ .operation = operation } },
-                        commit_completion_time_request_us,
+                        commit_completion_time_request,
                     );
                 }
             }
@@ -5204,15 +5195,9 @@ pub fn ReplicaType(
                     });
                     self.send_reply_message_to_client(reply);
 
-                    const commit_execute_time_request_us = blk: {
-                        if (self.clock.realtime_synchronized()) |realtime| {
-                            maybe(realtime < self.commit_prepare.?.header.timestamp);
-
-                            break :blk @as(u64, @intCast(realtime)) -|
-                                self.commit_prepare.?.header.timestamp;
-                        } else {
-                            break :blk 0;
-                        }
+                    const commit_execute_time_request: Duration = .{
+                        .ns = @as(u64, @intCast(self.clock.realtime())) -|
+                            self.commit_prepare.?.header.timestamp,
                     };
 
                     if (StateMachine.Operation == @import("../tigerbeetle.zig").Operation and
@@ -5223,7 +5208,7 @@ pub fn ReplicaType(
                         )) |operation| {
                             self.trace.timing(
                                 .{ .replica_request_execute = .{ .operation = operation } },
-                                commit_execute_time_request_us,
+                                commit_execute_time_request,
                             );
                         }
                     }
@@ -6821,10 +6806,7 @@ pub fn ReplicaType(
                     )) |operation| {
                         self.trace.timing(
                             .{ .client_request_round_trip = .{ .operation = operation } },
-                            @divFloor(
-                                request.message.header.previous_request_latency,
-                                std.time.ns_per_us,
-                            ),
+                            .{ .ns = request.message.header.previous_request_latency },
                         );
                     }
                 }

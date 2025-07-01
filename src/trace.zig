@@ -101,6 +101,7 @@ const log = std.log.scoped(.trace);
 
 const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
+const Duration = stdx.Duration;
 const IO = @import("io.zig").IO;
 const StatsD = @import("trace/statsd.zig").StatsD;
 pub const Event = @import("trace/event.zig").Event;
@@ -257,7 +258,7 @@ pub fn TracerType(comptime Time: type) type {
                 .thread_id = event_tracing.stack(),
                 .category = @tagName(event),
                 .event = 'B',
-                .timestamp = time_elapsed.microseconds(),
+                .timestamp = time_elapsed.us(),
                 .event_tracing = event_tracing,
                 .event_timing = event_timing,
                 .args = std.json.Formatter(Event){ .value = event, .options = .{} },
@@ -297,13 +298,13 @@ pub fn TracerType(comptime Time: type) type {
                 event_tracing,
                 event_timing,
                 if (event_duration.ns < us_log_threshold_ns)
-                    event_duration.microseconds()
+                    event_duration.us()
                 else
-                    event_duration.milliseconds(),
+                    event_duration.ms(),
                 if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
             });
 
-            tracer.timing(event_timing, event_duration.microseconds());
+            tracer.timing(event_timing, event_duration);
 
             tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
         }
@@ -339,7 +340,7 @@ pub fn TracerType(comptime Time: type) type {
                     .process_id = tracer.replica_index,
                     .thread_id = stack,
                     .event = 'E',
-                    .timestamp = time_elapsed.microseconds(),
+                    .timestamp = time_elapsed.us(),
                 },
             ) catch unreachable;
 
@@ -373,7 +374,7 @@ pub fn TracerType(comptime Time: type) type {
         // values.
         //
         // This matches the default behavior of the `g` and `c` statsd types respectively.
-        pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration_us: u64) void {
+        pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) void {
             const timing_slot = event_timing.slot();
 
             if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
@@ -383,18 +384,18 @@ pub fn TracerType(comptime Time: type) type {
 
                 const timing_existing = event_timing_existing.values;
                 event_timing_existing.values = .{
-                    .duration_min_us = @min(timing_existing.duration_min_us, duration_us),
-                    .duration_max_us = @max(timing_existing.duration_max_us, duration_us),
-                    .duration_sum_us = timing_existing.duration_sum_us +| duration_us,
+                    .duration_min = timing_existing.duration_min.min(duration),
+                    .duration_max = timing_existing.duration_min.max(duration),
+                    .duration_sum = .{ .ns = timing_existing.duration_sum.ns +| duration.ns },
                     .count = timing_existing.count +| 1,
                 };
             } else {
                 tracer.events_timing[timing_slot] = .{
                     .event = event_timing,
                     .values = .{
-                        .duration_min_us = duration_us,
-                        .duration_max_us = duration_us,
-                        .duration_sum_us = duration_us,
+                        .duration_min = duration,
+                        .duration_max = duration,
+                        .duration_sum = duration,
                         .count = 1,
                     },
                 };
@@ -451,14 +452,14 @@ test "timing overflow" {
     defer trace.deinit(std.testing.allocator);
 
     const event: EventTiming = .replica_aof_write;
-    const value = std.math.maxInt(u64) - 1;
+    const value: Duration = .{ .ns = std.math.maxInt(u64) - 1 };
     trace.timing(event, value);
     trace.timing(event, value);
 
     const aggregate = trace.events_timing[event.slot()].?;
 
     assert(aggregate.values.count == 2);
-    assert(aggregate.values.duration_min_us == value);
-    assert(aggregate.values.duration_max_us == value);
-    assert(aggregate.values.duration_sum_us == std.math.maxInt(u64));
+    assert(aggregate.values.duration_min.ns == value.ns);
+    assert(aggregate.values.duration_max.ns == value.ns);
+    assert(aggregate.values.duration_sum.ns == std.math.maxInt(u64));
 }
