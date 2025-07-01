@@ -645,7 +645,6 @@ pub fn ClientType(
                 .ping_timestamp_monotonic = self.time.monotonic(),
             };
 
-            // TODO If we haven't received a pong from a replica since our last ping, then back off.
             self.send_header_to_replicas(ping.frame_const());
         }
 
