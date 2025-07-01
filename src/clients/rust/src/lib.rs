@@ -412,7 +412,11 @@ impl Client {
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateAccountResult::Ok,
-                |r: tbc::tb_create_accounts_result_t| r.result.into(),
+                |r: tbc::tb_create_accounts_result_t| {
+                    // The server will never actually send this as it is the "hole" value.
+                    assert!(r.result != tbc::TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK);
+                    r.result.into()
+                },
             )
         }
     }
@@ -466,7 +470,11 @@ impl Client {
                  event_index: usize|
                  -> bool { next_result.index as usize == event_index },
                 CreateTransferResult::Ok,
-                |r: tbc::tb_create_transfers_result_t| r.result.into(),
+                |r: tbc::tb_create_transfers_result_t| {
+                    // The server will never actually send this as it is the "hole" value.
+                    assert!(r.result != tbc::TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK);
+                    r.result.into()
+                },
             )
         }
     }
