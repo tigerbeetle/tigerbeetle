@@ -26,29 +26,34 @@ impl TestDb {
     fn new() -> anyhow::Result<TestDb> {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
 
+        // NB: There is one test database shared between all tests, and reused
+        // between test runs. If the tests choose their IDs correctly there
+        // should never be any collisions, and that one database should work
+        // forever, just taking up a lot of space.
         let tigerbeetle_bin = format!("{manifest_dir}/../../../tigerbeetle{EXE_SUFFIX}");
         let work_dir = env!("CARGO_TARGET_TMPDIR");
-        let database_name = format!("0_0.{:016x}.tigerbeetle", tb::id() as u64);
+        let database_name = "0_0.testdb.tigerbeetle";
 
-        let mut cmd = Command::new(&tigerbeetle_bin);
-        cmd.current_dir(&work_dir);
-        cmd.args([
-            "format",
-            "--replica-count=1",
-            "--replica=0",
-            "--cluster=0",
-            &database_name,
-        ]);
-        let status = cmd.status()?;
-
-        assert!(status.success());
+        if !std::fs::exists(&format!("{work_dir}/{database_name}"))? {
+            let mut cmd = Command::new(&tigerbeetle_bin);
+            cmd.current_dir(&work_dir);
+            cmd.args([
+                "format",
+                "--replica-count=1",
+                "--replica=0",
+                "--cluster=0",
+                &database_name,
+            ]);
+            let status = cmd.status()?;
+            assert!(status.success());
+        }
 
         let mut cmd = Command::new(&tigerbeetle_bin);
         cmd.current_dir(&work_dir);
         cmd.args([
             "start",
             // magic address 0: tell us the port to use,
-            // shutdown and delete db when stdin closes
+            // shutdown when stdin closes
             "--addresses=0",
             &database_name,
         ])
