@@ -385,7 +385,16 @@ test chance {
 
 /// Like enum_weighted, but doesn't require specifying the enum up-front.
 pub fn chances(prng: *PRNG, weights: anytype) std.meta.FieldEnum(@TypeOf(weights)) {
-    return enum_weighted(prng, std.meta.FieldEnum(@TypeOf(weights)), weights);
+    const Enum = std.meta.FieldEnum(@TypeOf(weights));
+    const EnumWeights = EnumWeightsType(Enum);
+    const enum_weights: EnumWeights = cast: {
+        var enum_weights: EnumWeights = undefined;
+        inline for (std.meta.fields(EnumWeights)) |field| {
+            @field(enum_weights, field.name) = @field(weights, field.name);
+        }
+        break :cast enum_weights;
+    };
+    return enum_weighted(prng, Enum, enum_weights);
 }
 
 test chances {

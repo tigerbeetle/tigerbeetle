@@ -417,6 +417,7 @@ fn struct_size_max(StructOrVoid: type) StructOrVoid {
 
 /// Returns the longest @tagName for a given Enum.
 fn enum_size_max(Enum: type) []const u8 {
+    @setEvalBranchQuota(10_000);
     var tag_longest: []const u8 = "";
     for (std.meta.fieldNames(Enum)) |field_name| {
         if (tag_longest.len < field_name.len) {

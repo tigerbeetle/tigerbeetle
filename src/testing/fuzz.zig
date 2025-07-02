@@ -96,7 +96,7 @@ pub fn parse_seed(bytes: []const u8) u64 {
 // Like `std.meta.DeclEnum`, but allows excluding specific things. Feed the result into
 // random_enum_weights for swarm testing public API of a data structure.
 pub fn DeclEnumExcludingType(T: type, exclude: []const std.meta.DeclEnum(T)) type {
-    const base = @typeInfo(std.meta.DeclEnum(T)).Enum;
+    const base = @typeInfo(std.meta.DeclEnum(T)).@"enum";
     assert(exclude.len > 0); // Use plain std.meta.DeclEnum.
     assert(exclude.len < base.fields.len);
     var fields_filtered: [base.fields.len - exclude.len]std.builtin.Type.EnumField = undefined;
@@ -110,7 +110,7 @@ pub fn DeclEnumExcludingType(T: type, exclude: []const std.meta.DeclEnum(T)) typ
     }
     assert(i == fields_filtered.len);
 
-    return @Type(.{ .Enum = .{
+    return @Type(.{ .@"enum" = .{
         .tag_type = base.tag_type,
         .fields = &fields_filtered,
         .decls = &.{},

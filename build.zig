@@ -540,9 +540,9 @@ fn hide_stderr(run: *std.Build.Step.Run) void {
     const override = struct {
         var global_map: std.AutoHashMapUnmanaged(usize, std.Build.Step.MakeFn) = .{};
 
-        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) anyerror!void {
+        fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
             const original = global_map.get(@intFromPtr(step)).?;
-            try original(step, prog_node);
+            try original(step, options);
             assert(step.result_error_msgs.items.len == 0);
             step.result_stderr = "";
         }

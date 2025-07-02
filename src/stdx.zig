@@ -189,18 +189,18 @@ pub fn bytes_as_slice(
 ) type: {
     const type_info = @typeInfo(@TypeOf(bytes));
     switch (type_info) {
-        .Pointer => |info| switch (info.size) {
-            .One => switch (@typeInfo(info.child)) {
-                .Array => |array_info| assert(array_info.child == u8),
+        .pointer => |info| switch (info.size) {
+            .one => switch (@typeInfo(info.child)) {
+                .array => |array_info| assert(array_info.child == u8),
                 else => unreachable,
             },
-            .Slice => assert(info.child == u8),
+            .slice => assert(info.child == u8),
             else => unreachable,
         },
         else => unreachable,
     }
 
-    break :type if (type_info.Pointer.is_const) []const T else []T;
+    break :type if (type_info.pointer.is_const) []const T else []T;
 } {
     switch (precision) {
         .exact => {

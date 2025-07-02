@@ -30,7 +30,7 @@ comptime {
         .{ .name = "tb_client_register_log_callback", .linkage = .strong },
     );
     @export(
-        exports.init_parameters,
+        &exports.init_parameters,
         .{ .name = "tb_client_init_parameters", .linkage = .strong },
     );
 }

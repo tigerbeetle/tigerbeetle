@@ -111,6 +111,7 @@ pub fn TableType(
             assert(@sizeOf(Key) >= 4);
             assert(@sizeOf(Key) % 4 == 0);
 
+            assert(block_body_size >= value_size);
             const block_value_count_max = @divFloor(
                 block_body_size,
                 value_size,
@@ -118,6 +119,8 @@ pub fn TableType(
 
             // We need enough blocks to hold `value_count_max` values.
             const data_blocks = div_ceil(value_count_max, block_value_count_max);
+            assert(data_blocks >= 1);
+            assert(data_blocks <= constants.lsm_table_data_blocks_max);
 
             break :layout .{
                 // The maximum number of values in a data block.
