@@ -1,22 +1,25 @@
 import ctypes
 import dataclasses
 import platform
+import sys
+import os
+
 from pathlib import Path
 
 
 class NativeError(Exception):
     pass
 
+
 class IntegerOverflowError(ValueError):
     pass
 
 
-def _load_tbclient():
-    prefix = ""
+def _python_tbclient_path():
     arch = ""
     system = ""
     linux_libc = ""
-    suffix = ""
+    extension = "so"
 
     platform_machine = platform.machine().lower()
 
@@ -28,9 +31,7 @@ def _load_tbclient():
         raise NativeError("Unsupported machine: " + platform.machine())
 
     if platform.system() == "Linux":
-        prefix = "lib"
         system = "linux"
-        suffix = ".so"
         libc = platform.libc_ver()[0]
         if libc == "glibc":
             linux_libc = "-gnu.2.27"
@@ -39,19 +40,22 @@ def _load_tbclient():
         else:
             raise NativeError("Unsupported libc: " + libc)
     elif platform.system() == "Darwin":
-        prefix = "lib"
         system = "macos"
-        suffix = ".dylib"
     elif platform.system() == "Windows":
         system = "windows"
-        suffix = ".dll"
+        extension = "pyd"
     else:
         raise NativeError("Unsupported system: " + platform.system())
 
     source_path = Path(__file__)
     source_dir = source_path.parent
-    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"{prefix}tb_client{suffix}"
-    return ctypes.CDLL(str(library_path))
+    library_path = source_dir / "lib" / f"{arch}-{system}{linux_libc}" / f"libtb_pythonclient.abi3.{extension}"
+
+    return library_path
+
+
+class IntegerOverflowError(ValueError):
+    pass
 
 
 def validate_uint(*, bits: int, name: str, number: int):
@@ -85,4 +89,16 @@ def tb_assert(value):
     if not value:
         raise AssertionError()
 
-tbclient = _load_tbclient()
+import importlib.util
+_spec = importlib.util.spec_from_file_location("libtb_pythonclient", _python_tbclient_path())
+libtb_pythonclient = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(libtb_pythonclient)
+
+# This is a little bit unorthodox: the same shared library is used both as a CPython extension,
+# imported directly, _and_ via ctypes.
+tbclient = ctypes.CDLL(str(_python_tbclient_path()))
+
+encode = libtb_pythonclient.encode
+decode = libtb_pythonclient.decode
+id = libtb_pythonclient.id
+
