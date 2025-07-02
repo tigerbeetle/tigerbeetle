@@ -69,6 +69,7 @@ fn enum_max(EnumOrUnion: type) u8 {
 pub const Event = union(enum) {
     replica_commit: struct { stage: CommitStage.Tag, op: ?usize = null },
     replica_aof_write: struct { op: usize },
+    replica_aof_checkpoint,
     replica_sync_table: struct { index: usize },
     replica_request: struct { operation: Operation },
     replica_request_execute: struct { operation: Operation },
@@ -140,6 +141,7 @@ pub const Event = union(enum) {
 pub const EventTiming = union(Event.Tag) {
     replica_commit: struct { stage: CommitStage.Tag },
     replica_aof_write,
+    replica_aof_checkpoint,
     replica_sync_table,
     replica_request: struct { operation: Operation },
     replica_request_execute: struct { operation: Operation },
@@ -167,6 +169,7 @@ pub const EventTiming = union(Event.Tag) {
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = enum_max(CommitStage.Tag),
         .replica_aof_write = 1,
+        .replica_aof_checkpoint = 1,
         .replica_sync_table = 1,
         .replica_request = enum_max(Operation),
         .replica_request_execute = enum_max(Operation),
@@ -287,6 +290,7 @@ pub const EventTiming = union(Event.Tag) {
 pub const EventTracing = union(Event.Tag) {
     replica_commit,
     replica_aof_write,
+    replica_aof_checkpoint,
     replica_sync_table: struct { index: usize },
     replica_request,
     replica_request_execute,
@@ -314,6 +318,7 @@ pub const EventTracing = union(Event.Tag) {
     pub const stack_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
         .replica_commit = 1,
         .replica_aof_write = 1,
+        .replica_aof_checkpoint = 1,
         .replica_sync_table = constants.grid_missing_tables_max,
         .replica_request = 1,
         .replica_request_execute = 1,
@@ -592,6 +597,7 @@ test "EventTiming slot doesn't have collisions" {
         const event: EventTiming = switch (g.enum_value(Event.Tag)) {
             .replica_commit => .{ .replica_commit = .{ .stage = g.enum_value(CommitStage.Tag) } },
             .replica_aof_write => .replica_aof_write,
+            .replica_aof_checkpoint => .replica_aof_checkpoint,
             .replica_sync_table => .replica_sync_table,
             .replica_request => .{ .replica_request = .{ .operation = g.enum_value(Operation) } },
             .replica_request_execute => .{ .replica_request_execute = .{

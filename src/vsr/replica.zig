@@ -4711,6 +4711,8 @@ pub fn ReplicaType(
                 self.send_commit();
             }
             if (self.aof) |aof| {
+                self.trace.start(.replica_aof_checkpoint);
+
                 aof.checkpoint(self, commit_checkpoint_data_aof_callback);
             } else {
                 self.commit_checkpoint_data_callback_join(.aof);
@@ -4729,6 +4731,7 @@ pub fn ReplicaType(
         fn commit_checkpoint_data_aof_callback(replica: *anyopaque) void {
             const self: *Replica = @alignCast(@ptrCast(replica));
             assert(self.commit_stage == .checkpoint_data);
+            self.trace.stop(.replica_aof_checkpoint);
             self.commit_checkpoint_data_callback_join(.aof);
         }
 
