@@ -376,9 +376,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 const event_count_remain: u32 =
                     if (AccountingStateMachine.operation_is_batchable(operation))
-                    event_max - event_count
-                else
-                    1;
+                        event_max - event_count
+                    else
+                        1;
                 const batch_size = self.build_request_batch(
                     client_index,
                     action,
@@ -394,9 +394,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 });
                 const result_count_expected: u32 =
                     AccountingStateMachine.operation_result_count_expected(
-                    operation,
-                    writable[0..batch_size],
-                );
+                        operation,
+                        writable[0..batch_size],
+                    );
                 const reply_message_size: u32 =
                     ((result_count + result_count_expected) * result_size) +
                     reply_trailer_size;

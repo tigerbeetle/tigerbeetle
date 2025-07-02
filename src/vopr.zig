@@ -251,14 +251,13 @@ pub fn main() !void {
         }
         const requests_done = simulator.requests_replied == simulator.options.requests_max;
         const upgrades_done =
-            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
-        {
-            if (health != .up) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
-            }
-        } else false;
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
+                if (health != .up) continue;
+                const release_latest = releases[simulator.replica_releases_limit - 1].release;
+                if (replica.release.value == release_latest.value) {
+                    break true;
+                }
+            } else false;
 
         if (requests_done and upgrades_done) break;
     } else {
@@ -1485,7 +1484,7 @@ pub const Simulator = struct {
             simulator.replica_releases[replica.replica] <
             simulator.replica_releases_limit and
             (simulator.core.is_set(replica.replica) or
-            simulator.prng.chance(simulator.options.replica_release_catchup_probability));
+                simulator.prng.chance(simulator.options.replica_release_catchup_probability));
         if (restart_upgrade) simulator.replica_upgrade(replica.replica);
 
         const restart_random =

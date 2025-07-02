@@ -949,7 +949,7 @@ test "Routing fuzz" {
             for (0..constants.replicas_max) |replica| {
                 assert(visited.is_set(replica) ==
                     (replica < member_count and
-                    replica != env.view % env.routing.replica_count));
+                        replica != env.view % env.routing.replica_count));
             }
         }
 

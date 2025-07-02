@@ -830,14 +830,14 @@ const Inspector = struct {
         const SliceOfAlignedWordSlice = []const []align(@alignOf(vsr.FreeSet.Word)) const u8;
         const encoded_free_set_blocks_acquired: SliceOfAlignedWordSlice =
             if (free_set_blocks_acquired_buffer.len != 0)
-            &.{free_set_blocks_acquired_buffer}
-        else
-            &.{};
+                &.{free_set_blocks_acquired_buffer}
+            else
+                &.{};
         const encoded_free_set_blocks_released: SliceOfAlignedWordSlice =
             if (free_set_blocks_released_buffer.len != 0)
-            &.{free_set_blocks_released_buffer}
-        else
-            &.{};
+                &.{free_set_blocks_released_buffer}
+            else
+                &.{};
 
         free_set.open(.{
             .encoded = .{
