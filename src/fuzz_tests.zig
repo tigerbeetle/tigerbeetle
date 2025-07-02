@@ -65,7 +65,12 @@ pub fn main() !void {
         .ptr = std.heap.page_allocator.ptr,
         .vtable = &comptime .{
             .alloc = struct {
-                fn alloc(ctx: *anyopaque, len: usize, ptr_align: u8, ret_addr: usize) ?[*]u8 {
+                fn alloc(
+                    ctx: *anyopaque,
+                    len: usize,
+                    ptr_align: std.mem.Alignment,
+                    ret_addr: usize,
+                ) ?[*]u8 {
                     @atomicStore(
                         @TypeOf(std.heap.next_mmap_addr_hint),
                         &std.heap.next_mmap_addr_hint,
@@ -75,6 +80,7 @@ pub fn main() !void {
                     return std.heap.page_allocator.vtable.alloc(ctx, len, ptr_align, ret_addr);
                 }
             }.alloc,
+            .remap = std.heap.page_allocator.vtable.remap,
             .resize = std.heap.page_allocator.vtable.resize,
             .free = std.heap.page_allocator.vtable.free,
         },
