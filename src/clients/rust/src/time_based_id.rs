@@ -88,7 +88,7 @@ impl TbidGenerator {
 
         match next_ms_since_epoch.cmp(&previous_ms_since_epoch) {
             Ordering::Greater => {
-                // The new time is different from previous.
+                // The new time is greater than previous.
                 // Use it and choose a new random number.
                 TbidGenerator {
                     ms_since_epoch: next_ms_since_epoch,
@@ -122,8 +122,7 @@ impl TbidGenerator {
                         // clock by 1 ms until time catches up.
                         TbidGenerator {
                             // There is too much resolution in a u128 for this to ever overflow.
-                            ms_since_epoch: self
-                                .ms_since_epoch
+                            ms_since_epoch: previous_ms_since_epoch
                                 .checked_add(1)
                                 .expect("impossible overflow"),
                             random: random_u80(),
