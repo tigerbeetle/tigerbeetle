@@ -201,6 +201,8 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
+        // The submission queue. This is accessed from multiple threads and must always
+        // be protected by taking `interface.locker`.
         submitted: Packet.Queue,
         pending: Packet.Queue,
 
@@ -390,9 +392,11 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
-            // The submitted queue is no longer accessible to user threads,
-            // so synchronization is not required here.
-            while (self.submitted.pop()) |packet| {
+            while (brk: {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
+                break :brk self.submitted.pop();
+            }) |packet| {
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
             }
@@ -928,7 +932,11 @@ pub fn ContextType(
             self.signal.stop();
             self.thread.join();
 
-            assert(self.submitted.pop() == null);
+            {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
+                assert(self.submitted.pop() == null);
+            }
             assert(self.pending.pop() == null);
 
             self.gpa.allocator().free(self.addresses_copy);
