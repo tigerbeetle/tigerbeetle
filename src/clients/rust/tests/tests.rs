@@ -630,6 +630,51 @@ fn concurrent_requests() -> anyhow::Result<()> {
     Ok(())
 }
 
+// A potentially suprising behavior, documented in the crate docs.
+#[test]
+fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
+    let mut ids = Vec::new();
+
+    // Queue up lots of transactions, drop their futures, drop the client.
+    {
+        let client = test_client()?;
+
+        // Timing-sensitive - trying to create enough pending transactions that
+        // not all will be completed. I think test is unlikely to fail because
+        // of timing problems since it takes quite some time to process a
+        // transaction. Locally setting this to 1 still fails.
+        let transaction_count = 100_000;
+        for _ in 0..transaction_count {
+            let id = tb::id();
+            let _ = client.create_accounts(&[tb::Account {
+                id,
+                ledger: TEST_LEDGER,
+                code: TEST_CODE,
+                ..Default::default()
+            }]);
+            ids.push(id);
+        }
+    }
+
+    // Some of those transactions will have been dropped by tb_client.
+    let client = test_client()?;
+
+    // Reverse because later transactions most likely to be lost.
+    ids.reverse();
+
+    for next_ids in ids.chunks(8189) {
+        let results = block_on(client.lookup_accounts(next_ids))?;
+        for result in &results {
+            if result.is_err() {
+                // This is what we expect.
+                return Ok(());
+            }
+        }
+    }
+
+    panic!("unexpected all transactions succeeded");
+}
+
 /// Query multiple transfers for a single account, with paging.
 ///
 /// This handles the case where there are too many results to fit into

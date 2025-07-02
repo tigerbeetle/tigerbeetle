@@ -195,6 +195,28 @@
 //! ```
 //!
 //!
+//! # Response futures and client lifetime considerations
+//!
+//! Responses to requests are returned as [`Future`]s. It is not strictly
+//! necessary for applications to `await` these futures &mdash; requests are
+//! enqueued as soon as the request method is called and will be executed even
+//! if the future is dropped.
+//!
+//! With one subtle exception.
+//!
+//! If a `Client` is dropped, any pending requests are canceled and will not be
+//! executed. Because the futures returned by requests are tied by Rust
+//! lifetimes to the client, it is not possible to drop the client as long as
+//! any of its futures are outstanding.
+//!
+//! If all futures are dropped it becomes possible to accidentally drop the
+//! client before all requests have been submitted. TigerBeetle recommends
+//! awaiting all futures, as well as calling [`close`] and awaiting its future
+//! to destroy the `Client`.
+//!
+//! [`close`]: Client::close
+//!
+//!
 //! # Concurrency and multithreading
 //!
 //! Multiple requests may be submitted concurrently from a single client; the
@@ -714,8 +736,8 @@ impl Client {
     /// `Client`'s destructor will correctly shut down the client, though
     /// without providing the ability to wait for shutdown.
     ///
-    /// This method is provided for those that wish to ensure that the client's
-    /// outstanding requests and resources are completed and freed prior to proceeding.
+    /// Calling `close` will cancel any pending requests. This is only possible
+    /// if the futures for those requests were dropped without awaiting them.
     pub fn close(mut self) -> impl Future<Output = ()> {
         struct SendClient(*mut tbc::tb_client_t);
         unsafe impl Send for SendClient {}
