@@ -46,7 +46,7 @@ for /f %%i in ("%ZIG_URL%") do (
 )
 
 :: Checks the ZIG_DIRECTORY variable follows the expected format.
-echo.%ZIG_DIRECTORY% | findstr /b /r /c:"zig-win64-" /c:"zig-windows-x86_64-">nul || (echo.Unexpected zip directory name format. && exit 1)
+echo.%ZIG_DIRECTORY% | findstr /b /r /c:"zig-x86_64-windows-">nul || (echo.Unexpected zip directory name format. && exit 1)
 
 :: Making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 if exist %ZIG_TARBALL% (
