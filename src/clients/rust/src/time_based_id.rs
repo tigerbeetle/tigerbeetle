@@ -42,7 +42,6 @@ pub fn id() -> u128 {
 
 static GLOBAL_GENERATOR: Mutex<Option<TbidGenerator>> = Mutex::new(None);
 
-#[derive(Debug)]
 struct TbidGenerator {
     ms_since_epoch: u128,
     random: u128, // 80 bits

@@ -1568,7 +1568,6 @@ where
     Ok(result_accum)
 }
 
-#[derive(Debug)]
 struct CompletionMessage<E> {
     _context: usize,
     packet: Box<tbc::tb_packet_t>,
