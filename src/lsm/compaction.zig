@@ -308,7 +308,6 @@ pub fn CompactionType(
             inactive,
             beat,
             beat_quota_done,
-            beat_table_done,
             paused,
         } = .inactive,
 
@@ -393,9 +392,8 @@ pub fn CompactionType(
         }, compaction_tables_output_max) = .{},
 
         table_builder: Table.Builder = .{},
-        // A beat always ends with writing a value block, but the index block can be carried
-        // over to the next beat.
         table_builder_index_block: ?*ResourcePool.Block = null,
+        table_builder_value_block: ?*ResourcePool.Block = null,
 
         // The progress through immutable table is persisted throughout the bar.
         level_a_immutable_stage: enum { ready, merge, exhausted } = .ready,
@@ -406,7 +404,6 @@ pub fn CompactionType(
         callback: ?*const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void = null,
 
         grid_reservation: ?Grid.Reservation = null,
-        table_builder_value_block: ?*ResourcePool.Block = null,
 
         // IO queues:
         //
@@ -482,13 +479,14 @@ pub fn CompactionType(
             assert(compaction.block_queues_empty_output());
             assert(compaction.block_queues_empty_input());
 
+            assert(compaction.table_builder.state == .no_blocks);
+            assert(compaction.table_builder_value_block == null);
             assert(compaction.table_builder_index_block == null);
             assert(compaction.manifest_entries.empty());
         }
 
         fn idle(compaction: *const Compaction) bool {
-            return compaction.callback == null and compaction.table_builder_value_block == null and
-                compaction.quotas.beat_exhausted();
+            return compaction.callback == null and compaction.quotas.beat_exhausted();
         }
 
         fn block_queues_empty_output(compaction: *const Compaction) bool {
@@ -880,9 +878,11 @@ pub fn CompactionType(
             assert(compaction.quotas.beat <= compaction.quotas.bar);
 
             if (compaction.quotas.beat_exhausted()) {
-                log.debug("{s}:{}: beat_commence: beat quota fulfilled", .{
+                log.debug("{s}:{}: beat_commence: beat quota={} fulfilled, done={}", .{
                     compaction.tree.config.name,
                     compaction.level_b,
+                    compaction.quotas.beat,
+                    compaction.quotas.beat_done,
                 });
                 return .ready;
             }
@@ -921,11 +921,10 @@ pub fn CompactionType(
         // deterministic grid reservations, each compaction completes its own beat's work
         // asynchronously
         fn beat_complete(compaction: *Compaction) void {
-            assert(compaction.stage == .beat_table_done);
+            assert(compaction.stage == .beat_quota_done);
             switch (compaction.table_builder.state) {
-                .no_blocks => {},
+                .no_blocks, .index_and_data_block => {},
                 .index_block => assert(!compaction.table_builder.index_block_full()),
-                .index_and_data_block => unreachable,
             }
             if (compaction.table_info_a.? == .immutable) {
                 switch (compaction.level_a_immutable_stage) {
@@ -950,15 +949,9 @@ pub fn CompactionType(
             // during this beat.
             assert(compaction.grid_reservation != null);
 
-            assert(compaction.counters.consistent());
-
-            assert(compaction.table_builder.data_block_empty());
-            assert(compaction.table_builder_value_block == null);
-            assert(compaction.table_builder.state == .no_blocks or
-                !compaction.table_builder.index_block_full());
-
             if (compaction.quotas.bar_exhausted()) {
                 assert(compaction.table_builder.state == .no_blocks);
+                assert(compaction.table_builder_value_block == null);
                 assert(compaction.table_builder_index_block == null);
                 assert(compaction.block_queues_empty_input());
             }
@@ -1009,7 +1002,6 @@ pub fn CompactionType(
             switch (compaction.stage) {
                 .beat,
                 .beat_quota_done,
-                .beat_table_done,
                 => {},
                 .inactive,
                 .paused,
@@ -1027,9 +1019,9 @@ pub fn CompactionType(
                 if (!progressed) break;
                 progressed = false;
 
-                if (compaction.stage == .beat_table_done) {
+                if (compaction.stage == .beat_quota_done) {
                     // Just wait for all in-flight jobs to complete.
-                    return compaction.compaction_dispatch_beat_table_done();
+                    return compaction.compaction_dispatch_beat_quota_done();
                 }
 
                 // To avoid deadlocks, allocate blocks for the table builder first.
@@ -1121,7 +1113,6 @@ pub fn CompactionType(
                             const index_schema = schema.TableIndex.from(index_block.ptr);
                             const data_blocks_count =
                                 index_schema.data_blocks_used(index_block.ptr);
-
                             if (!compaction.level_a_value_block.full() and
                                 level_a_value_block_next < data_blocks_count)
                             {
@@ -1210,24 +1201,27 @@ pub fn CompactionType(
                         progressed = true;
                     }
 
-                    if (compaction.table_builder.data_block_full() and
-                        // Ensure that it is possible to immediately write the index block.
-                        compaction.output_blocks.spare_capacity() >= 2)
-                    {
-                        const write = compaction.pool.?.writes.acquire().?;
-                        compaction.write_value_block(write, .{
-                            .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                        });
-                        progressed = true;
-                    }
+                    // Write value and index blocks. It is important for correctness that both the
+                    // value block and index block are written together. Otherwise, we may end up
+                    // overflowing the index block's capacity for data block addresses.
+                    if (compaction.output_blocks.spare_capacity() >= 2) {
+                        if (compaction.table_builder.data_block_full()) {
+                            assert(!compaction.output_blocks.full());
+                            const write = compaction.pool.?.writes.acquire().?;
+                            compaction.write_value_block(write, .{
+                                .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                            });
+                            progressed = true;
+                        }
 
-                    if (compaction.table_builder.index_block_full()) {
-                        assert(!compaction.output_blocks.full());
-                        const write = compaction.pool.?.writes.acquire().?;
-                        compaction.write_index_block(write, .{
-                            .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                        });
-                        progressed = true;
+                        if (compaction.table_builder.index_block_full()) {
+                            assert(!compaction.output_blocks.full());
+                            const write = compaction.pool.?.writes.acquire().?;
+                            compaction.write_index_block(write, .{
+                                .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                            });
+                            progressed = true;
+                        }
                     }
                 }
             } else unreachable;
@@ -1235,13 +1229,15 @@ pub fn CompactionType(
             assert(!compaction.pool.?.idle());
         }
 
-        fn compaction_dispatch_beat_table_done(compaction: *Compaction) void {
-            assert(compaction.stage == .beat_table_done);
+        fn compaction_dispatch_beat_quota_done(compaction: *Compaction) void {
+            assert(compaction.stage == .beat_quota_done);
 
-            if (compaction.table_builder.state == .index_and_data_block) {
-                if (!compaction.table_builder.data_block_full()) {
-                    assert(compaction.quotas.bar_exhausted());
-                }
+            // If the bar quota has been exhausted, we must write the index & value blocks to disk.
+            if (compaction.quotas.bar_exhausted() and
+                compaction.table_builder.state == .index_and_data_block and
+                // Ensure that it is possible to immediately write both the index and value block.
+                compaction.output_blocks.spare_capacity() >= 2)
+            {
                 if (compaction.table_builder.data_block_empty()) {
                     const value_block = compaction.table_builder_value_block.?;
                     compaction.table_builder_value_block = null;
@@ -1251,22 +1247,12 @@ pub fn CompactionType(
                     value_block.stage = .free;
                     compaction.pool.?.block_release(value_block);
                 } else {
-                    if (!compaction.output_blocks.full()) {
-                        const write = compaction.pool.?.writes.acquire().?;
-                        compaction.write_value_block(write, .{
-                            .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                        });
-                        assert(compaction.table_builder.state == .index_block);
-                        assert(compaction.table_builder_value_block == null);
-                    }
+                    compaction.write_value_block(compaction.pool.?.writes.acquire().?, .{
+                        .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                    });
                 }
-            }
 
-            if (compaction.table_builder.state == .index_block and
-                (compaction.table_builder.index_block_full() or compaction.quotas.bar_exhausted()))
-            {
                 if (compaction.table_builder.index_block_empty()) {
-                    assert(compaction.quotas.bar_exhausted());
                     const index_block = compaction.table_builder_index_block.?;
                     compaction.table_builder_index_block = null;
                     compaction.table_builder.state = .no_blocks;
@@ -1275,25 +1261,23 @@ pub fn CompactionType(
                     index_block.stage = .free;
                     compaction.pool.?.block_release(index_block);
                 } else {
-                    if (!compaction.output_blocks.full()) {
-                        const write = compaction.pool.?.writes.acquire().?;
-                        compaction.write_index_block(write, .{
-                            .address = compaction.grid.acquire(compaction.grid_reservation.?),
-                        });
-                    }
+                    compaction.write_index_block(compaction.pool.?.writes.acquire().?, .{
+                        .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                    });
                 }
+                assert(compaction.table_builder.state == .no_blocks);
             }
 
             if (compaction.output_blocks.count > 0) {
                 return;
             }
+
             switch (compaction.table_builder.state) {
-                .no_blocks => {},
+                .no_blocks, .index_and_data_block => {},
                 .index_block => {
                     assert(!compaction.table_builder.index_block_full());
                     assert(!compaction.quotas.bar_exhausted());
                 },
-                .index_and_data_block => unreachable,
             }
 
             var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
@@ -1732,17 +1716,8 @@ pub fn CompactionType(
             }
 
             if (compaction.quotas.beat_exhausted()) {
-                assert(
-                    compaction.stage == .beat or
-                        compaction.stage == .beat_quota_done,
-                );
+                assert(compaction.stage == .beat);
                 compaction.stage = .beat_quota_done;
-
-                if (compaction.table_builder.data_block_full() or
-                    compaction.quotas.bar_exhausted())
-                {
-                    compaction.stage = .beat_table_done;
-                }
             }
         }
 
@@ -1772,11 +1747,7 @@ pub fn CompactionType(
 
             write.block = block;
             write.compaction = compaction;
-            compaction.grid.create_block(
-                write_block_callback,
-                &write.grid_write,
-                &write.block.ptr,
-            );
+            compaction.grid.create_block(write_block_callback, &write.grid_write, &write.block.ptr);
         }
 
         fn write_index_block(
@@ -1809,11 +1780,7 @@ pub fn CompactionType(
 
             write.block = block;
             write.compaction = compaction;
-            compaction.grid.create_block(
-                write_block_callback,
-                &write.grid_write,
-                &write.block.ptr,
-            );
+            compaction.grid.create_block(write_block_callback, &write.grid_write, &write.block.ptr);
         }
 
         fn write_block_callback(grid_write: *Grid.Write) void {
