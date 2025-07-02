@@ -1533,7 +1533,7 @@ where
     let responses: &[EventResponse] = handle_message(&msg)?;
     let events = &msg.events;
 
-    let mut result_accum: Vec<EventResult> = Vec::new();
+    let mut result_accum: Vec<EventResult> = Vec::with_capacity(events.len());
     {
         let mut events_iter = events.iter().enumerate();
         let mut response_iter = responses.iter();
