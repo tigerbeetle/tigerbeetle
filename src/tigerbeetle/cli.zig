@@ -36,7 +36,7 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
 
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -49,7 +49,7 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
 
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -59,7 +59,7 @@ const CLIArgs = union(enum) {
         cache_grid: ?flags.ByteSize = null,
         development: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
 
         // Everything below here is considered experimental, and requires `--experimental` to be
@@ -76,7 +76,7 @@ const CLIArgs = union(enum) {
         cache_transfers_pending: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
@@ -85,14 +85,14 @@ const CLIArgs = union(enum) {
         replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
-        statsd: ?[:0]const u8 = null,
+        statsd: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
         /// log consisting of logged requests. Much like a redis AOF with fsync=on.
         /// Enabling this will have performance implications.
-        aof_file: ?[:0]const u8 = null,
+        aof_file: ?[]const u8 = null,
 
         /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
         /// setting aof_file to '<data file path>.aof'.
@@ -144,7 +144,7 @@ const CLIArgs = union(enum) {
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
         statsd: ?[]const u8 = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -261,7 +261,7 @@ const CLIArgs = union(enum) {
     const Multiversion = struct {
         log_debug: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -460,7 +460,7 @@ pub const Command = union(enum) {
         replica: u8,
         replica_count: u8,
         development: bool,
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -470,7 +470,7 @@ pub const Command = union(enum) {
         replica: u8,
         replica_count: u8,
         development: bool,
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -491,13 +491,13 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         timeout_prepare_ticks: ?u64,
         timeout_grid_repair_message_ticks: ?u64,
-        trace: ?[:0]const u8,
+        trace: ?[]const u8,
         development: bool,
         experimental: bool,
         replicate_closed_loop: bool,
         replicate_star: bool,
         aof_file: ?Path,
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
         statsd: ?std.net.Address,
     };
@@ -553,7 +553,7 @@ pub const Command = union(enum) {
         id_order: IdOrder,
         clients: u32,
         statsd: ?[]const u8,
-        trace: ?[:0]const u8,
+        trace: ?[]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -593,7 +593,7 @@ pub const Command = union(enum) {
     };
 
     pub const Multiversion = struct {
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 

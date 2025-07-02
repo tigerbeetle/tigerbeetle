@@ -178,12 +178,12 @@ const Command = struct {
     io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
-    data_file_path: [:0]const u8,
+    data_file_path: []const u8,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
-        path: [:0]const u8,
+        path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
