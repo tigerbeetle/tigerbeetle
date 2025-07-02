@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-ZIG_RELEASE_DEFAULT="0.14.0"
+ZIG_RELEASE_DEFAULT="0.14.1"
 # Default to the release build, or allow the latest dev build, or an explicit release version:
 ZIG_RELEASE=${1:-$ZIG_RELEASE_DEFAULT}
 if [ "$ZIG_RELEASE" = "latest" ]; then
@@ -42,7 +42,7 @@ case "$(uname)" in
         ;;
 esac
 
-ZIG_TARGET="zig-$ZIG_OS-$ZIG_ARCH"
+ZIG_TARGET="zig-$ZIG_ARCH-$ZIG_OS"
 
 # Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
 if command -v wget > /dev/null; then

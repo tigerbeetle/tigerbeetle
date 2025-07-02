@@ -45,7 +45,7 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
 const zig_version = std.SemanticVersion{
     .major = 0,
     .minor = 14,
-    .patch = 0,
+    .patch = 1,
 };
 
 comptime {
