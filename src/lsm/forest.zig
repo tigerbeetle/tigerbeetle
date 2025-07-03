@@ -813,6 +813,24 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     };
 }
 
+/// Plans a bar's worth of compaction work across all the trees in the Forest, and schedules it
+/// one beat at a time. Each bar is divided into two half bars with `lsm_compaction_ops/2` beats
+/// each. Even levels (0 → 1, 2 → 4, etc.) are active during the first half bar and odd levels
+/// (immutable → 0, 1 → 3, etc.) are active during the second half bar.
+///
+/// We now describe the scheduling algorithm. In the description, we refer to each (tree, level)
+/// combination as a `Compaction`, for example the compaction from level 0 → 1 in the Accounts tree.
+///
+/// At the first beat of each half bar:
+/// 1. Calculate the half-bar quota for each Compaction.
+/// 2. Calculate the half-bar quota for the entire Forest by summing up the aforementioned quotas.
+///
+/// At each beat:
+/// 1. Calculate the Forest's beat quota by equally dividing the half-bar quota across each beat.
+/// 2. Resume a suspended Compaction, or start a new one.
+/// 3. Run active Compaction till either the Forest's beat quota is met, or its half-bar quota is
+///    met. If its the latter, go to step 2. If its the former...
+/// 4. Suspend active Compaction and finish the beat.
 fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
     return struct {
         grid: *Grid,
