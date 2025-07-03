@@ -51,9 +51,9 @@ pub const Ratio = struct {
         const numerator_string, const denominator_string = stdx.cut(value, "/") orelse
             return .{ .err = "expected 'a/b' ratio, but found:" };
 
-        const numerator = std.fmt.parseInt(u64, numerator_string, 16) catch
+        const numerator = std.fmt.parseInt(u64, numerator_string, 10) catch
             return .{ .err = "invalid numerator:" };
-        const denominator = std.fmt.parseInt(u64, denominator_string, 16) catch
+        const denominator = std.fmt.parseInt(u64, denominator_string, 10) catch
             return .{ .err = "invalid denominator:" };
         if (numerator > denominator) {
             return .{ .err = "ratio greater than 1:" };
@@ -66,6 +66,10 @@ test "Ratio.parse_flag_value" {
     assert(std.meta.eql(
         Ratio.parse_flag_value("3/4"),
         .{ .ok = ratio(3, 4) },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("10/100"),
+        .{ .ok = ratio(10, 100) },
     ));
     assert(std.meta.eql(
         Ratio.parse_flag_value("3"),
