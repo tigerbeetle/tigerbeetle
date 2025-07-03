@@ -473,6 +473,53 @@ pub fn CompactionType(
             };
         }
 
+        /// Assert consistency of the compaction counters between beats. This isn't as
+        /// straightforward as calling counters.consistent() as we do at the end of the bar, since
+        /// we may carry over multiple input value blocks, and an output value block over to the
+        /// next beat.
+        ///
+        ///
+        /// Compute values_in, values_dropped, values_out, values_in_flight, and assert:
+        ///       values_out + values_in_flight == values_in - values_dropped
+        ///
+        // values_in: Values from the input value blocks that have been read from disk.
+        // values_dropped: Values dropped during merge.
+        // values_out: Values from the output value blocks that have been written to disk,
+        //             plus the values from the output value block being carried over to the
+        //             next beat (output of merge but not written to disk yet).
+        // values_in_flight: Values from the input value blocks being carried over to the next
+        //                   beat, minus the values that have already been consumed during
+        //                   merge.
+        fn assert_counter_consistency_between_beats(compaction: *const Compaction) void {
+            const values_in = compaction.counters.in;
+            const values_out = compaction.counters.out + compaction.table_builder.value_count;
+            const values_dropped = compaction.counters.dropped;
+
+            var values_in_flight: u64 = 0;
+
+            if (compaction.table_info_a.? == .immutable) {
+                assert(compaction.level_a_value_block.empty());
+                if (compaction.level_a_immutable_stage != .exhausted) {
+                    values_in_flight += compaction.table_info_a.?.immutable.len;
+                }
+            }
+
+            var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
+            while (level_a_value_block_iterator.next()) |block| {
+                values_in_flight += Table.data_block_values_used(block.ptr).len;
+            }
+            values_in_flight -= compaction.level_a_position.value;
+
+            var level_b_value_block_iterator = compaction.level_b_value_block.iterator();
+            while (level_b_value_block_iterator.next()) |block| {
+                values_in_flight += Table.data_block_values_used(block.ptr).len;
+            }
+
+            values_in_flight -= compaction.level_b_position.value;
+
+            assert(values_out + values_in_flight == values_in - values_dropped);
+        }
+
         pub fn assert_between_bars(compaction: *const Compaction) void {
             assert(compaction.stage == .inactive);
             assert(compaction.idle());
@@ -518,11 +565,11 @@ pub fn CompactionType(
                 pool.blocks_free() >=
                     // Input index & value blocks that can be carried over to the subsequent beat.
                     compaction.level_a_index_block.buffer.len +
-                    compaction.level_a_value_block.buffer.len +
-                    compaction.level_b_index_block.buffer.len +
-                    compaction.level_b_value_block.buffer.len +
-                    // At least one output index & value block.
-                    (1 + 1),
+                        compaction.level_a_value_block.buffer.len +
+                        compaction.level_b_index_block.buffer.len +
+                        compaction.level_b_value_block.buffer.len +
+                        // At least one output index & value block.
+                        (1 + 1),
             );
 
             compaction.stage = .paused;
@@ -690,6 +737,9 @@ pub fn CompactionType(
 
                 return 0;
             } else {
+                if (compaction.table_info_a.? == .immutable) {
+                    compaction.counters.in += compaction.table_info_a.?.immutable.len;
+                }
                 return compaction.quotas.bar;
             }
         }
@@ -845,12 +895,11 @@ pub fn CompactionType(
             },
         ) enum { pending, ready } {
             assert(compaction.idle());
-
+            assert(compaction.stage == .paused);
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some blocks from the previous beat.
             maybe(compaction.block_queues_empty_input());
 
-            assert(compaction.stage == .paused);
             if (compaction.move_table) assert(compaction.quotas.bar_exhausted());
 
             if (compaction.quotas.bar_exhausted()) {
@@ -936,6 +985,8 @@ pub fn CompactionType(
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some input blocks to the next beat.
             maybe(compaction.block_queues_empty_input());
+
+            compaction.assert_counter_consistency_between_beats();
 
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
@@ -1446,6 +1497,7 @@ pub fn CompactionType(
             assert(block.stage == .read_value_block);
             stdx.copy_disjoint(.exact, u8, block.ptr, value_block);
             block.stage = .read_value_block_done;
+            compaction.counters.in += Table.data_block_values_used(block.ptr).len;
             compaction.compaction_dispatch();
         }
 
@@ -1555,7 +1607,6 @@ pub fn CompactionType(
 
             compaction.quotas.bar_done += consumed_total;
             compaction.quotas.beat_done += consumed_total;
-            compaction.counters.in += consumed_total;
 
             compaction.counters.dropped += merge_result.dropped;
 

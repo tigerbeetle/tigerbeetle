@@ -791,7 +791,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     blocks +=
                         stdx.div_ceil(constants.lsm_levels, 2) *
                         (compaction_input_tables_max *
-                        (1 + tree_info.Tree.Table.layout.data_block_count_max));
+                            (1 + tree_info.Tree.Table.layout.data_block_count_max));
                 }
                 break :blocks blocks;
             };
@@ -822,7 +822,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 /// combination as a `Compaction`, for example the compaction from level 0 → 1 in the Accounts tree.
 ///
 /// At the first beat of each half bar:
-/// 1. Calculate the half-bar quota for each Compaction.
+/// 1. Calculate the half-bar quota for each Compaction, which is the total number of bytes that
+///    Compaction needs to chew through. We use this as an estimate of time the compaction will take
+///    and then slice it into small chunks, to spread it evenly across the beats of the half bar.
 /// 2. Calculate the half-bar quota for the entire Forest by summing up the aforementioned quotas.
 ///
 /// At each beat:
