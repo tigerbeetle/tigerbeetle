@@ -870,9 +870,9 @@ const Metrics = struct {
     const TimingSummary = struct {
         timer: std.time.Timer,
 
-        duration_min_ns: ?u64 = null,
-        duration_max_ns: ?u64 = null,
-        duration_sum_ns: u64 = 0,
+        duration_min: ?stdx.Duration = null,
+        duration_max: ?stdx.Duration = null,
+        duration_sum: stdx.Duration = .{ .ns = 0 },
         event_count: u64 = 0,
         count: u64 = 0,
 
@@ -880,14 +880,13 @@ const Metrics = struct {
             metrics: *TimingSummary,
             event_count: u64,
         ) void {
-            const duration_ns: u64 = metrics.timer.read();
-            assert(duration_ns > 0);
+            const duration: stdx.Duration = .{ .ns = metrics.timer.lap() };
+            maybe(duration.ns == 0);
             maybe(event_count == 0);
 
-            metrics.duration_min_ns =
-                @min(duration_ns, metrics.duration_min_ns orelse std.math.maxInt(u64));
-            metrics.duration_max_ns = @max(duration_ns, metrics.duration_max_ns orelse 0);
-            metrics.duration_sum_ns += duration_ns;
+            metrics.duration_min = if (metrics.duration_min) |min| duration.min(min) else duration;
+            metrics.duration_max = if (metrics.duration_max) |max| duration.max(max) else duration;
+            metrics.duration_sum.ns += duration.ns;
             metrics.count += 1;
             metrics.event_count += event_count;
         }
@@ -912,11 +911,10 @@ const Metrics = struct {
         const runner: *const Runner = @alignCast(@fieldParentPtr("metrics", metrics));
         inline for (comptime std.enums.values(Fields)) |field| {
             const summary: *TimingSummary = &@field(metrics, @tagName(field));
-            if (summary.count > 0) {
+            if (summary.count > 0 and summary.duration_sum.ns > 0) {
                 assert(runner.state == .last);
-                assert(summary.duration_sum_ns > 0);
-                assert(summary.duration_min_ns != null);
-                assert(summary.duration_max_ns != null);
+                assert(summary.duration_min != null);
+                assert(summary.duration_max != null);
 
                 const timestamp_last = switch (field) {
                     .consumer => runner.state.last.consumer_timestamp,
@@ -924,18 +922,15 @@ const Metrics = struct {
                 };
                 const event_rate = @divTrunc(
                     summary.event_count * std.time.ns_per_s,
-                    summary.duration_sum_ns,
+                    summary.duration_sum.ns,
                 );
-                log.info("{s}: p0={}ms mean={}ms p100={?}ms " ++
+                log.info("{s}: p0={}ms mean={}ms p100={}ms " ++
                     "event_count={} throughput={} op/s " ++
                     "last timestamp={} ({})", .{
                     @tagName(field),
-                    @divTrunc(summary.duration_min_ns.?, std.time.ns_per_ms),
-                    @divFloor(
-                        @divTrunc(summary.duration_sum_ns, std.time.ns_per_ms),
-                        summary.count,
-                    ),
-                    @divTrunc(summary.duration_max_ns.?, std.time.ns_per_ms),
+                    summary.duration_min.?.ms(),
+                    @divFloor(summary.duration_sum.ms(), summary.count),
+                    summary.duration_max.?.ms(),
                     summary.event_count,
                     event_rate,
                     timestamp_last,
@@ -1444,4 +1439,55 @@ test "amqp: JSON message" {
             \\{"timestamp":"18446744073709551615","type":"two_phase_pending","ledger":4294967295,"transfer":{"id":"340282366920938463463374607431768211455","amount":"340282366920938463463374607431768211455","pending_id":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"timeout":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"debit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"credit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"}}
         ).diff(buffer);
     }
+}
+
+test "amqp: metrics" {
+    var summary: Metrics.TimingSummary = .{
+        .timer = try std.time.Timer.start(),
+    };
+
+    try testing.expect(summary.count == 0);
+    try testing.expect(summary.event_count == 0);
+    try testing.expect(summary.duration_sum.ns == 0);
+    try testing.expect(summary.duration_max == null);
+    try testing.expect(summary.duration_min == null);
+
+    summary.record(10);
+
+    try testing.expect(summary.count == 1);
+    try testing.expect(summary.event_count == 10);
+    try testing.expect(summary.duration_sum.ns >= 0);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expect(summary.duration_sum.ns == summary.duration_min.?.ns);
+    try testing.expect(summary.duration_sum.ns == summary.duration_max.?.ns);
+    try testing.expect(summary.duration_min.?.ns == summary.duration_max.?.ns);
+
+    std.time.sleep(100 * std.time.ns_per_us);
+    summary.record(5);
+
+    try testing.expect(summary.count == 2);
+    try testing.expect(summary.event_count == 15);
+    try testing.expect(summary.duration_sum.ns > 0);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expect(
+        summary.duration_sum.ns ==
+            summary.duration_min.?.ns + summary.duration_max.?.ns,
+    );
+    try testing.expect(summary.duration_min.?.ns < summary.duration_max.?.ns);
+
+    std.time.sleep(100 * std.time.ns_per_us);
+    summary.record(0);
+
+    try testing.expect(summary.count == 3);
+    try testing.expect(summary.event_count == 15);
+    try testing.expect(summary.duration_sum.ns > 0);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expect(
+        summary.duration_sum.ns >
+            summary.duration_min.?.ns + summary.duration_max.?.ns,
+    );
+    try testing.expect(summary.duration_min.?.ns < summary.duration_max.?.ns);
 }
