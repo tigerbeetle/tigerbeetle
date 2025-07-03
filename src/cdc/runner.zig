@@ -261,12 +261,13 @@ pub const Runner = struct {
     }
 
     pub fn deinit(self: *Runner, allocator: std.mem.Allocator) void {
+        self.amqp_client.deinit(allocator);
         self.vsr_client.deinit(allocator);
         self.message_pool.deinit(allocator);
-        self.amqp_client.deinit(allocator);
+        self.io.deinit();
         self.buffer.deinit(allocator);
-        allocator.free(self.progress_tracker_queue);
         allocator.free(self.locker_queue);
+        allocator.free(self.progress_tracker_queue);
     }
 
     /// To make the CDC stateless, internal queues are used to store the state:
