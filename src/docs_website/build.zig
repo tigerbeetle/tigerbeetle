@@ -32,7 +32,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     const content = b.addWriteFiles();
-    { //TODO(Zig 0.14.0): https://github.com/ziglang/zig/issues/20571
+    { //TODO(zig): https://github.com/ziglang/zig/issues/20571
         var dir = try b.build_root.handle.openDir("assets", .{ .iterate = true });
         defer dir.close();
 
