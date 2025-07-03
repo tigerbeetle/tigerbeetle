@@ -80,15 +80,15 @@ const IdTreeValue = extern struct {
 /// Normalizes index tree field types into either u64 or u128 for CompositeKey
 fn IndexCompositeKeyType(comptime Field: type) type {
     switch (@typeInfo(Field)) {
-        .Void => return void,
-        .Enum => |e| {
+        .void => return void,
+        .@"enum" => |e| {
             return switch (@bitSizeOf(e.tag_type)) {
                 0...@bitSizeOf(u64) => u64,
                 @bitSizeOf(u65)...@bitSizeOf(u128) => u128,
                 else => @compileError("Unsupported enum tag for index: " ++ @typeName(e.tag_type)),
             };
         },
-        .Int => |i| {
+        .int => |i| {
             if (i.signedness != .unsigned) {
                 @compileError("Index int type (" ++ @typeName(Field) ++ ") is not unsigned");
             }
@@ -212,7 +212,7 @@ pub fn GrooveType(
                 .{
                     .name = field.name,
                     .type = IndexTree,
-                    .default_value = null,
+                    .default_value_ptr = null,
                     .is_comptime = false,
                     .alignment = @alignOf(IndexTree),
                 },
@@ -225,7 +225,7 @@ pub fn GrooveType(
     for (derived_fields) |field| {
         // Get the function info for the derived field.
         const derive_func = @field(groove_options.derived, field.name);
-        const derive_func_info = @typeInfo(@TypeOf(derive_func)).Fn;
+        const derive_func_info = @typeInfo(@TypeOf(derive_func)).@"fn";
 
         // Make sure it has only one argument.
         if (derive_func_info.params.len != 1) {
@@ -245,11 +245,11 @@ pub fn GrooveType(
         }
 
         const derive_return_type = @typeInfo(derive_func_info.return_type.?);
-        if (derive_return_type != .Optional) {
+        if (derive_return_type != .optional) {
             @compileError("expected derive fn to return optional tree index type");
         }
 
-        const DerivedType = derive_return_type.Optional.child;
+        const DerivedType = derive_return_type.optional.child;
         const table_value_count_max = constants.lsm_compaction_ops *
             @field(groove_options.batch_value_count_max, field.name);
         const IndexTree = IndexTreeType(Storage, DerivedType, table_value_count_max);
@@ -258,7 +258,7 @@ pub fn GrooveType(
             .{
                 .name = field.name,
                 .type = IndexTree,
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(IndexTree),
             },
@@ -271,7 +271,7 @@ pub fn GrooveType(
         index_options_fields[i] = .{
             .name = index_field.name,
             .type = IndexTree.Options,
-            .default_value = null,
+            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(IndexTree.Options),
         };
@@ -319,7 +319,7 @@ pub fn GrooveType(
     };
 
     const _IndexTrees = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = index_fields,
             .decls = &.{},
@@ -327,7 +327,7 @@ pub fn GrooveType(
         },
     });
     const _IndexTreeOptions = @Type(.{
-        .Struct = .{
+        .@"struct" = .{
             .layout = .auto,
             .fields = &index_options_fields,
             .decls = &.{},
@@ -357,20 +357,20 @@ pub fn GrooveType(
                             groove_options.derived,
                             field_name,
                         )));
-                        assert(derived_fn == .Fn);
-                        assert(derived_fn.Fn.return_type != null);
+                        assert(derived_fn == .@"fn");
+                        assert(derived_fn.@"fn".return_type != null);
 
-                        const return_type = @typeInfo(derived_fn.Fn.return_type.?);
-                        assert(return_type == .Optional);
-                        break :type return_type.Optional.child;
+                        const return_type = @typeInfo(derived_fn.@"fn".return_type.?);
+                        assert(return_type == .optional);
+                        break :type return_type.optional.child;
                     }
 
                     break :type @TypeOf(@field(@as(Object, undefined), field_name));
                 };
                 pub const IndexPrefix = switch (@typeInfo(Index)) {
-                    .Void => void,
-                    .Int => Index,
-                    .Enum => |info| info.tag_type,
+                    .void => void,
+                    .int => Index,
+                    .@"enum" => |info| info.tag_type,
                     else => @compileError("Unsupported index type for " ++ field_name),
                 };
 
@@ -393,9 +393,9 @@ pub fn GrooveType(
 
                 inline fn as_prefix(index: Index) IndexPrefix {
                     return switch (@typeInfo(Index)) {
-                        .Void => {},
-                        .Int => index,
-                        .Enum => @intFromEnum(index),
+                        .void => {},
+                        .int => index,
+                        .@"enum" => @intFromEnum(index),
                         else => unreachable,
                     };
                 }
@@ -634,7 +634,7 @@ pub fn GrooveType(
                 // for by batch_value_count_limit.
                 .stash_value_count_max = constants.lsm_compaction_ops *
                     (options.tree_options_object.batch_value_count_limit +
-                    options.prefetch_entries_for_read_max),
+                        options.prefetch_entries_for_read_max),
 
                 // Scopes are limited to a single beat, so the maximum number of entries in
                 // a single scope is batch_value_count_limit (total – not per beat).

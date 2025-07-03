@@ -23,7 +23,7 @@ const TreeEnum = tree_enum: {
         }
     }
 
-    break :tree_enum @Type(.{ .Enum = .{
+    break :tree_enum @Type(.{ .@"enum" = .{
         .tag_type = u32,
         .fields = tree_fields,
         .decls = &.{},
@@ -34,12 +34,12 @@ const TreeEnum = tree_enum: {
 /// Returns the minimum length of an array which can be indexed by the values of every enum variant.
 fn enum_max(EnumOrUnion: type) u8 {
     const type_info = @typeInfo(EnumOrUnion);
-    assert(type_info == .Enum or type_info == .Union);
+    assert(type_info == .@"enum" or type_info == .@"union");
 
-    const Enum = if (type_info == .Enum)
-        type_info.Enum
+    const Enum = if (type_info == .@"enum")
+        type_info.@"enum"
     else
-        @typeInfo(type_info.Union.tag_type.?).Enum;
+        @typeInfo(type_info.Union.tag_type.?).@"enum";
     assert(Enum.is_exhaustive);
 
     var max: u8 = Enum.fields[0].value;
@@ -114,15 +114,16 @@ pub const Event = union(enum) {
 
     /// Convert the base event to an EventTiming or EventMetric.
     pub fn as(event: *const Event, EventType: type) EventType {
+        @setEvalBranchQuota(32_000);
         return switch (event.*) {
             inline else => |source_payload, tag| {
                 const TargetPayload = std.meta.fieldInfo(EventType, tag).type;
                 const target_payload_info = @typeInfo(TargetPayload);
-                assert(target_payload_info == .Void or target_payload_info == .Struct);
+                assert(target_payload_info == .void or target_payload_info == .@"struct");
 
                 const target_payload: TargetPayload = switch (@typeInfo(TargetPayload)) {
-                    .Void => {},
-                    .Struct => blk: {
+                    .void => {},
+                    .@"struct" => blk: {
                         var target_payload: TargetPayload = undefined;
                         inline for (comptime std.meta.fieldNames(TargetPayload)) |field| {
                             @field(target_payload, field) = @field(source_payload, field);
@@ -518,16 +519,16 @@ pub fn format_data(
     const fields = std.meta.fields(Data);
     inline for (fields, 0..) |data_field, i| {
         assert(data_field.type == bool or
-            @typeInfo(data_field.type) == .Int or
-            @typeInfo(data_field.type) == .Enum or
-            @typeInfo(data_field.type) == .Union);
+            @typeInfo(data_field.type) == .int or
+            @typeInfo(data_field.type) == .@"enum" or
+            @typeInfo(data_field.type) == .@"union");
 
         const data_field_value = @field(data, data_field.name);
         try writer.writeAll(data_field.name);
         try writer.writeByte('=');
 
-        if (@typeInfo(data_field.type) == .Enum or
-            @typeInfo(data_field.type) == .Union)
+        if (@typeInfo(data_field.type) == .@"enum" or
+            @typeInfo(data_field.type) == .@"union")
         {
             try writer.print("{s}", .{@tagName(data_field_value)});
         } else {

@@ -1049,62 +1049,62 @@ pub fn StateMachineType(
             // all operations, so they need to be large enough for the worst case.
             const scan_lookup_buffer_size: usize, const scan_lookup_result_max: u16 =
                 max: {
-                const operations: []const Operation = &.{
-                    .get_account_transfers,
-                    .get_account_balances,
-                    .query_accounts,
-                    .query_transfers,
-                    .get_change_events,
-
-                    .deprecated_get_account_transfers,
-                    .deprecated_get_account_balances,
-                    .deprecated_query_accounts,
-                    .deprecated_query_transfers,
-                };
-                var batch_count_max: u16 = 0;
-                var buffer_size_max: usize = 0;
-                inline for (operations) |operation| {
-                    // The `Groove` object is stored in the buffer, not necessarily
-                    // the same as `ResultType(operation)`.
-                    const object_size: usize = switch (operation) {
+                    const operations: []const Operation = &.{
                         .get_account_transfers,
-                        .deprecated_get_account_transfers,
-                        => @sizeOf(Transfer),
                         .get_account_balances,
-                        .deprecated_get_account_balances,
-                        => @sizeOf(AccountEvent),
                         .query_accounts,
-                        .deprecated_query_accounts,
-                        => @sizeOf(Account),
                         .query_transfers,
-                        .deprecated_query_transfers,
-                        => @sizeOf(Transfer),
-                        .get_change_events => @sizeOf(AccountEvent),
-                        else => comptime unreachable,
-                    };
-                    buffer_size_max = @max(
-                        buffer_size_max,
-                        operation_result_max(
-                            operation,
-                            self.batch_size_limit,
-                        ) * object_size,
-                    );
+                        .get_change_events,
 
-                    // For multi-batched queries, the result count of each individual query
-                    // is stored in a list and used as the offset into `scan_lookup_buffer`.
-                    batch_count_max = @max(
-                        batch_count_max,
-                        if (operation_is_multi_batch(operation))
-                            vsr.multi_batch.multi_batch_count_max(.{
-                                .batch_size_min = @sizeOf(EventType(operation)),
-                                .batch_size_limit = options.batch_size_limit,
-                            })
-                        else
-                            1,
-                    );
-                }
-                break :max .{ buffer_size_max, batch_count_max };
-            };
+                        .deprecated_get_account_transfers,
+                        .deprecated_get_account_balances,
+                        .deprecated_query_accounts,
+                        .deprecated_query_transfers,
+                    };
+                    var batch_count_max: u16 = 0;
+                    var buffer_size_max: usize = 0;
+                    inline for (operations) |operation| {
+                        // The `Groove` object is stored in the buffer, not necessarily
+                        // the same as `ResultType(operation)`.
+                        const object_size: usize = switch (operation) {
+                            .get_account_transfers,
+                            .deprecated_get_account_transfers,
+                            => @sizeOf(Transfer),
+                            .get_account_balances,
+                            .deprecated_get_account_balances,
+                            => @sizeOf(AccountEvent),
+                            .query_accounts,
+                            .deprecated_query_accounts,
+                            => @sizeOf(Account),
+                            .query_transfers,
+                            .deprecated_query_transfers,
+                            => @sizeOf(Transfer),
+                            .get_change_events => @sizeOf(AccountEvent),
+                            else => comptime unreachable,
+                        };
+                        buffer_size_max = @max(
+                            buffer_size_max,
+                            operation_result_max(
+                                operation,
+                                self.batch_size_limit,
+                            ) * object_size,
+                        );
+
+                        // For multi-batched queries, the result count of each individual query
+                        // is stored in a list and used as the offset into `scan_lookup_buffer`.
+                        batch_count_max = @max(
+                            batch_count_max,
+                            if (operation_is_multi_batch(operation))
+                                vsr.multi_batch.multi_batch_count_max(.{
+                                    .batch_size_min = @sizeOf(EventType(operation)),
+                                    .batch_size_limit = options.batch_size_limit,
+                                })
+                            else
+                                1,
+                        );
+                    }
+                    break :max .{ buffer_size_max, batch_count_max };
+                };
             self.scan_lookup_buffer = try allocator.alignedAlloc(u8, 16, scan_lookup_buffer_size);
             errdefer allocator.free(self.scan_lookup_buffer);
 
@@ -1197,7 +1197,7 @@ pub fn StateMachineType(
             // Checking if the expected number of results will fit the reply.
             if (machine_constants.message_body_size_max <
                 (result_count_expected * result_size) +
-                reply_trailer_size)
+                    reply_trailer_size)
             {
                 return false;
             }
@@ -2845,9 +2845,9 @@ pub fn StateMachineType(
 
             var execute_timestamp: u64 = timestamp -
                 self.prepare_delta_nanoseconds(
-                operation,
-                body_decoder.payload, // The entire message's body without the trailer.
-            );
+                    operation,
+                    body_decoder.payload, // The entire message's body without the trailer.
+                );
             while (body_decoder.pop()) |batch| {
                 assert(self.batch_valid(operation, batch));
                 // Commit each batched set of events
@@ -3556,9 +3556,9 @@ pub fn StateMachineType(
             assert(result.cr_account_id != 0);
             const transfer: Transfer =
                 switch (self.forest.grooves.transfers.get_by_timestamp(result.timestamp)) {
-                .found_object => |transfer| transfer,
-                .found_orphaned_id, .not_found => unreachable,
-            };
+                    .found_object => |transfer| transfer,
+                    .found_orphaned_id, .not_found => unreachable,
+                };
             const dr_account = self.get_account(result.dr_account_id).?;
             const cr_account = self.get_account(result.cr_account_id).?;
             assert(transfer.debit_account_id == dr_account.id);
@@ -5641,9 +5641,9 @@ fn check(test_table: []const u8) !void {
 
                 const interval_ns: u64 = @abs(ticks.value) *
                     @as(u64, switch (ticks.unit) {
-                    .nanoseconds => 1,
-                    .seconds => std.time.ns_per_s,
-                });
+                        .nanoseconds => 1,
+                        .seconds => std.time.ns_per_s,
+                    });
 
                 // The `parse` logic already computes `maxInt - value` when a unsigned int is
                 // represented as a negative number. However, we need to use a signed int and
@@ -6093,7 +6093,7 @@ test "linked accounts" {
 
 test "linked_event_chain_open" {
     try check(
-    // A chain of 3 events (the last event in the chain closes the chain with linked=false):
+        // A chain of 3 events (the last event in the chain closes the chain with linked=false):
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1 LNK   _   _ _ _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C1 LNK   _   _ _ _ _ _ _ ok
         \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
@@ -6114,7 +6114,7 @@ test "linked_event_chain_open" {
 
 test "linked_event_chain_open for an already failed batch" {
     try check(
-    // An individual event (successful):
+        // An individual event (successful):
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
 
         // An open chain of 3 events (the second one fails):
@@ -7017,7 +7017,7 @@ test "imported events: linked chain" {
 
 test "create_accounts: closed accounts" {
     try check(
-    // Accounts can be created already closed.
+        // Accounts can be created already closed.
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _  _  _ _ _  CLSD _ _ ok
         \\ commit create_accounts
         \\
@@ -7868,6 +7868,12 @@ test "deprecated operations" {
 // Sanity test to check the maximum batch size on a 1MiB message.
 // For a comprehensive test of all operations, see the `input_valid` test.
 test "StateMachine: batch_elements_max" {
+    // TODO: Zig 0.13.0 lazy compilation allowed creating a state machine
+    // with `test_min` config and a 1MiB message. With Zig 0.14.1, many
+    // assertions are hit during compile time.
+    // We should either move this test to another non-testing binary or isolate
+    // the code in another type that doesn’t require creating the state machine.
+    if (true) return error.SkipZigTest;
     // 1MiB message:
     const message_body_size_max = (1024 * 1024) - @sizeOf(vsr.Header);
 

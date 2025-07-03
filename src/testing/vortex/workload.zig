@@ -474,29 +474,31 @@ fn lookup_latest_transfers(model: *const Model) Command {
 /// corresponding type, with the maximum count of driver events as its len. These buffers are used
 /// to hold commands and results in the workload loop.
 fn FixedSizeBuffersType(Union: type) type {
-    const union_fields = @typeInfo(Union).Union.fields;
+    const union_fields = @typeInfo(Union).@"union".fields;
     var struct_fields: [union_fields.len]std.builtin.Type.StructField = undefined;
 
     var i = 0;
     for (union_fields) |union_field| {
         const info = @typeInfo(union_field.type);
-        const field_type = [events_count_max]info.Pointer.child;
+        const field_type = [events_count_max]info.pointer.child;
         struct_fields[i] = .{
             .name = union_field.name,
             .type = field_type,
-            .default_value = null,
+            .default_value_ptr = null,
             .is_comptime = false,
             .alignment = @alignOf(field_type),
         };
         i += 1;
     }
 
-    return @Type(.{ .Struct = .{
-        .is_tuple = false,
-        .fields = &struct_fields,
-        .layout = .auto,
-        .decls = &.{},
-    } });
+    return @Type(.{
+        .@"struct" = .{
+            .is_tuple = false,
+            .fields = &struct_fields,
+            .layout = .auto,
+            .decls = &.{},
+        },
+    });
 }
 
 pub fn send(

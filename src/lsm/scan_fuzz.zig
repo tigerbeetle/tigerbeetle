@@ -231,12 +231,12 @@ const QuerySpec = struct {
                 .merge => |merge| switch (merge.operator) {
                     .union_set => match: {
                         var match: bool = false;
-                        for (0..merge.operand_count) |_| match = matches.pop() or match;
+                        for (0..merge.operand_count) |_| match = matches.pop().? or match;
                         break :match match;
                     },
                     .intersection_set => match: {
                         var match: bool = true;
-                        for (0..merge.operand_count) |_| match = matches.pop() and match;
+                        for (0..merge.operand_count) |_| match = matches.pop().? and match;
                         break :match match;
                     },
                 },

@@ -274,8 +274,8 @@ pub const Decoder = struct {
     }
 
     pub fn read_int(self: *Decoder, comptime T: type) Error!T {
-        comptime assert(@typeInfo(T) == .Int);
-        comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+        comptime assert(@typeInfo(T) == .int);
+        comptime assert(@typeInfo(T).int.signedness == .unsigned);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         if (self.index + @sizeOf(T) > self.buffer.len) return error.BufferExhausted;
         defer {
@@ -287,7 +287,7 @@ pub const Decoder = struct {
     }
 
     pub fn read_enum(self: *Decoder, comptime Enum: type) Error!Enum {
-        comptime assert(@typeInfo(Enum) == .Enum);
+        comptime assert(@typeInfo(Enum) == .@"enum");
         const Int = std.meta.Tag(Enum);
         const value = try self.read_int(Int);
         return std.meta.intToEnum(
@@ -497,7 +497,7 @@ pub const Encoder = struct {
     }
 
     pub fn write_int(self: *Encoder, comptime T: type, value: T) void {
-        comptime assert(@typeInfo(T) == .Int);
+        comptime assert(@typeInfo(T) == .int);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         assert(self.index + @sizeOf(T) <= self.buffer.len);
         std.mem.writeInt(T, self.buffer[self.index..][0..@sizeOf(T)], value, .big);

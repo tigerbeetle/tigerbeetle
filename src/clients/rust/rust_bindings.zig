@@ -39,11 +39,11 @@ const type_mappings = .{
 
 fn resolve_rust_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Array => |info| return resolve_rust_type(info.child),
-        .Enum => |info| return resolve_rust_type(info.tag_type),
-        .Struct => return resolve_rust_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
-        .Bool => return "u8", // todo "bool"
-        .Int => |info| {
+        .array => |info| return resolve_rust_type(info.child),
+        .@"enum" => |info| return resolve_rust_type(info.tag_type),
+        .@"struct" => return resolve_rust_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .bool => return "u8", // todo "bool"
+        .int => |info| {
             assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 8 => "u8",
@@ -54,12 +54,12 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
                 else => @compileError("invalid int type"),
             };
         },
-        .Optional => |info| switch (@typeInfo(info.child)) {
-            .Pointer => return resolve_rust_type(info.child),
+        .optional => |info| switch (@typeInfo(info.child)) {
+            .pointer => return resolve_rust_type(info.child),
             else => @compileError("Unsupported optional type: " ++ @typeName(Type)),
         },
-        .Pointer => |info| {
-            assert(info.size != .Slice);
+        .pointer => |info| {
+            assert(info.size != .slice);
             assert(!info.is_allowzero);
 
             inline for (type_mappings) |type_mapping| {
@@ -73,7 +73,7 @@ fn resolve_rust_type(comptime Type: type) []const u8 {
 
             return comptime "*mut " ++ resolve_rust_type(info.child);
         },
-        .Void, .Opaque => return "::std::os::raw::c_void",
+        .void, .@"opaque" => return "::std::os::raw::c_void",
         else => @compileError("Unhandled type: " ++ @typeName(Type)),
     }
 }
@@ -98,12 +98,12 @@ fn emit_enum(
     if (std.mem.count(u8, rust_name, "_") == 1) suffix_pos = rust_name.len;
 
     const backing_type = switch (@typeInfo(Type)) {
-        .Struct => |s| s.backing_integer.?,
-        .Enum => |e| e.tag_type,
+        .@"struct" => |s| s.backing_integer.?,
+        .@"enum" => |e| e.tag_type,
         else => @panic("unexpected"),
     };
     const rust_backing_type_str = switch (@typeInfo(backing_type)) {
-        .Int => |i| brk: {
+        .int => |i| brk: {
             break :brk switch (i.bits) {
                 32 => switch (i.signedness) {
                     .unsigned => "u32",
@@ -127,7 +127,7 @@ fn emit_enum(
 
         if (!skip) {
             const field_name = to_uppercase(field.name);
-            if (@typeInfo(Type) == .Enum) {
+            if (@typeInfo(Type) == .@"enum") {
                 try buffer.writer().print("pub const {s}_{s}_{s}: {s} = {};\n", .{
                     rust_name,
                     rust_name[0..suffix_pos],
@@ -162,7 +162,7 @@ fn emit_struct(
 
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
-            .Array => |array| {
+            .array => |array| {
                 try buffer.writer().print("    pub {s}: [{s}; {}]", .{
                     field.name,
                     resolve_rust_type(field.type),
@@ -208,12 +208,12 @@ pub fn main() !void {
         }
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError("Invalid C struct type: " ++ @typeName(ZigType)),
                 .@"packed" => try emit_enum(&buffer, ZigType, info, rust_name, &.{"padding"}),
                 .@"extern" => try emit_struct(&buffer, info, rust_name),
             },
-            .Enum => |info| {
+            .@"enum" => |info| {
                 try emit_enum(&buffer, ZigType, info, rust_name, &.{});
             },
             else => try buffer.writer().print("pub type {s} = {s};\n\n", .{

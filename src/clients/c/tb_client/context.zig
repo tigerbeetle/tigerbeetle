@@ -968,7 +968,7 @@ const Locker = extern struct {
     }
 
     fn lock_slow(self: *Locker) void {
-        @setCold(true);
+        @branchHint(.cold);
 
         // Avoid doing an atomic swap below if we already know the state is contended.
         // An atomic swap unconditionally stores which marks the cache-line as modified

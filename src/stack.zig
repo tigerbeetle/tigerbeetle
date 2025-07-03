@@ -195,7 +195,7 @@ test "Stack: fuzz" {
         // Verify that peek() returns the same as the last element in our model.
         if (model.items.len > 0) {
             const top = stack.peek() orelse unreachable;
-            const top_ref = model.pop();
+            const top_ref = model.pop().?;
             assert(top.id == top_ref);
             try model.append(top_ref);
         } else {

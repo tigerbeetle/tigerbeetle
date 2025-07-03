@@ -40,7 +40,7 @@ pub var log_level_runtime: std.log.Level = .info;
 
 pub fn log_runtime(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -164,7 +164,7 @@ const SigIllHandler = struct {
 
                 var oact: std.posix.Sigaction = undefined;
 
-                try std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
+                std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
                 original_posix_sigill_handler = oact.handler.sigaction.?;
             },
             else => unreachable,
@@ -751,8 +751,8 @@ fn print_value(
     }
 
     switch (@typeInfo(@TypeOf(value))) {
-        .Fn => {}, // Ignore the log() function.
-        .Pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+        .@"fn" => {}, // Ignore the log() function.
+        .pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
             field,
             std.fmt.fmtSliceEscapeLower(value),
         }),

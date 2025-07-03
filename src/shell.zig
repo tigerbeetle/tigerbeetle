@@ -746,7 +746,7 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 
         const T = @TypeOf(arg_or_slice);
 
-        if (@typeInfo(T) == .Int or @typeInfo(T) == .ComptimeInt) {
+        if (@typeInfo(T) == .int or @typeInfo(T) == .comptime_int) {
             if (concat_left) {
                 try argv.extend_last_arg("{d}", .{arg_or_slice});
             } else {

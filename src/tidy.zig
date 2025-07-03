@@ -224,8 +224,8 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
                     (std.mem.startsWith(u8, string_value, " account A") or
-                    std.mem.startsWith(u8, string_value, " transfer T") or
-                    std.mem.startsWith(u8, string_value, " transfer   ")))
+                        std.mem.startsWith(u8, string_value, " transfer T") or
+                        std.mem.startsWith(u8, string_value, " transfer   ")))
                 {
                     // Table tests from state_machine.zig. They are intentionally wide.
                     continue;

@@ -103,7 +103,7 @@ const TransferBatch = struct {
 
 /// Indexes: [valid:bool][limit:bool][method]
 const transfer_templates = table: {
-    @setEvalBranchQuota(2_000);
+    @setEvalBranchQuota(4_000);
 
     const SNGL = @intFromEnum(TransferPlan.Method.single_phase);
     const PEND = @intFromEnum(TransferPlan.Method.pending);
@@ -376,9 +376,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
 
                 const event_count_remain: u32 =
                     if (AccountingStateMachine.operation_is_batchable(operation))
-                    event_max - event_count
-                else
-                    1;
+                        event_max - event_count
+                    else
+                        1;
                 const batch_size = self.build_request_batch(
                     client_index,
                     action,
@@ -394,9 +394,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 });
                 const result_count_expected: u32 =
                     AccountingStateMachine.operation_result_count_expected(
-                    operation,
-                    writable[0..batch_size],
-                );
+                        operation,
+                        writable[0..batch_size],
+                    );
                 const reply_message_size: u32 =
                     ((result_count + result_count_expected) * result_size) +
                     reply_trailer_size;
@@ -916,9 +916,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .debits_must_not_exceed_credits = null,
                 .credits_must_not_exceed_debits = null,
             })) |account| account.id else
-            // Pick an account with valid index (rather than "random.int(u128)") because the
-            // Auditor must decode the id to check for a matching account.
-            self.auditor.account_index_to_id(self.prng.int(usize));
+                // Pick an account with valid index (rather than "random.int(u128)") because the
+                // Auditor must decode the id to check for a matching account.
+                self.auditor.account_index_to_id(self.prng.int(usize));
 
             // It may be an invalid account.
             const account_state: ?*const Auditor.AccountState = self.auditor.get_account_state(
@@ -1149,7 +1149,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 const default = transfer_plan.method;
                 if (default == .pending and
                     self.auditor.pending_expiries.count() + self.transfers_pending_in_flight ==
-                    self.auditor.options.transfers_pending_max)
+                        self.auditor.options.transfers_pending_max)
                 {
                     break :method .single_phase;
                 }
@@ -1231,7 +1231,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     while (iterator.next()) |id| {
                         if (previous == null or
                             @max(target, id.*) - @min(target, id.*) <
-                            @max(target, previous.?) - @min(target, previous.?))
+                                @max(target, previous.?) - @min(target, previous.?))
                         {
                             previous = id.*;
                         }

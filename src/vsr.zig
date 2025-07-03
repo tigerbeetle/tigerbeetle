@@ -306,7 +306,7 @@ pub const Operation = enum(u8) {
     pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
         assert(self.valid(StateMachine));
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
-            inline for (@typeInfo(Enum).Enum.fields) |field| {
+            inline for (@typeInfo(Enum).@"enum".fields) |field| {
                 const op = @field(Enum, field.name);
                 if (@intFromEnum(self) == @intFromEnum(op)) {
                     return field.name;
@@ -318,16 +318,16 @@ pub const Operation = enum(u8) {
 
     fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
-            assert(@typeInfo(StateMachine.Operation).Enum.is_exhaustive);
-            assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
-                @typeInfo(Operation).Enum.tag_type);
-            for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
+            assert(@typeInfo(StateMachine.Operation).@"enum".is_exhaustive);
+            assert(@typeInfo(StateMachine.Operation).@"enum".tag_type ==
+                @typeInfo(Operation).@"enum".tag_type);
+            for (@typeInfo(StateMachine.Operation).@"enum".fields) |field| {
                 const operation = @field(StateMachine.Operation, field.name);
                 if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
             }
-            for (@typeInfo(Operation).Enum.fields) |field| {
+            for (@typeInfo(Operation).@"enum".fields) |field| {
                 const vsr_operation = @field(Operation, field.name);
                 switch (vsr_operation) {
                     // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
@@ -1329,7 +1329,7 @@ const ViewChangeHeadersSlice = struct {
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
             if (headers.command == .do_view_change or
                 (headers.command == .start_view and
-                index < constants.pipeline_prepare_queue_max + 1))
+                    index < constants.pipeline_prepare_queue_max + 1))
             {
                 assert(header.op == head.op - index);
             }

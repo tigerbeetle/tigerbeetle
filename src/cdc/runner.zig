@@ -1284,8 +1284,8 @@ pub const Message = struct {
         var value: T = undefined;
         for (std.meta.fields(T)) |field| {
             @field(value, field.name) = switch (@typeInfo(field.type)) {
-                .Int => std.math.maxInt(field.type),
-                .Enum => max: {
+                .int => std.math.maxInt(field.type),
+                .@"enum" => max: {
                     var name: []const u8 = "";
                     for (std.enums.values(tb.ChangeEventType)) |tag| {
                         if (@tagName(tag).len > name.len) {
@@ -1294,7 +1294,7 @@ pub const Message = struct {
                     }
                     break :max @field(field.type, name);
                 },
-                .Struct => worse_case(field.type),
+                .@"struct" => worse_case(field.type),
                 else => unreachable,
             };
         }
@@ -1325,7 +1325,7 @@ test "amqp: DualBuffer" {
         try testing.expectEqual(@as(usize, event_count_max), producer1_buffer.len);
 
         const producer1_count = prng.range_inclusive(u32, 1, event_count_max);
-        prng.fill(std.mem.asBytes(producer1_buffer[0..producer1_count]));
+        prng.fill(std.mem.sliceAsBytes(producer1_buffer[0..producer1_count]));
         dual_buffer.producer_finish(producer1_count);
 
         // Starts a consumer after the producer has finished:
@@ -1343,7 +1343,7 @@ test "amqp: DualBuffer" {
 
         const producer2_count = prng.range_inclusive(u32, 0, event_count_max);
         maybe(producer2_count == 0); // Testing zeroed producers.
-        prng.fill(std.mem.asBytes(producer2_buffer[0..producer2_count]));
+        prng.fill(std.mem.sliceAsBytes(producer2_buffer[0..producer2_count]));
         dual_buffer.producer_finish(producer2_count);
 
         // Consuming the first producer:

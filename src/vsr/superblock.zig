@@ -258,11 +258,11 @@ pub const SuperBlockHeader = extern struct {
 
                 assert((state.checkpoint.manifest_block_count == 1) ==
                     (state.checkpoint.manifest_oldest_address ==
-                    state.checkpoint.manifest_newest_address));
+                        state.checkpoint.manifest_newest_address));
 
                 assert((state.checkpoint.manifest_block_count == 1) ==
                     (state.checkpoint.manifest_oldest_checksum ==
-                    state.checkpoint.manifest_newest_checksum));
+                        state.checkpoint.manifest_newest_checksum));
             }
         }
 
@@ -990,7 +990,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.storage_size >= data_file_size_min);
             assert((update.storage_size == data_file_size_min) ==
                 (update.free_set_references.blocks_acquired.empty() and
-                update.free_set_references.blocks_released.empty()));
+                    update.free_set_references.blocks_released.empty()));
 
             // NOTE: Within the vsr_state.checkpoint assignment below, do not read from vsr_state
             // directly. A miscompilation bug (as of Zig 0.11.0) causes fields to receive the

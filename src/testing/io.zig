@@ -175,8 +175,8 @@ pub const IO = struct {
 
                     const sector_has_larger_than_logical_sector_read_fault =
                         (op.len > constants.sector_size and io.prng.chance(
-                        io.options.larger_than_logical_sector_read_fault_probability,
-                    ));
+                            io.options.larger_than_logical_sector_read_fault_probability,
+                        ));
 
                     if (sector_marked_in_fault_map or
                         sector_has_larger_than_logical_sector_read_fault)

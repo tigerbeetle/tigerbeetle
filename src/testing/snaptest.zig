@@ -166,9 +166,18 @@ pub const Snap = struct {
         defer arena.deinit();
 
         const allocator = arena.allocator();
+        const file_path_relative = try std.fs.path.join(
+            allocator,
+            // The file location is relative to the module root path.
+            // TODO: Don't hardcode `src` here.
+            &.{ "src/", snapshot.location.file },
+        );
 
-        const file_text =
-            try std.fs.cwd().readFileAlloc(allocator, snapshot.location.file, 1024 * 1024);
+        const file_text = try std.fs.cwd().readFileAlloc(
+            allocator,
+            file_path_relative,
+            1024 * 1024,
+        );
         var file_text_updated = try std.ArrayList(u8).initCapacity(allocator, file_text.len);
 
         const line_zero_based = snapshot.location.line - 1;
@@ -190,11 +199,11 @@ pub const Snap = struct {
         try file_text_updated.appendSlice(snapshot_suffix);
 
         try std.fs.cwd().writeFile(.{
-            .sub_path = snapshot.location.file,
+            .sub_path = file_path_relative,
             .data = file_text_updated.items,
         });
 
-        std.debug.print("Updated {s}\n", .{snapshot.location.file});
+        std.debug.print("Updated {s}\n", .{file_path_relative});
         return error.SnapUpdated;
     }
 };

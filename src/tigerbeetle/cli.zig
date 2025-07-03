@@ -748,6 +748,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         "development", "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
+        @setEvalBranchQuota(2_000);
         const stable_field = comptime for (stable_args) |stable_arg| {
             assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
             if (std.mem.eql(u8, field.name, stable_arg)) {
