@@ -386,15 +386,7 @@ test chance {
 /// Like enum_weighted, but doesn't require specifying the enum up-front.
 pub fn chances(prng: *PRNG, weights: anytype) std.meta.FieldEnum(@TypeOf(weights)) {
     const Enum = std.meta.FieldEnum(@TypeOf(weights));
-    const EnumWeights = EnumWeightsType(Enum);
-    const enum_weights: EnumWeights = cast: {
-        var enum_weights: EnumWeights = undefined;
-        inline for (std.meta.fields(EnumWeights)) |field| {
-            @field(enum_weights, field.name) = @field(weights, field.name);
-        }
-        break :cast enum_weights;
-    };
-    return enum_weighted(prng, Enum, enum_weights);
+    return enum_weighted_impl(prng, Enum, weights);
 }
 
 test chances {
@@ -438,6 +430,10 @@ pub fn EnumWeightsType(E: type) type {
 
 /// Returns a random value of an enum, where probability is proportional to weight.
 pub fn enum_weighted(prng: *PRNG, Enum: type, weights: EnumWeightsType(Enum)) Enum {
+    return enum_weighted_impl(prng, Enum, weights);
+}
+
+fn enum_weighted_impl(prng: *PRNG, Enum: type, weights: anytype) Enum {
     const fields = @typeInfo(Enum).@"enum".fields;
     var total: u64 = 0;
     inline for (fields) |field| {
