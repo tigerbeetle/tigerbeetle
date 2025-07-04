@@ -625,10 +625,10 @@ test "Routing finds best route" {
                 .node_count = replica_count,
                 .client_count = 0,
                 .seed = seed,
-                .one_way_delay_mean = 0,
-                .one_way_delay_min = 0,
+                .one_way_delay_mean = .{ .ns = 0 },
+                .one_way_delay_min = .{ .ns = 0 },
                 .path_maximum_capacity = replica_count,
-                .path_clog_duration_mean = 0,
+                .path_clog_duration_mean = .{ .ns = 0 },
                 .path_clog_probability = ratio(0, 100),
             }, .{
                 .packet_command = packet_command,
@@ -744,9 +744,11 @@ test "Routing finds best route" {
             }
         }
 
-        fn packet_delay(packet_simulator: *PacketSimulator, _: Packet, path: Path) u64 {
+        fn packet_delay(packet_simulator: *PacketSimulator, _: Packet, path: Path) Duration {
             const env: *Environment = @fieldParentPtr("packet_simulator", packet_simulator);
-            return env.distance(path.source, path.target);
+            return .{
+                .ns = @as(u64, env.distance(path.source, path.target)) * 10 * std.time.ns_per_ms,
+            };
         }
     };
 

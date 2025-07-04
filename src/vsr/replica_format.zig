@@ -227,10 +227,10 @@ test "format" {
         allocator,
         data_file_size_min,
         .{
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = .{ .ns = 0 },
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = .{ .ns = 0 },
         },
     );
     defer storage.deinit(allocator);
