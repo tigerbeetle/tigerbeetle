@@ -880,15 +880,25 @@ const Metrics = struct {
             metrics: *TimingSummary,
             event_count: u64,
         ) void {
-            const duration: stdx.Duration = .{ .ns = metrics.timer.lap() };
+            metrics.timing(
+                event_count,
+                .{ .ns = metrics.timer.read() },
+            );
+        }
+
+        fn timing(
+            metrics: *TimingSummary,
+            event_count: u64,
+            duration: stdx.Duration,
+        ) void {
             maybe(duration.ns == 0);
             maybe(event_count == 0);
 
+            metrics.count += 1;
+            metrics.event_count += event_count;
             metrics.duration_min = if (metrics.duration_min) |min| duration.min(min) else duration;
             metrics.duration_max = if (metrics.duration_max) |max| duration.max(max) else duration;
             metrics.duration_sum.ns += duration.ns;
-            metrics.count += 1;
-            metrics.event_count += event_count;
         }
     };
 
@@ -1445,49 +1455,36 @@ test "amqp: metrics" {
     var summary: Metrics.TimingSummary = .{
         .timer = try std.time.Timer.start(),
     };
-
-    try testing.expect(summary.count == 0);
-    try testing.expect(summary.event_count == 0);
-    try testing.expect(summary.duration_sum.ns == 0);
+    try testing.expectEqual(@as(u64, 0), summary.count);
+    try testing.expectEqual(@as(u64, 0), summary.event_count);
+    try testing.expectEqual(@as(u64, 0), summary.duration_sum.ns);
     try testing.expect(summary.duration_max == null);
     try testing.expect(summary.duration_min == null);
 
-    summary.record(10);
-
-    try testing.expect(summary.count == 1);
-    try testing.expect(summary.event_count == 10);
-    try testing.expect(summary.duration_sum.ns >= 0);
+    summary.timing(10, .{ .ns = 50 });
+    try testing.expectEqual(@as(u64, 1), summary.count);
+    try testing.expectEqual(@as(u64, 10), summary.event_count);
+    try testing.expectEqual(@as(u64, 50), summary.duration_sum.ns);
     try testing.expect(summary.duration_min != null);
     try testing.expect(summary.duration_max != null);
-    try testing.expect(summary.duration_sum.ns == summary.duration_min.?.ns);
-    try testing.expect(summary.duration_sum.ns == summary.duration_max.?.ns);
-    try testing.expect(summary.duration_min.?.ns == summary.duration_max.?.ns);
+    try testing.expectEqual(@as(u64, 50), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 50), summary.duration_max.?.ns);
 
-    std.time.sleep(100 * std.time.ns_per_us);
-    summary.record(5);
-
-    try testing.expect(summary.count == 2);
-    try testing.expect(summary.event_count == 15);
-    try testing.expect(summary.duration_sum.ns > 0);
+    summary.timing(5, .{ .ns = 100 });
+    try testing.expectEqual(@as(u64, 2), summary.count);
+    try testing.expectEqual(@as(u64, 15), summary.event_count);
+    try testing.expectEqual(@as(u64, 150), summary.duration_sum.ns);
     try testing.expect(summary.duration_min != null);
     try testing.expect(summary.duration_max != null);
-    try testing.expect(
-        summary.duration_sum.ns ==
-            summary.duration_min.?.ns + summary.duration_max.?.ns,
-    );
-    try testing.expect(summary.duration_min.?.ns < summary.duration_max.?.ns);
+    try testing.expectEqual(@as(u64, 50), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 100), summary.duration_max.?.ns);
 
-    std.time.sleep(100 * std.time.ns_per_us);
-    summary.record(0);
-
-    try testing.expect(summary.count == 3);
-    try testing.expect(summary.event_count == 15);
-    try testing.expect(summary.duration_sum.ns > 0);
+    summary.timing(0, .{ .ns = 10 });
+    try testing.expectEqual(@as(u64, 3), summary.count);
+    try testing.expectEqual(@as(u64, 15), summary.event_count);
+    try testing.expectEqual(@as(u64, 160), summary.duration_sum.ns);
     try testing.expect(summary.duration_min != null);
     try testing.expect(summary.duration_max != null);
-    try testing.expect(
-        summary.duration_sum.ns >
-            summary.duration_min.?.ns + summary.duration_max.?.ns,
-    );
-    try testing.expect(summary.duration_min.?.ns < summary.duration_max.?.ns);
+    try testing.expectEqual(@as(u64, 10), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 100), summary.duration_max.?.ns);
 }
