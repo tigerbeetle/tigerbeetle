@@ -105,6 +105,10 @@ pub fn ClientType(
         /// Used for end-to-end keepalive, and to discover a new primary between requests.
         ping_timeout: vsr.Timeout,
 
+        /// Tracks if client received a pong response after a ping request.
+        /// Used to reduce the load of timeout resets by backing off.
+        pong_received_since_last_ping: bool = false,
+
         /// The round-trip time (estimated by the latest ping/pong pair) from each replica.
         replica_round_trip_times_ns: [constants.replicas_max]?u64 =
             .{null} ** constants.replicas_max,
@@ -463,6 +467,8 @@ pub fn ClientType(
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
+            self.pong_received_since_last_ping = true;
+
             if (pong.header.view > self.view) {
                 log.debug("{}: on_pong: newer view={}..{}", .{
                     self.id,
@@ -635,7 +641,12 @@ pub fn ClientType(
         }
 
         fn on_ping_timeout(self: *Client) void {
-            self.ping_timeout.reset();
+            if (!self.pong_received_since_last_ping) {
+                self.ping_timeout.backoff(&self.prng);
+            } else {
+                self.ping_timeout.reset();
+            }
+            self.pong_received_since_last_ping = false;
 
             const ping = Header.PingClient{
                 .command = .ping_client,
@@ -645,7 +656,6 @@ pub fn ClientType(
                 .ping_timestamp_monotonic = self.time.monotonic(),
             };
 
-            // TODO If we haven't received a pong from a replica since our last ping, then back off.
             self.send_header_to_replicas(ping.frame_const());
         }
 
