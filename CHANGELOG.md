@@ -3,6 +3,30 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.49
+
+Released: 2025-07-04
+
+### Safety And Performance
+
+- [#3064](https://github.com/tigerbeetle/tigerbeetle/pull/3064)
+
+  Fix a division by zero when logging CDC metrics, and increase resolution to nanoseconds.
+
+### Internals
+
+- [#2705](https://github.com/tigerbeetle/tigerbeetle/pull/2705)
+
+  Upgrade to Zig 0.14.1.
+
+- [#3068](https://github.com/tigerbeetle/tigerbeetle/pull/3068)
+
+  Fix a typo that caused probabilities to be parsed as hexadecimal.
+
+### TigerTracks 🎧
+
+- [Dance of Maria](https://open.spotify.com/track/0f7iz1qAWSz61BdHTXbzvC?si=d1znWf4XR1Gev1RZsgtPpQ)
+
 ## TigerBeetle 0.16.48
 
 Released: 2025-07-01
