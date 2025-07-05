@@ -716,6 +716,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release_execute_context = null,
                     .test_context = cluster,
                     .replicate_options = cluster.options.replicate_options,
+                    .commit_stall_probability = null,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
