@@ -354,18 +354,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                     compaction.quotas.bar - compaction.quotas.bar_done;
                 const input_values_remaining_beat =
                     stdx.div_ceil(input_values_remaining_bar, beats_remaining);
-                switch (compaction.beat_commence(.{
-                    .values_count = input_values_remaining_beat,
-                    .callback = compact_callback,
-                })) {
+
+                compaction.beat_commence(input_values_remaining_beat);
+
+                switch (compaction.compaction_dispatch_enter(compact_callback)) {
                     .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
                     .ready => env.change_state(.tree_compact, .fuzzing),
                 }
 
-                if (compaction.grid_reservation) |grid_reservation| {
-                    compaction.grid.forfeit(grid_reservation);
-                    compaction.grid_reservation = null;
-                }
                 assert(env.pool.idle());
             }
 
@@ -384,10 +380,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 if (op >= constants.lsm_compaction_ops) {
                     env.manifest_log.compact_end();
-                    if (env.manifest_log.grid_reservation) |grid_reservation| {
-                        env.manifest_log.grid.forfeit(grid_reservation);
-                        env.manifest_log.grid_reservation = null;
-                    }
                 }
             }
 

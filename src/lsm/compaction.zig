@@ -886,15 +886,62 @@ pub fn CompactionType(
             }
         }
 
-        /// The entry point to the actual compaction work for the beat. Called by the forest.
         pub fn beat_commence(
             compaction: *Compaction,
-            options: struct {
-                values_count: u64,
-                callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
-            },
-        ) enum { pending, ready } {
+            values_count: u64,
+        ) void {
             assert(compaction.idle());
+            assert(compaction.pool.?.idle());
+            assert(compaction.stage == .paused);
+            assert(compaction.block_queues_empty_output());
+            // We may be carrying over some blocks from the previous beat.
+            maybe(compaction.block_queues_empty_input());
+
+            if (compaction.move_table) assert(compaction.quotas.bar_exhausted());
+
+            // Run the compaction up to completion of the bar quota, if possible.
+            const values_remaining = (compaction.quotas.bar - compaction.quotas.bar_done);
+            const quota_beat = @min(values_count, values_remaining);
+
+            compaction.quotas.beat_done = 0;
+            compaction.quotas.beat = quota_beat;
+            assert(compaction.quotas.beat <= compaction.quotas.bar);
+
+            if (compaction.quotas.beat_exhausted()) {
+                log.debug("{s}:{}: beat_commence: beat quota={} fulfilled, done={}", .{
+                    compaction.tree.config.name,
+                    compaction.level_b,
+                    compaction.quotas.beat,
+                    compaction.quotas.beat_done,
+                });
+                return;
+            }
+
+            // The +1 is for imperfections in pacing our immutable table, which might cause us
+            // to overshoot by a single block (limited to 1 due to how the immutable table values
+            // are consumed.)
+            const beat_value_blocks_max = stdx.div_ceil(
+                quota_beat,
+                Table.layout.block_value_count_max,
+            ) + 1;
+
+            // The +1 is in case we had a partially finished index block from a previous beat.
+            const beat_index_blocks_max = stdx.div_ceil(
+                beat_value_blocks_max,
+                Table.data_block_count_max,
+            ) + 1;
+
+            compaction.grid_reservation = compaction.grid.reserve(
+                beat_value_blocks_max + beat_index_blocks_max,
+            );
+        }
+
+        /// The entry point to the actual compaction work for the beat. Called by the forest.
+        pub fn compaction_dispatch_enter(
+            compaction: *Compaction,
+            callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
+        ) enum { pending, ready } {
+            assert(compaction.pool.?.idle());
             assert(compaction.stage == .paused);
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some blocks from the previous beat.
@@ -913,19 +960,6 @@ pub fn CompactionType(
                 return .ready;
             }
 
-            assert(!compaction.move_table);
-            assert(compaction.pool.?.idle());
-
-            // Calculate how many values we have to compact each beat, to self-correct our pacing.
-            // Pacing will have imperfections due to rounding up to fill target value blocks and
-            // immutable table filtering duplicate values.
-            const values_remaining = (compaction.quotas.bar - compaction.quotas.bar_done);
-            const quota_beat = @min(options.values_count, values_remaining);
-
-            compaction.quotas.beat_done = 0;
-            compaction.quotas.beat = quota_beat;
-            assert(compaction.quotas.beat <= compaction.quotas.bar);
-
             if (compaction.quotas.beat_exhausted()) {
                 log.debug("{s}:{}: beat_commence: beat quota={} fulfilled, done={}", .{
                     compaction.tree.config.name,
@@ -936,31 +970,17 @@ pub fn CompactionType(
                 return .ready;
             }
 
+            assert(!compaction.move_table);
+
             compaction.grid.trace.start(.{ .compact_beat = .{
                 .tree = @enumFromInt(compaction.tree.config.id),
                 .level_b = compaction.level_b,
             } });
 
-            compaction.callback = options.callback;
+            assert(compaction.grid_reservation != null);
+
+            compaction.callback = callback;
             compaction.stage = .beat;
-
-            // The +1 is for imperfections in pacing our immutable table, which might cause us
-            // to overshoot by a single block (limited to 1 due to how the immutable table values
-            // are consumed.)
-            const beat_value_blocks_max = stdx.div_ceil(
-                quota_beat,
-                Table.layout.block_value_count_max,
-            ) + 1;
-
-            // The +1 is in case we had a partially finished index block from a previous beat.
-            const beat_index_blocks_max = stdx.div_ceil(
-                beat_value_blocks_max,
-                Table.data_block_count_max,
-            ) + 1;
-            const beat_blocks_max = beat_value_blocks_max + beat_index_blocks_max;
-
-            assert(compaction.grid_reservation == null);
-            compaction.grid_reservation = compaction.grid.reserve(beat_blocks_max);
 
             compaction.compaction_dispatch();
             return .pending;
@@ -991,14 +1011,11 @@ pub fn CompactionType(
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
 
-            // Grid reservation is forfeited by the forest after both ManifestLog and Forest
-            // compactions for this beat are finished. This is because both ManifestLog and Forest
-            // compactions may have active reservations against the grid, and our
-            // reservation-forfeiting logic ensures that once we forfeit one out of multiple active
-            // reservations, we can't reserve a new one (see `forfeit` in free_set.zig). So, if this
-            // reservation is forfeited, another tree's compaction may not be able to reserve blocks
-            // during this beat.
             assert(compaction.grid_reservation != null);
+            if (compaction.grid_reservation) |reservation| {
+                compaction.grid.forfeit(reservation);
+                compaction.grid_reservation = null;
+            }
 
             if (compaction.quotas.bar_exhausted()) {
                 assert(compaction.table_builder.state == .no_blocks);
