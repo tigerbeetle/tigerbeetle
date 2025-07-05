@@ -37,3 +37,10 @@ artifacts = ["*.so", "*.dylib", "*.dll"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.mypy]
+strict = true
+exclude = [
+    "samples/",
+    "tests/",
+]
