@@ -10101,6 +10101,13 @@ pub fn ReplicaType(
             // checkpoint header and the Journal.
             assert(self.op >= self.op_checkpoint());
 
+            // We just replaced our superblock, so any outstanding request_prepares are probably not
+            // useful, and we are likely to need to repair soon (and quickly) in order to start
+            // committing again.
+            const refill_amount = self.repair_messages_budget_journal.refill_max;
+            self.repair_messages_budget_journal.refill(refill_amount);
+            if (self.repair_timeout.ticking) self.repair_timeout.reset();
+
             log.info("{}: sync: ops={}..{}", .{
                 self.replica,
                 self.superblock.working.vsr_state.sync_op_min,
