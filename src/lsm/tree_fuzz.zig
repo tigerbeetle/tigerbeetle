@@ -344,10 +344,11 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(compactions_active_count <= stdx.div_ceil(constants.lsm_levels, 2));
             const compactions_slice = compactions_active[0..compactions_active_count];
 
-            for (compactions_slice) |compaction| {
-                assert(env.pool.idle());
-                env.change_state(.fuzzing, .tree_compact);
+            // 1 since we may have partially finished index/value blocks from the previous beat.
+            var beat_value_blocks_max: u64 = 1;
+            var beat_index_blocks_max: u64 = 1;
 
+            for (compactions_slice) |compaction| {
                 if (first_beat or half_beat) _ = compaction.bar_commence(op, &env.pool);
 
                 const input_values_remaining_bar =
@@ -357,13 +358,39 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 compaction.beat_commence(input_values_remaining_beat);
 
-                switch (compaction.compaction_dispatch_enter(compact_callback)) {
+                // The +1 is for imperfections in pacing our immutable table, which
+                // might cause us to overshoot by a single block (limited to 1 due
+                // to how the immutable table values are consumed.)
+                beat_value_blocks_max += stdx.div_ceil(
+                    compaction.quotas.beat,
+                    Table.layout.block_value_count_max,
+                ) + 1;
+
+                beat_index_blocks_max += stdx.div_ceil(
+                    beat_value_blocks_max,
+                    Table.data_block_count_max,
+                );
+            }
+
+            const grid_reservation = env.grid.reserve(
+                beat_value_blocks_max + beat_index_blocks_max,
+            );
+
+            for (compactions_slice) |compaction| {
+                assert(env.pool.idle());
+                env.change_state(.fuzzing, .tree_compact);
+
+                switch (compaction.compaction_dispatch_enter(.{
+                    .grid_reservation = grid_reservation,
+                    .callback = compact_callback,
+                })) {
                     .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
                     .ready => env.change_state(.tree_compact, .fuzzing),
                 }
-
                 assert(env.pool.idle());
             }
+
+            env.grid.forfeit(grid_reservation);
 
             if (last_beat or last_half_beat) {
                 assert(env.pool.blocks_acquired() == 0);

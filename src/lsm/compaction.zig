@@ -906,40 +906,15 @@ pub fn CompactionType(
             compaction.quotas.beat_done = 0;
             compaction.quotas.beat = quota_beat;
             assert(compaction.quotas.beat <= compaction.quotas.bar);
-
-            if (compaction.quotas.beat_exhausted()) {
-                log.debug("{s}:{}: beat_commence: beat quota={} fulfilled, done={}", .{
-                    compaction.tree.config.name,
-                    compaction.level_b,
-                    compaction.quotas.beat,
-                    compaction.quotas.beat_done,
-                });
-                return;
-            }
-
-            // The +1 is for imperfections in pacing our immutable table, which might cause us
-            // to overshoot by a single block (limited to 1 due to how the immutable table values
-            // are consumed.)
-            const beat_value_blocks_max = stdx.div_ceil(
-                quota_beat,
-                Table.layout.block_value_count_max,
-            ) + 1;
-
-            // The +1 is in case we had a partially finished index block from a previous beat.
-            const beat_index_blocks_max = stdx.div_ceil(
-                beat_value_blocks_max,
-                Table.data_block_count_max,
-            ) + 1;
-
-            compaction.grid_reservation = compaction.grid.reserve(
-                beat_value_blocks_max + beat_index_blocks_max,
-            );
         }
 
         /// The entry point to the actual compaction work for the beat. Called by the forest.
         pub fn compaction_dispatch_enter(
             compaction: *Compaction,
-            callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
+            options: struct {
+                grid_reservation: Grid.Reservation,
+                callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
+            },
         ) enum { pending, ready } {
             assert(compaction.pool.?.idle());
             assert(compaction.stage == .paused);
@@ -977,9 +952,9 @@ pub fn CompactionType(
                 .level_b = compaction.level_b,
             } });
 
-            assert(compaction.grid_reservation != null);
-
-            compaction.callback = callback;
+            assert(compaction.grid_reservation == null);
+            compaction.grid_reservation = options.grid_reservation;
+            compaction.callback = options.callback;
             compaction.stage = .beat;
 
             compaction.compaction_dispatch();
@@ -1011,11 +986,9 @@ pub fn CompactionType(
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
 
+            // The grid reservation is released by the Forest, as it is shared amongst compactions.
             assert(compaction.grid_reservation != null);
-            if (compaction.grid_reservation) |reservation| {
-                compaction.grid.forfeit(reservation);
-                compaction.grid_reservation = null;
-            }
+            compaction.grid_reservation = null;
 
             if (compaction.quotas.bar_exhausted()) {
                 assert(compaction.table_builder.state == .no_blocks);
