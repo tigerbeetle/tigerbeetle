@@ -1804,7 +1804,7 @@ test parse_elf {
 
 pub fn print_information(
     allocator: std.mem.Allocator,
-    exe_path: [:0]const u8,
+    exe_path: []const u8,
     output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);

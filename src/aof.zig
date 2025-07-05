@@ -127,7 +127,8 @@ pub fn AOFType(comptime IO: type) type {
 
         /// Create an AOF in the dir_fd when given a file name. dir_fd must be opened read write
         /// (except on Windows). This ensures everything (including the dir) is fsync'd
-        /// appropriately. Closing dir_fd is the responsibility of the caller.
+        /// appropriately. Closing dir_fd is the responsibility of the caller, which can be done
+        /// immediately after .init() finishes.
         pub fn init(
             io: *IO,
             options: struct {
@@ -136,6 +137,7 @@ pub fn AOFType(comptime IO: type) type {
             },
         ) !AOF {
             assert(!std.fs.path.isAbsolute(options.relative_path));
+            assert(std.mem.endsWith(u8, options.relative_path, ".aof"));
             assert(IO == @import("io.zig").IO);
 
             const dir = std.fs.Dir{
