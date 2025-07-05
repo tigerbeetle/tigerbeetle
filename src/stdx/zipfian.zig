@@ -140,45 +140,6 @@ pub const ZipfianGenerator = struct {
             .zetan = zetan_new,
         };
     }
-
-    /// The probability that an index will be chosen.
-    fn probability(self: *const ZipfianGenerator, item: u64) f64 {
-        assert(item < self.n);
-
-        // Reference: https://en.wikipedia.org/wiki/Zipf's_law#Formal_definition
-        //
-        //   1      1
-        // ----- * ---
-        // zetan   k^s
-        //
-        // zetan is the generalized harmonic number of order "s" (theta) for `n`.
-        // We add 1 to `k` because our items are 0-based but the math is 1-based.
-        return (1.0 / self.zetan) * (1.0 / math.pow(
-            f64,
-            @as(f64, @floatFromInt(item)) + 1,
-            self.theta,
-        ));
-    }
-
-    /// Returns the numbef of items at which the cumulative distribution function (CDF - the
-    /// probability of some value less than x being generated) is greater or equal to
-    /// `cdf_probability`.
-    ///
-    /// If there is no such value, returns the total number of items.
-    fn cumulative_distribution_items(self: *const ZipfianGenerator, cdf_probability: f64) u64 {
-        assert(cdf_probability >= 0.0 and cdf_probability <= 1.0);
-
-        var index: u64 = 0;
-        var probability_sum: f64 = 0.0;
-        while (index < self.n) : (index += 1) {
-            probability_sum += self.probability(index);
-            if (probability_sum >= cdf_probability) {
-                return index + 1;
-            }
-        }
-
-        return self.n;
-    }
 };
 
 /// The Riemann zeta function up to `n`,
@@ -216,33 +177,18 @@ fn zeta_incremental(
 /// some keyspace, where a few keys are hot and most are cold.
 ///
 /// This behaves as if it maintains a shuffled mapping
-/// from every index to a different index. It is implemented
-/// as suggested in the Jim Gray paper: we observe that
-/// most items have very low probability of being selected;
-/// we don't maintain a mapping for this set and instead treat
-/// them as uniformly distributed; we keep only a small
-/// mapping of the most probably selected items.
+/// from every index to a different index. Internally, it is implemented
+/// with a bijective "hash" function (modular‑multiplication permutation)
+///     f(i) = (a * i) mod N
+/// with gcd(a, N) = 1, so every original (Zipfian) index i
+/// maps to a unique “shuffled” index without collisions.
 ///
 /// This technique is described offhandedly in the paper in
 /// a single sentence, and YCSB does not use it, so we are
 /// inventing the details here in a way that seems efficient.
 pub const ZipfianShuffled = struct {
-    const HotArray = stdx.BoundedArrayType(u64, hot_items_limit);
-
-    /// We prefer to store enough hot items to fill the cumulative probability here.
-    /// Other items have uniform probability. In practice though most uses of this
-    /// type first hit the `hot_items_min_probability_limit` below.
-    const hot_items_cumulative_distribution_function = 0.8;
-    /// The cutoff probability for hot items.
-    /// Any index with a probability less than this has uniform probability.
-    /// This is used to short circuit the CDF above for data sets / thetas with a particularly
-    /// large hot item set.
-    const hot_items_min_probability_limit = 0.0001;
-    /// The maximum hot items we're willing to track.
-    const hot_items_limit = 1024 * 4;
-
     gen: ZipfianGenerator,
-    hot_items: HotArray,
+    a: u64,
 
     pub fn init(items: u64, prng: *stdx.PRNG) ZipfianShuffled {
         return ZipfianShuffled.init_theta(items, theta_default, prng);
@@ -251,7 +197,7 @@ pub const ZipfianShuffled = struct {
     pub fn init_theta(items: u64, theta: f64, prng: *stdx.PRNG) ZipfianShuffled {
         var zipf = ZipfianShuffled{
             .gen = ZipfianGenerator.init_theta(0, theta),
-            .hot_items = HotArray{},
+            .a = 0, // Correct a is determined in grow.
         };
 
         zipf.grow(items, prng);
@@ -259,19 +205,14 @@ pub const ZipfianShuffled = struct {
         return zipf;
     }
 
-    pub fn next(self: *const ZipfianShuffled, prng: *stdx.PRNG) u64 {
-        // First try to pick from a zipfian distribution
-        // of hot items.
-        const zipf_index = self.gen.next(prng);
-        if (zipf_index < self.hot_items.count()) {
-            const item = self.hot_items.get(zipf_index);
-            assert(item < self.gen.n);
-            return item;
-        }
+    fn transform(self: *const ZipfianShuffled, zipf_standard: u64) u64 {
+        return (zipf_standard * self.a) % self.gen.n;
+    }
 
-        // Next pick from uniform distribution of all items.
-        const uni_index = prng.int_inclusive(u64, self.gen.n - 1);
-        return uni_index;
+    pub fn next(self: *const ZipfianShuffled, prng: *stdx.PRNG) u64 {
+        const zipf_standard = self.gen.next(prng);
+        const zipf_shuffled = self.transform(zipf_standard);
+        return zipf_shuffled;
     }
 
     /// Grow the size of the random set.
@@ -287,67 +228,19 @@ pub const ZipfianShuffled = struct {
 
         assert(self.gen.n == new_n);
 
-        const hot_items_count_max = self.hot_items_max();
-
-        assert(hot_items_count_max > 0);
-        assert(hot_items_count_max <= new_n);
-
-        // Shuffle each new item into deck of items.
-        // If it's a hot item we'll track it, if not discard it.
-        const start_index = old_n;
-        const end_index = new_n;
-        var index = start_index;
-        while (index < end_index) : (index += 1) {
-            if (self.hot_items.count() < hot_items_count_max) {
-                const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
-                self.hot_items.insert_at(pos_actual, index);
-            } else {
-                // NB: I believe this is biased as to which new items become hot items,
-                // but it probably doesn't matter for our purposes.
-                const pos_init = prng.int_inclusive(u64, new_n - 1);
-                if (pos_init < hot_items_count_max) {
-                    self.hot_items.truncate(hot_items_count_max - 1);
-                    const pos_actual = prng.int_inclusive(u64, self.hot_items.count());
-                    self.hot_items.insert_at(pos_actual, index);
-                }
+        // We try to find an `a` so that it satisifies gcd(a,N) == 1.
+        // This allows us to generate a permutation with (a*zipf_standard) mod N.
+        // This permutation maps one index to another without holes, i.e. is bijective.
+        // The bound is arbitrary but should be large enough to find a number that satisifies
+        // the requirement (see https://en.wikipedia.org/wiki/Euler%27s_totient_function).
+        self.a = for (0..100_000) |_| {
+            const a = prng.range_inclusive(u64, 1, self.gen.n);
+            if (std.math.gcd(a, self.gen.n) == 1) {
+                break a;
             }
-        }
-
-        assert(self.hot_items.count() == hot_items_count_max);
-    }
-
-    fn hot_items_max(self: *ZipfianShuffled) u64 {
-        // If the probability of selecting any individual item greater than hot_items.count is low,
-        // then we don't need any more hot_items. This short-circuits calculating the
-        // expensive cumulative distribution function.
-        if (self.hot_items.count() > 0) {
-            const cur_hot_min_probability = self.gen.probability(self.hot_items.count() - 1);
-            if (cur_hot_min_probability < hot_items_min_probability_limit) {
-                return self.hot_items.count();
-            }
-        }
-
-        const cdf_items_max = self.gen.cumulative_distribution_items(
-            hot_items_cumulative_distribution_function,
-        );
-
-        assert(cdf_items_max >= self.hot_items.count());
-
-        var max = cdf_items_max;
-        var hot_index = self.hot_items.count();
-        while (hot_index < cdf_items_max) : (hot_index += 1) {
-            const probability = self.gen.probability(hot_index);
-            if (probability < hot_items_min_probability_limit) {
-                assert(hot_index > 0);
-                max = hot_index;
-                break;
-            }
-        }
-
-        // Hopefully hot items fit our array.
-        assert(max <= hot_items_limit);
-
-        return max;
+        } else {
+            @panic("Did not find number that satisfies gcd requirement (probabilistic)");
+        };
     }
 };
 
@@ -448,56 +341,21 @@ test "zipfian-ctors" {
 
 // Non-statistical smoke tests related to the shuffled hot items optimization.
 // These could fail if that optimization is tweaked or if the prng changes.
-test "zipfian-hot-items" {
+// The standard zipf generator is tested, here we test the mapping of the shuffled one.
+test "zipfian-shuffled" {
+    const max = 100;
     var prng = stdx.PRNG.from_seed(0);
+    const allocator = std.testing.allocator;
+    var found = try allocator.alloc(bool, max);
+    defer allocator.free(found);
+    for (1..max) |items| {
+        @memset(found, false);
+        var zipf = ZipfianShuffled.init(items, &prng);
 
-    {
-        const szipf = ZipfianShuffled.init(0, &prng);
-        assert(szipf.hot_items.count() == 0);
-    }
-
-    {
-        const szipf = ZipfianShuffled.init(1, &prng);
-        assert(szipf.hot_items.count() == 1);
-    }
-
-    {
-        const szipf = ZipfianShuffled.init(2, &prng);
-        assert(szipf.hot_items.count() == 2);
-    }
-
-    for ([_]u64{ 3, 10, 999, 1_000_000 }) |i| {
-        const szipf = ZipfianShuffled.init(i, &prng);
-        assert(szipf.hot_items.count() >= 1);
-        assert(szipf.hot_items.count() < i);
-
-        // Hot items should be unique
-        for (szipf.hot_items.const_slice()) |h1| {
-            var dupes: u64 = 0;
-            for (szipf.hot_items.const_slice()) |h2| {
-                if (h1 == h2) {
-                    dupes += 1;
-                }
-            }
-            assert(dupes == 1);
+        for (0..items) |i| {
+            const zipf_shuffled = zipf.transform(i);
+            try std.testing.expect(!found[zipf_shuffled]);
+            found[zipf_shuffled] = true;
         }
-
-        // Test that mostly hot items are selected, sometimes non-hot items.
-        var j: u64 = 0;
-        var hot: u64 = 0;
-        while (j < 100) : (j += 1) {
-            const n = szipf.next(&prng);
-            for (szipf.hot_items.const_slice()) |hot_item| {
-                if (n == hot_item) {
-                    hot += 1;
-                }
-            }
-        }
-        if (i < 1000) {
-            assert(hot > 80);
-        } else {
-            assert(hot > 30);
-        }
-        assert(hot < 100);
     }
 }
