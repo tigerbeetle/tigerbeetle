@@ -851,14 +851,9 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
 
-            if (manifest_log.grid_reservation) |_| {
-                // Grid reservation is forfeited by the forest after both ManifestLog and Forest
-                // compactions for this beat are finished. This is because both ManifestLog and
-                // Forest compactions may have active reservations against the grid, and our
-                // reservation-forfeiting logic ensures that once we forfeit one out of multiple
-                // active reservations, we can't reserve a new one (see `forfeit` in free_set.zig).
-                // So, if this reservation is forfeited, another tree's compaction may not be able
-                // to reserve blocks during this beat.
+            if (manifest_log.grid_reservation) |reservation| {
+                manifest_log.grid.forfeit(reservation);
+                manifest_log.grid_reservation = null;
             } else {
                 // Compaction was skipped for this half-bar.
                 assert(manifest_log.entry_count == 0);
