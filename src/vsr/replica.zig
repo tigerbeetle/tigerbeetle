@@ -4226,11 +4226,16 @@ pub fn ReplicaType(
 
             if (self.syncing == .canceling_commit) {
                 switch (self.commit_stage) {
-                    .start, .reply_setup, .checkpoint_data, .checkpoint_superblock => {
+                    .start, .reply_setup, .stall, .checkpoint_data, .checkpoint_superblock => {
                         self.sync_dispatch(.canceling_grid);
                         return;
                     },
-                    else => unreachable,
+                    .idle,
+                    .check_prepare,
+                    .prefetch,
+                    .execute,
+                    .checkpoint_durable,
+                    .compact => unreachable,
                 }
             }
 
