@@ -4235,7 +4235,8 @@ pub fn ReplicaType(
                     .prefetch,
                     .execute,
                     .checkpoint_durable,
-                    .compact => unreachable,
+                    .compact,
+                    => unreachable,
                 }
             }
 
