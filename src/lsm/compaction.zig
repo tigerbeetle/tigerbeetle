@@ -901,10 +901,9 @@ pub fn CompactionType(
 
             // Run the compaction up to completion of the bar quota, if possible.
             const values_remaining = (compaction.quotas.bar - compaction.quotas.bar_done);
-            const quota_beat = @min(values_count, values_remaining);
 
+            compaction.quotas.beat = @min(values_count, values_remaining);
             compaction.quotas.beat_done = 0;
-            compaction.quotas.beat = quota_beat;
             assert(compaction.quotas.beat <= compaction.quotas.bar);
         }
 
@@ -1288,7 +1287,8 @@ pub fn CompactionType(
                     value_block.stage = .free;
                     compaction.pool.?.block_release(value_block);
                 } else {
-                    compaction.write_value_block(compaction.pool.?.writes.acquire().?, .{
+                    const write = compaction.pool.?.writes.acquire().?;
+                    compaction.write_value_block(write, .{
                         .address = compaction.grid.acquire(compaction.grid_reservation.?),
                     });
                 }
@@ -1302,7 +1302,8 @@ pub fn CompactionType(
                     index_block.stage = .free;
                     compaction.pool.?.block_release(index_block);
                 } else {
-                    compaction.write_index_block(compaction.pool.?.writes.acquire().?, .{
+                    const write = compaction.pool.?.writes.acquire().?;
+                    compaction.write_index_block(write, .{
                         .address = compaction.grid.acquire(compaction.grid_reservation.?),
                     });
                 }
@@ -1593,10 +1594,10 @@ pub fn CompactionType(
             assert(compaction.level_b_position.value <= Table.data.value_count_max);
             assert(compaction.table_builder.value_count <= Table.data.value_count_max);
 
-            const consumed_total = merge_result.consumed_a + merge_result.consumed_b;
+            const consumed_ab = merge_result.consumed_a + merge_result.consumed_b;
 
-            compaction.quotas.bar_done += consumed_total;
-            compaction.quotas.beat_done += consumed_total;
+            compaction.quotas.bar_done += consumed_ab;
+            compaction.quotas.beat_done += consumed_ab;
 
             compaction.counters.dropped += merge_result.dropped;
 
@@ -1699,6 +1700,12 @@ pub fn CompactionType(
                         const index_schema = schema.TableIndex.from(index_block.ptr);
                         const data_blocks_count =
                             index_schema.data_blocks_used(index_block.ptr);
+
+                        // It is imperative that we pop the index block when the final value block
+                        // is popped. While it is tempting to pop the index block when we issue
+                        // a read for the final value block, this would be incorrect as it would
+                        // lead to an incorrect index being computed for level_a_value_block_next
+                        // in `compaction_dispatch`.
                         if (compaction.level_a_position.value_block == data_blocks_count) {
                             compaction.level_a_position.index_block += 1;
                             assert(compaction.level_a_position.index_block == 1);
@@ -1735,6 +1742,12 @@ pub fn CompactionType(
                     const index_schema = schema.TableIndex.from(index_block.ptr);
                     const data_blocks_count =
                         index_schema.data_blocks_used(index_block.ptr);
+
+                    // It is imperative that we pop the index block when the final value block
+                    // is popped. While it is tempting to pop the index block when we issue
+                    // a read for the final value block, this would be incorrect as it would
+                    // lead to an incorrect index being computed for level_b_value_block_next
+                    // in `compaction_dispatch`.
                     if (compaction.level_b_position.value_block == data_blocks_count) {
                         compaction.level_b_position.index_block += 1;
                         compaction.level_b_position.value_block = 0;
