@@ -178,12 +178,12 @@ const Command = struct {
     io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
-    data_file_path: [:0]const u8,
+    data_file_path: []const u8,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
-        path: [:0]const u8,
+        path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
@@ -345,18 +345,14 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: ?AOF = if (args.aof) blk: {
-            const aof_path = try std.fmt.allocPrint(
-                allocator,
-                "{s}.aof",
-                .{std.fs.path.basename(args.path)},
-            );
-            defer allocator.free(aof_path);
-            std.log.info("{s}", .{aof_path});
+        var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
+            const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
+            const aof_dir_fd = try IO.open_dir(aof_dir);
+            defer std.posix.close(aof_dir_fd);
 
             break :blk try AOF.init(&command.io, .{
-                .dir_fd = command.dir_fd,
-                .relative_path = aof_path,
+                .dir_fd = aof_dir_fd,
+                .relative_path = std.fs.path.basename(aof_file.const_slice()),
             });
         } else null;
         defer if (aof != null) aof.?.close();
