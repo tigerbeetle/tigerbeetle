@@ -13,6 +13,10 @@ Released: 2025-07-04
 
   Fix a division by zero when logging CDC metrics, and increase resolution to nanoseconds.
 
+- [#3050](https://github.com/tigerbeetle/tigerbeetle/pull/3050)
+
+  Apply backpressure at primary to mitigate an issue with lagging backups.
+
 ### Internals
 
 - [#2705](https://github.com/tigerbeetle/tigerbeetle/pull/2705)

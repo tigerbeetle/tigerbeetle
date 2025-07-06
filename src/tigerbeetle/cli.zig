@@ -24,6 +24,7 @@ const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
+const Ratio = stdx.PRNG.Ratio;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -80,6 +81,7 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
+        commit_stall_probability: ?Ratio = null,
 
         // Highly experimental options that will be removed in a future release:
         replicate_closed_loop: bool = false,
@@ -486,6 +488,7 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         timeout_prepare_ticks: ?u64,
         timeout_grid_repair_message_ticks: ?u64,
+        commit_stall_probability: ?Ratio,
         trace: ?[:0]const u8,
         development: bool,
         experimental: bool,
@@ -748,7 +751,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         "development", "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
-        @setEvalBranchQuota(2_000);
+        @setEvalBranchQuota(2_100);
         const stable_field = comptime for (stable_args) |stable_arg| {
             assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
             if (std.mem.eql(u8, field.name, stable_arg)) {
@@ -956,6 +959,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             start.timeout_grid_repair_message_ms,
             "--timeout-grid-repair-message-ms",
         ),
+        .commit_stall_probability = start.commit_stall_probability,
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
