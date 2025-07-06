@@ -966,9 +966,11 @@ pub fn CompactionType(
         fn beat_complete(compaction: *Compaction) void {
             assert(compaction.stage == .beat_quota_done);
             switch (compaction.table_builder.state) {
-                .no_blocks, .index_and_data_block => {},
-                .index_block => assert(!compaction.table_builder.index_block_full()),
+                .no_blocks => assert(compaction.quotas.bar_exhausted()),
+                .index_and_data_block => assert(!compaction.quotas.bar_exhausted()),
+                .index_block => unreachable,
             }
+
             if (compaction.table_info_a.? == .immutable) {
                 switch (compaction.level_a_immutable_stage) {
                     .ready, .exhausted => {},
@@ -1315,11 +1317,9 @@ pub fn CompactionType(
             }
 
             switch (compaction.table_builder.state) {
-                .no_blocks, .index_and_data_block => {},
-                .index_block => {
-                    assert(!compaction.table_builder.index_block_full());
-                    assert(!compaction.quotas.bar_exhausted());
-                },
+                .no_blocks => assert(compaction.quotas.bar_exhausted()),
+                .index_and_data_block => assert(!compaction.quotas.bar_exhausted()),
+                .index_block => unreachable,
             }
 
             var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
