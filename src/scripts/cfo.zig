@@ -231,21 +231,19 @@ fn run_fuzzers(
 
     const refresh_ns = options.refresh_seconds * std.time.ns_per_s;
     var refresh_timer = try std.time.Timer.start();
-    var refresh = true;
+    var refresh_first = true;
 
     const timeout_ns = options.timeout_seconds * std.time.ns_per_s;
 
     while (true) {
-        if (refresh_timer.read() >= refresh_ns) {
-            refresh = true;
-            refresh_timer.reset();
-        }
-        defer refresh = false;
+        const iteration_refresh = refresh_first or refresh_timer.read() >= refresh_ns;
+        if (iteration_refresh) refresh_timer.reset();
+        refresh_first = false;
 
         const iteration_last = budget_timer.read() >= budget_ns;
-        const iteration_push = refresh or iteration_last;
+        const iteration_push = iteration_refresh or iteration_last;
 
-        if (refresh) {
+        if (iteration_refresh) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
 
             for (tasks.list.items) |*task| {
@@ -268,10 +266,10 @@ fn run_fuzzers(
         for (children) |*child_or_null| {
             if (child_or_null.* == null) {
                 const task = tasks.sample();
-                assert(task.state == .suspended);
-                task.state = .resumed;
-
                 const seed = random.int(u64);
+
+                // Ensure that multiple fuzzers spawned in the same tick are spread out over tasks.
+                task.runtime_virtual += 1;
 
                 const child = try run_fuzzers_start_fuzzer(shell, .{
                     .working_directory = task.working_directory,
@@ -300,6 +298,9 @@ fn run_fuzzers(
                 };
             }
         }
+
+        // Wait 100ms before polling for completion, to avoid hogging the CPU.
+        std.time.sleep(100 * std.time.ns_per_ms);
 
         var running_count: u32 = 0;
         for (children) |*fuzzer_or_null| {
@@ -365,7 +366,6 @@ fn run_fuzzers(
                     ).?;
                     task.runtime_total_ns += seed_duration_ns;
                     task.runtime_virtual += @divFloor(seed_duration_ns, task.weight);
-                    task.state = .suspended;
 
                     fuzzer_or_null.* = null;
                 }
@@ -436,7 +436,6 @@ const Tasks = struct {
         /// Cumulative `runtime / weight`, but since `weight` can change over time, this is more
         /// precise.
         runtime_virtual: u64,
-        state: enum { suspended, resumed },
     };
 
     generation: u64 = 1,
@@ -491,7 +490,7 @@ const Tasks = struct {
             assert(task.runtime_virtual > 0);
             assert(task.generation <= tasks.generation);
 
-            if (task.generation == tasks.generation and task.state == .suspended) {
+            if (task.generation == tasks.generation) {
                 if (task_best_runtime_virtual == null or
                     task_best_runtime_virtual.? > task.runtime_virtual)
                 {
@@ -556,7 +555,6 @@ const Tasks = struct {
                 .seed_template = seed_template,
                 .generation = tasks.generation,
                 .weight = 0, // To be initialized later.
-                .state = .suspended,
                 .runtime_total_ns = 0,
                 .runtime_virtual = tasks.runtime_virtual_init,
             });
