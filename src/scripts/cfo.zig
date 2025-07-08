@@ -230,15 +230,22 @@ fn run_fuzzers(
     // Ticking only once per second would leave the CPU idle.
     const second_ticks = 2;
 
-    for (0..options.budget_seconds * second_ticks) |tick| {
-        const second = @divFloor(tick, second_ticks);
-        const tick_first = tick % second_ticks == 0;
-        const tick_final = tick % second_ticks == second_ticks - 1;
-        const iteration_last = tick_final and second == options.budget_seconds - 1;
-        const iteration_pull = tick_first and second % options.refresh_seconds == 0;
-        const iteration_push = (iteration_pull and second > 0) or iteration_last;
+    const budget_ns = options.budget_seconds * std.time.ns_per_s;
+    var budget_timer = try std.time.Timer.start();
 
-        if (iteration_pull) {
+    const refresh_ns = options.refresh_seconds * std.time.ns_per_s;
+    var refresh_timer = try std.time.Timer.start();
+    var refresh = true;
+
+    while (true) {
+        if (budget_timer.read() >= budget_ns) break;
+
+        if (refresh_timer.read() >= refresh_ns) {
+            refresh = true;
+            refresh_timer.reset();
+        }
+
+        if (refresh) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
 
             for (tasks.list.items) |*task| {
@@ -310,9 +317,12 @@ fn run_fuzzers(
         // Wait a tick before polling for completion.
         std.time.sleep(@divFloor(1 * std.time.ns_per_s, second_ticks));
 
+        var iteration_last = false;
         var running_count: u32 = 0;
         for (children) |*fuzzer_or_null| {
             // Poll for completed fuzzers.
+            if (budget_timer.read() >= budget_ns) iteration_last = true;
+
             if (fuzzer_or_null.*) |*fuzzer| {
                 running_count += 1;
 
@@ -368,7 +378,7 @@ fn run_fuzzers(
         }
         assert(running_count == options.concurrency);
 
-        if (iteration_push) {
+        if (refresh or iteration_last) {
             if (options.devhub_token) |token| {
                 try upload_results(shell, gpa, token, seeds.items);
             } else {
@@ -383,6 +393,7 @@ fn run_fuzzers(
                 }
             }
             seeds.clearRetainingCapacity();
+            refresh = false;
         }
     }
     assert(seeds.items.len == 0);
