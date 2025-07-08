@@ -238,10 +238,10 @@ fn run_fuzzers(
     while (true) {
         const iteration_refresh = refresh_first or refresh_timer.read() >= refresh_ns;
         if (iteration_refresh) refresh_timer.reset();
-        refresh_first = false;
 
         const iteration_last = budget_timer.read() >= budget_ns;
-        const iteration_push = iteration_refresh or iteration_last;
+        const iteration_push = (iteration_refresh and !refresh_first) or iteration_last;
+        refresh_first = false;
 
         if (iteration_refresh) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
