@@ -2005,8 +2005,7 @@ fn fetch(b: *std.Build, options: struct {
             \\        source_path,
             \\        std.fs.cwd(),
             \\        args[4],
-            \\        // TODO(Zig): https://github.com/ziglang/zig/pull/21555
-            \\        .{ .override_mode = if (builtin.target.os.tag == .macos) 0o777 else null },
+            \\        .{},
             \\    );
             \\}
         ),
