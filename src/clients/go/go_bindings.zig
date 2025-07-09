@@ -55,10 +55,8 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-/// Inline function so the return value can be known at comptime
-/// without needing to call this function with the comptime keyword.
-inline fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    comptime {
+fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
+    return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
         var iterator = std.mem.tokenizeScalar(u8, input, '_');
@@ -72,8 +70,8 @@ inline fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) [
             len += word.len;
         }
 
-        return stdx.comptime_slice(&output, min_len orelse len);
-    }
+        break :blk stdx.comptime_slice(&output, min_len orelse len);
+    };
 }
 
 fn calculate_min_len(comptime type_info: anytype) comptime_int {
@@ -116,7 +114,7 @@ fn emit_enum(
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-        const enum_name = prefix ++ to_pascal_case(field.name, min_len);
+        const enum_name = prefix ++ comptime to_pascal_case(field.name, min_len);
         if (type_info.tag_type == u1) {
             try buffer.writer().print("\t{s} {s} = {s}\n", .{
                 enum_name,
@@ -138,11 +136,11 @@ fn emit_enum(
     });
 
     if (type_info.tag_type == u1) {
-        const enum_zero_name = prefix ++ to_pascal_case(
+        const enum_zero_name = prefix ++ comptime to_pascal_case(
             @tagName(@as(Type, @enumFromInt(0))),
             null,
         );
-        const enum_one_name = prefix ++ to_pascal_case(
+        const enum_one_name = prefix ++ comptime to_pascal_case(
             @tagName(@as(Type, @enumFromInt(1))),
             null,
         );
@@ -161,7 +159,7 @@ fn emit_enum(
 
         inline for (type_info.fields) |field| {
             if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
-            const enum_name = prefix ++ to_pascal_case(field.name, null);
+            const enum_name = prefix ++ comptime to_pascal_case(field.name, null);
             try buffer.writer().print("\tcase {s}:\n" ++
                 "\t\treturn \"{s}\"\n", .{
                 enum_name,

@@ -196,17 +196,15 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
     } else return null;
 }
 
-/// Inline function so the return value can be known at comptime
-/// without needing to call this function with the comptime keyword.
-inline fn to_case(
+fn to_case(
     comptime input: []const u8,
     comptime case: enum { camel, pascal, upper },
 ) []const u8 {
-    comptime {
+    return comptime blk: {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {
             const len = std.ascii.upperString(output[0..], input).len;
-            return stdx.comptime_slice(&output, len);
+            break :blk stdx.comptime_slice(&output, len);
         } else {
             var len: usize = 0;
             var iterator = std.mem.tokenizeScalar(u8, input, '_');
@@ -222,9 +220,9 @@ inline fn to_case(
                 .upper => unreachable,
             };
 
-            return stdx.comptime_slice(&output, len);
+            break :blk stdx.comptime_slice(&output, len);
         }
-    }
+    };
 }
 
 fn emit_enum(

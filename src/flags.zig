@@ -87,7 +87,7 @@ fn parse_commands(args: *std.process.ArgIterator, comptime Commands: type) Comma
 
     const first_arg = args.next() orelse fatal(
         "subcommand required, expected {s}",
-        .{fields_to_comma_list(Commands)},
+        .{comptime fields_to_comma_list(Commands)},
     );
 
     // NB: help must be declared as *pub* const to be visible here.
@@ -232,7 +232,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             switch (counts.positional - 1) {
                 inline 0...positional_fields.len - 1 => |positional_index| {
                     const positional_field = positional_fields[positional_index];
-                    const flag = flag_name_positional(positional_field);
+                    const flag = comptime flag_name_positional(positional_field);
 
                     if (arg.len == 0) fatal("{s}: empty argument", .{flag});
                     // Prevent ambiguity between a flag and positional argument value. We could add
@@ -269,7 +269,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         assert(counts.positional <= positional_fields.len);
         inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (positional_index >= counts.positional) {
-                const flag = flag_name_positional(positional_field);
+                const flag = comptime flag_name_positional(positional_field);
                 if (default_value(positional_field)) |default| {
                     @field(result.positional, positional_field.name) = default;
                 } else {
@@ -516,13 +516,11 @@ fn parse_value_enum(comptime E: type, flag: []const u8, value: [:0]const u8) E {
 
     return std.meta.stringToEnum(E, value) orelse fatal(
         "{s}: expected one of {s}, but found '{s}'",
-        .{ flag, fields_to_comma_list(E), value },
+        .{ flag, comptime fields_to_comma_list(E), value },
     );
 }
 
-/// Inline function so the return value can be known at comptime
-/// without needing to call this function with the comptime keyword.
-inline fn fields_to_comma_list(comptime E: type) []const u8 {
+fn fields_to_comma_list(comptime E: type) []const u8 {
     comptime {
         const field_count = std.meta.fields(E).len;
         assert(field_count >= 2);
@@ -540,10 +538,8 @@ inline fn fields_to_comma_list(comptime E: type) []const u8 {
     }
 }
 
-/// Inline function so the return value can be known at comptime
-/// without needing to call this function with the comptime keyword.
-pub inline fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
-    comptime {
+pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+    return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 
         var result: []const u8 = "--";
@@ -553,8 +549,8 @@ pub inline fn flag_name(comptime field: std.builtin.Type.StructField) []const u8
             index = index + i + 1;
         }
         result = result ++ field.name[index..];
-        return result;
-    }
+        break :blk result;
+    };
 }
 
 test flag_name {
@@ -562,9 +558,7 @@ test flag_name {
     try std.testing.expectEqualStrings(flag_name(field), "--statsd");
 }
 
-/// Inline function so the return value can be known at comptime
-/// without needing to call this function with the comptime keyword.
-inline fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
+fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
     comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
     return "<" ++ field.name ++ ">";
 }
