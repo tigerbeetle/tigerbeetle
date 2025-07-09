@@ -138,7 +138,7 @@ fn next(prng: *PRNG) u64 {
 
 test next {
     var prng = from_seed(92);
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         distribution[prng.next() % 8] += 1;
     }
@@ -176,7 +176,7 @@ test fill {
     var buffer_max: [size_max]u8 = undefined;
     var prng = from_seed(32);
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..size_max + 1) |size| {
         // Check that the entire buffer is filled, by filling it over a couple of times
         // and checking that each byte is non-zero at least once.
@@ -240,7 +240,7 @@ test int_inclusive {
     var prng = from_seed(92);
     for (0..8) |max_usize| {
         const max: u8 = @intCast(max_usize);
-        var distribution: [8]u32 = .{0} ** 8;
+        var distribution: [8]u32 = @splat(0);
         for (0..100) |_| {
             distribution[prng.int_inclusive(u8, max)] += 1;
         }
@@ -248,7 +248,7 @@ test int_inclusive {
         for (distribution[max + 1 ..]) |d| assert(d == 0);
     }
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         const n = prng.int_inclusive(u128, 7);
         distribution[@intCast(n)] += 1;
@@ -287,7 +287,7 @@ pub fn index(prng: *PRNG, slice: anytype) usize {
 test index {
     var prng = from_seed(92);
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..100) |_| {
         distribution[index(&prng, &distribution)] += 1;
     }
@@ -307,7 +307,7 @@ test range_inclusive {
     var prng = from_seed(92);
     for (0..8) |min| {
         for (min..8) |max| {
-            var distribution: [8]u32 = .{0} ** 8;
+            var distribution: [8]u32 = @splat(0);
             for (0..100) |_| {
                 distribution[prng.range_inclusive(usize, min, max)] += 1;
             }
@@ -344,7 +344,7 @@ test int {
 
 fn test_bytes_int(Int: type, want: Snap) !void {
     var prng = PRNG.from_seed(92);
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         distribution[@intCast(prng.int(Int) % 8)] += 1;
     }

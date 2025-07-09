@@ -1040,7 +1040,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const replica = &cluster.replicas[replica_index];
 
-            var statuses = [_]u8{' '} ** constants.members_max;
+            var statuses: [constants.members_max]u8 = @splat(' ');
             statuses[replica_index] = switch (cluster.replica_health[replica_index]) {
                 .reformatting => ' ',
                 .down => '#',

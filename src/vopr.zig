@@ -1003,7 +1003,7 @@ pub const Simulator = struct {
         // smaller log_view may have an outdated version of the same uncommitted op. There may be
         // at most a pipeline of uncommitted headers in the cluster.
         const pipeline_max = constants.pipeline_prepare_queue_max;
-        var uncommitted_headers = [_]?vsr.Header.Prepare{null} ** pipeline_max;
+        var uncommitted_headers: [pipeline_max]?vsr.Header.Prepare = @splat(null);
         if (cluster_commit_max < cluster_op_head) {
             for (simulator.cluster.replicas) |replica| {
                 if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;

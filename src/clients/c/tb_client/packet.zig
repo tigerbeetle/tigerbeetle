@@ -27,7 +27,7 @@ pub const Packet = extern struct {
         user_tag: u16,
         operation: u8,
         status: Status,
-        @"opaque": [64]u8 = [_]u8{0} ** 64,
+        @"opaque": [64]u8 = @splat(0),
 
         pub fn cast(self: *Extern) *Packet {
             return @ptrCast(self);
@@ -60,7 +60,7 @@ pub const Packet = extern struct {
     multi_batch_event_count: u16,
     multi_batch_result_count_expected: u16,
     phase: Phase,
-    reserved: [25]u8 = .{0} ** 25,
+    reserved: [25]u8 = @splat(0),
 
     pub fn cast(self: *Packet) *Extern {
         return @ptrCast(self);

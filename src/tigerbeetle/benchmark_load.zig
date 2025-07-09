@@ -268,7 +268,7 @@ const Benchmark = struct {
 
     // State:
     clients_busy: stdx.BitSetType(constants.clients_max) = .{},
-    clients_request_ns: [constants.clients_max]u64 = .{undefined} ** constants.clients_max,
+    clients_request_ns: [constants.clients_max]u64 = @splat(undefined),
     client_requests: []align(constants.sector_size) [constants.message_body_size_max]u8,
     client_replies: []align(constants.sector_size) [constants.message_body_size_max]u8,
     client_timeouts: []Timeout,

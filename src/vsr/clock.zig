@@ -983,7 +983,7 @@ test "clock: fuzz test" {
     });
     defer simulator.deinit();
 
-    var clock_ticks_without_synchronization = [_]u32{0} ** clock_count;
+    var clock_ticks_without_synchronization: [clock_count]u32 = @splat(0);
     while (simulator.ticks < ticks_max) {
         simulator.tick();
 

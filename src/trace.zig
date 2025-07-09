@@ -121,8 +121,7 @@ pub fn TracerType(comptime Time: type) type {
         buffer: []u8,
         statsd: StatsD,
 
-        events_started: [EventTracing.stack_count]?stdx.Instant =
-            .{null} ** EventTracing.stack_count,
+        events_started: [EventTracing.stack_count]?stdx.Instant = @splat(null),
         events_metric: []?EventMetricAggregate,
         events_timing: []?EventTimingAggregate,
 

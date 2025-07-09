@@ -238,7 +238,7 @@ pub fn StateMachineType(
         pub const TransferPending = extern struct {
             timestamp: u64,
             status: TransferPendingStatus,
-            padding: [7]u8 = [_]u8{0} ** 7,
+            padding: [7]u8 = @splat(0),
 
             comptime {
                 // Assert that there is no implicit padding.
@@ -401,7 +401,7 @@ pub fn StateMachineType(
             /// See `transfer_pending_id` for tracking the pending transfer.
             /// It will be `zero` for `none` and `pending`.
             transfer_pending_status: TransferPendingStatus,
-            reserved: [11]u8 = [_]u8{0} ** 11,
+            reserved: [11]u8 = @splat(0),
 
             /// Previous schema before the changes introduced by PR #2507.
             const Former = extern struct {
@@ -416,7 +416,7 @@ pub fn StateMachineType(
                 cr_credits_pending: u128,
                 cr_credits_posted: u128,
                 timestamp: u64,
-                reserved: [88]u8 = [_]u8{0} ** 88,
+                reserved: [88]u8 = @splat(0),
 
                 comptime {
                     assert(stdx.no_padding(Former));

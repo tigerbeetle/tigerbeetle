@@ -26,8 +26,8 @@ test "open/write/read/close/statx" {
         done: bool = false,
 
         fd: ?posix.fd_t = null,
-        write_buf: [20]u8 = [_]u8{97} ** 20,
-        read_buf: [20]u8 = [_]u8{98} ** 20,
+        write_buf: [20]u8 = @splat(97),
+        read_buf: [20]u8 = @splat(98),
 
         written: usize = 0,
         read: usize = 0,
