@@ -639,6 +639,8 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
     );
 }
 
+/// True if every value of the type `T` has a unique bit pattern representing it.
+/// In other words, `T` has no unused bits and no padding.
 pub fn has_unique_representation(comptime T: type) bool {
     switch (@typeInfo(T)) {
         else => return false, // TODO can we know if it's true for some of these types ?
