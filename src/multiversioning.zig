@@ -868,10 +868,11 @@ pub const Multiversion = struct {
 
         if (self.timeout_statx_previous == .previous and
             stdx.equal_bytes(
-            os.linux.Statx,
-            &self.timeout_statx_previous.previous,
-            &self.timeout_statx,
-        )) {
+                os.linux.Statx,
+                &self.timeout_statx_previous.previous,
+                &self.timeout_statx,
+            ))
+        {
             self.stage = .init;
         } else {
             if (self.timeout_statx_previous != .none) {
