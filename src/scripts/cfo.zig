@@ -318,8 +318,9 @@ fn run_fuzzers(
                     }
                 };
 
+                const seed_timestamp_start_ns = fuzzer.seed.seed_timestamp_start;
                 const seed_duration_ns =
-                    @as(u64, @intCast(std.time.nanoTimestamp())) - fuzzer.seed.seed_timestamp_start;
+                    @as(u64, @intCast(std.time.nanoTimestamp())) - seed_timestamp_start_ns;
                 const seed_expired = !fuzzer_done and seed_duration_ns > timeout_ns;
 
                 if (fuzzer_done or seed_expired or iteration_last) {
@@ -345,7 +346,7 @@ fn run_fuzzers(
                         seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
                         // Convert seed_timestamp_start to seconds as `devhub.js` relies on it.
                         seed_record.seed_timestamp_start = @divFloor(
-                            seed_duration_ns,
+                            seed_timestamp_start_ns,
                             std.time.ns_per_s,
                         );
                         seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
