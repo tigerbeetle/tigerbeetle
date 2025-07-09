@@ -120,7 +120,7 @@ const Prepare = struct {
     ok_from_all_replicas: QuorumCounter = quorum_counter_null,
 
     /// commit_min of each replica that acked this prepare.
-    commit_mins: [constants.replicas_max]?u64 = .{null} ** constants.replicas_max,
+    commit_mins: [constants.replicas_max]?u64 = @splat(null),
 
     /// Whether a quorum of prepare_ok messages has been received for this prepare.
     ok_quorum_received: bool = false,
@@ -641,6 +641,7 @@ pub fn ReplicaType(
             assert(options.release.value >= options.release_client_min.value);
             assert(options.pipeline_requests_limit >= 0);
             assert(options.pipeline_requests_limit <= constants.pipeline_request_queue_max);
+            if (options.commit_stall_probability) |p| assert(p.numerator <= p.denominator);
 
             self.static_allocator = StaticAllocator.init(parent_allocator);
             const allocator = self.static_allocator.allocator();
@@ -2147,6 +2148,9 @@ pub fn ReplicaType(
                 }
             }
 
+            assert(message.header.commit_min >= message.header.op -| constants.journal_slot_count);
+            assert(message.header.commit_min <=
+                self.commit_min + constants.pipeline_prepare_queue_max);
             prepare.commit_mins[message.header.replica] = message.header.commit_min;
 
             const count = self.count_message_and_receive_quorum_exactly_once(
@@ -3887,6 +3891,7 @@ pub fn ReplicaType(
         }
 
         fn on_commit_stall_timeout(self: *Replica) void {
+            assert(self.commit_stall_timeout.ticking);
             assert(self.commit_stage == .stall);
 
             self.commit_stall_timeout.stop();
@@ -4607,82 +4612,76 @@ pub fn ReplicaType(
             assert(!self.commit_stall_timeout.ticking);
             assert(self.commit_prepare.?.header.op == self.commit_min + 1);
 
-            if (self.status == .normal and self.primary()) {
-                const prepare = self.pipeline.queue.prepare_queue.head_ptr().?;
-                assert(prepare.message == self.commit_prepare.?);
+            if (self.status != .normal) return .ready;
+            if (!self.primary()) return .ready;
 
-                var pipeline_iterator = self.pipeline.queue.prepare_queue.iterator();
-                _ = pipeline_iterator.next(); // Skip the current commit.
-                const pipeline_waiting = while (pipeline_iterator.next()) |queue_prepare| {
-                    if (queue_prepare.ok_from_all_replicas.count() >= self.quorum_replication) {
-                        break true;
-                    }
-                } else false;
-
-                const commit_lag = commit_lag: {
-                    var commit_lag_max: u64 = 0;
-                    for (
-                        prepare.commit_mins[0..self.replica_count],
-                        0..,
-                    ) |commit_min_or_null, replica_index| {
-                        assert(prepare.ok_from_all_replicas.is_set(replica_index) ==
-                            (prepare.commit_mins[replica_index] != null));
-
-                        if (commit_min_or_null) |commit_min| {
-                            commit_lag_max = @max(
-                                commit_lag_max,
-                                self.commit_min -| commit_min,
-                            );
-                        }
-                    }
-                    break :commit_lag commit_lag_max;
-                };
-
-                const stall_ms = ms: {
-                    if (!pipeline_waiting) break :ms 0;
-
-                    if (commit_lag < constants.pipeline_prepare_queue_max) {
-                        if (self.prng.chance(self.commit_stall_probability)) {
-                            break :ms constants.tick_ms;
-                        } else {
-                            break :ms 0;
-                        }
-                    } else {
-                        assert(self.replica_count > 1);
-
-                        // "Stall 10ms for every quarter-checkpoint of commits lagged,
-                        // but no longer than 40ms".
-                        //
-                        // TODO Once repair+sync is faster, tune this.
-                        // TODO Choose the growth rate in a more principled way. This current
-                        // configuration does seem to allow lagged replicas to recover
-                        // automatically. It also reduced the chance of normal operations leading to
-                        // lagged replicas, but it still happens sometimes.
-                        const checkpoint_quarter = constants.vsr_checkpoint_ops / 4;
-                        const stall_multiple =
-                            std.math.clamp(commit_lag / checkpoint_quarter, 1, 4);
-                        break :ms stall_multiple * 10;
-                    }
-                };
-
-                const stall_ticks = stall_ms / constants.tick_ms;
-                if (stall_ticks == 0) {
-                    return .ready;
-                } else {
-                    log.debug("{}: commit_stall op={} (oks={b} commit_lag={} stall_ticks={})", .{
-                        self.replica,
-                        prepare.message.header.op,
-                        prepare.ok_from_all_replicas.bits,
-                        commit_lag,
-                        stall_ticks,
-                    });
-
-                    self.commit_stall_timeout.after = stall_ticks;
-                    self.commit_stall_timeout.start();
-                    return .pending;
+            var pipeline_iterator = self.pipeline.queue.prepare_queue.iterator();
+            const prepare = pipeline_iterator.next().?; // Skip the current commit.
+            assert(prepare.message == self.commit_prepare.?);
+            const pipeline_waiting = while (pipeline_iterator.next()) |queue_prepare| {
+                if (queue_prepare.ok_from_all_replicas.count() >= self.quorum_replication) {
+                    break true;
                 }
-            } else {
+            } else false;
+
+            const commit_min_min = commit_min_min: {
+                var min: u64 = std.math.maxInt(u64);
+                for (
+                    prepare.commit_mins[0..self.replica_count],
+                    0..,
+                ) |commit_min_or_null, replica_index| {
+                    assert(prepare.ok_from_all_replicas.is_set(replica_index) ==
+                        (commit_min_or_null != null));
+                    min = @min(min, commit_min_or_null orelse std.math.maxInt(u64));
+                }
+                break :commit_min_min min;
+            };
+            assert(commit_min_min <= self.commit_min);
+            const commit_lag = self.commit_min - commit_min_min;
+
+            const stall_ms = ms: {
+                if (!pipeline_waiting) break :ms 0;
+
+                if (commit_lag < constants.pipeline_prepare_queue_max) {
+                    if (self.prng.chance(self.commit_stall_probability)) {
+                        break :ms constants.tick_ms;
+                    } else {
+                        break :ms 0;
+                    }
+                } else {
+                    assert(self.replica_count > 1);
+
+                    // "Stall 10ms for every quarter-checkpoint of commits lagged,
+                    // but no longer than 40ms".
+                    //
+                    // TODO Once repair+sync is faster, tune this.
+                    // TODO Choose the growth rate in a more principled way. This current
+                    // configuration does seem to allow lagged replicas to recover
+                    // automatically. It also reduced the chance of normal operations leading to
+                    // lagged replicas, but it still happens sometimes.
+                    const checkpoint_quarter = @divFloor(constants.vsr_checkpoint_ops, 4);
+                    const stall_multiple =
+                        std.math.clamp(@divFloor(commit_lag, checkpoint_quarter), 1, 4);
+                    break :ms stall_multiple * 10;
+                }
+            };
+
+            const stall_ticks = stall_ms / constants.tick_ms;
+            assert(stall_ms == 0 or stall_ms >= constants.tick_ms);
+            if (stall_ticks == 0) {
                 return .ready;
+            } else {
+                log.debug("{}: commit_stall op={} (oks={b} commit_lag={} stall_ticks={})", .{
+                    self.replica,
+                    prepare.message.header.op,
+                    prepare.ok_from_all_replicas.bits,
+                    commit_lag,
+                    stall_ticks,
+                });
+
+                self.commit_stall_timeout.after = stall_ticks;
+                self.commit_stall_timeout.start();
+                return .pending;
             }
         }
 
