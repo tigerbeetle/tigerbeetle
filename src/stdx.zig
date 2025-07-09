@@ -606,7 +606,7 @@ test "stdx.zig: parse_dirty_semver" {
     }
 }
 
-// TODO(zig): Zig 0.11 doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
+// TODO(zig): std doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
 // Once those are available, this can be removed.
 // The `statfs` definition used by the Linux kernel, and the magic number for tmpfs, from
 // `man 2 fstatfs`.

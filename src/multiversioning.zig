@@ -43,7 +43,7 @@ fn open_memory_file(name: [*:0]const u8) posix.fd_t {
     return @intCast(os.linux.memfd_create(name, mfd_cloexec));
 }
 
-// TODO(zig): Zig 0.11 doesn't have execveat.
+// TODO(zig): std doesn't have execveat.
 // Once that's available, this can be removed.
 fn execveat(
     dirfd: i32,
@@ -868,11 +868,10 @@ pub const Multiversion = struct {
 
         if (self.timeout_statx_previous == .previous and
             stdx.equal_bytes(
-                os.linux.Statx,
-                &self.timeout_statx_previous.previous,
-                &self.timeout_statx,
-            ))
-        {
+            os.linux.Statx,
+            &self.timeout_statx_previous.previous,
+            &self.timeout_statx,
+        )) {
             self.stage = .init;
         } else {
             if (self.timeout_statx_previous != .none) {
