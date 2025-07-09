@@ -434,9 +434,9 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 .manifest_log_done = false,
             };
 
-            forest.compaction_schedule.beat_start(compact_trees_callback, op);
-
-            // Manifest log compaction. Run on the last beat of each half-bar.
+            // Manifest log compaction. Run on the last beat of each half-bar. Start before forest
+            // compaction for lesser fragmentation, as manifest log grid reservations are much
+            // smaller than compaction's.
             // TODO: Figure out a plan wrt the pacing here. Putting it on the last beat kinda-sorta
             // balances out, because we expect to naturally do less other compaction work on the
             // last beat.
@@ -446,6 +446,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
             } else {
                 forest.compaction_progress.?.manifest_log_done = true;
             }
+
+            forest.compaction_schedule.beat_start(compact_trees_callback, op);
         }
 
         fn compact_trees_callback(forest: *Forest) void {
