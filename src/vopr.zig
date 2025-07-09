@@ -1009,7 +1009,31 @@ pub const Simulator = struct {
 
                 if (replica.log_view < cluster_log_view) continue;
                 for (cluster_commit_max + 1..cluster_op_head + 1) |op| {
-                    if (replica.journal.header_with_op(op)) |header| {
+                    if (header: {
+                        if (replica.superblock.working.vsr_state.log_view <
+                            replica.superblock.working.vsr_state.view)
+                        {
+                            // When we are view-changing, our journal headers may contain headers
+                            // which were truncated then restored due to restart. If a view change
+                            // completes then that will be resolved, but if the view-change is stuck
+                            // (e.g. due to "quorum received, awaiting repair") then they may
+                            // linger, so if we only looked at the journal headers it would appear
+                            // as if the replicas disagreed about the uncommitted headers.
+                            const headers_count = replica.superblock.working.vsr_headers_count;
+                            const headers =
+                                replica.superblock.working.vsr_headers_all[0..headers_count];
+                            for (headers) |*header| {
+                                if (header.op == op) {
+                                    break :header switch (vsr.Headers.dvc_header_type(header)) {
+                                        .valid => header,
+                                        .blank => null,
+                                    };
+                                }
+                            } else break :header null;
+                        } else {
+                            break :header replica.journal.header_with_op(op);
+                        }
+                    }) |header| {
                         if (uncommitted_headers[op % pipeline_max]) |header_existing| {
                             assert(header_existing.op == header.op);
                             assert(header_existing.view == header.view);
