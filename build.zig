@@ -422,13 +422,13 @@ fn build_ci(
 
     const mode: CIMode = if (b.args) |args| mode: {
         if (args.len != 1) {
-            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            step_ci.dependOn(&b.addFail("invalid CIMode").step);
             return;
         }
         if (std.meta.stringToEnum(CIMode, args[0])) |m| {
             break :mode m;
         } else {
-            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            step_ci.dependOn(&b.addFail("invalid CIMode").step);
             return;
         }
     } else .default;
@@ -941,8 +941,7 @@ fn build_test_jni(
     },
 ) !void {
     const java_home = b.graph.env_map.get("JAVA_HOME") orelse {
-        step_test_jni.dependOn(&FailStep.add(
-            b,
+        step_test_jni.dependOn(&b.addFail(
             "can't build jni tests tests, JAVA_HOME is not set",
         ).step);
         return;
@@ -1650,38 +1649,6 @@ fn build_git_review(
         &b.addInstallArtifact(git_review, .{}).step,
     );
 }
-
-/// Steps which unconditionally fails with a message.
-///
-/// This is useful for cases where at configuration time you can determine that a certain step
-/// can't succeeded (e.g., a system library is not preset on the host system), but you only want
-/// to fail the step once the user tries to run it. That is, you don't want to fail the whole build,
-/// as other steps might run fine.
-// TODO(Zig): switch to https://github.com/ziglang/zig/pull/20312 in 0.14
-const FailStep = struct {
-    step: std.Build.Step,
-    message: []const u8,
-
-    fn add(b: *std.Build, message: []const u8) *FailStep {
-        const result = b.allocator.create(FailStep) catch unreachable;
-        result.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "failure",
-                .owner = b,
-                .makeFn = FailStep.make,
-            }),
-            .message = message,
-        };
-        return result;
-    }
-
-    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
-        const self: *FailStep = @fieldParentPtr("step", step);
-        std.log.err("{s}", .{self.message});
-        return error.FailStep;
-    }
-};
 
 /// Set the JVM DLL directory on Windows.
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
