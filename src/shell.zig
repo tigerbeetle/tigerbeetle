@@ -833,10 +833,9 @@ test "shell: expand_argv" {
 /// Caller is responsible for closing the dir.
 fn discover_project_root() !std.fs.Dir {
     var current = try std.fs.cwd().openDir(".", .{});
-    errdefer current.close();
+    errdefer current.close(); // Caller is responsible for closing on success.
 
-    var level: u32 = 0;
-    while (level < 16) : (level += 1) {
+    for (0..16) |_| {
         if (current.statFile("src/shell.zig")) |_| {
             return current;
         } else |err| switch (err) {
