@@ -935,9 +935,8 @@ pub const Simulator = struct {
             }
         }
 
-        if (core_recovering == 0) return false;
-
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
+        assert(quorums.view_change <= core_replicas);
         return quorums.view_change > core_replicas - core_recovering;
     }
 
