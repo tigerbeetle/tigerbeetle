@@ -830,7 +830,6 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
 fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
     return struct {
         grid: *Grid,
-        grid_reservation: ?Grid.Reservation,
         forest: *Forest,
         pool: ResourcePool,
         next_tick: Grid.NextTick = undefined,
@@ -850,12 +849,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
         ) !void {
             assert(block_count >= compaction_block_count_beat_min);
 
-            self.* = .{
-                .grid = grid,
-                .forest = forest,
-                .pool = undefined,
-                .grid_reservation = null,
-            };
+            self.* = .{ .grid = grid, .forest = forest, .pool = undefined };
             self.pool = try ResourcePool.init(allocator, block_count);
             errdefer self.pool.deinit(allocator);
         }
@@ -867,16 +861,13 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
         pub fn reset(self: *CompactionSchedule) void {
             self.pool.reset();
 
-            self.* = .{
-                .grid = self.grid,
-                .forest = self.forest,
-                .pool = self.pool,
-                .grid_reservation = null,
-            };
+            self.* = .{ .grid = self.grid, .forest = self.forest, .pool = self.pool };
         }
 
         pub fn beat_start(self: *CompactionSchedule, callback: Forest.Callback, op: u64) void {
             assert(self.pool.idle());
+            assert(self.pool.grid_reservation == null);
+
             assert(self.callback == null);
             assert(self.beat_input_size == 0);
 
@@ -906,7 +897,18 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
                             const Value = tree.Tree.Value;
                             const compaction = self.compaction_at(level_b, tree_id);
 
-                            const bar_input_values = compaction.bar_commence(op, &self.pool);
+                            assert(
+                                self.pool.blocks_free() >=
+                                    // Input index & value blocks may be carried to the next beat.
+                                    compaction.level_a_index_block.buffer.len +
+                                        compaction.level_a_value_block.buffer.len +
+                                        compaction.level_b_index_block.buffer.len +
+                                        compaction.level_b_value_block.buffer.len +
+                                        // At least one output index & value block.
+                                        (1 + 1),
+                            );
+                            const bar_input_values = compaction.bar_commence(op);
+
                             self.bar_input_size += (bar_input_values * @sizeOf(Value));
                         }
                     }
@@ -960,7 +962,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
                     }
                 }
                 assert(beat_input_size == 0);
-                self.grid_reservation = self.grid.reserve(
+                self.pool.grid_reservation = self.grid.reserve(
                     beat_value_blocks_max + beat_index_blocks_max,
                 );
             }
@@ -975,7 +977,8 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
                 self.beat_finish();
                 return;
             }
-            assert(self.grid_reservation != null);
+            assert(self.pool.grid_reservation != null);
+
             const op = self.forest.progress.?.compact.op;
 
             for (0..constants.lsm_levels) |level_b| {
@@ -984,7 +987,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
                         const compaction = self.compaction_at(level_b, tree_id);
 
                         const resumed = compaction.compaction_dispatch_enter(.{
-                            .grid_reservation = self.grid_reservation.?,
+                            .pool = &self.pool,
                             .callback = beat_resume_callback,
                         });
 
@@ -1016,9 +1019,9 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
         fn beat_finish(self: *CompactionSchedule) void {
             assert(self.callback != null);
             assert(self.beat_input_size == 0);
-            if (self.grid_reservation) |reservation| {
+            if (self.pool.grid_reservation) |reservation| {
                 self.grid.forfeit(reservation);
-                self.grid_reservation = null;
+                self.pool.grid_reservation = null;
             }
             self.grid.on_next_tick(beat_finish_next_tick, &self.next_tick);
         }

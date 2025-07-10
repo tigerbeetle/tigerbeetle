@@ -349,7 +349,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             var beat_index_blocks_max: u64 = 1;
 
             for (compactions_slice) |compaction| {
-                if (first_beat or half_beat) _ = compaction.bar_commence(op, &env.pool);
+                if (first_beat or half_beat) _ = compaction.bar_commence(op);
 
                 const input_values_remaining_bar =
                     compaction.quotas.bar - compaction.quotas.bar_done;
@@ -372,7 +372,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 );
             }
 
-            const grid_reservation = env.grid.reserve(
+            env.pool.grid_reservation = env.grid.reserve(
                 beat_value_blocks_max + beat_index_blocks_max,
             );
 
@@ -381,7 +381,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 env.change_state(.fuzzing, .tree_compact);
 
                 switch (compaction.compaction_dispatch_enter(.{
-                    .grid_reservation = grid_reservation,
+                    .pool = &env.pool,
                     .callback = compact_callback,
                 })) {
                     .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
@@ -390,7 +390,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
                 assert(env.pool.idle());
             }
 
-            env.grid.forfeit(grid_reservation);
+            env.grid.forfeit(env.pool.grid_reservation.?);
 
             if (last_beat or last_half_beat) {
                 assert(env.pool.blocks_acquired() == 0);

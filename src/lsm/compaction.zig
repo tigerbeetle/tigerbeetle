@@ -86,6 +86,7 @@ pub fn ResourcePoolType(comptime Grid: type) type {
         cpus: IOPSType(CPU, 1) = .{},
         blocks: StackType(Block),
         blocks_backing_storage: []Block,
+        grid_reservation: ?Grid.Reservation = null,
 
         const ResourcePool = @This();
 
@@ -403,8 +404,6 @@ pub fn CompactionType(
         pool: ?*ResourcePool = null,
         callback: ?*const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void = null,
 
-        grid_reservation: ?Grid.Reservation = null,
-
         // IO queues:
         //
         // Compaction structure is such that the data can be read (and written) concurrently, but
@@ -533,7 +532,9 @@ pub fn CompactionType(
         }
 
         fn idle(compaction: *const Compaction) bool {
-            return compaction.callback == null and compaction.quotas.beat_exhausted();
+            return compaction.pool == null and
+                compaction.callback == null and
+                compaction.quotas.beat_exhausted();
         }
 
         fn block_queues_empty_output(compaction: *const Compaction) bool {
@@ -553,7 +554,7 @@ pub fn CompactionType(
         ///   compacted,
         /// - compute the bar quota (just the total number of values in all input tables),
         /// - execute move table optimization if range_b turns out to be empty.
-        pub fn bar_commence(compaction: *Compaction, op: u64, pool: *ResourcePool) u64 {
+        pub fn bar_commence(compaction: *Compaction, op: u64) u64 {
             assert(compaction.idle());
             assert(compaction.block_queues_empty_output());
             assert(compaction.block_queues_empty_input());
@@ -561,20 +562,8 @@ pub fn CompactionType(
             assert(compaction.stage == .inactive);
             assert(op == compaction_op_min(op));
 
-            assert(
-                pool.blocks_free() >=
-                    // Input index & value blocks that can be carried over to the subsequent beat.
-                    compaction.level_a_index_block.buffer.len +
-                        compaction.level_a_value_block.buffer.len +
-                        compaction.level_b_index_block.buffer.len +
-                        compaction.level_b_value_block.buffer.len +
-                        // At least one output index & value block.
-                        (1 + 1),
-            );
-
             compaction.stage = .paused;
             compaction.op_min = op;
-            compaction.pool = pool;
 
             if (compaction.level_b == 0) {
                 // Do not start compaction if the immutable table does not require compaction.
@@ -891,7 +880,6 @@ pub fn CompactionType(
             values_count: u64,
         ) void {
             assert(compaction.idle());
-            assert(compaction.pool.?.idle());
             assert(compaction.stage == .paused);
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some blocks from the previous beat.
@@ -911,11 +899,10 @@ pub fn CompactionType(
         pub fn compaction_dispatch_enter(
             compaction: *Compaction,
             options: struct {
-                grid_reservation: Grid.Reservation,
+                pool: *ResourcePool,
                 callback: *const fn (pool: *ResourcePool, tree_id: u16, values_consumed: u64) void,
             },
         ) enum { pending, ready } {
-            assert(compaction.pool.?.idle());
             assert(compaction.stage == .paused);
             assert(compaction.block_queues_empty_output());
             // We may be carrying over some blocks from the previous beat.
@@ -951,8 +938,10 @@ pub fn CompactionType(
                 .level_b = compaction.level_b,
             } });
 
-            assert(compaction.grid_reservation == null);
-            compaction.grid_reservation = options.grid_reservation;
+            assert(options.pool.idle());
+            assert(options.pool.grid_reservation != null);
+
+            compaction.pool = options.pool;
             compaction.callback = options.callback;
             compaction.stage = .beat;
 
@@ -987,10 +976,6 @@ pub fn CompactionType(
             assert(compaction.pool.?.idle());
             maybe(compaction.pool.?.blocks_acquired() > 0);
 
-            // The grid reservation is released by the Forest, as it is shared amongst compactions.
-            assert(compaction.grid_reservation != null);
-            compaction.grid_reservation = null;
-
             if (compaction.quotas.bar_exhausted()) {
                 assert(compaction.table_builder.state == .no_blocks);
                 assert(compaction.table_builder_value_block == null);
@@ -1003,6 +988,7 @@ pub fn CompactionType(
 
             compaction.stage = .paused;
             compaction.callback = null;
+            compaction.pool = null;
 
             assert(compaction.idle());
             assert(pool.idle());
@@ -1251,7 +1237,9 @@ pub fn CompactionType(
                             assert(!compaction.output_blocks.full());
                             const write = compaction.pool.?.writes.acquire().?;
                             compaction.write_value_block(write, .{
-                                .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                                .address = compaction.grid.acquire(
+                                    compaction.pool.?.grid_reservation.?,
+                                ),
                             });
                             progressed = true;
                         }
@@ -1260,7 +1248,9 @@ pub fn CompactionType(
                             assert(!compaction.output_blocks.full());
                             const write = compaction.pool.?.writes.acquire().?;
                             compaction.write_index_block(write, .{
-                                .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                                .address = compaction.grid.acquire(
+                                    compaction.pool.?.grid_reservation.?,
+                                ),
                             });
                             progressed = true;
                         }
@@ -1291,7 +1281,7 @@ pub fn CompactionType(
                 } else {
                     const write = compaction.pool.?.writes.acquire().?;
                     compaction.write_value_block(write, .{
-                        .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                        .address = compaction.grid.acquire(compaction.pool.?.grid_reservation.?),
                     });
                 }
 
@@ -1306,7 +1296,7 @@ pub fn CompactionType(
                 } else {
                     const write = compaction.pool.?.writes.acquire().?;
                     compaction.write_index_block(write, .{
-                        .address = compaction.grid.acquire(compaction.grid_reservation.?),
+                        .address = compaction.grid.acquire(compaction.pool.?.grid_reservation.?),
                     });
                 }
                 assert(compaction.table_builder.state == .no_blocks);
