@@ -70,6 +70,10 @@ pub const tb_create_account_result = vsr.tigerbeetle.CreateAccountResult;
 pub const tb_create_transfer_result = vsr.tigerbeetle.CreateTransferResult;
 pub const tb_create_accounts_result_t = vsr.tigerbeetle.CreateAccountsResult;
 pub const tb_create_transfers_result_t = vsr.tigerbeetle.CreateTransfersResult;
+pub const tb_create_and_return_transfers_result_t =
+    vsr.tigerbeetle.CreateAndReturnTransfersResult;
+pub const tb_create_and_return_transfers_result_flags =
+    vsr.tigerbeetle.CreateAndReturnTransfersResultFlags;
 pub const tb_account_filter_t = vsr.tigerbeetle.AccountFilter;
 pub const tb_account_filter_flags = vsr.tigerbeetle.AccountFilterFlags;
 pub const tb_account_balance_t = vsr.tigerbeetle.AccountBalance;
