@@ -632,6 +632,336 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
+pub const CreateAndReturnTransfersResult = extern struct {
+    result: CreateTransferResult,
+
+    /// Flags indicating which fields are present in this result.
+    /// Some fields are returned only in specific circumstances.
+    flags: CreateAndReturnTransfersResultFlags,
+
+    /// The transfer's timestamp.
+    /// Check `flags.transfer_set` to verify if this field is present in the result.
+    /// Always set when the transfer was successfully created (`result == .ok`)
+    /// or when the transfer already existed (e.g., `result == .exists`).
+    timestamp: u64,
+
+    /// The transfer's amount.
+    /// Check `flags.transfer_set` to verify if this field is present in the result.
+    /// Always set when the transfer was successfully created (`result == .ok`)
+    /// or when the transfer already existed (e.g., `result == .exists`).
+    /// The actual transfer amount may differ from the requested amount in cases such as
+    /// posting pending transfers or balancing accounts.
+    amount: u128,
+
+    /// The debit's account balance.
+    /// Check `flags.account_balances_set` to verify if these fields are present in the result.
+    /// Always present when the transfer was successfully created (`result == .ok`)
+    /// or when it failed due to balance checks (e.g., `result == .exceeds_debits`
+    /// or `result == .exceeds_credits`).
+    debit_account_debits_pending: u128,
+    debit_account_debits_posted: u128,
+    debit_account_credits_pending: u128,
+    debit_account_credits_posted: u128,
+
+    /// The credit's account balance.
+    /// Check `flags.account_balances_set` to verify if these fields are present in the result.
+    /// Always present when the transfer was successfully created (`result == .ok`)
+    /// or when it failed due to balance checks (e.g., `result == .exceeds_debits`
+    /// or `result == .exceeds_credits`).
+    credit_account_debits_pending: u128,
+    credit_account_debits_posted: u128,
+    credit_account_credits_pending: u128,
+    credit_account_credits_posted: u128,
+
+    // Helper declarations to easily convert a failed `CreateTransferResult`
+    // to a `CreateAndReturnTransfersResult`.
+    // These must be kept in sync with the `CreateTransferResult` enum.
+
+    pub const linked_event_failed = from_result(.linked_event_failed);
+    pub const linked_event_chain_open = from_result(.linked_event_chain_open);
+
+    pub const imported_event_expected = from_result(.imported_event_expected);
+    pub const imported_event_not_expected = from_result(.imported_event_not_expected);
+
+    pub const timestamp_must_be_zero = from_result(.timestamp_must_be_zero);
+
+    pub const imported_event_timestamp_out_of_range = from_result(
+        .imported_event_timestamp_out_of_range,
+    );
+    pub const imported_event_timestamp_must_not_advance = from_result(
+        .imported_event_timestamp_must_not_advance,
+    );
+
+    pub const reserved_flag = from_result(.reserved_flag);
+
+    pub const id_must_not_be_zero = from_result(.id_must_not_be_zero);
+    pub const id_must_not_be_int_max = from_result(.id_must_not_be_int_max);
+
+    pub const exists_with_different_flags = from_result(.exists_with_different_flags);
+    pub const exists_with_different_pending_id = from_result(.exists_with_different_pending_id);
+    pub const exists_with_different_timeout = from_result(.exists_with_different_timeout);
+    pub const exists_with_different_debit_account_id = from_result(
+        .exists_with_different_debit_account_id,
+    );
+    pub const exists_with_different_credit_account_id = from_result(
+        .exists_with_different_credit_account_id,
+    );
+    pub const exists_with_different_amount = from_result(.exists_with_different_amount);
+    pub const exists_with_different_user_data_128 = from_result(
+        .exists_with_different_user_data_128,
+    );
+    pub const exists_with_different_user_data_64 = from_result(
+        .exists_with_different_user_data_64,
+    );
+    pub const exists_with_different_user_data_32 = from_result(
+        .exists_with_different_user_data_32,
+    );
+    pub const exists_with_different_ledger = from_result(.exists_with_different_ledger);
+    pub const exists_with_different_code = from_result(.exists_with_different_code);
+
+    pub const id_already_failed = from_result(.id_already_failed);
+
+    pub const flags_are_mutually_exclusive = from_result(.flags_are_mutually_exclusive);
+
+    pub const debit_account_id_must_not_be_zero = from_result(.debit_account_id_must_not_be_zero);
+    pub const debit_account_id_must_not_be_int_max = from_result(
+        .debit_account_id_must_not_be_int_max,
+    );
+    pub const credit_account_id_must_not_be_zero = from_result(
+        .credit_account_id_must_not_be_zero,
+    );
+    pub const credit_account_id_must_not_be_int_max = from_result(
+        .credit_account_id_must_not_be_int_max,
+    );
+    pub const accounts_must_be_different = from_result(.accounts_must_be_different);
+
+    pub const pending_id_must_be_zero = from_result(.pending_id_must_be_zero);
+    pub const pending_id_must_not_be_zero = from_result(.pending_id_must_not_be_zero);
+    pub const pending_id_must_not_be_int_max = from_result(.pending_id_must_not_be_int_max);
+    pub const pending_id_must_be_different = from_result(.pending_id_must_be_different);
+    pub const timeout_reserved_for_pending_transfer = from_result(
+        .timeout_reserved_for_pending_transfer,
+    );
+
+    pub const closing_transfer_must_be_pending = from_result(.closing_transfer_must_be_pending);
+
+    pub const ledger_must_not_be_zero = from_result(.ledger_must_not_be_zero);
+    pub const code_must_not_be_zero = from_result(.code_must_not_be_zero);
+
+    pub const debit_account_not_found = from_result(.debit_account_not_found);
+    pub const credit_account_not_found = from_result(.credit_account_not_found);
+
+    pub const accounts_must_have_the_same_ledger = from_result(
+        .accounts_must_have_the_same_ledger,
+    );
+    pub const transfer_must_have_the_same_ledger_as_accounts = from_result(
+        .transfer_must_have_the_same_ledger_as_accounts,
+    );
+
+    pub const pending_transfer_not_found = from_result(.pending_transfer_not_found);
+    pub const pending_transfer_not_pending = from_result(.pending_transfer_not_pending);
+
+    pub const pending_transfer_has_different_debit_account_id = from_result(
+        .pending_transfer_has_different_debit_account_id,
+    );
+    pub const pending_transfer_has_different_credit_account_id = from_result(
+        .pending_transfer_has_different_credit_account_id,
+    );
+    pub const pending_transfer_has_different_ledger = from_result(
+        .pending_transfer_has_different_ledger,
+    );
+    pub const pending_transfer_has_different_code = from_result(
+        .pending_transfer_has_different_code,
+    );
+
+    pub const exceeds_pending_transfer_amount = from_result(.exceeds_pending_transfer_amount);
+    pub const pending_transfer_has_different_amount = from_result(
+        .pending_transfer_has_different_amount,
+    );
+
+    pub const pending_transfer_already_posted = from_result(.pending_transfer_already_posted);
+    pub const pending_transfer_already_voided = from_result(.pending_transfer_already_voided);
+
+    pub const pending_transfer_expired = from_result(.pending_transfer_expired);
+
+    pub const imported_event_timestamp_must_not_regress = from_result(
+        .imported_event_timestamp_must_not_regress,
+    );
+    pub const imported_event_timestamp_must_postdate_debit_account = from_result(
+        .imported_event_timestamp_must_postdate_debit_account,
+    );
+    pub const imported_event_timestamp_must_postdate_credit_account = from_result(
+        .imported_event_timestamp_must_postdate_credit_account,
+    );
+    pub const imported_event_timeout_must_be_zero = from_result(
+        .imported_event_timeout_must_be_zero,
+    );
+
+    pub const debit_account_already_closed = from_result(.debit_account_already_closed);
+    pub const credit_account_already_closed = from_result(.credit_account_already_closed);
+
+    pub const overflows_debits_pending = from_result(.overflows_debits_pending);
+    pub const overflows_credits_pending = from_result(.overflows_credits_pending);
+    pub const overflows_debits_posted = from_result(.overflows_debits_posted);
+    pub const overflows_credits_posted = from_result(.overflows_credits_posted);
+    pub const overflows_debits = from_result(.overflows_debits);
+    pub const overflows_credits = from_result(.overflows_credits);
+    pub const overflows_timeout = from_result(.overflows_timeout);
+
+    pub fn ok(outcome: struct {
+        transfer: *const Transfer,
+        dr_account: *const Account,
+        cr_account: *const Account,
+    }) CreateAndReturnTransfersResult {
+        assert(outcome.transfer.timestamp != 0);
+        assert(outcome.dr_account.timestamp != 0);
+        assert(outcome.cr_account.timestamp != 0);
+        assert(outcome.transfer.debit_account_id == outcome.dr_account.id);
+        assert(outcome.transfer.credit_account_id == outcome.cr_account.id);
+        return .{
+            .result = .ok,
+            .flags = .{
+                .transfer_set = true,
+                .account_balances_set = true,
+            },
+            .timestamp = outcome.transfer.timestamp,
+            .amount = outcome.transfer.amount,
+            .debit_account_debits_pending = outcome.dr_account.debits_pending,
+            .debit_account_debits_posted = outcome.dr_account.debits_posted,
+            .debit_account_credits_pending = outcome.dr_account.credits_pending,
+            .debit_account_credits_posted = outcome.dr_account.credits_posted,
+            .credit_account_debits_pending = outcome.cr_account.debits_pending,
+            .credit_account_debits_posted = outcome.cr_account.debits_posted,
+            .credit_account_credits_pending = outcome.cr_account.credits_pending,
+            .credit_account_credits_posted = outcome.cr_account.credits_posted,
+        };
+    }
+
+    pub fn exists(transfer: *const Transfer) CreateAndReturnTransfersResult {
+        assert(transfer.timestamp != 0);
+        return .{
+            .result = .exists,
+            .flags = .{
+                .transfer_set = true,
+                .account_balances_set = false,
+            },
+            .timestamp = transfer.timestamp,
+            .amount = transfer.amount,
+            .debit_account_debits_pending = 0,
+            .debit_account_debits_posted = 0,
+            .debit_account_credits_pending = 0,
+            .debit_account_credits_posted = 0,
+            .credit_account_debits_pending = 0,
+            .credit_account_debits_posted = 0,
+            .credit_account_credits_pending = 0,
+            .credit_account_credits_posted = 0,
+        };
+    }
+
+    pub fn exceeds_debits(outcome: struct {
+        dr_account: *const Account,
+        cr_account: *const Account,
+    }) CreateAndReturnTransfersResult {
+        assert(outcome.dr_account.timestamp != 0);
+        assert(outcome.cr_account.timestamp != 0);
+        return .{
+            .result = .exceeds_debits,
+            .flags = .{
+                .transfer_set = false,
+                .account_balances_set = true,
+            },
+            .timestamp = 0,
+            .amount = 0,
+            .debit_account_debits_pending = outcome.dr_account.debits_pending,
+            .debit_account_debits_posted = outcome.dr_account.debits_posted,
+            .debit_account_credits_pending = outcome.dr_account.credits_pending,
+            .debit_account_credits_posted = outcome.dr_account.credits_posted,
+            .credit_account_debits_pending = outcome.cr_account.debits_pending,
+            .credit_account_debits_posted = outcome.cr_account.debits_posted,
+            .credit_account_credits_pending = outcome.cr_account.credits_pending,
+            .credit_account_credits_posted = outcome.cr_account.credits_posted,
+        };
+    }
+
+    pub fn exceeds_credits(outcome: struct {
+        dr_account: *const Account,
+        cr_account: *const Account,
+    }) CreateAndReturnTransfersResult {
+        assert(outcome.dr_account.timestamp != 0);
+        assert(outcome.cr_account.timestamp != 0);
+        return .{
+            .result = .exceeds_credits,
+            .flags = .{
+                .transfer_set = false,
+                .account_balances_set = true,
+            },
+            .timestamp = 0,
+            .amount = 0,
+            .debit_account_debits_pending = outcome.dr_account.debits_pending,
+            .debit_account_debits_posted = outcome.dr_account.debits_posted,
+            .debit_account_credits_pending = outcome.dr_account.credits_pending,
+            .debit_account_credits_posted = outcome.dr_account.credits_posted,
+            .credit_account_debits_pending = outcome.cr_account.debits_pending,
+            .credit_account_debits_posted = outcome.cr_account.debits_posted,
+            .credit_account_credits_pending = outcome.cr_account.credits_pending,
+            .credit_account_credits_posted = outcome.cr_account.credits_posted,
+        };
+    }
+
+    fn from_result(comptime result: CreateTransferResult) CreateAndReturnTransfersResult {
+        comptime assert(result != .ok);
+        comptime assert(result != .exists);
+        comptime assert(result != .exceeds_debits);
+        comptime assert(result != .exceeds_credits);
+        comptime assert(!std.mem.startsWith(
+            u8,
+            @tagName(result),
+            "deprecated",
+        ));
+        return .{
+            .result = result,
+            .flags = .{
+                .transfer_set = false,
+                .account_balances_set = false,
+            },
+            .timestamp = 0,
+            .amount = 0,
+            .debit_account_debits_pending = 0,
+            .debit_account_debits_posted = 0,
+            .debit_account_credits_pending = 0,
+            .debit_account_credits_posted = 0,
+            .credit_account_debits_pending = 0,
+            .credit_account_debits_posted = 0,
+            .credit_account_credits_pending = 0,
+            .credit_account_credits_posted = 0,
+        };
+    }
+
+    comptime {
+        assert(stdx.no_padding(CreateAndReturnTransfersResult));
+        // No need for `@sizeOf` to be a power of two.
+        assert(@sizeOf(CreateAndReturnTransfersResult) == 160);
+        assert(@alignOf(CreateAndReturnTransfersResult) == 16);
+
+        for (std.enums.values(CreateTransferResult)) |result| {
+            if (result == .ok) continue;
+            if (result == .exists) continue;
+            if (result == .exceeds_debits) continue;
+            if (result == .exceeds_credits) continue;
+            if (std.mem.startsWith(u8, @tagName(result), "deprecated")) continue;
+
+            const field = @field(CreateAndReturnTransfersResult, @tagName(result));
+            assert(field.result == result);
+        }
+    }
+};
+
+pub const CreateAndReturnTransfersResultFlags = packed struct(u32) {
+    transfer_set: bool,
+    account_balances_set: bool,
+    padding: u30 = 0,
+};
+
 // Looking to make backwards incompatible changes here? Make sure to check release.zig for
 // `release_triple_client_min`.
 pub const Operation = enum(u8) {
@@ -658,6 +988,8 @@ pub const Operation = enum(u8) {
     get_account_balances = constants.vsr_operations_reserved + 15,
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
+
+    create_and_return_transfers = constants.vsr_operations_reserved + 18,
 };
 
 comptime {
