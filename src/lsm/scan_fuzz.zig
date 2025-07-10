@@ -200,7 +200,7 @@ const QuerySpec = struct {
                 .merge => |merge| {
                     print_operator = false;
                     try writer.print("(", .{});
-                    stack.append_assume_capacity(merge);
+                    stack.push(merge);
                 },
             }
 
@@ -241,7 +241,7 @@ const QuerySpec = struct {
                     },
                 },
             };
-            matches.append_assume_capacity(match);
+            matches.push(match);
         }
         return matches.get(matches.count() - 1);
     }
@@ -310,22 +310,19 @@ const QuerySpecFuzzer = struct {
         var query: Query = .{};
         if (field_max == 1) {
             // Single field queries must have just one part.
-            query.append_assume_capacity(.{
-                .field = self.generate_query_field(),
-            });
-
+            query.push(.{ .field = self.generate_query_field() });
             return query;
         }
 
         // Multi field queries must start with a merge.
         var stack: stdx.BoundedArrayType(MergeStack, query_scans_max - 1) = .{};
-        stack.append_assume_capacity(.{
+        stack.push(.{
             .index = 0,
             .operand_count = 0,
             .fields_remain = field_max,
         });
 
-        query.append_assume_capacity(.{
+        query.push(.{
             .merge = .{
                 .operator = self.prng.enum_uniform(QueryOperator),
                 .operand_count = 0,
@@ -396,7 +393,7 @@ const QuerySpecFuzzer = struct {
                         stack.truncate(stack.count() - 1);
                     }
 
-                    stack.append_assume_capacity(.{
+                    stack.push(.{
                         .index = query.count(),
                         .operand_count = 0,
                         .fields_remain = merge_field_remain,
@@ -411,7 +408,7 @@ const QuerySpecFuzzer = struct {
                 },
             };
 
-            query.append_assume_capacity(query_part);
+            query.push(query_part);
         }
 
         assert(stack.count() == 0);
@@ -763,7 +760,7 @@ const Environment = struct {
                             query_spec.direction,
                         ),
                     };
-                    stack.append_assume_capacity(scan);
+                    stack.push(scan);
                 },
                 .merge => |merge| {
                     assert(merge.operand_count > 1);
@@ -776,7 +773,7 @@ const Environment = struct {
                     };
 
                     stack.truncate(stack.count() - merge.operand_count);
-                    stack.append_assume_capacity(scan);
+                    stack.push(scan);
                 },
             }
         }

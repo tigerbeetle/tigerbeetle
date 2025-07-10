@@ -762,20 +762,11 @@ const Replica = struct {
         );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
-        argv.append_slice_assume_capacity(&.{
-            self.executable_path,
-            "start",
-        });
+        argv.push_slice(&.{ self.executable_path, "start" });
         if (self.log_debug) {
-            argv.append_slice_assume_capacity(&.{
-                "--log-debug",
-                "--experimental",
-            });
+            argv.push_slice(&.{ "--log-debug", "--experimental" });
         }
-        argv.append_slice_assume_capacity(&.{
-            addresses_arg,
-            self.datafile,
-        });
+        argv.push_slice(&.{ addresses_arg, self.datafile });
 
         self.process = try LoggedProcess.spawn(self.allocator, argv.const_slice(), .{});
     }

@@ -804,18 +804,18 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     // - build time is excluded from overall runtime,
     // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
     args.clear();
-    args.append_slice_assume_capacity(&.{ "./zig/zig", "build", "-Drelease" });
-    args.append_slice_assume_capacity(switch (options.fuzzer) {
+    args.push_slice(&.{ "./zig/zig", "build", "-Drelease" });
+    args.push_slice(switch (options.fuzzer) {
         inline else => |f| comptime f.args_run(),
     });
     var seed_buffer: [32]u8 = undefined;
-    args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
+    args.push(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
     const command = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
 
     const exe = exe: {
         args.clear();
-        args.append_slice_assume_capacity(&.{ "build", "-Drelease", "-Dprint-exe" });
-        args.append_slice_assume_capacity(switch (options.fuzzer) {
+        args.push_slice(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.push_slice(switch (options.fuzzer) {
             inline else => |f| comptime f.args_build(),
         });
         break :exe shell.exec_stdout("{zig} {args}", .{

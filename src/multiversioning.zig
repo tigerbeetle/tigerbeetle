@@ -439,14 +439,14 @@ pub const MultiversionHeader = extern struct {
         var release_list: ReleaseList = .{};
 
         for (0..self.past.count) |i| {
-            release_list.append_assume_capacity(Release{ .value = self.past.releases[i] });
+            release_list.push(Release{ .value = self.past.releases[i] });
             if (from_release.value < self.past.releases[i]) {
                 if (self.past.flags[i].visit) {
                     break;
                 }
             }
         } else {
-            release_list.append_assume_capacity(Release{ .value = self.current_release });
+            release_list.push(Release{ .value = self.current_release });
         }
 
         // These asserts should be impossible to reach barring a bug; they're checked in verify()
@@ -517,10 +517,10 @@ test "MultiversionHeader.advertisable" {
         var git_commits: ListGitCommit = .{};
 
         for (t.releases) |_| {
-            checksums.append_assume_capacity(0);
-            offsets.append_assume_capacity(@intCast(offsets.count()));
-            sizes.append_assume_capacity(1);
-            git_commits.append_assume_capacity("00000000000000000000".*);
+            checksums.push(0);
+            offsets.push(@intCast(offsets.count()));
+            sizes.push(1);
+            git_commits.push("00000000000000000000".*);
         }
 
         const past_releases = MultiversionHeader.PastReleases.init(@intCast(t.releases.len), .{
@@ -549,7 +549,7 @@ test "MultiversionHeader.advertisable" {
         const advertisable = header.advertisable(Release{ .value = t.from });
         var expected: ReleaseList = .{};
         for (t.expected) |release| {
-            expected.append_assume_capacity(Release{ .value = release });
+            expected.push(Release{ .value = release });
         }
         try std.testing.expectEqualSlices(
             Release,
@@ -781,7 +781,7 @@ pub const Multiversion = struct {
             // If there's been an error starting up multiversioning, don't disable it, but
             // advertise only the current version in memory.
             self.releases_bundled.clear();
-            self.releases_bundled.append_assume_capacity(constants.config.process.release);
+            self.releases_bundled.push(constants.config.process.release);
 
             return self.stage.err;
         }
@@ -1106,7 +1106,7 @@ pub const Multiversion = struct {
         // Since target_fd points to a memfd on Linux, this is functionally a memcpy. On other
         // platforms, it's blocking IO - which is acceptable for development.
         self.releases_bundled.clear();
-        self.releases_bundled.append_slice_assume_capacity(advertisable.const_slice());
+        self.releases_bundled.push_slice(advertisable.const_slice());
 
         // While these look like blocking IO operations, on a memfd they're memory manipulation.
         // TODO: Would panic'ing be a better option? On Linux, these should never fail. On other
@@ -1880,7 +1880,7 @@ pub fn print_information(
         {
             var release_list: ReleaseList = .{};
             for (@field(header.past, field)[0..header.past.count]) |release| {
-                release_list.append_assume_capacity(Release{ .value = release });
+                release_list.push(Release{ .value = release });
             }
 
             try output.print("multiversioning.header.past.{s}={any}\n", .{
