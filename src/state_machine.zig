@@ -5094,10 +5094,10 @@ pub const TestContext = struct {
             allocator,
             4096,
             .{
-                .read_latency_min = 0,
-                .read_latency_mean = 0,
-                .write_latency_min = 0,
-                .write_latency_mean = 0,
+                .read_latency_min = .{ .ns = 0 },
+                .read_latency_mean = .{ .ns = 0 },
+                .write_latency_min = .{ .ns = 0 },
+                .write_latency_mean = .{ .ns = 0 },
             },
         );
         errdefer ctx.storage.deinit(allocator);

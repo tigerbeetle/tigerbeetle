@@ -6,6 +6,7 @@ const maybe = stdx.maybe;
 const mem = std.mem;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
+const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
 
 const constants = @import("constants.zig");
 const flags = @import("./flags.zig");
@@ -418,11 +419,11 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
-        .one_way_delay_min = prng.int_inclusive(u16, 3),
+        .one_way_delay_min = range_inclusive_ms(prng, 0, 30),
+        .one_way_delay_mean = range_inclusive_ms(prng, 30, 100),
         .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
         .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
-        .path_clog_duration_mean = prng.int_inclusive(u16, 500),
+        .path_clog_duration_mean = range_inclusive_ms(prng, 0, 5_000),
         .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
         .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
 
@@ -434,14 +435,14 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .unpartition_stability = prng.int_inclusive(u32, 20),
     };
 
-    const read_latency_min = prng.range_inclusive(u16, 0, 3);
-    const write_latency_min = prng.range_inclusive(u16, 0, 3);
+    const read_latency_min = range_inclusive_ms(prng, 0, 30);
+    const write_latency_min = range_inclusive_ms(prng, 0, 30);
     const storage_options: Cluster.Storage.Options = .{
         .seed = prng.int(u64),
         .read_latency_min = read_latency_min,
-        .read_latency_mean = prng.range_inclusive(u16, read_latency_min, 10),
+        .read_latency_mean = range_inclusive_ms(prng, read_latency_min, 100),
         .write_latency_min = write_latency_min,
-        .write_latency_mean = prng.range_inclusive(u16, write_latency_min, 100),
+        .write_latency_mean = range_inclusive_ms(prng, write_latency_min, 1_000),
         .read_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
@@ -539,11 +540,11 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = 5,
-        .one_way_delay_min = 0,
+        .one_way_delay_mean = .{ .ns = 50 * std.time.ns_per_ms },
+        .one_way_delay_min = .{ .ns = 0 },
         .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
-        .path_clog_duration_mean = 200,
+        .path_clog_duration_mean = .{ .ns = 2_000 * std.time.ns_per_ms },
         .path_clog_probability = Ratio.zero(),
         .packet_replay_probability = Ratio.zero(),
 
@@ -557,10 +558,10 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
     const storage_options: Cluster.Storage.Options = .{
         .seed = prng.int(u64),
-        .read_latency_min = 0,
-        .read_latency_mean = 0,
-        .write_latency_min = 0,
-        .write_latency_mean = 0,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = .{ .ns = 0 },
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = .{ .ns = 0 },
         .read_fault_probability = Ratio.zero(),
         .write_fault_probability = Ratio.zero(),
         .write_misdirect_probability = Ratio.zero(),
