@@ -127,18 +127,13 @@ const CLIArgs = union(enum) {
         account_distribution: Command.Benchmark.Distribution = .uniform,
         flag_history: bool = false,
         flag_imported: bool = false,
-        account_batch_size: usize = StateMachine.operation_event_max(
-            .create_accounts,
-            constants.message_body_size_max,
-        ),
+        account_batch_size: ?usize = null,
         transfer_count: usize = 10_000_000,
         transfer_hot_percent: usize = 100,
         transfer_pending: bool = false,
-        transfer_batch_size: usize = StateMachine.operation_event_max(
-            .create_transfers,
-            constants.message_body_size_max,
-        ),
+        transfer_batch_size: ?usize = null,
         transfer_batch_delay_us: usize = 0,
+        create_and_return_transfers: bool = false,
         validate: bool = false,
         checksum_performance: bool = false,
         query_count: usize = 100,
@@ -549,6 +544,7 @@ pub const Command = union(enum) {
         transfer_pending: bool,
         transfer_batch_size: usize,
         transfer_batch_delay_us: usize,
+        create_and_return_transfers: bool,
         validate: bool,
         checksum_performance: bool,
         query_count: usize,
@@ -1034,14 +1030,17 @@ fn parse_args_repl(repl: CLIArgs.Repl) Command.Repl {
     };
 }
 
-const account_batch_size_max = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tigerbeetle.Account),
+const create_account_batch_size_max = StateMachine.operation_event_max(
+    .create_accounts,
+    constants.message_body_size_max,
 );
-
-const transfer_batch_size_max = @divExact(
-    constants.message_size_max - @sizeOf(vsr.Header),
-    @sizeOf(tigerbeetle.Transfer),
+const create_transfers_batch_size_max = StateMachine.operation_event_max(
+    .create_transfers,
+    constants.message_body_size_max,
+);
+const create_and_return_transfers_batch_size_max = StateMachine.operation_event_max(
+    .create_and_return_transfers,
+    constants.message_body_size_max,
 );
 
 fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
@@ -1058,11 +1057,11 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         vsr.fatal(.cli, "--account-batch-size must be greater than 0", .{});
     }
 
-    if (benchmark.account_batch_size > account_batch_size_max) {
-        vsr.fatal(
+    if (benchmark.account_batch_size) |account_batch_size| {
+        if (account_batch_size > create_account_batch_size_max) vsr.fatal(
             .cli,
             "--account-batch-size must be less than or equal to {}",
-            .{account_batch_size_max},
+            .{create_account_batch_size_max},
         );
     }
 
@@ -1070,8 +1069,12 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         vsr.fatal(.cli, "--transfer-batch-size must be greater than 0", .{});
     }
 
-    if (benchmark.transfer_batch_size > transfer_batch_size_max) {
-        vsr.fatal(
+    const transfer_batch_size_max = if (benchmark.create_and_return_transfers)
+        create_and_return_transfers_batch_size_max
+    else
+        create_transfers_batch_size_max;
+    if (benchmark.transfer_batch_size) |transfer_batch_size| {
+        if (transfer_batch_size > transfer_batch_size_max) vsr.fatal(
             .cli,
             "--transfer-batch-size must be less than or equal to {}",
             .{transfer_batch_size_max},
@@ -1088,14 +1091,15 @@ fn parse_args_benchmark(benchmark: CLIArgs.Benchmark) Command.Benchmark {
         .account_count = benchmark.account_count,
         .account_count_hot = benchmark.account_count_hot,
         .account_distribution = benchmark.account_distribution,
+        .account_batch_size = benchmark.account_batch_size orelse create_account_batch_size_max,
         .flag_history = benchmark.flag_history,
         .flag_imported = benchmark.flag_imported,
-        .account_batch_size = benchmark.account_batch_size,
         .transfer_count = benchmark.transfer_count,
         .transfer_hot_percent = benchmark.transfer_hot_percent,
         .transfer_pending = benchmark.transfer_pending,
-        .transfer_batch_size = benchmark.transfer_batch_size,
+        .transfer_batch_size = benchmark.transfer_batch_size orelse transfer_batch_size_max,
         .transfer_batch_delay_us = benchmark.transfer_batch_delay_us,
+        .create_and_return_transfers = benchmark.create_and_return_transfers,
         .validate = benchmark.validate,
         .checksum_performance = benchmark.checksum_performance,
         .query_count = benchmark.query_count,

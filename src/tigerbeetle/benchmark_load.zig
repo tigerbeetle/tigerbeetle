@@ -176,6 +176,7 @@ pub fn main(
         .transfer_count = cli_args.transfer_count,
         .transfer_hot_percent = cli_args.transfer_hot_percent,
         .transfer_pending = cli_args.transfer_pending,
+        .create_and_return_transfers = cli_args.create_and_return_transfers,
         .query_count = cli_args.query_count,
         .flag_history = cli_args.flag_history,
         .flag_imported = cli_args.flag_imported,
@@ -260,6 +261,7 @@ const Benchmark = struct {
     transfer_count: usize,
     transfer_hot_percent: usize,
     transfer_pending: bool,
+    create_and_return_transfers: bool,
     query_count: usize,
     flag_history: bool,
     flag_imported: bool,
@@ -424,13 +426,21 @@ const Benchmark = struct {
             &b.client_requests[client_index],
         )[0..transfer_count];
         b.build_transfers(transfers);
-        b.request(client_index, .create_transfers, .{
-            .batch_count = transfer_count,
-            .event_size = @sizeOf(tb.Transfer),
-        });
+        b.request(
+            client_index,
+            if (b.create_and_return_transfers)
+                .create_and_return_transfers
+            else
+                .create_transfers,
+            .{
+                .batch_count = transfer_count,
+                .event_size = @sizeOf(tb.Transfer),
+            },
+        );
     }
 
     fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+        assert(!b.create_and_return_transfers);
         assert(!b.clients_busy.is_set(client_index));
         const create_transfers_results = stdx.bytes_as_slice(
             .exact,
@@ -439,6 +449,50 @@ const Benchmark = struct {
         );
         if (create_transfers_results.len > 0) {
             panic("CreateTransfersResults: {any}", .{create_transfers_results});
+        }
+
+        const requests_complete = b.request_index - b.clients_busy.count();
+        const request_duration_ns = b.timer.read() - b.clients_request_ns[client_index];
+        const request_duration_ms = @divTrunc(request_duration_ns, std.time.ns_per_ms);
+        const transfers_created = @min(b.transfer_count, b.transfer_batch_size);
+        b.transfers_created += transfers_created;
+
+        if (b.print_batch_timings) {
+            log.info("batch {}: {} tx in {} ms", .{
+                requests_complete,
+                b.transfer_batch_size,
+                request_duration_ms,
+            });
+        }
+
+        b.client_timeouts[client_index] = .{ .benchmark = b, .client_index = client_index };
+        b.clients_busy.set(client_index);
+        b.io.timeout(
+            *Timeout,
+            &b.client_timeouts[client_index],
+            create_transfers_next,
+            &b.client_timeouts[client_index].completion,
+            @intCast(b.transfer_batch_delay_us * std.time.ns_per_us),
+        );
+    }
+
+    fn create_and_return_transfers_callback(
+        b: *Benchmark,
+        client_index: u32,
+        result: []const u8,
+    ) void {
+        assert(b.create_and_return_transfers);
+        assert(!b.clients_busy.is_set(client_index));
+        const create_transfers_results = stdx.bytes_as_slice(
+            .exact,
+            tb.CreateAndReturnTransfersResult,
+            result,
+        );
+        assert(create_transfers_results.len > 0);
+        for (create_transfers_results) |*create_transfers_result| {
+            if (create_transfers_result.result != .ok) {
+                panic("CreateTransfersWithBalanceResult: {any}", .{create_transfers_result});
+            }
         }
 
         const requests_complete = b.request_index - b.clients_busy.count();
@@ -806,22 +860,26 @@ const Benchmark = struct {
         const duration_ms = @divTrunc(duration_ns, std.time.ns_per_ms);
         b.request_latency_histogram[@min(duration_ms, b.request_latency_histogram.len - 1)] += 1;
 
-        const input: []const u8 = input: {
+        const batch: []const u8 = batch: {
             assert(StateMachine.operation_is_multi_batch(operation));
             var reply_decoder = vsr.multi_batch.MultiBatchDecoder.init(
                 result,
                 .{ .element_size = StateMachine.result_size_bytes(operation) },
             ) catch unreachable;
             assert(reply_decoder.batch_count() == 1);
-            break :input reply_decoder.peek();
+            break :batch reply_decoder.peek();
         };
 
         switch (operation) {
-            .create_accounts => b.create_accounts_callback(client, input),
-            .create_transfers => b.create_transfers_callback(client, input),
-            .lookup_accounts => b.validate_accounts_callback(client, input),
-            .lookup_transfers => b.validate_transfers_callback(client, input),
-            .get_account_transfers => b.get_account_transfers_callback(client, input),
+            .create_accounts => b.create_accounts_callback(client, batch),
+            .create_transfers => b.create_transfers_callback(client, batch),
+            .create_and_return_transfers => b.create_and_return_transfers_callback(
+                client,
+                batch,
+            ),
+            .lookup_accounts => b.validate_accounts_callback(client, batch),
+            .lookup_transfers => b.validate_transfers_callback(client, batch),
+            .get_account_transfers => b.get_account_transfers_callback(client, batch),
             else => unreachable,
         }
     }
