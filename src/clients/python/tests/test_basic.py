@@ -457,6 +457,222 @@ def test_close_accounts(client):
     assert account_b.flags == accounts[1].flags
     assert (accounts[1].flags & tb.AccountFlags.CLOSED) ==  tb.AccountFlags.NONE
 
+def test_create_and_return_transfers(client):
+    transfer = tb.Transfer(
+        id=tb.id(),
+        debit_account_id=account_b.id,
+        credit_account_id=account_a.id,
+        amount=100,
+        user_data_128=0,
+        user_data_64=0,
+        user_data_32=0,
+        pending_id=0,
+        timeout=0,
+        ledger=1,
+        code=1,
+        flags=0,
+        timestamp=0, # this will be set correctly by the TigerBeetle server
+    )
+
+    outcome = client.create_and_return_transfers([transfer])
+    assert len(outcome) == 1
+    assert outcome[0].result == tb.CreateTransferResult.OK
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
+
+    transfers = client.lookup_transfers([transfer.id])
+    assert len(transfers) == 1
+    assert outcome[0].timestamp == transfers[0].timestamp
+    assert outcome[0].amount == transfers[0].amount
+
+    accounts = client.lookup_accounts([account_a.id, account_b.id])
+    assert len(accounts) == 2
+
+    assert outcome[0].credit_account_debits_pending == accounts[0].debits_pending
+    assert outcome[0].credit_account_debits_posted == accounts[0].debits_posted
+    assert outcome[0].credit_account_credits_pending == accounts[0].credits_pending
+    assert outcome[0].credit_account_credits_posted == accounts[0].credits_posted
+
+    assert outcome[0].debit_account_debits_pending == accounts[1].debits_pending
+    assert outcome[0].debit_account_debits_posted == accounts[1].debits_posted
+    assert outcome[0].debit_account_credits_pending == accounts[1].credits_pending
+    assert outcome[0].debit_account_credits_posted == accounts[1].credits_posted
+
+def test_create_and_return_transfers_exists(client):
+    transfer = tb.Transfer(
+        id=tb.id(),
+        debit_account_id=account_b.id,
+        credit_account_id=account_a.id,
+        amount=100,
+        user_data_128=0,
+        user_data_64=0,
+        user_data_32=0,
+        pending_id=0,
+        timeout=0,
+        ledger=1,
+        code=1,
+        flags=0,
+        timestamp=0, # this will be set correctly by the TigerBeetle server
+    )
+
+    outcome = client.create_and_return_transfers([transfer])
+    assert len(outcome) == 1
+    assert outcome[0].result == tb.CreateTransferResult.OK
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
+
+    outcome_exists = client.create_and_return_transfers([transfer])
+    assert len(outcome_exists) == 1
+    assert outcome_exists[0].result == tb.CreateTransferResult.EXISTS
+    assert (outcome_exists[0].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET
+    assert (outcome_exists[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.NONE
+
+    assert outcome_exists[0].timestamp == outcome[0].timestamp
+    assert outcome_exists[0].amount == outcome[0].amount
+
+    assert outcome_exists[0].credit_account_debits_pending == 0
+    assert outcome_exists[0].credit_account_debits_posted == 0
+    assert outcome_exists[0].credit_account_credits_pending == 0
+    assert outcome_exists[0].credit_account_credits_posted == 0
+
+    assert outcome_exists[0].debit_account_debits_pending == 0
+    assert outcome_exists[0].debit_account_debits_posted == 0
+    assert outcome_exists[0].debit_account_credits_pending == 0
+    assert outcome_exists[0].debit_account_credits_posted == 0
+
+def test_create_and_return_transfers_exceeds(client):
+    account_a = tb.Account(
+        id=tb.id(),
+        debits_pending=0,
+        debits_posted=0,
+        credits_pending=0,
+        credits_posted=0,
+        user_data_128=0,
+        user_data_64=0,
+        user_data_32=0,
+        ledger=1,
+        code=718,
+        flags=tb.AccountFlags.DEBITS_MUST_NOT_EXCEED_CREDITS,
+        timestamp=0
+    )
+    account_b = tb.Account(
+        id=tb.id(),
+        debits_pending=0,
+        debits_posted=0,
+        credits_pending=0,
+        credits_posted=0,
+        user_data_128=0,
+        user_data_64=0,
+        user_data_32=0,
+        ledger=1,
+        code=718,
+        flags=tb.AccountFlags.CREDITS_MUST_NOT_EXCEED_DEBITS,
+        timestamp=0
+    )
+    account_c = tb.Account(
+        id=tb.id(),
+        debits_pending=0,
+        debits_posted=0,
+        credits_pending=0,
+        credits_posted=0,
+        user_data_128=0,
+        user_data_64=0,
+        user_data_32=0,
+        ledger=1,
+        code=718,
+        flags=tb.AccountFlags.NONE,
+        timestamp=0
+    )
+    account_errors = client.create_accounts([account_a, account_b, account_c])
+    assert account_errors == []
+
+    transfers = [
+        tb.Transfer(
+            id=tb.id(),
+            debit_account_id=account_c.id,
+            credit_account_id=account_a.id,
+            amount=100,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            pending_id=0,
+            timeout=0,
+            ledger=1,
+            code=1,
+            flags=0,
+            timestamp=0,
+        ),
+        tb.Transfer(
+            id=tb.id(),
+            debit_account_id=account_a.id,
+            credit_account_id=account_c.id,
+            amount=150,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            pending_id=0,
+            timeout=0,
+            ledger=1,
+            code=1,
+            flags=0,
+            timestamp=0,
+        ),
+        tb.Transfer(
+            id=tb.id(),
+            debit_account_id=account_c.id,
+            credit_account_id=account_b.id,
+            amount=150,
+            user_data_128=0,
+            user_data_64=0,
+            user_data_32=0,
+            pending_id=0,
+            timeout=0,
+            ledger=1,
+            code=1,
+            flags=0,
+            timestamp=0,
+        ),
+    ]
+
+    outcome = client.create_and_return_transfers(transfers)
+    assert len(outcome) == 3
+    assert outcome[0].result == tb.CreateTransferResult.OK
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET
+    assert (outcome[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
+
+    assert outcome[1].result == tb.CreateTransferResult.EXCEEDS_CREDITS
+    assert (outcome[1].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.NONE
+    assert (outcome[1].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
+    assert outcome[1].timestamp == 0
+    assert outcome[1].amount == 0
+
+    assert outcome[1].credit_account_debits_pending == 0
+    assert outcome[1].credit_account_debits_posted == 100
+    assert outcome[1].credit_account_credits_pending == 0
+    assert outcome[1].credit_account_credits_posted == 0
+
+    assert outcome[1].debit_account_debits_pending == 0
+    assert outcome[1].debit_account_debits_posted == 0
+    assert outcome[1].debit_account_credits_pending == 0
+    assert outcome[1].debit_account_credits_posted == 100
+
+    assert outcome[2].result == tb.CreateTransferResult.EXCEEDS_DEBITS
+    assert (outcome[2].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.NONE
+    assert (outcome[2].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
+    assert outcome[2].timestamp == 0
+    assert outcome[2].amount == 0
+
+    assert outcome[2].credit_account_debits_pending == 0
+    assert outcome[2].credit_account_debits_posted == 0
+    assert outcome[2].credit_account_credits_pending == 0
+    assert outcome[2].credit_account_credits_posted == 0
+
+    assert outcome[2].debit_account_debits_pending == 0
+    assert outcome[2].debit_account_debits_posted == 100
+    assert outcome[2].debit_account_credits_pending == 0
+    assert outcome[2].debit_account_credits_posted == 0
+
+
 def test_get_account_transfers(client):
     accountC = tb.Account(
         id=21,

@@ -36,6 +36,8 @@ const mappings_state_machine = .{
     .{ tb.CreateTransferResult, "CreateTransferResult" },
     .{ tb.CreateAccountsResult, "CreateAccountsResult" },
     .{ tb.CreateTransfersResult, "CreateTransfersResult" },
+    .{ tb.CreateAndReturnTransfersResult, "CreateAndReturnTransfersResult" },
+    .{ tb.CreateAndReturnTransfersResultFlags, "CreateAndReturnTransfersResultFlags" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
@@ -538,6 +540,7 @@ pub fn main() !void {
         const operations: []const StateMachine.Operation = &.{
             .create_accounts,
             .create_transfers,
+            .create_and_return_transfers,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
@@ -562,6 +565,7 @@ fn event_name(comptime operation: StateMachine.Operation) []const u8 {
     return switch (operation) {
         .create_accounts => "accounts",
         .create_transfers => "transfers",
+        .create_and_return_transfers => "transfers",
         .lookup_accounts => "accounts",
         .lookup_transfers => "transfers",
         .get_account_transfers => "filter",
