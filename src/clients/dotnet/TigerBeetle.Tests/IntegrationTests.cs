@@ -857,6 +857,229 @@ public class IntegrationTests
     }
 
     [TestMethod]
+    public void CreateAndReturnTransfers()
+    {
+        var accounts = GenerateAccounts();
+        var accountResults = client.CreateAccounts(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Ledger = 1,
+            Code = 1,
+        };
+
+        var transfersOutcome = client.CreateAndReturnTransfers(new[] { transfer });
+        Assert.IsTrue(transfersOutcome.Length == 1);
+        Assert.AreEqual(CreateTransferResult.Ok, transfersOutcome[0].Result);
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+
+        var lookupTransfers = client.LookupTransfers(new UInt128[] { transfer.Id });
+        Assert.IsTrue(lookupTransfers.Length == 1);
+        AssertTransfer(transfer, lookupTransfers[0]);
+
+        Assert.AreEqual(lookupTransfers[0].Timestamp, transfersOutcome[0].Timestamp);
+        Assert.AreEqual(lookupTransfers[0].Amount, transfersOutcome[0].Amount);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, transfersOutcome[0].CreditAccountDebitsPending);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfersOutcome[0].CreditAccountDebitsPosted);
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, transfersOutcome[0].CreditAccountCreditsPending);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfersOutcome[0].CreditAccountCreditsPosted);
+
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, transfersOutcome[0].DebitAccountDebitsPending);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfersOutcome[0].DebitAccountDebitsPosted);
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, transfersOutcome[0].DebitAccountCreditsPending);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfersOutcome[0].DebitAccountCreditsPosted);
+    }
+
+    [TestMethod]
+    public async Task CreateAndReturnTransfersAsync()
+    {
+        var accounts = GenerateAccounts();
+        var accountResults = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Ledger = 1,
+            Code = 1,
+        };
+
+        var transfersOutcome = await client.CreateAndReturnTransfersAsync(new[] { transfer });
+        Assert.IsTrue(transfersOutcome.Length == 1);
+        Assert.AreEqual(CreateTransferResult.Ok, transfersOutcome[0].Result);
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+
+        var lookupTransfers = await client.LookupTransfersAsync(new UInt128[] { transfer.Id });
+        Assert.IsTrue(lookupTransfers.Length == 1);
+        AssertTransfer(transfer, lookupTransfers[0]);
+
+        Assert.AreEqual(lookupTransfers[0].Timestamp, transfersOutcome[0].Timestamp);
+        Assert.AreEqual(lookupTransfers[0].Amount, transfersOutcome[0].Amount);
+
+        var lookupAccounts = client.LookupAccounts(new[] { accounts[0].Id, accounts[1].Id });
+        AssertAccounts(accounts, lookupAccounts);
+        Assert.AreEqual(lookupAccounts[0].DebitsPending, transfersOutcome[0].CreditAccountDebitsPending);
+        Assert.AreEqual(lookupAccounts[0].DebitsPosted, transfersOutcome[0].CreditAccountDebitsPosted);
+        Assert.AreEqual(lookupAccounts[0].CreditsPending, transfersOutcome[0].CreditAccountCreditsPending);
+        Assert.AreEqual(lookupAccounts[0].CreditsPosted, transfersOutcome[0].CreditAccountCreditsPosted);
+
+        Assert.AreEqual(lookupAccounts[1].DebitsPending, transfersOutcome[0].DebitAccountDebitsPending);
+        Assert.AreEqual(lookupAccounts[1].DebitsPosted, transfersOutcome[0].DebitAccountDebitsPosted);
+        Assert.AreEqual(lookupAccounts[1].CreditsPending, transfersOutcome[0].DebitAccountCreditsPending);
+        Assert.AreEqual(lookupAccounts[1].CreditsPosted, transfersOutcome[0].DebitAccountCreditsPosted);
+    }
+
+    [TestMethod]
+    public async Task CreateAndReturnTransfersExistsAsync()
+    {
+        var accounts = GenerateAccounts();
+        var accountResults = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var transfer = new Transfer
+        {
+            Id = ID.Create(),
+            CreditAccountId = accounts[0].Id,
+            DebitAccountId = accounts[1].Id,
+            Amount = 100,
+            Ledger = 1,
+            Code = 1,
+        };
+
+        var transfersOutcome = await client.CreateAndReturnTransfersAsync(new[] { transfer });
+        Assert.IsTrue(transfersOutcome.Length == 1);
+        Assert.AreEqual(CreateTransferResult.Ok, transfersOutcome[0].Result);
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+
+        var transfersExistsOutcome = await client.CreateAndReturnTransfersAsync(new[] { transfer });
+        Assert.IsTrue(transfersExistsOutcome.Length == 1);
+        Assert.AreEqual(CreateTransferResult.Exists, transfersExistsOutcome[0].Result);
+        Assert.IsTrue(transfersExistsOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsFalse(transfersExistsOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+
+        Assert.AreEqual(transfersOutcome[0].Timestamp, transfersExistsOutcome[0].Timestamp);
+        Assert.AreEqual(transfersOutcome[0].Amount, transfersExistsOutcome[0].Amount);
+
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountDebitsPending);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountCreditsPending);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountCreditsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountDebitsPending);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountCreditsPending);
+        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountCreditsPosted);
+    }
+
+
+    [TestMethod]
+    public async Task CreateAndReturnTransfersExceedsAsync()
+    {
+        var accounts = new[] {
+            new Account
+            {
+                Id = ID.Create(),
+                Code = 1,
+                Ledger = 1,
+                Flags = AccountFlags.DebitsMustNotExceedCredits,
+            },
+            new Account
+            {
+                Id = ID.Create(),
+                Code = 1,
+                Ledger = 1,
+                Flags = AccountFlags.CreditsMustNotExceedDebits,
+            },
+            new Account
+            {
+                Id = ID.Create(),
+                Code = 1,
+                Ledger = 1
+            },
+        };
+        var accountResults = await client.CreateAccountsAsync(accounts);
+        Assert.IsTrue(accountResults.Length == 0);
+
+        var transfers = new[] {
+            new Transfer
+            {
+                Id = ID.Create(),
+                DebitAccountId = accounts[2].Id,
+                CreditAccountId = accounts[0].Id,
+                Amount = 100,
+                Ledger = 1,
+                Code = 1,
+            },
+            new Transfer
+            {
+                Id = ID.Create(),
+                DebitAccountId = accounts[0].Id,
+                CreditAccountId = accounts[2].Id,
+                Amount = 150,
+                Ledger = 1,
+                Code = 1,
+            },
+            new Transfer
+            {
+                Id = ID.Create(),
+                DebitAccountId = accounts[2].Id,
+                CreditAccountId = accounts[1].Id,
+                Amount = 150,
+                Ledger = 1,
+                Code = 1,
+            },
+        };
+
+        var transfersOutcome = await client.CreateAndReturnTransfersAsync(transfers);
+        Assert.IsTrue(transfersOutcome.Length == 3);
+        Assert.AreEqual(CreateTransferResult.Ok, transfersOutcome[0].Result);
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+
+        Assert.AreEqual(CreateTransferResult.ExceedsCredits, transfersOutcome[1].Result);
+        Assert.IsFalse(transfersOutcome[1].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[1].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+        Assert.AreEqual(0UL, transfersOutcome[1].Timestamp);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].Amount);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].CreditAccountDebitsPending);
+        Assert.AreEqual((UInt128)100, transfersOutcome[1].CreditAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].CreditAccountCreditsPending);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].CreditAccountCreditsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].DebitAccountDebitsPending);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].DebitAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[1].DebitAccountCreditsPending);
+        Assert.AreEqual((UInt128)100, transfersOutcome[1].DebitAccountCreditsPosted);
+
+        Assert.AreEqual(CreateTransferResult.ExceedsDebits, transfersOutcome[2].Result);
+        Assert.IsFalse(transfersOutcome[2].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
+        Assert.IsTrue(transfersOutcome[2].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+        Assert.AreEqual(0UL, transfersOutcome[2].Timestamp);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].Amount);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].CreditAccountDebitsPending);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].CreditAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].CreditAccountCreditsPending);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].CreditAccountCreditsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].DebitAccountDebitsPending);
+        Assert.AreEqual((UInt128)100, transfersOutcome[2].DebitAccountDebitsPosted);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].DebitAccountCreditsPending);
+        Assert.AreEqual(UInt128.Zero, transfersOutcome[2].DebitAccountCreditsPosted);
+    }
+
+
+    [TestMethod]
     public void CreateAccountTooMuchData()
     {
         const int TOO_MUCH_DATA = 10_000;
@@ -956,6 +1179,58 @@ public class IntegrationTests
         try
         {
             _ = await client.CreateTransfersAsync(transfers);
+            Assert.Fail();
+        }
+        catch (RequestException requestException)
+        {
+            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+        }
+    }
+
+    [TestMethod]
+    public void CreateAndReturnTransferTooMuchData()
+    {
+        const int TOO_MUCH_DATA = 7_000;
+        var transfers = new Transfer[TOO_MUCH_DATA];
+        for (int i = 0; i < TOO_MUCH_DATA; i++)
+        {
+            transfers[i] = new Transfer
+            {
+                Id = ID.Create(),
+                Code = 1,
+                Ledger = 1
+            };
+        }
+
+        try
+        {
+            _ = client.CreateAndReturnTransfers(transfers);
+            Assert.Fail();
+        }
+        catch (RequestException requestException)
+        {
+            Assert.AreEqual(PacketStatus.TooMuchData, requestException.Status);
+        }
+    }
+
+    [TestMethod]
+    public async Task CreateAndReturnTransferTooMuchDataAsync()
+    {
+        const int TOO_MUCH_DATA = 7_000;
+        var transfers = new Transfer[TOO_MUCH_DATA];
+        for (int i = 0; i < TOO_MUCH_DATA; i++)
+        {
+            transfers[i] = new Transfer
+            {
+                Id = ID.Create(),
+                Code = 1,
+                Ledger = 1
+            };
+        }
+
+        try
+        {
+            _ = await client.CreateAndReturnTransfersAsync(transfers);
             Assert.Fail();
         }
         catch (RequestException requestException)

@@ -99,6 +99,25 @@ const type_mappings = .{
         .name = "CreateTransfersResult",
         .visibility = .public,
     } },
+    .{ tb.CreateAndReturnTransfersResult, TypeMapping{
+        .name = "CreateAndReturnTransfersResult",
+        .visibility = .public,
+        .readonly_fields = &.{
+            "result",                         "flags",
+            "timestamp",                      "amount",
+            "debit_account_debits_pending",   "debit_account_debits_posted",
+            "debit_account_credits_pending",  "debit_account_credits_posted",
+            "credit_account_debits_pending",  "credit_account_debits_posted",
+            "credit_account_credits_pending", "credit_account_credits_posted",
+        },
+        .docs_link = "reference/requests/create_and_return_transfers#",
+    } },
+    .{ tb.CreateAndReturnTransfersResultFlags, TypeMapping{
+        .name = "CreateAndReturnTransfersResultFlags",
+        .visibility = .public,
+        .private_fields = &.{"padding"},
+        .docs_link = "reference/requests/create_and_return_transfers#flags",
+    } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",
         .visibility = .public,

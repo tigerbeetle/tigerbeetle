@@ -73,6 +73,28 @@ public sealed class Client : IDisposable
         return nativeClient.CallRequestAsync<CreateTransfersResult, Transfer>(TBOperation.CreateTransfers, batch);
     }
 
+    public CreateAndReturnTransfersResult CreateAndReturnTransfer(Transfer transfer)
+    {
+        var ret = nativeClient.CallRequest<CreateAndReturnTransfersResult, Transfer>(TBOperation.CreateAndReturnTransfers, new[] { transfer });
+        return ret[0];
+    }
+
+    public CreateAndReturnTransfersResult[] CreateAndReturnTransfers(ReadOnlySpan<Transfer> batch)
+    {
+        return nativeClient.CallRequest<CreateAndReturnTransfersResult, Transfer>(TBOperation.CreateAndReturnTransfers, batch);
+    }
+
+    public Task<CreateAndReturnTransfersResult> CreateAndReturnTransfersAsync(Transfer transfer)
+    {
+        return nativeClient.CallRequestAsync<CreateAndReturnTransfersResult, Transfer>(TBOperation.CreateAndReturnTransfers, new[] { transfer })
+        .ContinueWith(x => x.Result[0]);
+    }
+
+    public Task<CreateAndReturnTransfersResult[]> CreateAndReturnTransfersAsync(ReadOnlyMemory<Transfer> batch)
+    {
+        return nativeClient.CallRequestAsync<CreateAndReturnTransfersResult, Transfer>(TBOperation.CreateAndReturnTransfers, batch);
+    }
+
     public Account? LookupAccount(UInt128 id)
     {
         var ret = nativeClient.CallRequest<Account, UInt128>(TBOperation.LookupAccounts, new[] { id });

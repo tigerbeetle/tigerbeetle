@@ -256,4 +256,39 @@ public class BindingTests
         result.Result = CreateTransferResult.Exists;
         Assert.AreEqual(result.Result, CreateTransferResult.Exists);
     }
+
+    [TestMethod]
+    public void CreateAndReturnTransfersResults()
+    {
+        var result = new CreateAndReturnTransfersResult();
+
+        result.Result = CreateTransferResult.Exists;
+        Assert.AreEqual(result.Result, CreateTransferResult.Exists);
+
+        result.Flags = CreateAndReturnTransfersResultFlags.TransferSet | CreateAndReturnTransfersResultFlags.AccountBalancesSet;
+        Assert.AreEqual(result.Flags, CreateAndReturnTransfersResultFlags.TransferSet | CreateAndReturnTransfersResultFlags.AccountBalancesSet);
+
+        result.Timestamp = 1;
+        Assert.AreEqual(result.Timestamp, 1UL);
+
+        result.Amount = 100;
+        Assert.AreEqual(result.Amount, (UInt128)100);
+
+        result.DebitAccountDebitsPending = 101;
+        Assert.AreEqual(result.DebitAccountDebitsPending, (UInt128)101);
+        result.DebitAccountDebitsPosted = 102;
+        Assert.AreEqual(result.DebitAccountDebitsPosted, (UInt128)102);
+        result.DebitAccountCreditsPending = 103;
+        Assert.AreEqual(result.DebitAccountCreditsPending, (UInt128)103);
+        result.DebitAccountCreditsPosted = 104;
+        Assert.AreEqual(result.DebitAccountCreditsPosted, (UInt128)104);
+        result.CreditAccountDebitsPending = 105;
+        Assert.AreEqual(result.CreditAccountDebitsPending, (UInt128)105);
+        result.CreditAccountDebitsPosted = 106;
+        Assert.AreEqual(result.CreditAccountDebitsPosted, (UInt128)106);
+        result.CreditAccountCreditsPending = 107;
+        Assert.AreEqual(result.CreditAccountCreditsPending, (UInt128)107);
+        result.CreditAccountCreditsPosted = 108;
+        Assert.AreEqual(result.CreditAccountCreditsPosted, (UInt128)108);
+    }
 }
