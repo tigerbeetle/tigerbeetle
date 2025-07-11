@@ -40,6 +40,14 @@ const big_integer = struct {
         "credits_pending",
         "debits_posted",
         "debits_pending",
+        "debit_account_credits_posted",
+        "debit_account_credits_pending",
+        "debit_account_debits_posted",
+        "debit_account_debits_pending",
+        "credit_account_credits_posted",
+        "credit_account_credits_pending",
+        "credit_account_debits_posted",
+        "credit_account_debits_pending",
         "amount",
     };
 
@@ -127,6 +135,23 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransferResultBatch",
         .readonly_fields = &.{ "index", "result" },
+    } },
+    .{ tb.CreateAndReturnTransfersResult, TypeMapping{
+        .name = "CreateAndReturnTransferResultBatch",
+        .docs_link = "reference/requests/create_and_return_transfers#",
+        .readonly_fields = &.{
+            "result",                         "flags",
+            "timestamp",                      "amount",
+            "debit_account_debits_pending",   "debit_account_debits_posted",
+            "debit_account_credits_pending",  "debit_account_credits_posted",
+            "credit_account_debits_pending",  "credit_account_debits_posted",
+            "credit_account_credits_pending", "credit_account_credits_posted",
+        },
+    } },
+    .{ tb.CreateAndReturnTransfersResultFlags, TypeMapping{
+        .name = "CreateAndReturnTransferResultFlags",
+        .private_fields = &.{"padding"},
+        .docs_link = "reference/requests/create_and_return_transfers#flags",
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilterBatch",

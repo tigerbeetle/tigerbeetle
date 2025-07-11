@@ -57,6 +57,12 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
+    public static BlockingRequest<CreateAndReturnTransferResultBatch> createAndReturnTransfers(
+            final NativeClient nativeClient, final TransferBatch batch) {
+        return new BlockingRequest<CreateAndReturnTransferResultBatch>(nativeClient,
+                Request.Operations.CREATE_AND_RETURN_TRANSFERS, batch);
+    }
+
     public static BlockingRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,
             final IdBatch batch) {
         return new BlockingRequest<TransferBatch>(nativeClient, Request.Operations.LOOKUP_TRANSFERS,

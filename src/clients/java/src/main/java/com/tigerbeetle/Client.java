@@ -162,6 +162,41 @@ public final class Client implements AutoCloseable {
     }
 
     /**
+     * Submits a batch of new transfers to be created and returns the outcome.
+     *
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
+     *        created.
+     * @return a read-only {@link com.tigerbeetle.CreateAndReturnTransferResultBatch batch}
+     *         containing information about the outcome.
+     * @throws RequestException refer to {@link PacketStatus} for more details.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CreateAndReturnTransferResultBatch createAndReturnTransfers(final TransferBatch batch) {
+        final var request = BlockingRequest.createAndReturnTransfers(this.nativeClient, batch);
+        request.beginRequest();
+        return request.waitForResult();
+    }
+
+    /**
+     * Submits a batch of new transfers to be created asynchronously and returns the outcome.
+     *
+     * @param batch a {@link com.tigerbeetle.TransferBatch batch} containing all transfers to be
+     *        created.
+     * @return a {@link java.util.concurrent.CompletableFuture} to be completed.
+     * @throws IllegalArgumentException if {@code batch} is empty.
+     * @throws NullPointerException if {@code batch} is null.
+     * @throws IllegalStateException if this client is closed.
+     */
+    public CompletableFuture<CreateAndReturnTransferResultBatch> createAndReturnTransfersAsync(
+            final TransferBatch batch) {
+        final var request = AsyncRequest.createAndReturnTransfers(this.nativeClient, batch);
+        request.beginRequest();
+        return request.getFuture();
+    }
+
+    /**
      * Looks up a batch of transfers.
      *
      * @param batch a {@link com.tigerbeetle.IdBatch batch} containing all transfer ids.

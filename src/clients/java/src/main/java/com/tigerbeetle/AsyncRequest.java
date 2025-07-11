@@ -42,6 +42,12 @@ final class AsyncRequest<TResponse extends Batch> extends Request<TResponse> {
                 Request.Operations.CREATE_TRANSFERS, batch);
     }
 
+    public static AsyncRequest<CreateAndReturnTransferResultBatch> createAndReturnTransfers(
+            final NativeClient nativeClient, final TransferBatch batch) {
+        return new AsyncRequest<CreateAndReturnTransferResultBatch>(nativeClient,
+                Request.Operations.CREATE_AND_RETURN_TRANSFERS, batch);
+    }
+
     public static AsyncRequest<TransferBatch> lookupTransfers(final NativeClient nativeClient,
             final IdBatch batch) {
         return new AsyncRequest<TransferBatch>(nativeClient, Request.Operations.LOOKUP_TRANSFERS,
