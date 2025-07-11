@@ -350,6 +350,198 @@ func doTestClient(t *testing.T, client Client) {
 		assert.True(t, !accounts[1].AccountFlags().Closed)
 	})
 
+	t.Run("can create and return a transfer", func(t *testing.T) {
+		t.Parallel()
+		accountA, accountB := createTwoAccounts(t)
+		transferID := types.ID()
+
+		outcome, err := client.CreateAndReturnTransfers([]types.Transfer{
+			{
+				ID:              transferID,
+				CreditAccountID: accountA.ID,
+				DebitAccountID:  accountB.ID,
+				Amount:          types.ToUint128(100),
+				Ledger:          1,
+				Code:            1,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, outcome, 1)
+		assert.Equal(t, types.TransferOK, outcome[0].Result)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+
+		transfers, err := client.LookupTransfers([]types.Uint128{transferID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, transfers, 1)
+
+		assert.Equal(t, transfers[0].Timestamp, outcome[0].Timestamp)
+		assert.Equal(t, transfers[0].Amount, outcome[0].Amount)
+
+		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, accounts, 2)
+
+		accountA = accounts[0]
+		assert.Equal(t, accountA.DebitsPending, outcome[0].CreditAccountDebitsPending)
+		assert.Equal(t, accountA.DebitsPosted, outcome[0].CreditAccountDebitsPosted)
+		assert.Equal(t, accountA.CreditsPending, outcome[0].CreditAccountCreditsPending)
+		assert.Equal(t, accountA.CreditsPosted, outcome[0].CreditAccountCreditsPosted)
+
+		accountB = accounts[1]
+		assert.Equal(t, accountB.DebitsPending, outcome[0].DebitAccountDebitsPending)
+		assert.Equal(t, accountB.DebitsPosted, outcome[0].DebitAccountDebitsPosted)
+		assert.Equal(t, accountB.CreditsPending, outcome[0].DebitAccountCreditsPending)
+		assert.Equal(t, accountB.CreditsPosted, outcome[0].DebitAccountCreditsPosted)
+	})
+
+	t.Run("can create and return a transfer exists", func(t *testing.T) {
+		t.Parallel()
+		accountA, accountB := createTwoAccounts(t)
+
+		transfer := types.Transfer{
+			ID:              types.ID(),
+			CreditAccountID: accountA.ID,
+			DebitAccountID:  accountB.ID,
+			Amount:          types.ToUint128(100),
+			Ledger:          1,
+			Code:            1,
+		}
+
+		outcome, err := client.CreateAndReturnTransfers([]types.Transfer{transfer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, outcome, 1)
+		assert.Equal(t, types.TransferOK, outcome[0].Result)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+
+		outcomeExists, err := client.CreateAndReturnTransfers([]types.Transfer{transfer})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, outcomeExists, 1)
+		assert.Equal(t, types.TransferExists, outcomeExists[0].Result)
+		assert.Equal(t, true, outcomeExists[0].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, false, outcomeExists[0].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+
+		assert.Equal(t, outcome[0].Timestamp, outcomeExists[0].Timestamp)
+		assert.Equal(t, outcome[0].Amount, outcomeExists[0].Amount)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].CreditAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].CreditAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].CreditAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].CreditAccountCreditsPosted)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].DebitAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].DebitAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].DebitAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(0), outcomeExists[0].DebitAccountCreditsPosted)
+	})
+
+	t.Run("can create and return transfer exceeds", func(t *testing.T) {
+		t.Parallel()
+
+		accountA := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   1,
+			Flags: types.AccountFlags{
+				DebitsMustNotExceedCredits: true,
+			}.ToUint16(),
+		}
+		accountB := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   2,
+			Flags: types.AccountFlags{
+				CreditsMustNotExceedDebits: true,
+			}.ToUint16(),
+		}
+		accountC := types.Account{
+			ID:     types.ID(),
+			Ledger: 1,
+			Code:   2,
+		}
+
+		results, err := client.CreateAccounts([]types.Account{
+			accountA,
+			accountB,
+			accountC,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Empty(t, results)
+
+		outcome, err := client.CreateAndReturnTransfers([]types.Transfer{
+			{
+				ID:              types.ID(),
+				DebitAccountID:  accountC.ID,
+				CreditAccountID: accountA.ID,
+				Amount:          types.ToUint128(100),
+				Ledger:          1,
+				Code:            1,
+			},
+			{
+				ID:              types.ID(),
+				DebitAccountID:  accountA.ID,
+				CreditAccountID: accountC.ID,
+				Amount:          types.ToUint128(150),
+				Ledger:          1,
+				Code:            1,
+			},
+			{
+				ID:              types.ID(),
+				DebitAccountID:  accountC.ID,
+				CreditAccountID: accountB.ID,
+				Amount:          types.ToUint128(150),
+				Ledger:          1,
+				Code:            1,
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, outcome, 3)
+		assert.Equal(t, types.TransferOK, outcome[0].Result)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, true, outcome[0].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+
+		assert.Equal(t, types.TransferExceedsCredits, outcome[1].Result)
+		assert.Equal(t, 0, outcome[1].Timestamp)
+		assert.Equal(t, types.ToUint128(0), outcome[1].Amount)
+		assert.Equal(t, false, outcome[1].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, true, outcome[1].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+		assert.Equal(t, types.ToUint128(0), outcome[1].CreditAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(100), outcome[1].CreditAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[1].CreditAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(0), outcome[1].CreditAccountCreditsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[1].DebitAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(0), outcome[1].DebitAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[1].DebitAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(100), outcome[1].DebitAccountCreditsPosted)
+
+		assert.Equal(t, types.TransferExceedsDebits, outcome[2].Result)
+		assert.Equal(t, false, outcome[2].TransferWithOutcomeEventResultFlags().TransferSet)
+		assert.Equal(t, true, outcome[2].TransferWithOutcomeEventResultFlags().AccountBalancesSet)
+		assert.Equal(t, 0, outcome[2].Timestamp)
+		assert.Equal(t, types.ToUint128(0), outcome[2].Amount)
+		assert.Equal(t, types.ToUint128(0), outcome[2].CreditAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(0), outcome[2].CreditAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[2].CreditAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(0), outcome[2].CreditAccountCreditsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[2].DebitAccountDebitsPending)
+		assert.Equal(t, types.ToUint128(100), outcome[2].DebitAccountDebitsPosted)
+		assert.Equal(t, types.ToUint128(0), outcome[2].DebitAccountCreditsPending)
+		assert.Equal(t, types.ToUint128(0), outcome[2].DebitAccountCreditsPosted)
+	})
+
 	t.Run("accept zero-length create_accounts", func(t *testing.T) {
 		t.Parallel()
 		results, err := client.CreateAccounts([]types.Account{})

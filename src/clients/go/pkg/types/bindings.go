@@ -516,6 +516,47 @@ type TransferEventResult struct {
 	Result CreateTransferResult
 }
 
+type TransferWithOutcomeEventResult struct {
+	Result                      CreateTransferResult
+	Flags                       uint32
+	Timestamp                   uint64
+	Amount                      Uint128
+	DebitAccountDebitsPending   Uint128
+	DebitAccountDebitsPosted    Uint128
+	DebitAccountCreditsPending  Uint128
+	DebitAccountCreditsPosted   Uint128
+	CreditAccountDebitsPending  Uint128
+	CreditAccountDebitsPosted   Uint128
+	CreditAccountCreditsPending Uint128
+	CreditAccountCreditsPosted  Uint128
+}
+
+func (o TransferWithOutcomeEventResult) TransferWithOutcomeEventResultFlags() TransferWithOutcomeEventResultFlags {
+	var f TransferWithOutcomeEventResultFlags
+	f.TransferSet = ((o.Flags >> 0) & 0x1) == 1
+	f.AccountBalancesSet = ((o.Flags >> 1) & 0x1) == 1
+	return f
+}
+
+type TransferWithOutcomeEventResultFlags struct {
+	TransferSet        bool
+	AccountBalancesSet bool
+}
+
+func (f TransferWithOutcomeEventResultFlags) ToUint32() uint32 {
+	var ret uint32 = 0
+
+	if f.TransferSet {
+		ret |= (1 << 0)
+	}
+
+	if f.AccountBalancesSet {
+		ret |= (1 << 1)
+	}
+
+	return ret
+}
+
 type AccountFilter struct {
 	AccountID    Uint128
 	UserData128  Uint128
