@@ -664,6 +664,169 @@ pub const AccountingAuditor = struct {
         }
     }
 
+    pub fn on_create_and_return_transfers(
+        self: *AccountingAuditor,
+        client_index: usize,
+        timestamp: u64,
+        transfers: []const tb.Transfer,
+        results: []const tb.CreateAndReturnTransfersResult,
+    ) void {
+        assert(transfers.len == results.len);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (transfers.len == 0 and self.timestamp == timestamp));
+        defer self.timestamp = timestamp;
+
+        const results_expect = self.take_in_flight(client_index).create_transfers;
+
+        for (transfers, results, 0..) |*transfer, *outcome, i| {
+            const transfer_timestamp = timestamp - transfers.len + i + 1;
+
+            if (!results_expect[i].contains(outcome.result.to_ordered())) {
+                log.err("on_create_and_return_transfers: transfer={} expect={} result={}", .{
+                    transfer.*,
+                    results_expect[i],
+                    outcome.result,
+                });
+                @panic("on_create_and_return_transfers: unexpected result");
+            }
+
+            if (outcome.result == .ok) {
+                self.changes_tracker.update(.{ .transfer = .{
+                    .timestamp = transfer_timestamp,
+                    .flags = transfer.flags,
+                } });
+
+                const query_intersection_index = transfer.code - 1;
+                const query_intersection = &self.query_intersections[query_intersection_index];
+                assert(transfer.user_data_64 == query_intersection.user_data_64);
+                assert(transfer.user_data_32 == query_intersection.user_data_32);
+                assert(transfer.code == query_intersection.code);
+                query_intersection.transfers.count += 1;
+                if (query_intersection.transfers.timestamp_min == 0) {
+                    query_intersection.transfers.timestamp_min = transfer_timestamp;
+                }
+                query_intersection.transfers.timestamp_max = transfer_timestamp;
+
+                if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+                    const p = self.pending_transfers.get(transfer.pending_id).?;
+                    const dr_state = &self.accounts_state[p.debit_account_index];
+                    const cr_state = &self.accounts_state[p.credit_account_index];
+                    dr_state.update(.dr, transfer_timestamp);
+                    cr_state.update(.cr, transfer_timestamp);
+
+                    const dr = &self.accounts[p.debit_account_index];
+                    const cr = &self.accounts[p.credit_account_index];
+
+                    assert(self.pending_transfers.remove(transfer.pending_id));
+                    // The transfer may still be in `pending_expiries` — removal would be O(n),
+                    // so don't bother.
+
+                    dr.debits_pending -= p.amount;
+                    cr.credits_pending -= p.amount;
+                    if (transfer.flags.post_pending_transfer) {
+                        const amount = @min(transfer.amount, p.amount);
+                        dr.debits_posted += amount;
+                        cr.credits_posted += amount;
+                    }
+
+                    assert(!dr.debits_exceed_credits(0));
+                    assert(!dr.credits_exceed_debits(0));
+                    assert(!cr.debits_exceed_credits(0));
+                    assert(!cr.credits_exceed_debits(0));
+                } else {
+                    const dr_index = self.account_id_to_index(transfer.debit_account_id);
+                    const cr_index = self.account_id_to_index(transfer.credit_account_id);
+                    const dr_state = &self.accounts_state[dr_index];
+                    const cr_state = &self.accounts_state[cr_index];
+                    dr_state.update(.dr, transfer_timestamp);
+                    cr_state.update(.cr, transfer_timestamp);
+
+                    const dr = &self.accounts[dr_index];
+                    const cr = &self.accounts[cr_index];
+
+                    if (transfer.flags.pending) {
+                        if (transfer.timeout > 0) {
+                            self.pending_transfers.putAssumeCapacity(transfer.id, .{
+                                .amount = transfer.amount,
+                                .debit_account_index = dr_index,
+                                .credit_account_index = cr_index,
+                                .query_intersection_index = transfer.code - 1,
+                            });
+                            self.pending_expiries.add(.{
+                                .transfer_id = transfer.id,
+                                .transfer_timestamp = transfer_timestamp,
+                                .expires_at = transfer_timestamp + transfer.timeout_ns(),
+                            }) catch unreachable;
+                            // PriorityQueue lacks an "unmanaged" API, so verify that the workload
+                            // hasn't created more pending transfers than permitted.
+                            assert(self.pending_expiries.count() <=
+                                self.options.transfers_pending_max);
+                        }
+                        dr.debits_pending += transfer.amount;
+                        cr.credits_pending += transfer.amount;
+                    } else {
+                        dr.debits_posted += transfer.amount;
+                        cr.credits_posted += transfer.amount;
+                    }
+
+                    assert(!dr.debits_exceed_credits(0));
+                    assert(!dr.credits_exceed_debits(0));
+                    assert(!cr.debits_exceed_credits(0));
+                    assert(!cr.credits_exceed_debits(0));
+                }
+            }
+
+            if (outcome.flags.transfer_set) {
+                assert(outcome.result == .ok or outcome.result == .exists);
+
+                assert(outcome.timestamp == transfer_timestamp); // TODO: handle .exists!
+                assert(outcome.amount == transfer.amount);
+            } else {
+                assert(outcome.result != .ok);
+                assert(outcome.result != .exists);
+
+                assert(outcome.timestamp == 0);
+                assert(outcome.amount == 0);
+            }
+
+            if (outcome.flags.account_balances_set) {
+                assert(outcome.result == .ok or
+                    outcome.result == .exceeds_debits or
+                    outcome.result == .exceeds_credits);
+
+                const dr_index = self.account_id_to_index(transfer.debit_account_id);
+                const cr_index = self.account_id_to_index(transfer.credit_account_id);
+                const dr = &self.accounts[dr_index];
+                const cr = &self.accounts[cr_index];
+
+                assert(outcome.debit_account_debits_pending == dr.debits_pending);
+                assert(outcome.debit_account_debits_posted == dr.debits_posted);
+                assert(outcome.debit_account_credits_pending == dr.credits_pending);
+                assert(outcome.debit_account_credits_posted == dr.credits_posted);
+
+                assert(outcome.credit_account_debits_pending == cr.debits_pending);
+                assert(outcome.credit_account_debits_posted == cr.debits_posted);
+                assert(outcome.credit_account_credits_pending == cr.credits_pending);
+                assert(outcome.credit_account_credits_posted == cr.credits_posted);
+            } else {
+                assert(outcome.result != .ok);
+                assert(outcome.result != .exceeds_debits);
+                assert(outcome.result != .exceeds_credits);
+
+                assert(outcome.debit_account_debits_pending == 0);
+                assert(outcome.debit_account_debits_posted == 0);
+                assert(outcome.debit_account_credits_pending == 0);
+                assert(outcome.debit_account_credits_posted == 0);
+
+                assert(outcome.credit_account_debits_pending == 0);
+                assert(outcome.credit_account_debits_posted == 0);
+                assert(outcome.credit_account_credits_pending == 0);
+                assert(outcome.credit_account_credits_posted == 0);
+            }
+        }
+    }
+
     pub fn on_lookup_accounts(
         self: *AccountingAuditor,
         client_index: usize,

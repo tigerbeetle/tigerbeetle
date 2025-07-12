@@ -118,7 +118,7 @@ fn build_batch(
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
-        .create_accounts, .create_transfers => 0,
+        .create_accounts, .create_transfers, .create_and_return_transfers => 0,
 
         .lookup_accounts, .lookup_transfers => build_lookup(prng, buffer),
         .get_account_transfers, .get_account_balances => build_account_filter(prng, buffer),
