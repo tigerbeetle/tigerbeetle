@@ -174,6 +174,27 @@ pub struct tb_create_transfers_result_t {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct tb_create_and_return_transfers_result_t {
+    pub result: u32,
+    pub flags: u32,
+    pub timestamp: u64,
+    pub amount: u128,
+    pub debit_account_debits_pending: u128,
+    pub debit_account_debits_posted: u128,
+    pub debit_account_credits_pending: u128,
+    pub debit_account_credits_posted: u128,
+    pub credit_account_debits_pending: u128,
+    pub credit_account_debits_posted: u128,
+    pub credit_account_credits_pending: u128,
+    pub credit_account_credits_posted: u128,
+}
+
+pub type TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS = u32;
+pub const TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS_TB_CREATE_AND_RETURN_TRANSFERS_RESULT_TRANSFER_SET: TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS = 1 << 0;
+pub const TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS_TB_CREATE_AND_RETURN_TRANSFERS_RESULT_ACCOUNT_BALANCES_SET: TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS = 1 << 1;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct tb_account_filter_t {
     pub account_id: u128,
     pub user_data_128: u128,
@@ -264,6 +285,7 @@ pub const TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS: TB_OPERATION = 142;
 pub const TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES: TB_OPERATION = 143;
 pub const TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS: TB_OPERATION = 144;
 pub const TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS: TB_OPERATION = 145;
+pub const TB_OPERATION_TB_OPERATION_CREATE_AND_RETURN_TRANSFERS: TB_OPERATION = 146;
 
 pub type TB_PACKET_STATUS = u8;
 pub const TB_PACKET_STATUS_TB_PACKET_OK: TB_PACKET_STATUS = 0;
