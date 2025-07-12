@@ -1453,9 +1453,12 @@ fn build_node_client(
             .name = "tb_nodeclient",
             .root_module = root_module,
         });
-        lib.linker_allow_shlib_undefined = true;
         lib.linkLibC();
+
+        lib.step.dependOn(&npm_install.step);
         lib.addSystemIncludePath(b.path("src/clients/node/node_modules/node-api-headers/include"));
+        lib.linker_allow_shlib_undefined = true;
+
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
@@ -1465,7 +1468,6 @@ fn build_node_client(
             lib.linkSystemLibrary("node");
         }
 
-        lib.step.dependOn(&npm_install.step);
         lib.step.dependOn(&bindings.step);
         step_clients_node.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/node/dist/bin",
