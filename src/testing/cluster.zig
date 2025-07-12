@@ -51,8 +51,6 @@ pub const Failure = enum(u8) {
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
 
-// TODO(Zig): Once Zig is upgraded from 0.13, change StateMachineType from anytype back to
-// fn (comptime Storage: type, comptime constants: anytype) type.
 pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
         const Cluster = @This();
@@ -1042,7 +1040,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const replica = &cluster.replicas[replica_index];
 
-            var statuses = [_]u8{' '} ** constants.members_max;
+            var statuses: [constants.members_max]u8 = @splat(' ');
             statuses[replica_index] = switch (cluster.replica_health[replica_index]) {
                 .reformatting => ' ',
                 .down => '#',

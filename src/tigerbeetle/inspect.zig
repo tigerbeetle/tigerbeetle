@@ -1606,7 +1606,7 @@ fn GroupByType(comptime count_max: usize) type {
         const BitSet = stdx.BitSetType(count_max);
 
         count: usize = 0,
-        checksums: [count_max]?u128 = [_]?u128{null} ** count_max,
+        checksums: [count_max]?u128 = @splat(null),
         matches: [count_max]BitSet = undefined,
 
         pub fn compare(group_by: *GroupBy, bytes: []const u8) void {

@@ -32,7 +32,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         replica_count: u8,
 
         commits: Commits,
-        commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
+        commit_mins: [constants.members_max]u64 = @splat(0),
 
         replicas: []const Replica,
         clients: []const ?Client,

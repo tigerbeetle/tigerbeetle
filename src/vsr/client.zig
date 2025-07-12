@@ -106,8 +106,7 @@ pub fn ClientType(
         ping_timeout: vsr.Timeout,
 
         /// The round-trip time (estimated by the latest ping/pong pair) from each replica.
-        replica_round_trip_times_ns: [constants.replicas_max]?u64 =
-            .{null} ** constants.replicas_max,
+        replica_round_trip_times_ns: [constants.replicas_max]?u64 = @splat(null),
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the client's ID.

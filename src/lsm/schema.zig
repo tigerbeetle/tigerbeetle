@@ -90,7 +90,7 @@ pub const TableIndex = struct {
         data_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = [_]u8{0} ** 82,
+        reserved: [82]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -277,7 +277,7 @@ pub const TableData = struct {
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = [_]u8{0} ** 82,
+        reserved: [82]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -404,7 +404,7 @@ pub const TrailerNode = struct {
         previous_trailer_block_checksum: u128,
         previous_trailer_block_checksum_padding: u128 = 0,
         previous_trailer_block_address: u64,
-        reserved: [56]u8 = .{0} ** 56,
+        reserved: [56]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -498,7 +498,7 @@ pub const ManifestNode = struct {
         previous_manifest_block_checksum_padding: u128 = 0,
         previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [52]u8 = .{0} ** 52,
+        reserved: [52]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -521,7 +521,7 @@ pub const ManifestNode = struct {
         value_count: u32,
         tree_id: u16,
         label: Label,
-        reserved: [1]u8 = .{0} ** 1,
+        reserved: [1]u8 = @splat(0),
 
         comptime {
             assert(@sizeOf(TableInfo) == 128);

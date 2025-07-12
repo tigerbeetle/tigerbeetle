@@ -344,7 +344,7 @@ pub const RegisterRequest = extern struct {
     /// When command=prepare, batch_size_limit > 0 and batch_size_limit ≤ message_body_size_max.
     /// (Note that this does *not* include the `@sizeOf(Header)`.)
     batch_size_limit: u32,
-    reserved: [252]u8 = [_]u8{0} ** 252,
+    reserved: [252]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(RegisterRequest) == 256);
@@ -355,7 +355,7 @@ pub const RegisterRequest = extern struct {
 
 pub const RegisterResult = extern struct {
     batch_size_limit: u32,
-    reserved: [60]u8 = [_]u8{0} ** 60,
+    reserved: [60]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(RegisterResult) == 64);
@@ -367,7 +367,7 @@ pub const RegisterResult = extern struct {
 pub const BlockRequest = extern struct {
     block_checksum: u128,
     block_address: u64,
-    reserved: [8]u8 = [_]u8{0} ** 8,
+    reserved: [8]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(BlockRequest) == 32);
@@ -399,7 +399,7 @@ pub const ReconfigurationRequest = extern struct {
     ///
     /// At the moment, we require this to be equal to the old count.
     standby_count: u8,
-    reserved: [54]u8 = [_]u8{0} ** 54,
+    reserved: [54]u8 = @splat(0),
     /// The result of this request. Set to zero by the client and filled-in by the primary when it
     /// accepts a reconfiguration request.
     result: ReconfigurationResult,
@@ -545,7 +545,7 @@ test "ReconfigurationRequest" {
         }
 
         fn to_members(m: anytype) Members {
-            var result = [_]u128{0} ** constants.members_max;
+            var result: [constants.members_max]u128 = @splat(0);
             inline for (m, 0..) |member, index| result[index] = member;
             return result;
         }
@@ -629,7 +629,7 @@ test "ReconfigurationRequest" {
 
 pub const UpgradeRequest = extern struct {
     release: Release,
-    reserved: [12]u8 = [_]u8{0} ** 12,
+    reserved: [12]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(UpgradeRequest) == 16);
@@ -1054,7 +1054,7 @@ test "parse_addresses: fuzz" {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    var input_max: [len_max]u8 = .{0} ** len_max;
+    var input_max: [len_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const len = prng.int_inclusive(usize, len_max);
@@ -1190,7 +1190,7 @@ pub fn root_members(cluster: u128) Members {
     };
     comptime assert(@sizeOf(IdSeed) == 33);
 
-    var result = [_]u128{0} ** constants.members_max;
+    var result: [constants.members_max]u128 = @splat(0);
     var replica: u8 = 0;
     while (replica < constants.members_max) : (replica += 1) {
         const seed = IdSeed{

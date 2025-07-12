@@ -832,22 +832,17 @@ test "shell: expand_argv" {
 ///
 /// Caller is responsible for closing the dir.
 fn discover_project_root() !std.fs.Dir {
-    // TODO(Zig): https://github.com/ziglang/zig/issues/16779
-    const ancestors = "./" ++ "../" ** 16;
+    var current = try std.fs.cwd().openDir(".", .{});
+    errdefer current.close(); // Caller is responsible for closing on success.
 
-    var level: u32 = 0;
-    while (level < 16) : (level += 1) {
-        const ancestor = ancestors[0 .. 2 + 3 * level];
-        assert(ancestor[ancestor.len - 1] == '/');
-
-        var current = try std.fs.cwd().openDir(ancestor, .{});
-        errdefer current.close();
-
+    for (0..16) |_| {
         if (current.statFile("src/shell.zig")) |_| {
             return current;
         } else |err| switch (err) {
             error.FileNotFound => {
+                const parent = try current.openDir("..", .{});
                 current.close();
+                current = parent;
             },
             else => return err,
         }

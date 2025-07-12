@@ -56,8 +56,6 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
-    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
     return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);

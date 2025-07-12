@@ -132,7 +132,7 @@ const Request = struct {
 };
 
 const DVCQuorumMessages = [constants.replicas_max]?*Message.DoViewChange;
-const dvc_quorum_messages_null = [_]?*Message.DoViewChange{null} ** constants.replicas_max;
+const dvc_quorum_messages_null: DVCQuorumMessages = @splat(null);
 
 const QuorumCounter = stdx.BitSetType(constants.replicas_max);
 const quorum_counter_null: QuorumCounter = .{};
@@ -347,7 +347,7 @@ pub fn ReplicaType(
             checkpoint: u64,
             view: u32,
             releases: vsr.ReleaseList,
-        } = .{null} ** constants.replicas_max,
+        } = @splat(null),
 
         /// The current view.
         /// Initialized from the superblock's VSRState.
@@ -10153,7 +10153,7 @@ pub fn ReplicaType(
                 const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
                 var tables = ForestTableIterator{};
                 var table_count: u32 = 0;
-                var table_count_by_level = [_]u32{0} ** constants.lsm_levels;
+                var table_count_by_level: [constants.lsm_levels]u32 = @splat(0);
                 while (tables.next(&self.state_machine.forest)) |table_info| {
                     if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
                         table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
@@ -11692,8 +11692,7 @@ const PipelineCache = struct {
     capacity: u32,
 
     // Invariant: prepares[capacity..] == null
-    prepares: [prepares_max]?*Message.Prepare =
-        [_]?*Message.Prepare{null} ** prepares_max,
+    prepares: [prepares_max]?*Message.Prepare = @splat(null),
 
     /// Converting a PipelineQueue to a PipelineCache discards all accumulated acks.
     /// "prepare_ok"s from previous views are not valid, even if the pipeline entry is reused

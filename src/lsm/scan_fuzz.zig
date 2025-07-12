@@ -546,7 +546,7 @@ const Environment = struct {
             }),
             .forest = undefined,
             .model = .{},
-            .model_matches = [_]std.DynamicBitSetUnmanaged{.{}} ** query_spec_max,
+            .model_matches = @splat(.{}),
 
             .scan_lookup_buffer = try gpa.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,

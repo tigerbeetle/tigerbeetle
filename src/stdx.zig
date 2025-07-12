@@ -606,7 +606,7 @@ test "stdx.zig: parse_dirty_semver" {
     }
 }
 
-// TODO(zig): Zig 0.11 doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
+// TODO(zig): std doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
 // Once those are available, this can be removed.
 // The `statfs` definition used by the Linux kernel, and the magic number for tmpfs, from
 // `man 2 fstatfs`.
@@ -639,7 +639,6 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
     );
 }
 
-// TODO(Zig): https://github.com/ziglang/zig/issues/17592.
 /// True if every value of the type `T` has a unique bit pattern representing it.
 /// In other words, `T` has no unused bits and no padding.
 pub fn has_unique_representation(comptime T: type) bool {

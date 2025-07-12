@@ -401,30 +401,16 @@ pub fn ScanType(
         pub fn read(scan: *Scan, context: *Context) void {
             @setEvalBranchQuota(4_000);
             switch (scan.dispatcher) {
-                inline else => |*scan_impl, tag| read_dispatch(
-                    tag,
-                    scan_impl,
-                    context,
-                ),
+                inline else => |*scan_impl, tag| {
+                    const Impl = @TypeOf(scan_impl.*);
+                    const on_read_callback = struct {
+                        fn callback(ctx: *Context, ptr: *Impl) void {
+                            ctx.callback(ctx, parent(tag, ptr));
+                        }
+                    }.callback;
+                    scan_impl.read(context, on_read_callback);
+                },
             }
-        }
-
-        // Comptime generates an specialized callback function for each type.
-        // TODO(Zig): remove this function and move this logic to `read`,
-        // but for some reason, the Zig compiler can't resolve the correct type.
-        fn read_dispatch(
-            comptime tag: std.meta.Tag(Dispatcher),
-            scan_impl: *std.meta.fieldInfo(Dispatcher, tag).type,
-            context: *Context,
-        ) void {
-            const Impl = @TypeOf(scan_impl.*);
-            const on_read_callback = struct {
-                fn callback(ctx: *Context, ptr: *Impl) void {
-                    ctx.callback(ctx, parent(tag, ptr));
-                }
-            }.callback;
-
-            scan_impl.read(context, on_read_callback);
         }
 
         pub fn next(scan: *Scan) error{ReadAgain}!?u64 {
