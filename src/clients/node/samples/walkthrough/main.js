@@ -13,6 +13,7 @@ const {
   CreateAccountError,
   AccountFilterFlags,
   QueryFilterFlags,
+  CreateAndReturnTransfersResultFlags,
   amount_max,
 } = require("tigerbeetle-node");
 
@@ -50,7 +51,7 @@ async function main() {
     const account_errors = await client.createAccounts([account]);
     // Error handling omitted.
     // endsection:create-accounts
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:account-flags
@@ -88,7 +89,7 @@ async function main() {
     const account_errors = await client.createAccounts([account0, account1]);
     // Error handling omitted.
     // endsection:account-flags
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:create-accounts-errors
@@ -153,15 +154,15 @@ async function main() {
       }
     }
     // endsection:create-accounts-errors
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:lookup-accounts
     const accounts = await client.lookupAccounts([100n, 101n]);
     // endsection:lookup-accounts
-   } catch (exception) {}
+  } catch (exception) { }
 
-   try {
+  try {
     // section:create-transfers
     const transfers = [{
       id: id(), // TigerBeetle time-based ID.
@@ -182,7 +183,7 @@ async function main() {
     const transfer_errors = await client.createTransfers(transfers);
     // Error handling omitted.
     // endsection:create-transfers
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:create-transfers-errors
@@ -247,7 +248,7 @@ async function main() {
       }
     }
     // endsection:create-transfers-errors
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:no-batch
@@ -257,7 +258,7 @@ async function main() {
       // Error handling omitted.
     }
     // endsection:no-batch
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:batch
@@ -270,7 +271,7 @@ async function main() {
       // Error handling omitted.
     }
     // endsection:batch
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:transfer-flags-link
@@ -309,7 +310,7 @@ async function main() {
     const transfer_errors = await client.createTransfers([transfer0, transfer1]);
     // Error handling omitted.
     // endsection:transfer-flags-link
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:transfer-flags-post
@@ -352,7 +353,7 @@ async function main() {
     transfer_errors = await client.createTransfers([transfer1]);
     // Error handling omitted.
     // endsection:transfer-flags-post
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:transfer-flags-void
@@ -394,13 +395,69 @@ async function main() {
     transfer_errors = await client.createTransfers([transfer1]);
     // Error handling omitted.
     // endsection:transfer-flags-void
-  } catch (exception) {}
+  } catch (exception) { }
+
+  try {
+    // section:create-and-return-transfers
+    const transfers = [{
+      id: 10n,
+      debit_account_id: 102n,
+      credit_account_id: 103n,
+      amount: 99n,
+      pending_id: 0n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      timeout: 0,
+      ledger: 1,
+      code: 720,
+      flags: TransferFlags.pending,
+      timestamp: 0n,
+    },
+    {
+      id: 11n,
+      debit_account_id: 102n,
+      credit_account_id: 103n,
+      amount: amount_max, // The actual amount depends on the pending transfer.
+      pending_id: 10n,
+      user_data_128: 0n,
+      user_data_64: 0n,
+      user_data_32: 0,
+      timeout: 0,
+      ledger: 1,
+      code: 720,
+      flags: TransferFlags.post_pending_transfer,
+      timestamp: 0n,
+    }];
+
+    const transfers_outcome = await client.createAndReturnTransfers(batch);
+    for (const outcome of transfers_outcome) {
+      console.log(`Transfer result: ${outcome.result}.`);
+
+      if (outcome.flags & CreateAndReturnTransfersResultFlags.transfer_set != 0) {
+        console.log(`Transfer timestamp: ${outcome.timestamp} amount: ${outcome.amount}.`);
+      }
+
+      if (outcome.flags & CreateAndReturnTransfersResultFlags.account_balances_set != 0) {
+        console.log(`Debit account debits pending: ${outcome.debit_account_debits_pending}.`);
+        console.log(`Debit account debits posted: ${outcome.debit_account_debits_posted}.`);
+        console.log(`Debit account credits pending: ${outcome.debit_account_credits_pending}.`);
+        console.log(`Debit account credits posted: ${outcome.debit_account_credits_posted}.`);
+
+        console.log(`Credit account debits pending: ${outcome.credit_account_debits_pending}.`);
+        console.log(`Credit account debits posted: ${outcome.credit_account_debits_posted}.`);
+        console.log(`Credit account credits pending: ${outcome.credit_account_credits_pending}.`);
+        console.log(`Credit account credits posted: ${outcome.credit_account_credits_posted}.`);
+      }
+    }
+    // endsection:create-and-return-transfers
+  } catch (exception) { }
 
   try {
     // section:lookup-transfers
     const transfers = await client.lookupTransfers([1n, 2n]);
     // endsection:lookup-transfers
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:get-account-transfers
@@ -420,7 +477,7 @@ async function main() {
 
     const account_transfers = await client.getAccountTransfers(filter);
     // endsection:get-account-transfers
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:get-account-balances
@@ -440,7 +497,7 @@ async function main() {
 
     const account_balances = await client.getAccountBalances(filter);
     // endsection:get-account-balances
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:query-accounts
@@ -458,7 +515,7 @@ async function main() {
 
     const query_accounts = await client.queryAccounts(query_filter);
     // endsection:query-accounts
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
     // section:query-transfers
@@ -476,94 +533,94 @@ async function main() {
 
     const query_transfers = await client.queryTransfers(query_filter);
     // endsection:query-transfers
-  } catch (exception) {}
+  } catch (exception) { }
 
   try {
-      // section:linked-events
-      const batch = []; // Array of transfer to create.
-      let linkedFlag = 0;
-      linkedFlag |= TransferFlags.linked;
+    // section:linked-events
+    const batch = []; // Array of transfer to create.
+    let linkedFlag = 0;
+    linkedFlag |= TransferFlags.linked;
 
-      // An individual transfer (successful):
-      batch.push({ id: 1n /* , ... */ });
+    // An individual transfer (successful):
+    batch.push({ id: 1n /* , ... */ });
 
-      // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
-      batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
-      batch.push({ id: 3n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
-      batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Fail with exists
-      batch.push({ id: 4n, /* ..., */ flags: 0 }); // Fail without committing.
+    // A chain of 4 transfers (the last transfer in the chain closes the chain with linked=false):
+    batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
+    batch.push({ id: 3n, /* ..., */ flags: linkedFlag }); // Commit/rollback.
+    batch.push({ id: 2n, /* ..., */ flags: linkedFlag }); // Fail with exists
+    batch.push({ id: 4n, /* ..., */ flags: 0 }); // Fail without committing.
 
-      // An individual transfer (successful):
-      // This should not see any effect from the failed chain above.
-      batch.push({ id: 2n, /* ..., */ flags: 0 });
+    // An individual transfer (successful):
+    // This should not see any effect from the failed chain above.
+    batch.push({ id: 2n, /* ..., */ flags: 0 });
 
-      // A chain of 2 transfers (the first transfer fails the chain):
-      batch.push({ id: 2n, /* ..., */ flags: linkedFlag });
-      batch.push({ id: 3n, /* ..., */ flags: 0 });
+    // A chain of 2 transfers (the first transfer fails the chain):
+    batch.push({ id: 2n, /* ..., */ flags: linkedFlag });
+    batch.push({ id: 3n, /* ..., */ flags: 0 });
 
-      // A chain of 2 transfers (successful):
-      batch.push({ id: 3n, /* ..., */ flags: linkedFlag });
-      batch.push({ id: 4n, /* ..., */ flags: 0 });
+    // A chain of 2 transfers (successful):
+    batch.push({ id: 3n, /* ..., */ flags: linkedFlag });
+    batch.push({ id: 4n, /* ..., */ flags: 0 });
 
-      const transfer_errors = await client.createTransfers(batch);
-      // Error handling omitted.
-      // endsection:linked-events
-    } catch (exception) {}
+    const transfer_errors = await client.createTransfers(batch);
+    // Error handling omitted.
+    // endsection:linked-events
+  } catch (exception) { }
 
-    try {
-      // section:imported-events
-      // External source of time.
-      let historical_timestamp = 0n
-      // Events loaded from an external source.
-      const historical_accounts = []; // Loaded from an external source.
-      const historical_transfers = []; // Loaded from an external source.
+  try {
+    // section:imported-events
+    // External source of time.
+    let historical_timestamp = 0n
+    // Events loaded from an external source.
+    const historical_accounts = []; // Loaded from an external source.
+    const historical_transfers = []; // Loaded from an external source.
 
-      // First, load and import all accounts with their timestamps from the historical source.
-      const accounts = [];
-      for (let index = 0; i < historical_accounts.length; i++) {
-        let account = historical_accounts[i];
-        // Set a unique and strictly increasing timestamp.
-        historical_timestamp += 1;
-        account.timestamp = historical_timestamp;
-        // Set the account as `imported`.
-        account.flags = AccountFlags.imported;
-        // To ensure atomicity, the entire batch (except the last event in the chain)
-        // must be `linked`.
-        if (index < historical_accounts.length - 1) {
-          account.flags |= AccountFlags.linked;
-        }
-
-        accounts.push(account);
+    // First, load and import all accounts with their timestamps from the historical source.
+    const accounts = [];
+    for (let index = 0; i < historical_accounts.length; i++) {
+      let account = historical_accounts[i];
+      // Set a unique and strictly increasing timestamp.
+      historical_timestamp += 1;
+      account.timestamp = historical_timestamp;
+      // Set the account as `imported`.
+      account.flags = AccountFlags.imported;
+      // To ensure atomicity, the entire batch (except the last event in the chain)
+      // must be `linked`.
+      if (index < historical_accounts.length - 1) {
+        account.flags |= AccountFlags.linked;
       }
 
-      const account_errors = await client.createAccounts(accounts);
-      // Error handling omitted.
+      accounts.push(account);
+    }
 
-      // Then, load and import all transfers with their timestamps from the historical source.
-      const transfers = [];
-      for (let index = 0; i < historical_transfers.length; i++) {
-        let transfer = historical_transfers[i];
-        // Set a unique and strictly increasing timestamp.
-        historical_timestamp += 1;
-        transfer.timestamp = historical_timestamp;
-        // Set the account as `imported`.
-        transfer.flags = TransferFlags.imported;
-        // To ensure atomicity, the entire batch (except the last event in the chain)
-        // must be `linked`.
-        if (index < historical_transfers.length - 1) {
-          transfer.flags |= TransferFlags.linked;
-        }
+    const account_errors = await client.createAccounts(accounts);
+    // Error handling omitted.
 
-        transfers.push(transfer);
+    // Then, load and import all transfers with their timestamps from the historical source.
+    const transfers = [];
+    for (let index = 0; i < historical_transfers.length; i++) {
+      let transfer = historical_transfers[i];
+      // Set a unique and strictly increasing timestamp.
+      historical_timestamp += 1;
+      transfer.timestamp = historical_timestamp;
+      // Set the account as `imported`.
+      transfer.flags = TransferFlags.imported;
+      // To ensure atomicity, the entire batch (except the last event in the chain)
+      // must be `linked`.
+      if (index < historical_transfers.length - 1) {
+        transfer.flags |= TransferFlags.linked;
       }
 
-      const transfer_errors = await client.createTransfers(transfers);
-      // Error handling omitted.
+      transfers.push(transfer);
+    }
 
-      // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
-      // with the same historical timestamps without regressing the cluster timestamp.
-      // endsection:imported-events
-    } catch (exception) {}
+    const transfer_errors = await client.createTransfers(transfers);
+    // Error handling omitted.
+
+    // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
+    // with the same historical timestamps without regressing the cluster timestamp.
+    // endsection:imported-events
+  } catch (exception) { }
 }
 
 main()

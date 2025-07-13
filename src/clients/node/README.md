@@ -575,6 +575,67 @@ transfer_errors = await client.createTransfers([transfer1]);
 // Error handling omitted.
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```javascript
+const transfers = [{
+  id: 10n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: 99n,
+  pending_id: 0n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: TransferFlags.pending,
+  timestamp: 0n,
+},
+{
+  id: 11n,
+  debit_account_id: 102n,
+  credit_account_id: 103n,
+  amount: amount_max, // The actual amount depends on the pending transfer.
+  pending_id: 10n,
+  user_data_128: 0n,
+  user_data_64: 0n,
+  user_data_32: 0,
+  timeout: 0,
+  ledger: 1,
+  code: 720,
+  flags: TransferFlags.post_pending_transfer,
+  timestamp: 0n,
+}];
+
+const transfers_outcome = await client.createAndReturnTransfers(batch);
+for (const outcome of transfers_outcome) {
+  console.log(`Transfer result: ${outcome.result}.`);
+
+  if (outcome.flags & CreateAndReturnTransfersResultFlags.transfer_set != 0) {
+    console.log(`Transfer timestamp: ${outcome.timestamp} amount: ${outcome.amount}.`);
+  }
+
+  if (outcome.flags & CreateAndReturnTransfersResultFlags.account_balances_set != 0) {
+    console.log(`Debit account debits pending: ${outcome.debit_account_debits_pending}.`);
+    console.log(`Debit account debits posted: ${outcome.debit_account_debits_posted}.`);
+    console.log(`Debit account credits pending: ${outcome.debit_account_credits_pending}.`);
+    console.log(`Debit account credits posted: ${outcome.debit_account_credits_posted}.`);
+
+    console.log(`Credit account debits pending: ${outcome.credit_account_debits_pending}.`);
+    console.log(`Credit account debits posted: ${outcome.credit_account_debits_posted}.`);
+    console.log(`Credit account credits pending: ${outcome.credit_account_credits_pending}.`);
+    console.log(`Credit account credits posted: ${outcome.credit_account_credits_posted}.`);
+  }
+}
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We

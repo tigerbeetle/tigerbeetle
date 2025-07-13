@@ -495,6 +495,63 @@ transferErrors = client.CreateTransfers(new[] { transfer1 });
 // Error handling omitted.
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```cs
+var transfers = new[] {
+    new Transfer
+    {
+        Id = 10,
+        DebitAccountId = 102,
+        CreditAccountId = 103,
+        Amount = 99,
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.Pending,
+    },
+    new Transfer
+    {
+        Id = 11,
+        DebitAccountId = 102,
+        CreditAccountId = 103,
+        PendingId = 10,
+        Amount = Transfer.AmountMax, // The actual amount depends on the pending transfer.
+        Ledger = 1,
+        Code = 1,
+        Flags = TransferFlags.PostPendingTransfer,
+    },
+};
+
+var transfersOutcome = client.CreateAndReturnTransfers(transfers);
+foreach (var outcome in transfersOutcome)
+{
+    Console.WriteLine($"Transfer result: {outcome.Result}.");
+
+    if (outcome.Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet))
+    {
+        Console.WriteLine($"Transfer timestamp: {outcome.Timestamp} amount: {outcome.Amount}.");
+    }
+
+    if (outcome.Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet))
+    {
+        Console.WriteLine($"Debit account debits pending: {outcome.DebitAccountDebitsPending}.");
+        Console.WriteLine($"Debit account debits posted: {outcome.DebitAccountDebitsPosted}.");
+        Console.WriteLine($"Debit account credits pending: {outcome.DebitAccountCreditsPending}.");
+        Console.WriteLine($"Debit account credits posted: {outcome.DebitAccountCreditsPosted}.");
+
+        Console.WriteLine($"Credit account debits pending: {outcome.CreditAccountDebitsPending}.");
+        Console.WriteLine($"Credit account debits posted: {outcome.CreditAccountDebitsPosted}.");
+        Console.WriteLine($"Credit account credits pending: {outcome.CreditAccountCreditsPending}.");
+        Console.WriteLine($"Credit account credits posted: {outcome.CreditAccountCreditsPosted}.");
+    }
+}
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We
