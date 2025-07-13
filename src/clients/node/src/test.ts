@@ -13,6 +13,7 @@ import {
   id,
   QueryFilter,
   QueryFilterFlags,
+  CreateAndReturnTransfersResultFlags,
 } from '.'
 
 const client = createClient({
@@ -110,7 +111,7 @@ test('error if timestamp is not set to 0n on account', async (): Promise<void> =
 test('batch max size', async (): Promise<void> => {
   const BATCH_SIZE = 10_000;
   var transfers: Transfer[] = [];
-  for (var i=0; i<BATCH_SIZE;i++) {
+  for (var i = 0; i < BATCH_SIZE; i++) {
     transfers.push({
       id: 0n,
       debit_account_id: 0n,
@@ -522,6 +523,287 @@ test('can close accounts', async (): Promise<void> => {
   assert.ok((accounts[1].flags & AccountFlags.closed) == 0)
 })
 
+test('can create and return a transfer', async (): Promise<void> => {
+  const dr_account: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: 0,
+    timestamp: 0n
+  }
+  const cr_account: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: 0,
+    timestamp: 0n
+  }
+  const error = await client.createAccounts([dr_account, cr_account]);
+  assert.deepStrictEqual(error, [])
+
+  const transfer: Transfer = {
+    id: id(),
+    debit_account_id: dr_account.id,
+    credit_account_id: cr_account.id,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: 0n,
+  }
+
+  const outcome = await client.createAndReturnTransfers([transfer])
+  assert.strictEqual(outcome.length, 1)
+  assert.strictEqual(outcome[0].result, CreateTransferError.ok)
+  assert.strictEqual(outcome[0].flags,
+    CreateAndReturnTransfersResultFlags.transfer_set | CreateAndReturnTransfersResultFlags.account_balances_set)
+
+  const transfers = await client.lookupTransfers([transfer.id])
+  assert.strictEqual(transfers.length, 1)
+
+  assert.strictEqual(outcome[0].timestamp, transfers[0].timestamp)
+  assert.strictEqual(outcome[0].amount, transfers[0].amount)
+
+  const accounts = await client.lookupAccounts([dr_account.id, cr_account.id])
+  assert.strictEqual(accounts.length, 2)
+
+  assert.strictEqual(outcome[0].debit_account_debits_pending, accounts[0].debits_pending)
+  assert.strictEqual(outcome[0].debit_account_debits_posted, accounts[0].debits_posted)
+  assert.strictEqual(outcome[0].debit_account_credits_pending, accounts[0].credits_pending)
+  assert.strictEqual(outcome[0].debit_account_credits_posted, accounts[0].credits_posted)
+
+  assert.strictEqual(outcome[0].credit_account_debits_pending, accounts[1].debits_pending)
+  assert.strictEqual(outcome[0].credit_account_debits_posted, accounts[1].debits_posted)
+  assert.strictEqual(outcome[0].credit_account_credits_pending, accounts[1].credits_pending)
+  assert.strictEqual(outcome[0].credit_account_credits_posted, accounts[1].credits_posted)
+})
+
+test('can create and return a transfer exists', async (): Promise<void> => {
+  const dr_account: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: 0,
+    timestamp: 0n
+  }
+  const cr_account: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: 0,
+    timestamp: 0n
+  }
+  const error = await client.createAccounts([dr_account, cr_account]);
+  assert.deepStrictEqual(error, [])
+
+  const transfer: Transfer = {
+    id: id(),
+    debit_account_id: dr_account.id,
+    credit_account_id: cr_account.id,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: 0n,
+  }
+
+  const outcome = await client.createAndReturnTransfers([transfer])
+  assert.strictEqual(outcome.length, 1)
+  assert.strictEqual(outcome[0].result, CreateTransferError.ok)
+  assert.strictEqual(outcome[0].flags, CreateAndReturnTransfersResultFlags.transfer_set | CreateAndReturnTransfersResultFlags.account_balances_set)
+
+  const outcome_exists = await client.createAndReturnTransfers([transfer])
+  assert.strictEqual(outcome_exists.length, 1)
+  assert.strictEqual(outcome_exists[0].result, CreateTransferError.exists)
+  assert.strictEqual(outcome_exists[0].flags, CreateAndReturnTransfersResultFlags.transfer_set)
+
+  assert.strictEqual(outcome_exists[0].timestamp, outcome[0].timestamp)
+  assert.strictEqual(outcome_exists[0].amount, outcome[0].amount)
+
+  assert.strictEqual(outcome_exists[0].debit_account_debits_pending, 0n)
+  assert.strictEqual(outcome_exists[0].debit_account_debits_posted, 0n)
+  assert.strictEqual(outcome_exists[0].debit_account_credits_pending, 0n)
+  assert.strictEqual(outcome_exists[0].debit_account_credits_posted, 0n)
+
+  assert.strictEqual(outcome_exists[0].credit_account_debits_pending, 0n)
+  assert.strictEqual(outcome_exists[0].credit_account_debits_posted, 0n)
+  assert.strictEqual(outcome_exists[0].credit_account_credits_pending, 0n)
+  assert.strictEqual(outcome_exists[0].credit_account_credits_posted, 0n)
+})
+
+test('can create and return a transfer exceeds', async (): Promise<void> => {
+  const account_a: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: AccountFlags.debits_must_not_exceed_credits,
+    timestamp: 0n
+  }
+  const account_b: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: AccountFlags.credits_must_not_exceed_debits,
+    timestamp: 0n
+  }
+  const account_c: Account = {
+    id: id(),
+    debits_pending: 0n,
+    debits_posted: 0n,
+    credits_pending: 0n,
+    credits_posted: 0n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    reserved: 0,
+    ledger: 1,
+    code: 719,
+    flags: AccountFlags.none,
+    timestamp: 0n
+  }
+  const error = await client.createAccounts([account_a, account_b, account_c]);
+  assert.deepStrictEqual(error, [])
+
+  const transfers: Transfer[] = [{
+    id: id(),
+    debit_account_id: account_c.id,
+    credit_account_id: account_a.id,
+    amount: 100n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: 0n,
+  },
+  {
+    id: id(),
+    debit_account_id: account_a.id,
+    credit_account_id: account_c.id,
+    amount: 150n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: 0n,
+  },
+  {
+    id: id(),
+    debit_account_id: account_c.id,
+    credit_account_id: account_b.id,
+    amount: 150n,
+    user_data_128: 0n,
+    user_data_64: 0n,
+    user_data_32: 0,
+    pending_id: 0n,
+    timeout: 0,
+    ledger: 1,
+    code: 1,
+    flags: 0,
+    timestamp: 0n,
+  }]
+
+  const outcome = await client.createAndReturnTransfers(transfers)
+  assert.strictEqual(outcome.length, 3)
+  assert.strictEqual(outcome[0].result, CreateTransferError.ok)
+  assert.strictEqual(outcome[0].flags, CreateAndReturnTransfersResultFlags.transfer_set | CreateAndReturnTransfersResultFlags.account_balances_set)
+
+  assert.strictEqual(outcome[1].result, CreateTransferError.exceeds_credits)
+  assert.strictEqual(outcome[1].flags, CreateAndReturnTransfersResultFlags.account_balances_set)
+  assert.strictEqual(outcome[1].timestamp, 0n)
+  assert.strictEqual(outcome[1].amount, 0n)
+
+  assert.strictEqual(outcome[1].debit_account_debits_pending, 0n)
+  assert.strictEqual(outcome[1].debit_account_debits_posted, 0n)
+  assert.strictEqual(outcome[1].debit_account_credits_pending, 0n)
+  assert.strictEqual(outcome[1].debit_account_credits_posted, 100n)
+
+  assert.strictEqual(outcome[1].credit_account_debits_pending, 0n)
+  assert.strictEqual(outcome[1].credit_account_debits_posted, 100n)
+  assert.strictEqual(outcome[1].credit_account_credits_pending, 0n)
+  assert.strictEqual(outcome[1].credit_account_credits_posted, 0n)
+
+  assert.strictEqual(outcome[2].result, CreateTransferError.exceeds_debits)
+  assert.strictEqual(outcome[2].flags, CreateAndReturnTransfersResultFlags.account_balances_set)
+  assert.strictEqual(outcome[2].timestamp, 0n)
+  assert.strictEqual(outcome[2].amount, 0n)
+
+  assert.strictEqual(outcome[2].debit_account_debits_pending, 0n)
+  assert.strictEqual(outcome[2].debit_account_debits_posted, 100n)
+  assert.strictEqual(outcome[2].debit_account_credits_pending, 0n)
+  assert.strictEqual(outcome[2].debit_account_credits_posted, 0n)
+
+  assert.strictEqual(outcome[2].credit_account_debits_pending, 0n)
+  assert.strictEqual(outcome[2].credit_account_debits_posted, 0n)
+  assert.strictEqual(outcome[2].credit_account_credits_pending, 0n)
+  assert.strictEqual(outcome[2].credit_account_credits_posted, 0n)
+})
+
 test('can get account transfers', async (): Promise<void> => {
   const accountC: Account = {
     id: 21n,
@@ -541,9 +823,9 @@ test('can get account transfers', async (): Promise<void> => {
   const account_errors = await client.createAccounts([accountC])
   assert.deepStrictEqual(account_errors, [])
 
-  var transfers_created : Transfer[] = [];
+  var transfers_created: Transfer[] = [];
   // Create transfers where the new account is either the debit or credit account:
-  for (var i=0; i<10;i++) {
+  for (var i = 0; i < 10; i++) {
     transfers_created.push({
       id: BigInt(i + 10000),
       debit_account_id: i % 2 == 0 ? accountC.id : accountA.id,
@@ -601,7 +883,7 @@ test('can get account transfers', async (): Promise<void> => {
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: BATCH_MAX,
-    flags: AccountFilterFlags.debits |  AccountFilterFlags.reversed,
+    flags: AccountFilterFlags.debits | AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
   account_balances = await client.getAccountBalances(filter)
@@ -629,7 +911,7 @@ test('can get account transfers', async (): Promise<void> => {
     timestamp_min: 0n,
     timestamp_max: 0n,
     limit: BATCH_MAX,
-    flags: AccountFilterFlags.credits |  AccountFilterFlags.reversed,
+    flags: AccountFilterFlags.credits | AccountFilterFlags.reversed,
   }
   transfers = await client.getAccountTransfers(filter)
   account_balances = await client.getAccountBalances(filter)
@@ -902,9 +1184,9 @@ test('can get account transfers', async (): Promise<void> => {
 
 test('can query accounts', async (): Promise<void> => {
   {
-    var accounts : Account[] = [];
+    var accounts: Account[] = [];
     // Create transfers:
-    for (var i=0; i<10;i++) {
+    for (var i = 0; i < 10; i++) {
       accounts.push({
         id: id(),
         debits_pending: 0n,
@@ -1097,9 +1379,9 @@ test('can query transfers', async (): Promise<void> => {
     const create_accounts_result = await client.createAccounts([account])
     assert.deepStrictEqual(create_accounts_result, [])
 
-    var transfers_created : Transfer[] = [];
+    var transfers_created: Transfer[] = [];
     // Create transfers:
-    for (var i=0; i<10;i++) {
+    for (var i = 0; i < 10; i++) {
       transfers_created.push({
         id: id(),
         debit_account_id: i % 2 == 0 ? account.id : accountA.id,
@@ -1471,7 +1753,7 @@ test("destroy client in-flight", async (): Promise<void> => {
   throw "expected an error";
 });
 
-async function main () {
+async function main() {
   const start = new Date().getTime()
   try {
     for (let i = 0; i < tests.length; i++) {
@@ -1483,7 +1765,7 @@ async function main () {
       })
     }
     const end = new Date().getTime()
-    console.log('Time taken (s):', (end - start)/1000)
+    console.log('Time taken (s):', (end - start) / 1000)
   } finally {
     await client.destroy()
   }

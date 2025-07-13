@@ -8,6 +8,7 @@ import {
   AccountFilter,
   AccountBalance,
   QueryFilter,
+  CreateAndReturnTransfersResult,
 } from './bindings'
 import { randomFillSync } from 'node:crypto'
 
@@ -22,14 +23,14 @@ const binding: Binding = (() => {
   const platformMap = {
     "linux": "linux",
     "darwin": "macos",
-    "win32" : "windows",
+    "win32": "windows",
   }
 
-  if (! (arch in archMap)) {
+  if (!(arch in archMap)) {
     throw new Error(`Unsupported arch: ${arch}`)
   }
 
-  if (! (platform in platformMap)) {
+  if (!(platform in platformMap)) {
     throw new Error(`Unsupported platform: ${platform}`)
   }
 
@@ -70,7 +71,7 @@ export type Context = object // tb_client
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
 export type Event = Account | Transfer | AccountID | TransferID | AccountFilter | QueryFilter
-export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer | AccountBalance
+export type Result = CreateAccountsError | CreateTransfersError | CreateAndReturnTransfersResult | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 export const amount_max: bigint = (2n ** 128n) - 1n
@@ -94,6 +95,7 @@ export interface ClientInitArgs {
 export interface Client {
   createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
   createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
+  createAndReturnTransfers: (batch: Transfer[]) => Promise<CreateAndReturnTransfersResult[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>
@@ -103,7 +105,7 @@ export interface Client {
   destroy: () => void
 }
 
-export function createClient (args: ClientInitArgs): Client {
+export function createClient(args: ClientInitArgs): Client {
   // Context becomes null when `destroy` is called. After that point, further `request` Promises
   // throw a shutdown Error. This prevents tb_client calls from happening after tb_client_deinit().
   let context: Context | null = binding.init({
@@ -138,6 +140,7 @@ export function createClient (args: ClientInitArgs): Client {
   return {
     createAccounts(batch) { return request(Operation.create_accounts, batch) },
     createTransfers(batch) { return request(Operation.create_transfers, batch) },
+    createAndReturnTransfers(batch) { return request(Operation.create_and_return_transfers, batch) },
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },

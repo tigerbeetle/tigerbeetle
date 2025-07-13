@@ -62,6 +62,15 @@ const type_mappings = .{
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransfersError",
     } },
+    .{ tb.CreateAndReturnTransfersResult, TypeMapping{
+        .name = "CreateAndReturnTransfersResult",
+        .docs_link = "reference/requests/create_and_return_transfers#",
+    } },
+    .{ tb.CreateAndReturnTransfersResultFlags, TypeMapping{
+        .name = "CreateAndReturnTransfersResultFlags",
+        .hidden_fields = &.{"padding"},
+        .docs_link = "reference/requests/create_and_return_transfers#flags",
+    } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",
         .hidden_fields = &.{"reserved"},
