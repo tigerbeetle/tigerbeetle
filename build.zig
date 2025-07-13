@@ -653,17 +653,20 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
 }) *std.Build.Step.Compile {
-    const tigerbeetle = b.addExecutable(.{
-        .name = "tigerbeetle",
+    const root_module = b.createModule(.{
         .root_source_file = b.path("src/tigerbeetle/main.zig"),
         .target = options.target,
         .optimize = options.mode,
     });
-    tigerbeetle.root_module.addImport("vsr", options.vsr_module);
-    tigerbeetle.root_module.addOptions("vsr_options", options.vsr_options);
-    tigerbeetle.root_module.strip = options.mode == .ReleaseSafe;
-    // Ensure that we get stack traces even in release builds.
-    tigerbeetle.root_module.omit_frame_pointer = false;
+    root_module.addImport("vsr", options.vsr_module);
+    root_module.addOptions("vsr_options", options.vsr_options);
+    if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+    const tigerbeetle = b.addExecutable(.{
+        .name = "tigerbeetle",
+        .root_module = root_module,
+    });
+
     return tigerbeetle;
 }
 
@@ -1236,19 +1239,23 @@ fn build_go_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addStaticLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
+            .stack_protector = false,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const lib = b.addStaticLibrary(.{
+            .name = "tb_client",
+            .root_module = root_module,
         });
         lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
-        lib.root_module.stack_protector = false;
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
@@ -1287,22 +1294,24 @@ fn build_java_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_jniclient",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/java/src/client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const lib = b.addSharedLibrary(.{
+            .name = "tb_jniclient",
+            .root_module = root_module,
+        });
+        lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
         }
-
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
@@ -1342,22 +1351,21 @@ fn build_dotnet_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const lib = b.addSharedLibrary(.{ .name = "tb_client", .root_module = root_module });
+        lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
         }
-
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         step_clients_dotnet.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
@@ -1432,14 +1440,19 @@ fn build_node_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_nodeclient",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/node/node.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const lib = b.addSharedLibrary(.{
+            .name = "tb_nodeclient",
+            .root_module = root_module,
+        });
         lib.linkLibC();
 
         lib.step.dependOn(&npm_install.step);
@@ -1455,10 +1468,7 @@ fn build_node_client(
             lib.linkSystemLibrary("node");
         }
 
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
-
         step_clients_node.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/node/dist/bin",
             strip_glibc_version(platform[0]),
@@ -1496,21 +1506,21 @@ fn build_python_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
-        const shared_lib = b.addSharedLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        shared_lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const shared_lib = b.addSharedLibrary(.{ .name = "tb_client", .root_module = root_module });
+        shared_lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             shared_lib.linkSystemLibrary("ws2_32");
             shared_lib.linkSystemLibrary("advapi32");
         }
-
-        shared_lib.root_module.addImport("vsr", options.vsr_module);
-        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         step_clients_python.dependOn(&b.addInstallFile(
             shared_lib.getEmittedBin(),
@@ -1544,32 +1554,33 @@ fn build_c_client(
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
 
+        const root_module = b.createModule(.{
+            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
         const shared_lib = b.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
-        });
-        const static_lib = b.addStaticLibrary(.{
-            .name = "tb_client",
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
+            .root_module = root_module,
         });
 
+        const static_lib = b.addStaticLibrary(.{
+            .name = "tb_client",
+            .root_module = root_module,
+        });
         static_lib.bundle_compiler_rt = true;
         static_lib.pie = true;
 
         for ([_]*std.Build.Step.Compile{ shared_lib, static_lib }) |lib| {
             lib.linkLibC();
-
             if (resolved_target.result.os.tag == .windows) {
                 lib.linkSystemLibrary("ws2_32");
                 lib.linkSystemLibrary("advapi32");
             }
-
-            lib.root_module.addImport("vsr", options.vsr_module);
-            lib.root_module.addOptions("vsr_options", options.vsr_options);
 
             step_clients_c.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
                 "../src/clients/c/lib/",
@@ -1648,6 +1659,13 @@ fn build_git_review(
     steps.install.dependOn(
         &b.addInstallArtifact(git_review, .{}).step,
     );
+}
+
+fn strip_root_module(root_module: *std.Build.Module) void {
+    root_module.strip = true;
+    // Ensure that we get stack traces even in release builds.
+    root_module.omit_frame_pointer = false;
+    root_module.unwind_tables = .none;
 }
 
 /// Set the JVM DLL directory on Windows.
