@@ -4,6 +4,8 @@ TigerBeetle supports the following request types:
 
 - [`create_accounts`](./create_accounts.md): create [`Account`s](../account.md)
 - [`create_transfers`](./create_transfers.md): create [`Transfer`s](../transfer.md)
+- [`create_and_return_transfers`](./create_and_return_transfers.md): create
+  [`Transfer`s](../transfer.md) returning the outcome of the operation.
 - [`lookup_accounts`](./lookup_accounts.md): fetch `Account`s by `id`
 - [`lookup_transfers`](./lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](./get_account_transfers.md): fetch `Transfer`s by `debit_account_id` or
