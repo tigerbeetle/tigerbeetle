@@ -246,6 +246,7 @@ queryable
 quickstart
 Rafiki
 Rappa
+rbino
 reactively
 READMEs
 realised

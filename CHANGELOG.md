@@ -3,6 +3,34 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.50
+
+Released: 2025-07-13
+
+### Internals
+
+- [#3076](https://github.com/tigerbeetle/tigerbeetle/pull/3076)
+
+  Cleanup Zig TODO items that have been resolved with the recent upgrade to Zig 0.14.1.
+
+- [#3071](https://github.com/tigerbeetle/tigerbeetle/pull/3071)
+
+  Always copy fields from `vsr_options` to `build_options`, since Zig 0.14.1 removed anonymous
+  structs. Thanks @rbino!
+
+- [#3075](https://github.com/tigerbeetle/tigerbeetle/pull/3075),
+  [#3074](https://github.com/tigerbeetle/tigerbeetle/pull/3074)
+
+  Use realtime to enforce budget and refresh timeouts in the CFO.
+
+- [#3072](https://github.com/tigerbeetle/tigerbeetle/pull/3072)
+
+  Remove `unwind_tables` from release builds and strip client libraries to reduce binary size.
+
+### TigerTracks 🎧
+
+- [Washday Blues](https://www.youtube.com/watch?v=a77xKtyVKMw)
+
 ## TigerBeetle 0.16.49
 
 Released: 2025-07-04
