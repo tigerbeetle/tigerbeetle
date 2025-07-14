@@ -1,4 +1,7 @@
 #![allow(unused)]
+// This code reads better if all protocol byte conversions are transmutes -
+// rustc would prefer us to use safe conversions for the u128s.
+#![allow(unnecessary_transmutes)]
 
 use anyhow::Result as AnyResult;
 use anyhow::{bail, Context};
