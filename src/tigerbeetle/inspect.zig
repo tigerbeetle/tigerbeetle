@@ -1336,7 +1336,7 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .{ .block_type = .client_sessions, .Schema = schema.TrailerNode },
         .{ .block_type = .manifest, .Schema = schema.ManifestNode },
         .{ .block_type = .index, .Schema = schema.TableIndex },
-        .{ .block_type = .data, .Schema = schema.TableData },
+        .{ .block_type = .value, .Schema = schema.TableValue },
     }) |pair| {
         if (header.block_type == pair.block_type) {
             try print_struct(writer, "header.metadata", pair.Schema.metadata(block));
@@ -1372,26 +1372,26 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .index => {
             const index = schema.TableIndex.from(block);
             for (
-                index.data_addresses_used(block),
-                index.data_checksums_used(block),
+                index.value_addresses_used(block),
+                index.value_checksums_used(block),
                 0..,
-            ) |data_address, data_checksum, i| {
+            ) |value_address, value_checksum, i| {
                 try writer.print(
-                    "data_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
-                    .{ i, data_address, data_checksum.value },
+                    "value_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
+                    .{ i, value_address, value_checksum.value },
                 );
             }
         },
-        .data => {
-            const data = schema.TableData.from(block);
-            const metadata = data.block_metadata(block);
-            const data_bytes = data.block_values_used_bytes(block);
+        .value => {
+            const value_block = schema.TableValue.from(block);
+            const metadata = value_block.block_metadata(block);
+            const value_bytes = value_block.block_values_used_bytes(block);
 
             var label_buffer: [256]u8 = undefined;
             inline for (StateMachine.Forest.tree_infos) |tree_info| {
                 if (metadata.tree_id == tree_info.tree_id) {
                     for (
-                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes),
+                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, value_bytes),
                         0..,
                     ) |*value, i| {
                         var label_stream = std.io.fixedBufferStream(&label_buffer);

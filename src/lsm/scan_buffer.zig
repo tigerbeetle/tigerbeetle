@@ -16,24 +16,24 @@ pub const Error = error{
 pub const ScanBuffer = struct {
     pub const LevelBuffer = struct {
         index_block: BlockPtr,
-        data_block: BlockPtr,
+        value_block: BlockPtr,
 
         pub fn init(self: *LevelBuffer, allocator: Allocator) !void {
             self.* = .{
                 .index_block = undefined,
-                .data_block = undefined,
+                .value_block = undefined,
             };
 
             self.index_block = try allocate_block(allocator);
             errdefer allocator.free(self.index_block);
 
-            self.data_block = try allocate_block(allocator);
-            errdefer allocator.free(self.data_block);
+            self.value_block = try allocate_block(allocator);
+            errdefer allocator.free(self.value_block);
         }
 
         pub fn deinit(self: *LevelBuffer, allocator: Allocator) void {
             allocator.free(self.index_block);
-            allocator.free(self.data_block);
+            allocator.free(self.value_block);
         }
     };
 

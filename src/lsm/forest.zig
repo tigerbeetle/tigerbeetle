@@ -785,7 +785,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     blocks +=
                         stdx.div_ceil(constants.lsm_levels, 2) *
                         (compaction_input_tables_max *
-                            (1 + tree_info.Tree.Table.layout.data_block_count_max));
+                            (1 + tree_info.Tree.Table.layout.value_block_count_max));
                 }
                 break :blocks blocks;
             };
@@ -954,7 +954,7 @@ fn CompactionScheduleType(comptime Forest: type, comptime Grid: type) type {
 
                             beat_index_blocks_max += stdx.div_ceil(
                                 beat_value_blocks_max,
-                                Table.data_block_count_max,
+                                Table.value_block_count_max,
                             );
 
                             beat_input_size -|= (compaction.quotas.beat * @sizeOf(Value));
