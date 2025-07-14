@@ -142,6 +142,7 @@ fn read_file_cached(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 // These links don't work with https.
 const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
+    .{"http://pmg.csail.mit.edu/papers/vr-revisited.pdf"},
 });
 
 // These links cause TLS errors with std.http.Client.
