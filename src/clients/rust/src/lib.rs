@@ -793,7 +793,7 @@ impl core::fmt::Display for ClientStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Invalid => f.write_str("invalid"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
