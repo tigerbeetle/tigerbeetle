@@ -559,7 +559,7 @@ const transfer1 = {
   id: 9n,
   debit_account_id: 102n,
   credit_account_id: 103n,
-  amount: 10n,
+  amount: 0n,
   pending_id: 8n,
   user_data_128: 0n,
   user_data_64: 0n,
