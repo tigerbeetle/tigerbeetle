@@ -105,7 +105,7 @@ TigerBeetle is as important as what's inside:
   gateway.
 - The gateway provides an HTTP API for potentially untrusted clients.
 - The gateway aggregates individual transfers from separate applications into large batches.
-- Gateways are stateless and horizontally scalable. All states are managed by TigerBeetle.
+- Gateways are stateless and horizontally scalable. All state is managed by TigerBeetle.
 - End-to-end idempotency keys guarantee that each transfer is processed at most once, even if, due
   to retry and load-balancing logic, it gets routed through several gateways.
 - TigerBeetle records high-volume business transactions under debit-credit schema, but transactions
