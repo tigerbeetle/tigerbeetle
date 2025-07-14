@@ -15,7 +15,7 @@ support. But for ease of development we also support macOS and Windows.
 * Go >= 1.21
 
 **Additionally on Windows**: you must install [Zig
-0.13.0](https://ziglang.org/download/#release-0.13.0) and set the
+0.14.1](https://ziglang.org/download/#release-0.14.1) and set the
 `CC` environment variable to `zig.exe cc`. Use the full path for
 `zig.exe`.
 
@@ -475,8 +475,7 @@ transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
 // Error handling omitted.
 
 transfer1 := Transfer{
-	ID: ToUint128(9),
-	// Post the entire pending amount.
+	ID:        ToUint128(9),
 	Amount:    ToUint128(0),
 	PendingID: ToUint128(8),
 	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),

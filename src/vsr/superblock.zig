@@ -87,7 +87,7 @@ pub const SuperBlockHeader = extern struct {
     /// The number of headers in vsr_headers_all.
     vsr_headers_count: u32,
 
-    reserved: [1940]u8 = [_]u8{0} ** 1940,
+    reserved: [1940]u8 = @splat(0),
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
     /// Unoccupied headers (after vsr_headers_count) are zeroed.
@@ -95,8 +95,7 @@ pub const SuperBlockHeader = extern struct {
     /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
     /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
     vsr_headers_all: [constants.view_change_headers_max]vsr.Header.Prepare,
-    vsr_headers_reserved: [vsr_headers_reserved_size]u8 =
-        [_]u8{0} ** vsr_headers_reserved_size,
+    vsr_headers_reserved: [vsr_headers_reserved_size]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
@@ -146,7 +145,7 @@ pub const SuperBlockHeader = extern struct {
         /// Number of replicas (determines sizes of the quorums), part of VSR configuration.
         replica_count: u8,
 
-        reserved: [779]u8 = [_]u8{0} ** 779,
+        reserved: [779]u8 = @splat(0),
 
         comptime {
             assert(@sizeOf(VSRState) == 2048);
@@ -160,6 +159,7 @@ pub const SuperBlockHeader = extern struct {
             members: vsr.Members,
             replica_count: u8,
             release: vsr.Release,
+            view: u32,
         }) VSRState {
             return .{
                 .checkpoint = .{
@@ -195,7 +195,7 @@ pub const SuperBlockHeader = extern struct {
                 .sync_op_min = 0,
                 .sync_op_max = 0,
                 .log_view = 0,
-                .view = 0,
+                .view = options.view,
             };
         }
 
@@ -257,11 +257,11 @@ pub const SuperBlockHeader = extern struct {
 
                 assert((state.checkpoint.manifest_block_count == 1) ==
                     (state.checkpoint.manifest_oldest_address ==
-                    state.checkpoint.manifest_newest_address));
+                        state.checkpoint.manifest_newest_address));
 
                 assert((state.checkpoint.manifest_block_count == 1) ==
                     (state.checkpoint.manifest_oldest_checksum ==
-                    state.checkpoint.manifest_newest_checksum));
+                        state.checkpoint.manifest_newest_checksum));
             }
         }
 
@@ -379,7 +379,7 @@ pub const SuperBlockHeader = extern struct {
         /// `lsm_compaction_ops` before a checkpoint trigger may be replayed by a different release.
         release: vsr.Release,
 
-        reserved: [472]u8 = [_]u8{0} ** 472,
+        reserved: [472]u8 = @splat(0),
 
         comptime {
             assert(@sizeOf(CheckpointStateOld) % @sizeOf(u128) == 0);
@@ -461,7 +461,7 @@ pub const SuperBlockHeader = extern struct {
         /// `lsm_compaction_ops` before a checkpoint trigger may be replayed by a different release.
         release: vsr.Release,
 
-        reserved: [408]u8 = [_]u8{0} ** 408,
+        reserved: [408]u8 = @splat(0),
 
         comptime {
             assert(@sizeOf(CheckpointState) % @sizeOf(u128) == 0);
@@ -830,6 +830,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
             release: vsr.Release,
             replica: u8,
             replica_count: u8,
+            /// Set to null during initial cluster formatting.
+            /// Set to the target view when constructing a new data file for a reformatted replica.
+            view: ?u32,
         };
 
         pub fn format(
@@ -845,6 +848,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(options.replica_count > 0);
             assert(options.replica_count <= constants.replicas_max);
             assert(options.replica < options.replica_count + constants.standbys_max);
+            if (options.view) |view| {
+                assert(view > 1);
+                assert(options.replica < options.replica_count);
+            }
 
             const members = vsr.root_members(options.cluster);
             const replica_id = members[options.replica];
@@ -915,6 +922,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica_id = replica_id,
                     .members = members,
                     .replica_count = options.replica_count,
+                    .view = options.view orelse 0,
                 }),
                 .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
@@ -981,7 +989,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert(update.storage_size >= data_file_size_min);
             assert((update.storage_size == data_file_size_min) ==
                 (update.free_set_references.blocks_acquired.empty() and
-                update.free_set_references.blocks_released.empty()));
+                    update.free_set_references.blocks_released.empty()));
 
             // NOTE: Within the vsr_state.checkpoint assignment below, do not read from vsr_state
             // directly. A miscompilation bug (as of Zig 0.11.0) causes fields to receive the
@@ -1364,7 +1372,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.checkpoint.header.op == 0);
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
-                    assert(working.vsr_state.view == 0);
+                    maybe(working.vsr_state.view == 0); // On reformat view≠0.
                     assert(working.vsr_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);

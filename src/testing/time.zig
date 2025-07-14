@@ -79,7 +79,7 @@ pub const Time = struct {
             .non_ideal => {
                 const phase: f64 = @as(f64, @floatFromInt(ticks)) * 2 * std.math.pi /
                     (@as(f64, @floatFromInt(self.offset_coefficient_B)) +
-                    std.Random.init(&self.prng, stdx.PRNG.fill).floatNorm(f64) * 10);
+                        std.Random.init(&self.prng, stdx.PRNG.fill).floatNorm(f64) * 10);
                 const unscaled = std.math.sin(phase);
                 const scaled = @as(f64, @floatFromInt(self.offset_coefficient_A)) * unscaled;
                 const offset_random: i64 = -@as(i64, @intCast(self.offset_coefficient_C)) +

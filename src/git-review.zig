@@ -189,7 +189,8 @@ fn review_new(shell: *Shell) !void {
     const summary =
         \\# Review Summary
         \\
-        \\ Use this for review cover letter, if needed, or to leave review-wide comments.
+        \\Use this for review cover letter, if needed, or to leave review-wide comments.
+        \\
     ;
     try shell.cwd.writeFile(.{ .sub_path = "REVIEW.md", .data = summary });
 

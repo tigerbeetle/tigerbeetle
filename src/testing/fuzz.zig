@@ -1,18 +1,23 @@
 //! Utils functions for writing fuzzers.
 
+const builtin = @import("builtin");
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
 const PRNG = stdx.PRNG;
 const ratio = stdx.PRNG.ratio;
 
+const GiB = 1024 * 1024 * 1024;
+
+const log = std.log.scoped(.fuzz);
+
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
 pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
-        assert(info == .Int);
-        assert(info.Int.signedness == .unsigned);
+        assert(info == .int);
+        assert(info.int.signedness == .unsigned);
     }
     // Note: we use floats and rely on std implementation. Ideally, we should do neither, but I
     // wasn't able to find a quick way to generate geometrically distributed integers using only
@@ -91,7 +96,7 @@ pub fn parse_seed(bytes: []const u8) u64 {
 // Like `std.meta.DeclEnum`, but allows excluding specific things. Feed the result into
 // random_enum_weights for swarm testing public API of a data structure.
 pub fn DeclEnumExcludingType(T: type, exclude: []const std.meta.DeclEnum(T)) type {
-    const base = @typeInfo(std.meta.DeclEnum(T)).Enum;
+    const base = @typeInfo(std.meta.DeclEnum(T)).@"enum";
     assert(exclude.len > 0); // Use plain std.meta.DeclEnum.
     assert(exclude.len < base.fields.len);
     var fields_filtered: [base.fields.len - exclude.len]std.builtin.Type.EnumField = undefined;
@@ -105,7 +110,7 @@ pub fn DeclEnumExcludingType(T: type, exclude: []const std.meta.DeclEnum(T)) typ
     }
     assert(i == fields_filtered.len);
 
-    return @Type(.{ .Enum = .{
+    return @Type(.{ .@"enum" = .{
         .tag_type = base.tag_type,
         .fields = &fields_filtered,
         .decls = &.{},
@@ -215,5 +220,16 @@ pub fn ReadyQueueType(T: type) type {
 
             return result;
         }
+    };
+}
+
+pub fn limit_ram() void {
+    if (builtin.target.os.tag != .linux) return;
+
+    std.posix.setrlimit(.AS, .{
+        .cur = 20 * GiB,
+        .max = 20 * GiB,
+    }) catch |err| {
+        log.warn("failed to setrlimit address space: {}", .{err});
     };
 }

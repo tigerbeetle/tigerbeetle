@@ -1,5 +1,5 @@
 .{
-    .name = "TigerBeetle Docs",
+    .name = .tigerbeetle_docs,
     .version = "0.0.0",
     .dependencies = .{
         .pandoc_macos_arm64 = .{
@@ -24,4 +24,5 @@
         },
     },
     .paths = .{"."},
+    .fingerprint = 0x3efa1a0dbea6a5e9,
 }

@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
@@ -146,7 +146,7 @@ const Environment = struct {
 
         env.scan_lookup_buffer = try gpa.alloc(
             tb.Account,
-            StateMachine.constants.batch_max.create_accounts,
+            StateMachine.machine_constants.batch_max.create_accounts,
         );
 
         env.forest = undefined;
@@ -173,6 +173,7 @@ const Environment = struct {
             .release = vsr.Release.minimum,
             .replica = replica,
             .replica_count = replica_count,
+            .view = null,
         });
         try env.tick_until_state_change(.superblock_format, .superblock_open);
 
@@ -383,7 +384,7 @@ const Environment = struct {
             fn prefetch_start(getter: *@This()) void {
                 const groove = getter._groove_accounts;
                 groove.prefetch_setup(null);
-                groove.prefetch_exists_enqueue(getter._timestamp);
+                groove.prefetch_enqueue_by_timestamp(getter._timestamp);
                 groove.prefetch(@This().prefetch_callback, &getter.prefetch_context);
             }
 
@@ -1035,8 +1036,8 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
         // Checkpoint at the normal rate.
         // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         options.op == vsr.Checkpoint.trigger_for_checkpoint(
-        vsr.Checkpoint.checkpoint_after(options.persisted_op),
-    );
+            vsr.Checkpoint.checkpoint_after(options.persisted_op),
+        );
 
     // Checkpoint is considered durable when a replica is committing/compacting the (pipeline + 1)ᵗʰ
     // prepare after checkpoint trigger. See `op_repair_min` in `replica.zig` for more context.
@@ -1122,7 +1123,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .write_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
-        .crash_fault_probability = ratio(0, 100),
+        .crash_fault_probability = Ratio.zero(),
     }, fuzz_ops);
 
     log.info("Passed!", .{});

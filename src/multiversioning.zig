@@ -43,7 +43,7 @@ fn open_memory_file(name: [*:0]const u8) posix.fd_t {
     return @intCast(os.linux.memfd_create(name, mfd_cloexec));
 }
 
-// TODO(zig): Zig 0.11 doesn't have execveat.
+// TODO(zig): std doesn't have execveat.
 // Once that's available, this can be removed.
 fn execveat(
     dirfd: i32,
@@ -868,10 +868,11 @@ pub const Multiversion = struct {
 
         if (self.timeout_statx_previous == .previous and
             stdx.equal_bytes(
-            os.linux.Statx,
-            &self.timeout_statx_previous.previous,
-            &self.timeout_statx,
-        )) {
+                os.linux.Statx,
+                &self.timeout_statx_previous.previous,
+                &self.timeout_statx,
+            ))
+        {
             self.stage = .init;
         } else {
             if (self.timeout_statx_previous != .none) {
@@ -1548,12 +1549,11 @@ pub fn parse_elf(buffer: []align(@alignOf(elf.Elf64_Ehdr)) const u8) !HeaderBody
         .body_offset = body_offset.?,
         .body_size = body_size.?,
     };
-    const arch = elf_header.machine.toTargetCpuArch() orelse
-        return error.UnknownArchitecture;
-    return switch (arch) {
-        .aarch64 => .{ .format = .elf, .aarch64 = offsets, .x86_64 = null },
-        .x86_64 => .{ .format = .elf, .aarch64 = null, .x86_64 = offsets },
-        else => return error.UnknownArchitecture,
+
+    return switch (elf_header.machine) {
+        .AARCH64 => .{ .format = .elf, .aarch64 = offsets, .x86_64 = null },
+        .X86_64 => .{ .format = .elf, .aarch64 = null, .x86_64 = offsets },
+        else => error.UnknownArchitecture,
     };
 }
 
@@ -1660,12 +1660,10 @@ pub fn parse_pe(buffer: []const u8) !HeaderBodyOffsets {
         .body_size = body_size,
     };
 
-    const arch = coff.getCoffHeader().machine.toTargetCpuArch() orelse
-        return error.UnknownArchitecture;
-    return switch (arch) {
-        .aarch64 => .{ .format = .pe, .aarch64 = offsets, .x86_64 = null },
-        .x86_64 => .{ .format = .pe, .aarch64 = null, .x86_64 = offsets },
-        else => return error.UnknownArchitecture,
+    return switch (coff.getCoffHeader().machine) {
+        .ARM64 => .{ .format = .pe, .aarch64 = offsets, .x86_64 = null },
+        .X64 => .{ .format = .pe, .aarch64 = null, .x86_64 = offsets },
+        else => error.UnknownArchitecture,
     };
 }
 
@@ -1806,7 +1804,7 @@ test parse_elf {
 
 pub fn print_information(
     allocator: std.mem.Allocator,
-    exe_path: [:0]const u8,
+    exe_path: []const u8,
     output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);

@@ -17,16 +17,17 @@ const log = stdx.log.scoped(.client);
 pub fn ClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time: type,
+    comptime Time_: type,
 ) type {
     return struct {
         const Client = @This();
 
+        pub const Time = Time_;
         pub const StateMachine = StateMachine_;
         pub const Request = struct {
             pub const Callback = *const fn (
                 user_data: u128,
-                operation: StateMachine.Operation,
+                operation: vsr.Operation,
                 timestamp: u64,
                 results: []u8,
             ) void;
@@ -105,8 +106,7 @@ pub fn ClientType(
         ping_timeout: vsr.Timeout,
 
         /// The round-trip time (estimated by the latest ping/pong pair) from each replica.
-        replica_round_trip_times_ns: [constants.replicas_max]?u64 =
-            .{null} ** constants.replicas_max,
+        replica_round_trip_times_ns: [constants.replicas_max]?u64 = @splat(null),
 
         /// Used to calculate exponential backoff with random jitter.
         /// Seeded with the client's ID.
@@ -150,7 +150,6 @@ pub fn ClientType(
 
             var message_bus = try MessageBus.init(
                 allocator,
-                options.cluster,
                 .{ .client = options.id },
                 options.message_pool,
                 Client.on_messages,
@@ -274,6 +273,7 @@ pub fn ClientType(
                 .command = .request,
                 .operation = .register,
                 .release = self.release,
+                .previous_request_latency = 0,
             };
 
             std.mem.bytesAsValue(
@@ -331,6 +331,7 @@ pub fn ClientType(
                 .release = self.release,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
+                .previous_request_latency = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);
@@ -361,7 +362,8 @@ pub fn ClientType(
             assert(message.header.request == 0);
 
             if (!constants.aof_recovery) {
-                assert(!message.header.operation.vsr_reserved());
+                assert(message.header.operation == .noop or
+                    !message.header.operation.vsr_reserved());
             }
 
             // TODO: Re-investigate this state for AOF as it currently traps.
@@ -574,9 +576,10 @@ pub fn ClientType(
                 std.time.ns_per_ms,
             );
             if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
-                log.warn("{}: on_reply: slow request, request={} size={} {s} time={}ms", .{
+                log.warn("{}: on_reply: slow request, request={} op={} size={} {s} time={}ms", .{
                     self.id,
                     inflight.message.header.request,
+                    reply.header.op,
                     inflight.message.header.size,
                     inflight.message.header.operation.tag_name(StateMachine),
                     request_completion_time_ms,
@@ -623,7 +626,7 @@ pub fn ClientType(
                 // NOTE: the callback is allowed to mutate `reply.body_used()` here.
                 inflight.callback.request(
                     inflight.user_data,
-                    inflight_vsr_operation.cast(StateMachine),
+                    inflight_vsr_operation,
                     reply.header.timestamp,
                     reply.body_used(),
                 );
@@ -641,7 +644,6 @@ pub fn ClientType(
                 .ping_timestamp_monotonic = self.time.monotonic(),
             };
 
-            // TODO If we haven't received a pong from a replica since our last ping, then back off.
             self.send_header_to_replicas(ping.frame_const());
         }
 

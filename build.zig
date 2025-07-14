@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const builtin = @import("builtin");
-const CrossTarget = std.zig.CrossTarget;
+const Query = std.Target.Query;
 const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
@@ -35,7 +35,7 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
         std.log.err("unsupported target: '{s}'", .{target});
         return error.UnsupportedTarget;
     };
-    const query = try CrossTarget.parse(.{
+    const query = try Query.parse(.{
         .arch_os_abi = arch_os,
         .cpu_features = cpu,
     });
@@ -44,15 +44,15 @@ fn resolve_target(b: *std.Build, target_requested: ?[]const u8) !std.Build.Resol
 
 const zig_version = std.SemanticVersion{
     .major = 0,
-    .minor = 13,
-    .patch = 0,
+    .minor = 14,
+    .patch = 1,
 };
 
 comptime {
     // Compare versions while allowing different pre/patch metadata.
     const zig_version_eq = zig_version.major == builtin.zig_version.major and
         zig_version.minor == builtin.zig_version.minor and
-        zig_version.patch == builtin.zig_version.patch;
+        (zig_version.patch == builtin.zig_version.patch);
     if (!zig_version_eq) {
         @compileError(std.fmt.comptimePrint(
             "unsupported zig version: expected {}, found {}",
@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) !void {
         .run = b.step("run", "Run TigerBeetle"),
         .ci = b.step("ci", "Run the full suite of CI checks"),
         .scripts = b.step("scripts", "Free form automation scripts"),
+        .scripts_build = b.step("scripts:build", "Build automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
@@ -260,7 +261,10 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build scripts -- ci --language=java
-    const scripts = build_scripts(b, build_steps.scripts, .{
+    const scripts = build_scripts(b, .{
+        .scripts = build_steps.scripts,
+        .scripts_build = build_steps.scripts_build,
+    }, .{
         .vsr_options = vsr_options,
         .target = target,
     });
@@ -411,19 +415,20 @@ fn build_ci(
 
         devhub, // Things that run on known-good commit on main branch after merge.
         @"devhub-dry-run",
+        amqp,
         default, // smoke + test + building Zig parts of clients.
         all,
     };
 
     const mode: CIMode = if (b.args) |args| mode: {
         if (args.len != 1) {
-            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            step_ci.dependOn(&b.addFail("invalid CIMode").step);
             return;
         }
         if (std.meta.stringToEnum(CIMode, args[0])) |m| {
             break :mode m;
         } else {
-            step_ci.dependOn(&FailStep.add(b, "invalid CIMode").step);
+            step_ci.dependOn(&b.addFail("invalid CIMode").step);
             return;
         }
     } else .default;
@@ -442,6 +447,7 @@ fn build_ci(
     }
     if (default or mode == .@"test") {
         build_ci_step(b, step_ci, .{"test"});
+        build_ci_step(b, step_ci, .{ "fuzz", "--", "smoke" });
         build_ci_step(b, step_ci, .{"clients:c:sample"});
         build_ci_script(b, step_ci, options.scripts, &.{"--help"});
     }
@@ -457,6 +463,14 @@ fn build_ci(
             });
         }
     }
+    if (default or mode == .amqp) {
+        // Smoke test the AMQP integration.
+        build_ci_script(b, step_ci, options.scripts, &.{
+            "amqp",
+            "--transfer-count=100",
+        });
+    }
+
     if (all or mode == .aof) {
         const aof = b.addSystemCommand(&.{"./.github/ci/test_aof.sh"});
         hide_stderr(aof);
@@ -526,9 +540,9 @@ fn hide_stderr(run: *std.Build.Step.Run) void {
     const override = struct {
         var global_map: std.AutoHashMapUnmanaged(usize, std.Build.Step.MakeFn) = .{};
 
-        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) anyerror!void {
+        fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
             const original = global_map.get(@intFromPtr(step)).?;
-            try original(step, prog_node);
+            try original(step, options);
             assert(step.result_error_msgs.items.len == 0);
             step.result_stderr = "";
         }
@@ -639,17 +653,20 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
     target: std.Build.ResolvedTarget,
     mode: std.builtin.OptimizeMode,
 }) *std.Build.Step.Compile {
-    const tigerbeetle = b.addExecutable(.{
-        .name = "tigerbeetle",
+    const root_module = b.createModule(.{
         .root_source_file = b.path("src/tigerbeetle/main.zig"),
         .target = options.target,
         .optimize = options.mode,
     });
-    tigerbeetle.root_module.addImport("vsr", options.vsr_module);
-    tigerbeetle.root_module.addOptions("vsr_options", options.vsr_options);
-    tigerbeetle.root_module.strip = options.mode == .ReleaseSafe;
-    // Ensure that we get stack traces even in release builds.
-    tigerbeetle.root_module.omit_frame_pointer = false;
+    root_module.addImport("vsr", options.vsr_module);
+    root_module.addOptions("vsr_options", options.vsr_options);
+    if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+    const tigerbeetle = b.addExecutable(.{
+        .name = "tigerbeetle",
+        .root_module = root_module,
+    });
+
     return tigerbeetle;
 }
 
@@ -736,8 +753,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-x86_64-linux.zip",
                         .file_name = "llvm-objcopy",
-                        .hash = "12203104f50e31efee26b1467d0d918bf4ac6cda7bee93d865d01e09" ++
-                            "13f33504b03a",
+                        .hash = "N-V-__8AAFCWcgAxBPUOMe_uJrFGfQ2Ri_SsbNp77pPYZdAe",
                     });
                 },
                 .aarch64 => {
@@ -745,8 +761,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                         .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                             "18.1.8/llvm-objcopy-aarch64-linux.zip",
                         .file_name = "llvm-objcopy",
-                        .hash = "122006fbe2af4f6cdbd7236b951b4d128de95b7688828a6999b4fe71" ++
-                            "50e4bb3142ee",
+                        .hash = "N-V-__8AAIgJcQAG--KvT2zb1yNrlRtNEo3pW3aIgoppmbT-",
                     });
                 },
                 else => @panic("unsupported arch"),
@@ -758,7 +773,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-x86_64-windows.zip",
                 .file_name = "llvm-objcopy.exe",
-                .hash = "122069747460977a1eb52110eb2abc8b992af57242ef724316d3071c7ec7f61e41bc",
+                .hash = "N-V-__8AAADuPABpdHRgl3oetSEQ6yq8i5kq9XJC73JDFtMH",
             });
         },
         .macos => {
@@ -768,7 +783,7 @@ fn build_tigerbeetle_executable_get_objcopy(b: *std.Build) std.Build.LazyPath {
                 .url = "https://github.com/tigerbeetle/dependencies/releases/download/" ++
                     "18.1.8/llvm-objcopy-aarch64-macos.zip",
                 .file_name = "llvm-objcopy",
-                .hash = "12202b751a54e74823261a9a014497b137a62a8d80f6b09a7b0515a3e34a617313fa",
+                .hash = "N-V-__8AAFAsVgArdRpU50gjJhqaAUSXsTemKo2A9rCaewUV",
             });
         },
         else => @panic("unsupported host"),
@@ -929,8 +944,7 @@ fn build_test_jni(
     },
 ) !void {
     const java_home = b.graph.env_map.get("JAVA_HOME") orelse {
-        step_test_jni.dependOn(&FailStep.add(
-            b,
+        step_test_jni.dependOn(&b.addFail(
             "can't build jni tests tests, JAVA_HOME is not set",
         ).step);
         return;
@@ -1019,6 +1033,7 @@ fn build_vopr(
         // When running without a SEED, default to release.
         .optimize = if (b.args == null) .ReleaseSafe else options.mode,
     });
+    vopr.stack_size = 4 * MiB;
     vopr.root_module.addOptions("vsr_options", options.vsr_options);
     vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
     // Ensure that we get stack traces even in release builds.
@@ -1049,6 +1064,7 @@ fn build_fuzz(
         .target = options.target,
         .optimize = options.mode,
     });
+    fuzz_exe.stack_size = 4 * MiB;
     fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
     fuzz_exe.root_module.omit_frame_pointer = false;
     steps.fuzz_build.dependOn(print_or_install(b, fuzz_exe, options.print_exe));
@@ -1060,25 +1076,32 @@ fn build_fuzz(
 
 fn build_scripts(
     b: *std.Build,
-    step_scripts: *std.Build.Step,
+    steps: struct {
+        scripts: *std.Build.Step,
+        scripts_build: *std.Build.Step,
+    },
     options: struct {
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
     },
 ) *std.Build.Step.Compile {
-    const scripts = b.addExecutable(.{
+    const scripts_exe = b.addExecutable(.{
         .name = "scripts",
         .root_source_file = b.path("src/scripts.zig"),
         .target = options.target,
         .optimize = .Debug,
     });
-    scripts.root_module.addOptions("vsr_options", options.vsr_options);
-    const scripts_run = b.addRunArtifact(scripts);
+    scripts_exe.root_module.addOptions("vsr_options", options.vsr_options);
+    steps.scripts_build.dependOn(
+        &b.addInstallArtifact(scripts_exe, .{}).step,
+    );
+
+    const scripts_run = b.addRunArtifact(scripts_exe);
     scripts_run.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args) |args| scripts_run.addArgs(args);
-    step_scripts.dependOn(&scripts_run.step);
+    steps.scripts.dependOn(&scripts_run.step);
 
-    return scripts;
+    return scripts_exe;
 }
 
 fn build_vortex(
@@ -1210,25 +1233,29 @@ fn build_go_client(
         else
             platform[0];
 
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = name,
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addStaticLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
+            .stack_protector = false,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const lib = b.addStaticLibrary(.{
+            .name = "tb_client",
+            .root_module = root_module,
         });
         lib.linkLibC();
         lib.pie = true;
         lib.bundle_compiler_rt = true;
-        lib.root_module.stack_protector = false;
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
@@ -1261,28 +1288,30 @@ fn build_java_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_jniclient",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/java/src/client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const lib = b.addSharedLibrary(.{
+            .name = "tb_jniclient",
+            .root_module = root_module,
+        });
+        lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
         }
-
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
@@ -1316,28 +1345,27 @@ fn build_dotnet_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const lib = b.addSharedLibrary(.{ .name = "tb_client", .root_module = root_module });
+        lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             lib.linkSystemLibrary("ws2_32");
             lib.linkSystemLibrary("advapi32");
         }
-
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
 
         step_clients_dotnet.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
@@ -1406,20 +1434,25 @@ fn build_node_client(
     run_dll_tool.cwd = b.path("./src/clients/node");
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
-        const lib = b.addSharedLibrary(.{
-            .name = "tb_nodeclient",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/clients/node/node.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        lib.root_module.addImport("vsr", options.vsr_module);
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
+
+        const lib = b.addSharedLibrary(.{
+            .name = "tb_nodeclient",
+            .root_module = root_module,
+        });
         lib.linkLibC();
 
         lib.step.dependOn(&npm_install.step);
@@ -1435,10 +1468,7 @@ fn build_node_client(
             lib.linkSystemLibrary("node");
         }
 
-        lib.root_module.addOptions("vsr_options", options.vsr_options);
-
         lib.step.dependOn(&bindings.step);
-
         step_clients_node.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
             "../src/clients/node/dist/bin",
             strip_glibc_version(platform[0]),
@@ -1470,27 +1500,27 @@ fn build_python_client(
     });
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
 
-        const shared_lib = b.addSharedLibrary(.{
-            .name = "tb_client",
+        const root_module = b.createModule(.{
             .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
             .target = resolved_target,
             .optimize = options.mode,
         });
-        shared_lib.linkLibC();
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
+        const shared_lib = b.addSharedLibrary(.{ .name = "tb_client", .root_module = root_module });
+        shared_lib.linkLibC();
         if (resolved_target.result.os.tag == .windows) {
             shared_lib.linkSystemLibrary("ws2_32");
             shared_lib.linkSystemLibrary("advapi32");
         }
-
-        shared_lib.root_module.addImport("vsr", options.vsr_module);
-        shared_lib.root_module.addOptions("vsr_options", options.vsr_options);
 
         step_clients_python.dependOn(&b.addInstallFile(
             shared_lib.getEmittedBin(),
@@ -1518,38 +1548,39 @@ fn build_c_client(
     step_clients_c.dependOn(&options.tb_client_header.step);
 
     inline for (platforms) |platform| {
-        const cross_target = CrossTarget.parse(.{
+        const query = Query.parse(.{
             .arch_os_abi = platform[0],
             .cpu_features = platform[2],
         }) catch unreachable;
-        const resolved_target = b.resolveTargetQuery(cross_target);
+        const resolved_target = b.resolveTargetQuery(query);
+
+        const root_module = b.createModule(.{
+            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
+            .target = resolved_target,
+            .optimize = options.mode,
+        });
+        root_module.addImport("vsr", options.vsr_module);
+        root_module.addOptions("vsr_options", options.vsr_options);
+        if (options.mode == .ReleaseSafe) strip_root_module(root_module);
 
         const shared_lib = b.addSharedLibrary(.{
             .name = "tb_client",
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
-        });
-        const static_lib = b.addStaticLibrary(.{
-            .name = "tb_client",
-            .root_source_file = b.path("src/tigerbeetle/libtb_client.zig"),
-            .target = resolved_target,
-            .optimize = options.mode,
+            .root_module = root_module,
         });
 
+        const static_lib = b.addStaticLibrary(.{
+            .name = "tb_client",
+            .root_module = root_module,
+        });
         static_lib.bundle_compiler_rt = true;
         static_lib.pie = true;
 
         for ([_]*std.Build.Step.Compile{ shared_lib, static_lib }) |lib| {
             lib.linkLibC();
-
             if (resolved_target.result.os.tag == .windows) {
                 lib.linkSystemLibrary("ws2_32");
                 lib.linkSystemLibrary("advapi32");
             }
-
-            lib.root_module.addImport("vsr", options.vsr_module);
-            lib.root_module.addOptions("vsr_options", options.vsr_options);
 
             step_clients_c.dependOn(&b.addInstallFile(lib.getEmittedBin(), b.pathJoin(&.{
                 "../src/clients/c/lib/",
@@ -1630,37 +1661,12 @@ fn build_git_review(
     );
 }
 
-/// Steps which unconditionally fails with a message.
-///
-/// This is useful for cases where at configuration time you can determine that a certain step
-/// can't succeeded (e.g., a system library is not preset on the host system), but you only want
-/// to fail the step once the user tries to run it. That is, you don't want to fail the whole build,
-/// as other steps might run fine.
-// TODO(Zig): switch to https://github.com/ziglang/zig/pull/20312 in 0.14
-const FailStep = struct {
-    step: std.Build.Step,
-    message: []const u8,
-
-    fn add(b: *std.Build, message: []const u8) *FailStep {
-        const result = b.allocator.create(FailStep) catch unreachable;
-        result.* = .{
-            .step = std.Build.Step.init(.{
-                .id = .custom,
-                .name = "failure",
-                .owner = b,
-                .makeFn = FailStep.make,
-            }),
-            .message = message,
-        };
-        return result;
-    }
-
-    fn make(step: *std.Build.Step, _: std.Progress.Node) anyerror!void {
-        const self: *FailStep = @fieldParentPtr("step", step);
-        std.log.err("{s}", .{self.message});
-        return error.FailStep;
-    }
-};
+fn strip_root_module(root_module: *std.Build.Module) void {
+    root_module.strip = true;
+    // Ensure that we get stack traces even in release builds.
+    root_module.omit_frame_pointer = false;
+    root_module.unwind_tables = .none;
+}
 
 /// Set the JVM DLL directory on Windows.
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
@@ -1694,8 +1700,7 @@ fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool
         step: std.Build.Step,
         compile: *std.Build.Step.Compile,
 
-        fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
-            _ = prog_node;
+        fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
             const print_step: *@This() = @fieldParentPtr("step", step);
             const path = print_step.compile.getEmittedBin().getPath2(step.owner, step);
             try std.io.getStdOut().writer().print("{s}\n", .{path});
@@ -1801,8 +1806,7 @@ const Generated = struct {
         return result;
     }
 
-    fn make(step: *std.Build.Step, prog_node: std.Progress.Node) !void {
-        _ = prog_node;
+    fn make(step: *std.Build.Step, _: std.Build.Step.MakeOptions) !void {
         const b = step.owner;
         const generated: *Generated = @fieldParentPtr("step", step);
         const ci = try std.process.hasEnvVar(b.allocator, "CI");
@@ -2019,8 +2023,7 @@ fn fetch(b: *std.Build, options: struct {
             \\        source_path,
             \\        std.fs.cwd(),
             \\        args[4],
-            \\        // TODO(Zig): https://github.com/ziglang/zig/pull/21555
-            \\        .{ .override_mode = if (builtin.target.os.tag == .macos) 0o777 else null },
+            \\        .{},
             \\    );
             \\}
         ),
@@ -2039,3 +2042,5 @@ fn fetch(b: *std.Build, options: struct {
     }
     return result;
 }
+
+const MiB = 1024 * 1024;

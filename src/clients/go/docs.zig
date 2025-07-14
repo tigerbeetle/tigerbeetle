@@ -23,7 +23,7 @@ pub const GoDocs = Docs{
     \\* Go >= 1.21
     \\
     \\**Additionally on Windows**: you must install [Zig
-    \\0.13.0](https://ziglang.org/download/#release-0.13.0) and set the
+    \\0.14.1](https://ziglang.org/download/#release-0.14.1) and set the
     \\`CC` environment variable to `zig.exe cc`. Use the full path for
     \\`zig.exe`.
     ,

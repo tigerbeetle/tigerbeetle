@@ -121,12 +121,11 @@ pub const IO = struct {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
-        var current_ts: posix.timespec = undefined;
-        posix.clock_gettime(posix.CLOCK.MONOTONIC, &current_ts) catch unreachable;
+        const current_ts = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
         const timeout_ts: os.linux.kernel_timespec = .{
-            .tv_sec = current_ts.tv_sec,
-            .tv_nsec = current_ts.tv_nsec + nanoseconds,
+            .sec = current_ts.sec,
+            .nsec = current_ts.nsec + nanoseconds,
         };
         var timeouts: usize = 0;
         var etime = false;
@@ -177,8 +176,8 @@ pub const IO = struct {
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
         while (self.completed.pop()) |completion| {
             if (completion.operation == .timeout and
-                completion.operation.timeout.timespec.tv_sec == 0 and
-                completion.operation.timeout.timespec.tv_nsec == 0)
+                completion.operation.timeout.timespec.sec == 0 and
+                completion.operation.timeout.timespec.nsec == 0)
             {
                 // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
                 maybe(self.awaiting.empty());
@@ -337,18 +336,7 @@ pub const IO = struct {
         self.cancel_completion = .{
             .io = self,
             .context = self,
-            .callback = struct {
-                fn wrapper(
-                    ctx: ?*anyopaque,
-                    comp: *Completion,
-                    res: *const anyopaque,
-                ) void {
-                    const io: *IO = @ptrCast(@alignCast(ctx.?));
-                    const result =
-                        @as(*const CancelError!void, @ptrCast(@alignCast(res))).*;
-                    io.cancel_callback(comp, result);
-                }
-            }.wrapper,
+            .callback = erase_types(*IO, CancelError!void, cancel_callback),
             .operation = .{ .cancel = .{ .target = target } },
         };
 
@@ -715,6 +703,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                .CANCELED => error.Canceled,
                                 else => |errno| stdx.unexpected_errno("send", errno),
                             };
                             break :blk err;
@@ -885,15 +874,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const AcceptError!socket_t, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, AcceptError!socket_t, callback),
             .operation = .{
                 .accept = .{
                     .socket = socket,
@@ -927,15 +908,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const CloseError!void, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, CloseError!void, callback),
             .operation = .{
                 .close = .{ .fd = fd },
             },
@@ -980,15 +953,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const ConnectError!void, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, ConnectError!void, callback),
             .operation = .{
                 .connect = .{
                     .socket = socket,
@@ -1019,15 +984,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const FsyncError!void, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, FsyncError!void, callback),
             .operation = .{
                 .fsync = .{
                     .fd = fd,
@@ -1061,15 +1018,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const OpenatError!fd_t, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, OpenatError!fd_t, callback),
             .operation = .{
                 .openat = .{
                     .dir_fd = dir_fd,
@@ -1111,15 +1060,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const ReadError!usize, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, ReadError!usize, callback),
             .operation = .{
                 .read = .{
                     .fd = fd,
@@ -1159,15 +1100,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const RecvError!usize, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, RecvError!usize, callback),
             .operation = .{
                 .recv = .{
                     .socket = socket,
@@ -1193,6 +1126,7 @@ pub const IO = struct {
         BrokenPipe,
         ConnectionTimedOut,
         ConnectionRefused,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn send(
@@ -1211,15 +1145,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const SendError!usize, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, SendError!usize, callback),
             .operation = .{
                 .send = .{
                     .socket = socket,
@@ -1266,15 +1192,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const StatxError!void, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, StatxError!void, callback),
             .operation = .{
                 .statx = .{
                     .dir_fd = dir_fd,
@@ -1305,18 +1223,10 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const TimeoutError!void, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, TimeoutError!void, callback),
             .operation = .{
                 .timeout = .{
-                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds },
+                    .timespec = .{ .sec = 0, .nsec = nanoseconds },
                 },
             },
         };
@@ -1362,15 +1272,7 @@ pub const IO = struct {
         completion.* = .{
             .io = self,
             .context = context,
-            .callback = struct {
-                fn wrapper(ctx: ?*anyopaque, comp: *Completion, res: *const anyopaque) void {
-                    callback(
-                        @ptrCast(@alignCast(ctx)),
-                        comp,
-                        @as(*const WriteError!usize, @ptrCast(@alignCast(res))).*,
-                    );
-                }
-            }.wrapper,
+            .callback = erase_types(Context, WriteError!usize, callback),
             .operation = .{
                 .write = .{
                     .fd = fd,
@@ -1720,7 +1622,7 @@ pub const IO = struct {
                         "of the file instead...", .{});
 
                     const sector_size = constants.sector_size;
-                    const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+                    const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                     // Handle partial writes where the physical sector is
                     // less than a logical sector:
@@ -1836,7 +1738,7 @@ pub const IO = struct {
     fn fs_supports_direct_io(dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
-        var cookie: [16]u8 = .{'0'} ** 16;
+        var cookie: [16]u8 = @splat('0');
         _ = stdx.array_print(16, &cookie, "{0x}", .{std.crypto.random.int(u64)});
 
         const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
@@ -1887,5 +1789,41 @@ pub const IO = struct {
                 else => |errno| return stdx.unexpected_errno("fs_allocate", errno),
             }
         }
+    }
+
+    pub const PReadError = posix.PReadError;
+
+    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
+        return common.aof_blocking_write_all(fd, buffer);
+    }
+
+    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(fd, buffer, offset);
+    }
+
+    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(fd);
+    }
+
+    fn erase_types(
+        comptime Context: type,
+        comptime Result: type,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: Result,
+        ) void,
+    ) *const fn (?*anyopaque, *Completion, *const anyopaque) void {
+        return &struct {
+            fn erased(
+                ctx_any: ?*anyopaque,
+                completion: *Completion,
+                result_any: *const anyopaque,
+            ) void {
+                const ctx: Context = @ptrCast(@alignCast(ctx_any));
+                const result: *const Result = @ptrCast(@alignCast(result_any));
+                callback(ctx, completion, result.*);
+            }
+        }.erased;
     }
 };

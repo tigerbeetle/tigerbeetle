@@ -47,7 +47,7 @@ h2 {
     align-items: center;
 }
 
-h2 a {
+h2 a, h2 #vpm {
     font-size: 14px;
     font-weight: normal;
 }

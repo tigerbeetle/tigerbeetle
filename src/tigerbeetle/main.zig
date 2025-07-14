@@ -19,7 +19,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const Tracer = vsr.trace.TracerType(Time);
 pub const Storage = vsr.storage.StorageType(IO, Tracer);
-const AOF = vsr.aof.AOF;
+const AOF = vsr.aof.AOFType(IO);
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
 const MessagePool = vsr.message_pool.MessagePool;
@@ -27,7 +27,10 @@ pub const StateMachine =
     vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 pub const Grid = vsr.GridType(Storage);
 
+const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient, Time);
 const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+const ReplicaReformat =
+    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage, Time);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
@@ -37,7 +40,7 @@ pub var log_level_runtime: std.log.Level = .info;
 
 pub fn log_runtime(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -82,7 +85,9 @@ pub fn main() !void {
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
+            .view = null,
         }),
+        .recover => |*args| try Command.reformat(allocator, args),
         .start => |*args| try Command.start(arena.allocator(), args),
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(arena.allocator(), args),
@@ -99,6 +104,7 @@ pub fn main() !void {
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
+        .amqp => |*args| try Command.amqp(allocator, args),
     }
 }
 
@@ -158,7 +164,7 @@ const SigIllHandler = struct {
 
                 var oact: std.posix.Sigaction = undefined;
 
-                try std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
+                std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
                 original_posix_sigill_handler = oact.handler.sigaction.?;
             },
             else => unreachable,
@@ -172,11 +178,12 @@ const Command = struct {
     io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
+    data_file_path: []const u8,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
-        path: [:0]const u8,
+        path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
@@ -215,6 +222,8 @@ const Command = struct {
 
         command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
         errdefer allocator.free(command.self_exe_path);
+
+        command.data_file_path = path;
     }
 
     fn deinit(command: *Command, allocator: mem.Allocator) void {
@@ -237,22 +246,83 @@ const Command = struct {
         });
         defer command.deinit(allocator);
 
-        var superblock = try SuperBlock.init(
-            allocator,
-            .{
-                .storage = &command.storage,
-                .storage_size_limit = data_file_size_min,
-            },
-        );
-        defer superblock.deinit(allocator);
-
-        try vsr.format(Storage, allocator, options, &command.storage, &superblock);
+        vsr.format(Storage, allocator, options, .{
+            .storage = &command.storage,
+            .storage_size_limit = data_file_size_min,
+        }) catch |err| {
+            std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
+            return err;
+        };
 
         log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,
             options.cluster,
             options.replica_count,
         });
+    }
+
+    pub fn reformat(allocator: mem.Allocator, args: *const cli.Command.Recover) !void {
+        var command: Command = undefined;
+        try command.init(allocator, args.path, .{
+            .must_create = true,
+            .development = args.development,
+        });
+        defer command.deinit(allocator);
+
+        var message_pool = try MessagePool.init(allocator, .client);
+        defer message_pool.deinit(allocator);
+
+        var client = try Client.init(allocator, .{
+            .id = stdx.unique_u128(),
+            .cluster = args.cluster,
+            .replica_count = args.replica_count,
+            .time = .{},
+            .message_pool = &message_pool,
+            .message_bus_options = .{
+                .configuration = args.addresses.const_slice(),
+                .io = &command.io,
+                .clients_limit = null,
+            },
+            .eviction_callback = &reformat_client_eviction_callback,
+        });
+        defer client.deinit(allocator);
+
+        var reformatter = try ReplicaReformat.init(allocator, &client, .{
+            .format = .{
+                .cluster = args.cluster,
+                .replica = args.replica,
+                .replica_count = args.replica_count,
+                .release = config.process.release,
+                .view = null,
+            },
+            .superblock = .{
+                .storage = &command.storage,
+                .storage_size_limit = data_file_size_min,
+            },
+        });
+        defer reformatter.deinit(allocator);
+
+        reformatter.start();
+        while (reformatter.done() == null) {
+            client.tick();
+            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
+        switch (reformatter.done().?) {
+            .failed => |err| {
+                log.err("{}: error: {s}", .{ args.replica, @errorName(err) });
+                std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
+                return err;
+            },
+            .ok => log.info("{}: success", .{args.replica}),
+        }
+    }
+
+    fn reformat_client_eviction_callback(
+        client: *Client,
+        eviction: *const MessagePool.Message.Eviction,
+    ) void {
+        _ = client;
+        std.debug.panic("error: client evicted: {s}", .{@tagName(eviction.header.reason)});
     }
 
     pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
@@ -275,16 +345,15 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: ?AOF = if (args.aof) blk: {
-            const aof_path = try std.fmt.allocPrint(
-                allocator,
-                "{s}.aof",
-                .{std.fs.path.basename(args.path)},
-            );
-            defer allocator.free(aof_path);
-            std.log.info("{s}", .{aof_path});
+        var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
+            const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
+            const aof_dir_fd = try IO.open_dir(aof_dir);
+            defer std.posix.close(aof_dir_fd);
 
-            break :blk try AOF.init(command.dir_fd, aof_path, &command.io);
+            break :blk try AOF.init(&command.io, .{
+                .dir_fd = aof_dir_fd,
+                .relative_path = std.fs.path.basename(aof_file.const_slice()),
+            });
         } else null;
         defer if (aof != null) aof.?.close();
 
@@ -387,6 +456,7 @@ const Command = struct {
             .time = &time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
+            .commit_stall_probability = args.commit_stall_probability,
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
                 .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
@@ -420,10 +490,15 @@ const Command = struct {
         if (multiversion != null) {
             if (args.development) {
                 log.info("multiversioning: upgrade polling disabled due to --development.", .{});
-            } else if (args.experimental) {
-                log.info("multiversioning: upgrade polling disabled due to --experimental.", .{});
             } else {
                 multiversion.?.timeout_start(replica.replica);
+            }
+
+            if (args.experimental) {
+                log.warn("multiversioning: upgrade polling and --experimental enabled - " ++
+                    "make sure to check CLI argument compatibility before upgrading.", .{});
+                log.warn("If the cluster upgrades automatically, and incompatible experimental " ++
+                    "CLI arguments are set, it will crash.", .{});
             }
         }
 
@@ -575,6 +650,34 @@ const Command = struct {
 
         try repl_instance.run(args.statements);
     }
+
+    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.AMQP) !void {
+        var runner: vsr.cdc.Runner = undefined;
+        try runner.init(
+            allocator,
+            .{
+                .cluster_id = args.cluster,
+                .addresses = args.addresses.const_slice(),
+                .host = args.host,
+                .user = args.user,
+                .password = args.password,
+                .vhost = args.vhost,
+                .publish_exchange = args.publish_exchange,
+                .publish_routing_key = args.publish_routing_key,
+                .event_count_max = args.event_count_max,
+                .idle_interval_ms = args.idle_interval_ms,
+                .recovery_mode = if (args.timestamp_last) |timestamp_last|
+                    .{ .override = timestamp_last }
+                else
+                    .recover,
+            },
+        );
+        defer runner.deinit();
+
+        while (true) {
+            runner.tick();
+        }
+    }
 };
 
 fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
@@ -650,8 +753,8 @@ fn print_value(
     }
 
     switch (@typeInfo(@TypeOf(value))) {
-        .Fn => {}, // Ignore the log() function.
-        .Pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+        .@"fn" => {}, // Ignore the log() function.
+        .pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
             field,
             std.fmt.fmtSliceEscapeLower(value),
         }),

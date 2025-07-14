@@ -5,8 +5,8 @@ const log = std.log.scoped(.validate);
 const assert = std.debug.assert;
 
 const file_size_max = 166 * 1024;
-const search_index_size_max = 950 * 1024;
-const single_page_size_max = 950 * 1024;
+const search_index_size_max = 970 * 1024;
+const single_page_size_max = 970 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
 const check_links_external: bool = false;
@@ -142,6 +142,7 @@ fn read_file_cached(arena: std.mem.Allocator, dir: std.fs.Dir, path: []const u8)
 // These links don't work with https.
 const http_exceptions = std.StaticStringMap(void).initComptime(.{
     .{"http://www.bailis.org/blog/linearizability-versus-serializability/"},
+    .{"http://pmg.csail.mit.edu/papers/vr-revisited.pdf"},
 });
 
 // These links cause TLS errors with std.http.Client.

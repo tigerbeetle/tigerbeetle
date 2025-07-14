@@ -24,6 +24,7 @@ const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
+const Ratio = stdx.PRNG.Ratio;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -36,7 +37,20 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
 
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
+        },
+    };
+
+    const Recover = struct {
+        cluster: u128,
+        addresses: []const u8,
+        replica: u8,
+        replica_count: u8,
+        development: bool = false,
+        log_debug: bool = false,
+
+        positional: struct {
+            path: []const u8,
         },
     };
 
@@ -46,7 +60,7 @@ const CLIArgs = union(enum) {
         cache_grid: ?flags.ByteSize = null,
         development: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
 
         // Everything below here is considered experimental, and requires `--experimental` to be
@@ -63,22 +77,27 @@ const CLIArgs = union(enum) {
         cache_transfers_pending: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
+        commit_stall_probability: ?Ratio = null,
 
         // Highly experimental options that will be removed in a future release:
         replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
-        statsd: ?[:0]const u8 = null,
+        statsd: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
         /// log consisting of logged requests. Much like a redis AOF with fsync=on.
         /// Enabling this will have performance implications.
+        aof_file: ?[]const u8 = null,
+
+        /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
+        /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
     };
 
@@ -127,7 +146,7 @@ const CLIArgs = union(enum) {
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
         statsd: ?[]const u8 = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -244,17 +263,35 @@ const CLIArgs = union(enum) {
     const Multiversion = struct {
         log_debug: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
+    // CDC connector for AMQP targets.
+    const AMQP = struct {
+        addresses: []const u8,
+        cluster: u128,
+        host: []const u8,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8 = null,
+        publish_routing_key: ?[]const u8 = null,
+        event_count_max: ?u32 = null,
+        idle_interval_ms: ?u32 = null,
+        timestamp_last: ?u64 = null,
+        verbose: bool = false,
+    };
+
     format: Format,
+    recover: Recover,
     start: Start,
     version: Version,
     repl: Repl,
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: AMQP,
 
     // TODO Document --cache-accounts, --cache-transfers, --cache-transfers-posted, --limit-storage,
     // --limit-pipeline-requests
@@ -266,6 +303,9 @@ const CLIArgs = union(enum) {
         \\  tigerbeetle format [--cluster=<integer>] --replica=<index> --replica-count=<integer> <path>
         \\
         \\  tigerbeetle start --addresses=<addresses> [--cache-grid=<size><KiB|MiB|GiB>] <path>
+        \\
+        \\  tigerbeetle recover --cluster=<integer> --addresses=<addresses>
+        \\                      --replica=<index> --replica-count=<integer> <path>
         \\
         \\  tigerbeetle version [--verbose]
         \\
@@ -279,9 +319,16 @@ const CLIArgs = union(enum) {
         \\
         \\  start      Run a TigerBeetle replica from the data file at <path>.
         \\
+        \\  recover    Create a TigerBeetle replica data file at <path> for recovery.
+        \\             Used when a replica's data file is completely lost.
+        \\             Replicas with recovered data files must sync with the cluster before
+        \\             they can participate in consensus.
+        \\
         \\  version    Print the TigerBeetle build version and the compile-time config values.
         \\
         \\  repl       Enter the TigerBeetle client REPL.
+        \\
+        \\  amqp       CDC connector for AMQP targets.
         \\
         \\Options:
         \\
@@ -319,7 +366,7 @@ const CLIArgs = union(enum) {
         \\        Print compile-time configuration along with the build version.
         \\
         \\  --development
-        \\        Allow the replica to format/start even when Direct IO is unavailable.
+        \\        Allow the replica to format/start/recover even when Direct IO is unavailable.
         \\        Additionally, use smaller cache sizes and batch size by default.
         \\
         \\        Since this shrinks the batch size, note that:
@@ -337,17 +384,24 @@ const CLIArgs = union(enum) {
         \\  tigerbeetle format --cluster=0 --replica=1 --replica-count=3 0_1.tigerbeetle
         \\  tigerbeetle format --cluster=0 --replica=2 --replica-count=3 0_2.tigerbeetle
         \\
-        \\  tigerbeetle start --addresses=127.0.0.1:3003,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
-        \\  tigerbeetle start --addresses=3003,3001,3002 0_1.tigerbeetle
-        \\  tigerbeetle start --addresses=3003,3001,3002 0_2.tigerbeetle
+        \\  tigerbeetle start --addresses=127.0.0.1:3000,127.0.0.1:3001,127.0.0.1:3002 0_0.tigerbeetle
+        \\  tigerbeetle start --addresses=3000,3001,3002 0_1.tigerbeetle
+        \\  tigerbeetle start --addresses=3000,3001,3002 0_2.tigerbeetle
         \\
         \\  tigerbeetle start --addresses=192.168.0.1,192.168.0.2,192.168.0.3 0_0.tigerbeetle
         \\
-        \\  tigerbeetle start --addresses='[::1]:3003,[::1]:3001,[::1]:3002'  0_0.tigerbeetle
+        \\  tigerbeetle start --addresses='[::1]:3000,[::1]:3001,[::1]:3002' 0_0.tigerbeetle
+        \\
+        \\  tigerbeetle recover --cluster=0 --addresses=3003,3001,3002 \
+        \\                      --replica=1 --replica-count=3 0_1.tigerbeetle
         \\
         \\  tigerbeetle version --verbose
         \\
-        \\  tigerbeetle repl --addresses=3003,3002,3001 --cluster=0
+        \\  tigerbeetle repl --addresses=3000,3001,3002 --cluster=0
+        \\
+        \\  tigerbeetle amqp --addresses=3000,3001,3002 --cluster=0 \
+        \\      --host=127.0.0.1 --vhost=/ --user=guest --password=guest \
+        \\      --publish-exchange=my_exhange_name
         \\
     , .{
         .default_address = constants.address,
@@ -401,13 +455,24 @@ const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constan
 ///  appropriate).
 pub const Command = union(enum) {
     const Addresses = stdx.BoundedArrayType(std.net.Address, constants.members_max);
+    const Path = stdx.BoundedArrayType(u8, std.fs.max_path_bytes);
 
     pub const Format = struct {
         cluster: u128,
         replica: u8,
         replica_count: u8,
         development: bool,
-        path: [:0]const u8,
+        path: []const u8,
+        log_debug: bool,
+    };
+
+    pub const Recover = struct {
+        cluster: u128,
+        addresses: Addresses,
+        replica: u8,
+        replica_count: u8,
+        development: bool,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -428,13 +493,14 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         timeout_prepare_ticks: ?u64,
         timeout_grid_repair_message_ticks: ?u64,
-        trace: ?[:0]const u8,
+        commit_stall_probability: ?Ratio,
+        trace: ?[]const u8,
         development: bool,
         experimental: bool,
         replicate_closed_loop: bool,
         replicate_star: bool,
-        aof: bool,
-        path: [:0]const u8,
+        aof_file: ?Path,
+        path: []const u8,
         log_debug: bool,
         statsd: ?std.net.Address,
     };
@@ -490,7 +556,7 @@ pub const Command = union(enum) {
         id_order: IdOrder,
         clients: u32,
         statsd: ?[]const u8,
-        trace: ?[:0]const u8,
+        trace: ?[]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -530,17 +596,34 @@ pub const Command = union(enum) {
     };
 
     pub const Multiversion = struct {
-        path: [:0]const u8,
+        path: []const u8,
+        log_debug: bool,
+    };
+
+    pub const AMQP = struct {
+        addresses: Addresses,
+        cluster: u128,
+        host: std.net.Address,
+        user: []const u8,
+        password: []const u8,
+        vhost: []const u8,
+        publish_exchange: ?[]const u8,
+        publish_routing_key: ?[]const u8,
+        event_count_max: ?u32,
+        idle_interval_ms: ?u32,
+        timestamp_last: ?u64,
         log_debug: bool,
     };
 
     format: Format,
+    recover: Recover,
     start: Start,
     version: Version,
     repl: Repl,
     benchmark: Benchmark,
     inspect: Inspect,
     multiversion: Multiversion,
+    amqp: AMQP,
 };
 
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
@@ -550,12 +633,14 @@ pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
+        .recover => |recover| .{ .recover = parse_args_recover(recover) },
         .start => |start| .{ .start = parse_args_start(start) },
         .version => |version| .{ .version = parse_args_version(version) },
         .repl => |repl| .{ .repl = parse_args_repl(repl) },
         .benchmark => |benchmark| .{ .benchmark = parse_args_benchmark(benchmark) },
         .inspect => |inspect| .{ .inspect = parse_args_inspect(inspect) },
         .multiversion => |multiversion| .{ .multiversion = parse_args_multiversion(multiversion) },
+        .amqp => |amqp| .{ .amqp = parse_args_amqp(amqp) },
     };
 }
 
@@ -627,6 +712,42 @@ fn parse_args_format(format: CLIArgs.Format) Command.Format {
     };
 }
 
+fn parse_args_recover(recover: CLIArgs.Recover) Command.Recover {
+    if (recover.replica_count == 0) {
+        vsr.fatal(.cli, "--replica-count: value needs to be greater than zero", .{});
+    }
+    if (recover.replica_count > constants.replicas_max) {
+        vsr.fatal(.cli, "--replica-count: value is too large ({}), at most {} is allowed", .{
+            recover.replica_count,
+            constants.replicas_max,
+        });
+    }
+
+    if (recover.replica >= recover.replica_count) {
+        vsr.fatal(.cli, "--replica: value is too large ({}), at most {} is allowed", .{
+            recover.replica,
+            recover.replica_count - 1,
+        });
+    }
+    if (recover.replica_count <= 2) {
+        vsr.fatal(.cli, "--replica-count: 1- or 2- replica clusters don't support 'recover'", .{});
+    }
+
+    const replica = recover.replica;
+    assert(replica < constants.members_max);
+    assert(replica < recover.replica_count);
+
+    return .{
+        .cluster = recover.cluster,
+        .addresses = parse_addresses(recover.addresses, "--addresses", Command.Addresses),
+        .replica = replica,
+        .replica_count = recover.replica_count,
+        .development = recover.development,
+        .path = recover.positional.path,
+        .log_debug = recover.log_debug,
+    };
+}
+
 fn parse_args_start(start: CLIArgs.Start) Command.Start {
     // Allowlist of stable flags. --development will disable automatic multiversion
     // upgrades too, but the flag itself is stable.
@@ -635,6 +756,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         "development", "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
+        @setEvalBranchQuota(4_000);
         const stable_field = comptime for (stable_args) |stable_arg| {
             assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
             if (std.mem.eql(u8, field.name, stable_arg)) {
@@ -802,6 +924,38 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const lsm_forest_node_count: u32 =
         @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
+    const aof_file: ?Command.Path = if (start.aof) blk: {
+        if (start.aof_file != null) {
+            vsr.fatal(.cli, "--aof is mutually exclusive with --aof-file", .{});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len + 4) {
+            vsr.fatal(.cli, "data file path is too long for --aof. use --aof-file", .{});
+        }
+        aof_file.append_slice_assume_capacity(start.positional.path);
+        aof_file.append_slice_assume_capacity(".aof");
+
+        std.log.warn(
+            "--aof is deprecated. consider switching to '--aof-file={s}'",
+            .{aof_file.const_slice()},
+        );
+
+        break :blk aof_file;
+    } else if (start.aof_file) |start_aof_file| blk: {
+        if (!std.mem.endsWith(u8, start_aof_file, ".aof")) {
+            vsr.fatal(.cli, "--aof-file must end with .aof: '{s}'", .{start_aof_file});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len) {
+            vsr.fatal(.cli, "--aof-file path is too long", .{});
+        }
+        aof_file.append_slice_assume_capacity(start_aof_file);
+
+        break :blk aof_file;
+    } else null;
+
     return .{
         .addresses = addresses,
         .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
@@ -842,12 +996,13 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             start.timeout_grid_repair_message_ms,
             "--timeout-grid-repair-message-ms",
         ),
+        .commit_stall_probability = start.commit_stall_probability,
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
         .replicate_closed_loop = start.replicate_closed_loop,
         .replicate_star = start.replicate_star,
-        .aof = start.aof,
+        .aof_file = aof_file,
         .path = start.positional.path,
         .log_debug = start.log_debug,
         .statsd = if (start.statsd) |statsd_address|
@@ -999,6 +1154,38 @@ fn parse_args_multiversion(multiversion: CLIArgs.Multiversion) Command.Multivers
     };
 }
 
+fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
+    const addresses = parse_addresses(amqp.addresses, "--addresses", Command.Addresses);
+    const host = parse_address_and_port(
+        amqp.host,
+        "--host",
+        vsr.cdc.amqp.tcp_port_default,
+    );
+
+    if (amqp.publish_exchange == null and amqp.publish_routing_key == null) {
+        vsr.fatal(
+            .cli,
+            "--publish-exchange and --publish-routing-key cannot both be empty.",
+            .{},
+        );
+    }
+
+    return .{
+        .addresses = addresses,
+        .cluster = amqp.cluster,
+        .host = host,
+        .user = amqp.user,
+        .password = amqp.password,
+        .vhost = amqp.vhost,
+        .publish_exchange = amqp.publish_exchange,
+        .publish_routing_key = amqp.publish_routing_key,
+        .event_count_max = amqp.event_count_max,
+        .idle_interval_ms = amqp.idle_interval_ms,
+        .timestamp_last = amqp.timestamp_last,
+        .log_debug = amqp.verbose,
+    };
+}
+
 /// Parse and allocate the addresses returning a slice into that array.
 fn parse_addresses(
     raw_addresses: []const u8,
@@ -1031,6 +1218,27 @@ fn parse_addresses(
     assert(addresses_parsed.len <= result.capacity());
     result.resize(addresses_parsed.len) catch unreachable;
     return result;
+}
+
+fn parse_address_and_port(
+    raw_address: []const u8,
+    comptime flag: []const u8,
+    port_default: u16,
+) std.net.Address {
+    comptime assert(std.mem.startsWith(u8, flag, "--"));
+
+    const address = vsr.parse_address_and_port(.{
+        .string = raw_address,
+        .port_default = port_default,
+    }) catch |err| switch (err) {
+        error.AddressHasMoreThanOneColon => {
+            vsr.fatal(.cli, flag ++ ": invalid address with more than one colon", .{});
+        },
+        error.PortOverflow => vsr.fatal(.cli, flag ++ ": port exceeds 65535", .{}),
+        error.PortInvalid => vsr.fatal(.cli, flag ++ ": invalid port", .{}),
+        error.AddressInvalid => vsr.fatal(.cli, flag ++ ": invalid IPv4 or IPv6 address", .{}),
+    };
+    return address;
 }
 
 /// Given a limit like `10GiB`, a SetAssociativeCache and T return the largest `value_count_max`

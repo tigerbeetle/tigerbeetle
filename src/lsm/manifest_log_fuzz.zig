@@ -397,6 +397,7 @@ const Environment = struct {
             .release = vsr.Release.minimum,
             .replica = 0,
             .replica_count = 6,
+            .view = null,
         });
     }
 

@@ -71,22 +71,11 @@ pub const JNIThreadCleaner = struct {
     /// based on `pthread_key_create` for Linux/MacOS and `FlsAlloc` for Windows.
     const tls = switch (builtin.os.tag) {
         .linux, .macos => struct {
-            /// TODO(zig) Should use `std.c` instead, redeclaring because of macos.
-            /// https://github.com/ziglang/zig/issues/13950.
-            const c = struct {
-                const pthread_key_t = c_uint;
-                extern "c" fn pthread_key_create(
-                    key: *pthread_key_t,
-                    destructor: ?*const fn (value: *anyopaque) callconv(.C) void,
-                ) std.c.E;
-                extern "c" fn pthread_setspecific(key: pthread_key_t, value: ?*anyopaque) c_int;
-            };
-
-            const Key = c.pthread_key_t;
+            const Key = std.c.pthread_key_t;
 
             fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
                 var key: Key = undefined;
-                const ret = c.pthread_key_create(&key, destructor);
+                const ret = std.c.pthread_key_create(&key, destructor);
                 if (ret != .SUCCESS) {
                     const message = "Unexpected result calling pthread_key_create";
                     log.err(message ++ "; Error = {} ({s})", .{
@@ -100,7 +89,7 @@ pub const JNIThreadCleaner = struct {
             }
 
             fn set_key(key: Key, value: *anyopaque) void {
-                const ret = c.pthread_setspecific(key, value);
+                const ret = std.c.pthread_setspecific(key, value);
                 if (ret != 0) {
                     const message = "Unexpected result calling pthread_setspecific";
                     log.err(message ++ "; Error = {}", .{ret});

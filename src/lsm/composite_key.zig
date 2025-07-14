@@ -92,7 +92,7 @@ pub fn CompositeKeyType(comptime Field: type) type {
 }
 
 pub fn is_composite_key(comptime Value: type) bool {
-    if (@typeInfo(Value) == .Struct and
+    if (@typeInfo(Value) == .@"struct" and
         @hasField(Value, "field") and
         @hasField(Value, "timestamp"))
     {

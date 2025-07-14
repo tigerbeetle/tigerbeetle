@@ -34,6 +34,10 @@ comptime {
     _ = @import("clients/c/tb_client/signal.zig");
     _ = @import("clients/c/tb_client_header_test.zig");
 
+    _ = @import("cdc/amqp.zig");
+    _ = @import("cdc/runner.zig");
+    _ = @import("cdc/amqp/protocol.zig");
+
     _ = @import("io/test.zig");
 
     _ = @import("lsm/binary_search.zig");
@@ -80,7 +84,9 @@ comptime {
     _ = @import("vsr/journal.zig");
     _ = @import("vsr/marzullo.zig");
     _ = @import("vsr/replica_format.zig");
+    _ = @import("vsr/replica_reformat.zig");
     _ = @import("vsr/replica_test.zig");
+    _ = @import("vsr/routing.zig");
     _ = @import("vsr/superblock.zig");
     _ = @import("vsr/free_set.zig");
     _ = @import("vsr/superblock_quorums.zig");

@@ -8,7 +8,6 @@ const constants = @import("../constants.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const Ratio = stdx.PRNG.Ratio;
-const ratio = stdx.PRNG.ratio;
 
 /// A very simple mock IO implementation that only implements what is needed to test Storage.
 pub const IO = struct {
@@ -16,8 +15,14 @@ pub const IO = struct {
 
     pub const File = struct {
         buffer: []u8,
+
         /// Each bit of the fault map represents a sector that will fault consistently.
-        fault_map: ?[]const u8,
+        fault_map: ?[]const u8 = null,
+
+        closed: bool = false,
+
+        // Maintained for appending to the end of the file via `write_blocking`.
+        offset: u32 = 0,
     };
 
     /// Options for fault injection during fuzz testing.
@@ -27,23 +32,28 @@ pub const IO = struct {
 
         /// Chance out of 100 that a read larger than a logical sector
         /// will return an error.InputOutput.
-        larger_than_logical_sector_read_fault_probability: Ratio = ratio(0, 100),
+        larger_than_logical_sector_read_fault_probability: Ratio = Ratio.zero(),
     };
 
     const Queue = QueueType(Completion);
 
-    files: []const File,
+    files: []File,
+
     options: Options,
     prng: stdx.PRNG,
 
     completed: Queue = Queue.init(.{ .name = "io_completed" }),
 
-    pub fn init(files: []const File, options: Options) IO {
+    pub fn init(files: []File, options: Options) !IO {
         return .{
             .options = options,
             .prng = stdx.PRNG.from_seed(options.seed),
             .files = files,
         };
+    }
+
+    pub fn deinit(io: *IO) void {
+        for (io.files) |file| assert(file.closed);
     }
 
     /// Pass all queued submissions to the kernel and peek for completions.
@@ -73,6 +83,9 @@ pub const IO = struct {
             buf: [*]const u8,
             len: u32,
             offset: u64,
+        },
+        fsync: struct {
+            fd: fd_t,
         },
     };
 
@@ -162,8 +175,8 @@ pub const IO = struct {
 
                     const sector_has_larger_than_logical_sector_read_fault =
                         (op.len > constants.sector_size and io.prng.chance(
-                        io.options.larger_than_logical_sector_read_fault_probability,
-                    ));
+                            io.options.larger_than_logical_sector_read_fault_probability,
+                        ));
 
                     if (sector_marked_in_fault_map or
                         sector_has_larger_than_logical_sector_read_fault)
@@ -219,5 +232,72 @@ pub const IO = struct {
                 }
             },
         );
+    }
+
+    pub const FsyncError = posix.SyncError;
+
+    pub fn fsync(
+        self: *IO,
+        comptime Context: type,
+        context: Context,
+        comptime callback: fn (
+            context: Context,
+            completion: *Completion,
+            result: FsyncError!void,
+        ) void,
+        completion: *Completion,
+        fd: fd_t,
+    ) void {
+        assert(fd < self.files.len);
+
+        self.submit(
+            context,
+            callback,
+            completion,
+            .fsync,
+            .{ .fd = fd },
+            struct {
+                fn do_operation(_: *IO, _: anytype) FsyncError!void {}
+            },
+        );
+    }
+
+    pub fn aof_blocking_write_all(self: *IO, fd: fd_t, source: []const u8) posix.WriteError!void {
+        assert(fd < self.files.len);
+
+        const file_index = @as(u32, @intCast(fd));
+        const file = &self.files[file_index];
+        const target = file.buffer;
+        const offset = file.offset;
+
+        assert(offset + source.len <= target.len);
+
+        stdx.copy_disjoint(.exact, u8, target[offset..][0..source.len], source);
+
+        file.offset += @as(u32, @intCast(source.len));
+    }
+
+    pub const PReadError = posix.PReadError;
+
+    pub fn aof_blocking_close(self: *IO, fd: fd_t) void {
+        assert(fd < self.files.len);
+        self.files[fd].closed = true;
+    }
+
+    pub fn aof_blocking_pread_all(self: *IO, fd: fd_t, target: []u8, offset: u64) PReadError!usize {
+        assert(fd < self.files.len);
+
+        const file_index = @as(u32, @intCast(fd));
+        const source = self.files[file_index].buffer;
+
+        assert(offset + target.len <= source.len);
+
+        stdx.copy_disjoint(.exact, u8, target, source[offset..][0..target.len]);
+
+        return target.len;
+    }
+
+    pub fn reset(self: *IO) void {
+        self.completed.reset();
     }
 };

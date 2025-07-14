@@ -6,7 +6,7 @@ const maybe = stdx.maybe;
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
 const stdx = @import("../../stdx.zig");
-const ratio = stdx.PRNG.ratio;
+const Ratio = stdx.PRNG.Ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
@@ -132,10 +132,10 @@ pub const Network = struct {
     pub fn transition_to_liveness_mode(network: *Network, core: Core) void {
         assert(core.count() > 0);
 
-        network.packet_simulator.options.packet_loss_probability = ratio(0, 100);
-        network.packet_simulator.options.packet_replay_probability = ratio(0, 100);
-        network.packet_simulator.options.partition_probability = ratio(0, 100);
-        network.packet_simulator.options.unpartition_probability = ratio(0, 100);
+        network.packet_simulator.options.packet_loss_probability = Ratio.zero();
+        network.packet_simulator.options.packet_replay_probability = Ratio.zero();
+        network.packet_simulator.options.partition_probability = Ratio.zero();
+        network.packet_simulator.options.unpartition_probability = Ratio.zero();
 
         var it_source = core.iterate();
         while (it_source.next()) |replica_source| {
@@ -386,14 +386,14 @@ pub const MessageSummary = struct {
             total_count += message_summary.count;
             total_size += message_summary.size;
             if (message_summary.count > 0) {
-                try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+                try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
                     @tagName(command),
                     message_summary.count,
                     std.fmt.fmtIntSizeBin(message_summary.size),
                 });
             }
         }
-        try writer.print("{s:<24} {d:<7} {:.2}\n", .{
+        try writer.print("{s:<24} {d:>7} {:>10.2}\n", .{
             "total",
             total_count,
             std.fmt.fmtIntSizeBin(total_size),

@@ -358,7 +358,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             id=9,
             debit_account_id=102,
             credit_account_id=103,
-            amount=10,
+            amount=0,
             pending_id=8,
             user_data_128=0,
             user_data_64=0,

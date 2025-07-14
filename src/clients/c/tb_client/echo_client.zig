@@ -12,13 +12,14 @@ const Message = MessagePool.Message;
 pub fn EchoClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time: type,
+    comptime Time_: type,
 ) type {
     return struct {
         const EchoClient = @This();
 
         // Exposing the same types the real client does:
         const VSRClient = vsr.ClientType(StateMachine_, MessageBus, Time);
+        pub const Time = Time_;
         pub const StateMachine = EchoStateMachineType(VSRClient.StateMachine);
         pub const Request = VSRClient.Request;
 
@@ -29,6 +30,7 @@ pub fn EchoClientType(
         reply_timestamp: u64 = 0, // Fake timestamp, just a counter.
         request_inflight: ?Request = null,
         message_pool: *MessagePool,
+        time: Time,
 
         pub fn init(
             allocator: mem.Allocator,
@@ -53,6 +55,7 @@ pub fn EchoClientType(
                 .id = options.id,
                 .cluster = options.cluster,
                 .message_pool = options.message_pool,
+                .time = options.time,
             };
         }
 
@@ -87,12 +90,7 @@ pub fn EchoClientType(
 
             switch (inflight.callback) {
                 .request => |callback| {
-                    callback(
-                        inflight.user_data,
-                        operation.cast(EchoClient.StateMachine),
-                        timestamp,
-                        reply.body_used(),
-                    );
+                    callback(inflight.user_data, operation, timestamp, reply.body_used());
                 },
                 .register => |callback| {
                     const result = vsr.RegisterResult{
@@ -122,6 +120,7 @@ pub fn EchoClientType(
                 .command = .request,
                 .operation = .register,
                 .release = vsr.Release.minimum,
+                .previous_request_latency = 0,
             };
 
             assert(self.request_number == 0);
@@ -160,6 +159,7 @@ pub fn EchoClientType(
                 .release = vsr.Release.minimum,
                 .operation = vsr.Operation.from(StateMachine, operation),
                 .size = @intCast(@sizeOf(Header) + events.len),
+                .previous_request_latency = 0,
             };
 
             stdx.copy_disjoint(.exact, u8, message.body_used(), events);

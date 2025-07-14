@@ -105,7 +105,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (table.value_context.sorted) {
                 table.value_context.sorted = table.value_context.count == 0 or
                     key_from_value(&table.values[table.value_context.count - 1]) <
-                    key_from_value(value);
+                        key_from_value(value);
             } else {
                 assert(table.value_context.count > 0);
             }
@@ -244,7 +244,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 // can't be equal.
                 const value_next_equal = source_index + 1 < source_count and
                     key_from_value(&values[source_index]) ==
-                    key_from_value(&values[source_index + 1]);
+                        key_from_value(&values[source_index + 1]);
 
                 if (value_next_equal) {
                     if (Table.usage == .secondary_index) {

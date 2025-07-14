@@ -239,7 +239,7 @@ fn request(
             try decode_array(Event, env, array, buffer);
             break :blk .{ packet, std.mem.sliceAsBytes(buffer) };
         },
-        .pulse, .get_events => unreachable,
+        .pulse, .get_change_events => unreachable,
     };
 
     packet.* = .{
@@ -309,7 +309,7 @@ fn on_completion(
                     packet.data = reply_buffer.ptr;
                     packet.data_size = @intCast(reply_buffer.len);
                 },
-                .pulse, .get_events => unreachable,
+                .pulse, .get_change_events => unreachable,
             }
         },
         .client_evicted,
@@ -389,7 +389,7 @@ fn on_completion_js(
                 else => unreachable, // all other packet status' handled in previous callback.
             }
         },
-        .pulse, .get_events => unreachable,
+        .pulse, .get_change_events => unreachable,
     };
 
     // Parse Result array out of packet data, freeing it in the process.
@@ -433,7 +433,7 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
             => {
                 inline for (std.meta.fields(Event)) |field| {
                     const value: field.type = switch (@typeInfo(field.type)) {
-                        .Struct => |info| @bitCast(try @field(
+                        .@"struct" => |info| @bitCast(try @field(
                             translate,
                             @typeName(info.backing_integer.?) ++ "_from_object",
                         )(
@@ -441,7 +441,7 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                             object,
                             add_trailing_null(field.name),
                         )),
-                        .Int => try @field(translate, @typeName(field.type) ++ "_from_object")(
+                        .int => try @field(translate, @typeName(field.type) ++ "_from_object")(
                             env,
                             object,
                             add_trailing_null(field.name),
@@ -449,9 +449,9 @@ fn decode_array(comptime Event: type, env: c.napi_env, array: c.napi_value, even
                         // Arrays are only used for padding/reserved fields,
                         // instead of requiring the user to explicitly set an empty buffer,
                         // we just hide those fields and preserve their default value.
-                        .Array => @as(
+                        .array => @as(
                             *const field.type,
-                            @ptrCast(@alignCast(field.default_value.?)),
+                            @ptrCast(@alignCast(field.default_value_ptr.?)),
                         ).*,
                         else => unreachable,
                     };
@@ -480,16 +480,16 @@ fn encode_array(comptime Result: type, env: c.napi_env, results: []const Result)
 
         inline for (std.meta.fields(Result)) |field| {
             const FieldInt = switch (@typeInfo(field.type)) {
-                .Struct => |info| info.backing_integer.?,
-                .Enum => |info| info.tag_type,
+                .@"struct" => |info| info.backing_integer.?,
+                .@"enum" => |info| info.tag_type,
                 // Arrays are only used for padding/reserved fields.
-                .Array => continue,
+                .array => continue,
                 else => field.type,
             };
 
             const value: FieldInt = switch (@typeInfo(field.type)) {
-                .Struct => @bitCast(@field(result, field.name)),
-                .Enum => @intFromEnum(@field(result, field.name)),
+                .@"struct" => @bitCast(@field(result, field.name)),
+                .@"enum" => @intFromEnum(@field(result, field.name)),
                 else => @field(result, field.name),
             };
 

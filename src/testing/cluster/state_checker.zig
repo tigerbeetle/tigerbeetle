@@ -32,7 +32,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         replica_count: u8,
 
         commits: Commits,
-        commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
+        commit_mins: [constants.members_max]u64 = @splat(0),
 
         replicas: []const Replica,
         clients: []const ?Client,
@@ -143,6 +143,25 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             }
         }
 
+        /// Verify that the cluster has advanced since the replica was lost.
+        /// Then forget about the given replica's progress, since its data file has been "lost".
+        pub fn reformat(state_checker: *StateChecker, replica_index: u8) void {
+            const reformat_state = state_checker.replica_head_max[replica_index];
+            var commit_advanced: bool = false;
+            for (
+                state_checker.commit_mins[0..state_checker.replica_head_max.len],
+                0..,
+            ) |commit_min, i| {
+                if (i != replica_index) {
+                    commit_advanced = commit_advanced or reformat_state.op < commit_min;
+                }
+            }
+            assert(commit_advanced);
+
+            state_checker.replica_head_max[replica_index] = .{ .view = 0, .op = 0 };
+            state_checker.commit_mins[replica_index] = 0;
+        }
+
         /// Returns whether the replica's state changed since the last check_state().
         pub fn check_state(state_checker: *StateChecker, replica_index: u8) !void {
             const replica = &state_checker.replicas[replica_index];
@@ -170,11 +189,11 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
 
                 assert(replica.view > head_max.view or
                     (replica.view == head_max.view and (replica.op >= head_max.op or
-                    // The last acked prepare may have been truncated through a view change,
-                    // replaced by a prepare from a newer view, and the replica may have crashed
-                    // before making this new view durable in the superblock. Such prepares are
-                    // then truncated on startup.
-                    head_max.view < head_max_journal.view)));
+                        // The last acked prepare may have been truncated through a view change,
+                        // replaced by a prepare from a newer view, and the replica may have crashed
+                        // before making this new view durable in the superblock. Such prepares are
+                        // then truncated on startup.
+                        head_max.view < head_max_journal.view)));
             }
 
             const commit_root_op = replica.superblock.working.vsr_state.checkpoint.header.op;

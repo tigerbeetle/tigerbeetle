@@ -162,16 +162,16 @@ fn java_type(
     comptime Type: type,
 ) []const u8 {
     switch (@typeInfo(Type)) {
-        .Enum => return comptime get_mapped_type_name(Type) orelse @compileError(
+        .@"enum" => return comptime get_mapped_type_name(Type) orelse @compileError(
             "Type " ++ @typeName(Type) ++ " not mapped.",
         ),
-        .Struct => |info| switch (info.layout) {
+        .@"struct" => |info| switch (info.layout) {
             .@"packed" => return comptime java_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse @compileError(
                 "Type " ++ @typeName(Type) ++ " not mapped.",
             ),
         },
-        .Int => |info| {
+        .int => |info| {
             // For better API ergonomy,
             // we expose 16-bit unsigned integers in Java as "int" instead of "short".
             // Even though, the backing fields are always stored as "short".
@@ -200,8 +200,6 @@ fn to_case(
     comptime input: []const u8,
     comptime case: enum { camel, pascal, upper },
 ) []const u8 {
-    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
-    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
     return comptime blk: {
         var output: [input.len]u8 = undefined;
         if (case == .upper) {
@@ -247,7 +245,7 @@ fn emit_enum(
 
     const fields = comptime fields: {
         const EnumField = std.builtin.Type.EnumField;
-        const type_info = @typeInfo(Type).Enum;
+        const type_info = @typeInfo(Type).@"enum";
         var fields: []const EnumField = &[_]EnumField{};
         for (type_info.fields) |field| {
             if (mapping.is_private(field.name)) continue;
@@ -393,7 +391,7 @@ fn emit_packed_enum(
 
 fn batch_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Int => |info| {
+        .int => |info| {
             assert(info.signedness == .unsigned);
             switch (info.bits) {
                 16 => return "UInt16",
@@ -402,11 +400,11 @@ fn batch_type(comptime Type: type) []const u8 {
                 else => {},
             }
         },
-        .Struct => |info| switch (info.layout) {
+        .@"struct" => |info| switch (info.layout) {
             .@"packed" => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => {},
         },
-        .Enum => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
+        .@"enum" => return batch_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
         else => {},
     }
 
@@ -533,7 +531,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (@typeInfo(field.type) == .Array) {
+    if (@typeInfo(field.type) == .array) {
         try buffer.writer().print(
             \\    {[visibility]s}byte[] get{[property]s}() {{
             \\        return getArray(at(Struct.{[property]s}), {[array_len]d});
@@ -543,7 +541,7 @@ fn emit_batch_accessors(
         , .{
             .visibility = if (is_private) "" else "public ",
             .property = to_case(field.name, .pascal),
-            .array_len = @typeInfo(field.type).Array.len,
+            .array_len = @typeInfo(field.type).array.len,
         });
     } else {
         try buffer.writer().print(
@@ -558,7 +556,7 @@ fn emit_batch_accessors(
             .java_type = java_type(field.type),
             .property = to_case(field.name, .pascal),
             .batch_type = batch_type(field.type),
-            .return_expression = comptime if (@typeInfo(field.type) == .Enum)
+            .return_expression = comptime if (@typeInfo(field.type) == .@"enum")
                 get_mapped_type_name(field.type).? ++ ".fromValue(value)"
             else
                 "value",
@@ -592,7 +590,7 @@ fn emit_batch_accessors(
         , .{});
     }
 
-    if (@typeInfo(field.type) == .Array) {
+    if (@typeInfo(field.type) == .array) {
         try buffer.writer().print(
             \\    {[visibility]s}void set{[property]s}(byte[] {[param_name]s}) {{
             \\        if ({[param_name]s} == null)
@@ -607,7 +605,7 @@ fn emit_batch_accessors(
             .property = to_case(field.name, .pascal),
             .param_name = to_case(field.name, .camel),
             .visibility = if (is_private or is_read_only) "" else "public ",
-            .array_len = @typeInfo(field.type).Array.len,
+            .array_len = @typeInfo(field.type).array.len,
         });
     } else {
         try buffer.writer().print(
@@ -622,7 +620,7 @@ fn emit_batch_accessors(
             .visibility = if (is_private or is_read_only) "" else "public ",
             .batch_type = batch_type(field.type),
             .java_type = java_type(field.type),
-            .value_expression = if (comptime @typeInfo(field.type) == .Enum)
+            .value_expression = if (comptime @typeInfo(field.type) == .@"enum")
                 ".value"
             else
                 "",
@@ -920,7 +918,7 @@ pub fn generate_bindings(
     @setEvalBranchQuota(100_000);
 
     switch (@typeInfo(ZigType)) {
-        .Struct => |info| switch (info.layout) {
+        .@"struct" => |info| switch (info.layout) {
             .auto => @compileError(
                 "Only packed or extern structs are supported: " ++ @typeName(ZigType),
             ),
@@ -937,7 +935,7 @@ pub fn generate_bindings(
                 @sizeOf(ZigType),
             ),
         },
-        .Enum => try emit_enum(
+        .@"enum" => try emit_enum(
             buffer,
             ZigType,
             mapping,

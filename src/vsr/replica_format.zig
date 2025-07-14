@@ -15,10 +15,15 @@ pub fn format(
     comptime Storage: type,
     allocator: std.mem.Allocator,
     options: vsr.SuperBlockType(Storage).FormatOptions,
-    storage: *Storage,
-    superblock: *vsr.SuperBlockType(Storage),
+    superblock_options: vsr.SuperBlockType(Storage).Options,
 ) !void {
     const ReplicaFormat = ReplicaFormatType(Storage);
+    const SuperBlock = vsr.SuperBlockType(Storage);
+
+    const storage = superblock_options.storage;
+    var superblock = try SuperBlock.init(allocator, superblock_options);
+    defer superblock.deinit(allocator);
+
     var replica_format = ReplicaFormat{};
 
     try replica_format.format_wal(allocator, options.cluster, storage);
@@ -57,7 +62,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         ) !void {
             assert(!self.formatting);
 
-            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
+            const header_zeroes: [@sizeOf(Header)]u8 = @splat(0);
             const wal_write_size_max = 4 * 1024 * 1024;
             assert(wal_write_size_max % constants.sector_size == 0);
 
@@ -213,7 +218,6 @@ fn ReplicaFormatType(comptime Storage: type) type {
 test "format" {
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const Storage = @import("../testing/storage.zig").Storage;
-    const SuperBlock = vsr.SuperBlockType(Storage);
     const allocator = std.testing.allocator;
     const cluster = 0;
     const replica = 1;
@@ -231,18 +235,16 @@ test "format" {
     );
     defer storage.deinit(allocator);
 
-    var superblock = try SuperBlock.init(allocator, .{
-        .storage = &storage,
-        .storage_size_limit = data_file_size_min,
-    });
-    defer superblock.deinit(allocator);
-
     try format(Storage, allocator, .{
         .cluster = cluster,
         .release = vsr.Release.minimum,
         .replica = replica,
         .replica_count = replica_count,
-    }, &storage, &superblock);
+        .view = null,
+    }, .{
+        .storage = &storage,
+        .storage_size_limit = data_file_size_min,
+    });
 
     // Verify the superblock headers.
     var copy: u8 = 0;

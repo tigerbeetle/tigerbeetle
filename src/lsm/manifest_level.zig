@@ -19,7 +19,7 @@ pub fn ManifestLevelType(
     comptime TableInfo: type,
     comptime table_count_max_tree: u32,
 ) type {
-    comptime assert(@typeInfo(Key) == .Int or @typeInfo(Key) == .ComptimeInt);
+    comptime assert(@typeInfo(Key) == .int or @typeInfo(Key) == .comptime_int);
 
     return struct {
         const ManifestLevel = @This();

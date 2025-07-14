@@ -1,6 +1,6 @@
 @echo off
 
-set ZIG_RELEASE_DEFAULT=0.13.0
+set ZIG_RELEASE_DEFAULT=0.14.1
 
 :: Determine the Zig build:
 if "%~1"=="" (
@@ -17,7 +17,7 @@ echo.%ZIG_RELEASE% | findstr /b /r /c:"builds" /c:"^[0-9][0-9]*.[0-9][0-9]*.[0-9
 set ZIG_OS=windows
 set ZIG_ARCH=x86_64
 
-set ZIG_TARGET=zig-%ZIG_OS%-%ZIG_ARCH%
+set ZIG_TARGET=zig-%ZIG_ARCH%-%ZIG_OS%
 
 :: Determine the build, split the JSON line on whitespace and extract the 2nd field:
 for /f "tokens=2" %%a in ('curl --silent https://ziglang.org/download/index.json ^| findstr %ZIG_TARGET% ^| findstr %ZIG_RELEASE%' ) do (
@@ -46,7 +46,7 @@ for /f %%i in ("%ZIG_URL%") do (
 )
 
 :: Checks the ZIG_DIRECTORY variable follows the expected format.
-echo.%ZIG_DIRECTORY% | findstr /b /r /c:"zig-win64-" /c:"zig-windows-x86_64-">nul || (echo.Unexpected zip directory name format. && exit 1)
+echo.%ZIG_DIRECTORY% | findstr /b /r /c:"zig-x86_64-windows-">nul || (echo.Unexpected zip directory name format. && exit 1)
 
 :: Making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
 if exist %ZIG_TARBALL% (

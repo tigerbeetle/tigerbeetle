@@ -18,10 +18,15 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     // Only to test the build process - the samples below run directly from the src/ directory.
     try shell.exec("python3 -m build .", .{});
 
+    const path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
+        "src",
+        @src().file,
+    });
     const python_path_relative = try std.fs.path.join(shell.arena.allocator(), &.{
-        std.fs.path.dirname(@src().file).?,
+        std.fs.path.dirname(path_relative).?,
         "src",
     });
+
     const python_path = try shell.project_root.realpathAlloc(
         shell.arena.allocator(),
         python_path_relative,
@@ -31,7 +36,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
     {
         log.info("running pytest", .{});
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+            .development = true,
+        });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
@@ -52,7 +59,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+            .development = true,
+        });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
@@ -93,6 +102,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     }
 
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        .development = true,
         .prebuilt = options.tigerbeetle,
     });
     defer tmp_beetle.deinit(gpa);

@@ -5,11 +5,13 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const assert = std.debug.assert;
+const maybe = stdx.maybe;
 const log = std.log.scoped(.test_auditor);
 
 const constants = @import("../constants.zig");
 const tb = @import("../tigerbeetle.zig");
 const IdPermutation = @import("../testing/id.zig").IdPermutation;
+const TimestampRange = @import("../lsm/timestamp_range.zig").TimestampRange;
 
 const PriorityQueue = std.PriorityQueue;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -22,8 +24,8 @@ pub const CreateTransferResultSet = std.enums.EnumSet(tb.CreateTransferResult.Or
 
 /// Batch sizes apply to both `create` and `lookup` operations.
 /// (More ids would fit in the `lookup` request, but then the response wouldn't fit.)
-const accounts_batch_size_max = StateMachine.constants.batch_max.create_accounts;
-const transfers_batch_size_max = StateMachine.constants.batch_max.create_transfers;
+const accounts_batch_size_max = StateMachine.machine_constants.batch_max.create_accounts;
+const transfers_batch_size_max = StateMachine.machine_constants.batch_max.create_transfers;
 
 const InFlightKey = struct {
     client_index: usize,
@@ -123,6 +125,9 @@ pub const AccountingAuditor = struct {
         /// reached their expiry are still included in this count — see `pending_expiries`.
         transfers_pending_max: usize,
 
+        /// This is the maximum number of changes events needs to be tracked.
+        changes_events_max: u32,
+
         /// From the Auditor's point-of-view, all stalled requests are still in-flight, even if
         /// their reply has actually arrived at the ReplySequence.
         ///
@@ -148,6 +153,137 @@ pub const AccountingAuditor = struct {
         timestamp_min: u64 = 0,
         /// Timestamp of the last object recorded.
         timestamp_max: u64 = 0,
+    };
+
+    pub const ChangesTracker = struct {
+        const EnumArray = std.EnumArray(tb.ChangeEventType, u32);
+        const Counter = struct {
+            /// The number of events recorded.
+            count: EnumArray,
+            /// Timestamp of the first event recorded.
+            timestamp_min: u64,
+            /// Timestamp of the last event recorded.
+            timestamp_max: u64,
+
+            fn init() Counter {
+                return .{
+                    .count = EnumArray.initFill(0),
+                    .timestamp_min = 0,
+                    .timestamp_max = 0,
+                };
+            }
+
+            pub fn count_total(self: *const Counter) u32 {
+                const timestamp_valid: bool =
+                    TimestampRange.valid(self.timestamp_min) and
+                    TimestampRange.valid(self.timestamp_max);
+                maybe(timestamp_valid);
+
+                var total: u32 = 0;
+                for (self.count.values) |value| total += value;
+                assert((total > 0) == timestamp_valid);
+                return total;
+            }
+        };
+
+        current: Counter,
+        snapshot: ?Counter,
+        changes_events_max: u32,
+
+        fn init(changes_events_max: u32) ChangesTracker {
+            return .{
+                .current = Counter.init(),
+                .snapshot = null,
+                .changes_events_max = changes_events_max,
+            };
+        }
+
+        fn update(self: *ChangesTracker, change: union(enum) {
+            transfer: struct {
+                timestamp: u64,
+                flags: tb.TransferFlags,
+            },
+            expiry: struct {
+                timestamp: u64,
+                expired_count: u32,
+            },
+        }) void {
+            defer assert(self.current.count_total() <= self.changes_events_max);
+            const count: u32 = switch (change) {
+                .transfer => 1,
+                .expiry => |expiry| expiry.expired_count,
+            };
+            assert(count > 0);
+            if (self.current.count_total() + count > self.changes_events_max) {
+                // Reset the counters if we reach the maximum size.
+                self.current = Counter.init();
+                // Too many events to keep track of.
+                if (count > self.changes_events_max) return;
+            }
+
+            switch (change) {
+                .transfer => |transfer| {
+                    assert(TimestampRange.valid(transfer.timestamp));
+                    if (self.current.timestamp_min == 0 and
+                        self.current.timestamp_max == 0)
+                    {
+                        self.current.timestamp_min = transfer.timestamp;
+                        self.current.timestamp_max = transfer.timestamp;
+                    } else {
+                        assert(TimestampRange.valid(self.current.timestamp_min));
+                        assert(TimestampRange.valid(self.current.timestamp_max));
+                        assert(self.current.timestamp_min <= self.current.timestamp_max);
+                        assert(transfer.timestamp > self.current.timestamp_max);
+                        self.current.timestamp_max = transfer.timestamp;
+                    }
+
+                    if (transfer.flags.pending) {
+                        self.current.count.getPtr(.two_phase_pending).* += 1;
+                    } else if (transfer.flags.post_pending_transfer) {
+                        self.current.count.getPtr(.two_phase_posted).* += 1;
+                    } else if (transfer.flags.void_pending_transfer) {
+                        self.current.count.getPtr(.two_phase_voided).* += 1;
+                    } else {
+                        self.current.count.getPtr(.single_phase).* += 1;
+                    }
+                },
+                .expiry => |expiry| {
+                    assert(TimestampRange.valid(expiry.timestamp));
+                    if (self.current.timestamp_min == 0 and
+                        self.current.timestamp_max == 0)
+                    {
+                        const timestamp_first: u64 = expiry.timestamp - expiry.expired_count;
+                        assert(TimestampRange.valid(timestamp_first));
+                        self.current.timestamp_min = timestamp_first;
+                        self.current.timestamp_max = expiry.timestamp;
+                    } else {
+                        assert(TimestampRange.valid(self.current.timestamp_min));
+                        assert(TimestampRange.valid(self.current.timestamp_max));
+                        assert(self.current.timestamp_min <= self.current.timestamp_max);
+                        assert(expiry.timestamp > self.current.timestamp_max);
+                        self.current.timestamp_max = expiry.timestamp;
+                    }
+                    self.current.count.getPtr(.two_phase_expired).* += expiry.expired_count;
+                },
+            }
+        }
+
+        pub fn acquire_snapshot(self: *ChangesTracker) ?Counter {
+            // Snapshot already in use for another query.
+            if (self.snapshot != null) return null;
+            // No events.
+            if (self.current.count_total() == 0) return null;
+
+            assert(self.snapshot == null);
+            self.snapshot = self.current;
+            return self.snapshot.?;
+        }
+
+        fn release_snapshot(self: *ChangesTracker) Counter {
+            assert(self.snapshot != null);
+            defer self.snapshot = null;
+            return self.snapshot.?;
+        }
     };
 
     prng: *stdx.PRNG,
@@ -180,6 +316,10 @@ pub const AccountingAuditor = struct {
     /// The timeout will not impact account balances (because the `pending_transfers` entry is
     /// removed), but until timeout the transfer still counts against `transfers_pending_max`.
     pending_expiries: PendingExpiryQueue,
+
+    /// Records the number of events in a given timestamp span.
+    /// Used to validate the `get_change_events` results.
+    changes_tracker: ChangesTracker,
 
     /// Track the expected result of the in-flight request for each client.
     /// Each member queue corresponds to entries of the client's request queue, but omits
@@ -255,6 +395,7 @@ pub const AccountingAuditor = struct {
             .query_intersections = query_intersections,
             .pending_transfers = pending_transfers,
             .pending_expiries = pending_expiries,
+            .changes_tracker = ChangesTracker.init(options.changes_events_max),
             .in_flight = in_flight,
             .creates_sent = creates_sent,
             .creates_delivered = creates_delivered,
@@ -334,15 +475,21 @@ pub const AccountingAuditor = struct {
             const cr = &self.accounts[pending_transfer.credit_account_index];
             dr.debits_pending -= pending_transfer.amount;
             cr.credits_pending -= pending_transfer.amount;
-
-            // Each expiration round can expire at most one batch of transfers.
-            expired_count += 1;
-            if (expired_count == self.options.pulse_expiries_max) break;
-
             assert(!dr.debits_exceed_credits(0));
             assert(!dr.credits_exceed_debits(0));
             assert(!cr.debits_exceed_credits(0));
             assert(!cr.credits_exceed_debits(0));
+
+            // Each expiration round can expire at most one batch of transfers.
+            expired_count += 1;
+            if (expired_count == self.options.pulse_expiries_max) break;
+        }
+
+        if (expired_count > 0) {
+            self.changes_tracker.update(.{ .expiry = .{
+                .timestamp = timestamp,
+                .expired_count = expired_count,
+            } });
         }
     }
 
@@ -432,6 +579,10 @@ pub const AccountingAuditor = struct {
             }
 
             if (result_actual != .ok) continue;
+            self.changes_tracker.update(.{ .transfer = .{
+                .timestamp = transfer_timestamp,
+                .flags = transfer.flags,
+            } });
 
             const query_intersection_index = transfer.code - 1;
             const query_intersection = &self.query_intersections[query_intersection_index];
@@ -627,6 +778,52 @@ pub const AccountingAuditor = struct {
             return account;
         }
         return null;
+    }
+
+    pub fn on_get_change_events(
+        self: *AccountingAuditor,
+        timestamp: u64,
+        filter: tb.ChangeEventsFilter,
+        results: []const tb.ChangeEvent,
+    ) void {
+        _ = timestamp;
+        const filter_valid = filter.limit != 0 and
+            TimestampRange.valid(filter.timestamp_min) and
+            TimestampRange.valid(filter.timestamp_max) and
+            stdx.zeroed(&filter.reserved) and
+            (filter.timestamp_max == 0 or filter.timestamp_min <= filter.timestamp_max);
+        if (!filter_valid) {
+            assert(results.len == 0);
+            return;
+        }
+
+        const snapshot = self.changes_tracker.release_snapshot();
+        assert(filter.limit >= snapshot.count_total());
+        assert(filter.timestamp_min == snapshot.timestamp_min);
+        assert(filter.timestamp_max == snapshot.timestamp_max);
+        assert(results.len == snapshot.count_total());
+
+        var timestamp_previous: u64 = 0;
+        var count = ChangesTracker.EnumArray.initFill(0);
+        for (results) |*result| {
+            assert(result.timestamp > timestamp_previous);
+            timestamp_previous = result.timestamp;
+
+            if (filter.timestamp_min > 0) {
+                assert(result.timestamp >= filter.timestamp_min);
+            }
+            if (filter.timestamp_max > 0) {
+                assert(result.timestamp <= filter.timestamp_max);
+            }
+
+            count.getPtr(result.type).* += 1;
+        }
+
+        var iterator = count.iterator();
+        while (iterator.next()) |kv| {
+            const expected = snapshot.count.getPtrConst(kv.key).*;
+            assert(kv.value.* == expected);
+        }
     }
 
     pub fn account_id_to_index(self: *const AccountingAuditor, id: u128) usize {

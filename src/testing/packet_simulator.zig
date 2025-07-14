@@ -7,7 +7,6 @@ const fuzz = @import("./fuzz.zig");
 const ReadyQueueType = fuzz.ReadyQueueType;
 const stdx = @import("../stdx.zig");
 const Ratio = stdx.PRNG.Ratio;
-const ratio = stdx.PRNG.ratio;
 
 pub const PacketSimulatorOptions = struct {
     node_count: u8,
@@ -20,8 +19,8 @@ pub const PacketSimulatorOptions = struct {
     one_way_delay_mean: u64,
     one_way_delay_min: u64,
 
-    packet_loss_probability: Ratio = ratio(0, 100),
-    packet_replay_probability: Ratio = ratio(0, 100),
+    packet_loss_probability: Ratio = Ratio.zero(),
+    packet_replay_probability: Ratio = Ratio.zero(),
 
     /// How the partitions should be generated
     partition_mode: PartitionMode = .none,
@@ -29,10 +28,10 @@ pub const PacketSimulatorOptions = struct {
     partition_symmetry: PartitionSymmetry = .symmetric,
 
     /// Probability per tick that a partition will occur
-    partition_probability: Ratio = ratio(0, 100),
+    partition_probability: Ratio = Ratio.zero(),
 
     /// Probability per tick that a partition will resolve
-    unpartition_probability: Ratio = ratio(0, 100),
+    unpartition_probability: Ratio = Ratio.zero(),
 
     /// Minimum time a partition lasts
     partition_stability: u32 = 0,
@@ -202,7 +201,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 link.queue.deinit(allocator);
             }
 
-            while (self.recorded.popOrNull()) |recorded_packet| {
+            while (self.recorded.pop()) |recorded_packet| {
                 self.packet_deinit(recorded_packet.packet);
             }
             self.recorded.deinit(allocator);
@@ -243,7 +242,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
             assert(recording);
 
-            while (self.recorded.popOrNull()) |packet| {
+            while (self.recorded.pop()) |packet| {
                 self.submit_packet(packet.packet, packet.path);
             }
         }
@@ -347,7 +346,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                         to >= self.options.node_count or
                         partition[from] == partition[to] or
                         (self.options.partition_symmetry == .asymmetric and
-                        partition[from] == asymmetric_partition_side);
+                            partition[from] == asymmetric_partition_side);
                     self.links[self.path_index(path)].filter =
                         if (enabled) LinkFilter.initFull() else LinkFilter{};
                 }
@@ -423,7 +422,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
                 log.warn("submit_packet: {} reached capacity, dropped packet: {}", .{
                     path,
-                    if (@typeInfo(Packet) == .Pointer)
+                    if (@typeInfo(Packet) == .pointer)
                         link_packet.packet.header
                     else
                         link_packet.packet,
@@ -454,7 +453,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     .{
                         path.source,
                         path.target,
-                        if (@typeInfo(Packet) == .Pointer)
+                        if (@typeInfo(Packet) == .pointer)
                             link_packet.packet.header
                         else
                             link_packet.packet,
@@ -467,7 +466,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 log.warn("dropped packet from={} to={}: {}", .{
                     path.source,
                     path.target,
-                    if (@typeInfo(Packet) == .Pointer)
+                    if (@typeInfo(Packet) == .pointer)
                         link_packet.packet.header
                     else
                         link_packet.packet,

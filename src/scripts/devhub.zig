@@ -77,10 +77,26 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     // Only build the TigerBeetle binary to test build speed and build size. Throw it away once
     // done, and use a release build from `zig-out/dist/` to run the benchmark.
     var timer = try std.time.Timer.start();
-    try shell.exec_zig("build -Drelease install", .{});
-    const build_time_ms = timer.lap() / std.time.ns_per_ms;
-    const executable_size_bytes = (try shell.cwd.statFile("tigerbeetle")).size;
-    try shell.project_root.deleteFile("tigerbeetle");
+
+    const build_time_debug_ms = blk: {
+        timer.reset();
+        try shell.exec_zig("build install", .{});
+        defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
+
+        break :blk timer.read() / std.time.ns_per_ms;
+    };
+
+    const build_time_ms, const executable_size_bytes = blk: {
+        timer.reset();
+        try shell.project_root.deleteTree(".zig-cache");
+        try shell.exec_zig("build -Drelease install", .{});
+        defer shell.project_root.deleteFile("tigerbeetle") catch unreachable;
+
+        break :blk .{
+            timer.lap() / std.time.ns_per_ms,
+            (try shell.cwd.statFile("tigerbeetle")).size,
+        };
+    };
 
     // When doing a release, the latest release in the changelog on main will be newer than the
     // latest release on GitHub. In this case, don't pass in --no-changelog - as doing that causes
@@ -286,6 +302,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
                 .value = checksum_message_size_max_us,
                 .unit = "us",
             },
+            .{ .name = "build time debug", .value = build_time_debug_ms, .unit = "ms" },
             .{ .name = "build time", .value = build_time_ms, .unit = "ms" },
             .{ .name = "format time", .value = format_time_ms, .unit = "ms" },
             .{ .name = "startup time - 8GiB grid cache", .value = startup_time_ms, .unit = "ms" },

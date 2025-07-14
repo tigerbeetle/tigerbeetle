@@ -7,6 +7,7 @@ const log = std.log.scoped(.vsr);
 // vsr.zig is the root of a zig package, reexport all public APIs.
 //
 // Note that we don't promise any stability of these interfaces yet.
+pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
 pub const queue = @import("queue.zig");
@@ -31,6 +32,7 @@ pub const lsm = .{
     .forest = @import("lsm/forest.zig"),
     .schema = @import("lsm/schema.zig"),
     .composite_key = @import("lsm/composite_key.zig"),
+    .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
     .snaptest = @import("testing/snaptest.zig"),
@@ -44,6 +46,7 @@ pub const multi_batch = @import("vsr/multi_batch.zig");
 
 pub const ReplicaType = @import("vsr/replica.zig").ReplicaType;
 pub const ReplicaEvent = @import("vsr/replica.zig").ReplicaEvent;
+pub const ReplicaReformatType = @import("vsr/replica_reformat.zig").ReplicaReformatType;
 pub const format = @import("vsr/replica_format.zig").format;
 pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;
@@ -67,6 +70,7 @@ pub const Header = @import("vsr/message_header.zig").Header;
 pub const FreeSet = @import("vsr/free_set.zig").FreeSet;
 pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").CheckpointTrailerType;
 pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
+pub const Routing = @import("vsr/routing.zig");
 pub const CountingAllocator = @import("counting_allocator.zig");
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
@@ -254,8 +258,10 @@ pub const Operation = enum(u8) {
     reconfigure = 3,
     /// The value 4 is reserved for pulse request.
     pulse = 4,
-    /// The value 5 is is reserved for release-upgrade requests.
+    /// The value 5 is reserved for release-upgrade requests.
     upgrade = 5,
+    /// The value 6 is reserved for noop requests.
+    noop = 6,
 
     /// Operations <vsr_operations_reserved are reserved for the control plane.
     /// Operations ≥vsr_operations_reserved are available for the state machine.
@@ -300,7 +306,7 @@ pub const Operation = enum(u8) {
     pub fn tag_name(self: Operation, comptime StateMachine: type) []const u8 {
         assert(self.valid(StateMachine));
         inline for (.{ Operation, StateMachine.Operation }) |Enum| {
-            inline for (@typeInfo(Enum).Enum.fields) |field| {
+            inline for (@typeInfo(Enum).@"enum".fields) |field| {
                 const op = @field(Enum, field.name);
                 if (@intFromEnum(self) == @intFromEnum(op)) {
                     return field.name;
@@ -312,16 +318,16 @@ pub const Operation = enum(u8) {
 
     fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
-            assert(@typeInfo(StateMachine.Operation).Enum.is_exhaustive);
-            assert(@typeInfo(StateMachine.Operation).Enum.tag_type ==
-                @typeInfo(Operation).Enum.tag_type);
-            for (@typeInfo(StateMachine.Operation).Enum.fields) |field| {
+            assert(@typeInfo(StateMachine.Operation).@"enum".is_exhaustive);
+            assert(@typeInfo(StateMachine.Operation).@"enum".tag_type ==
+                @typeInfo(Operation).@"enum".tag_type);
+            for (@typeInfo(StateMachine.Operation).@"enum".fields) |field| {
                 const operation = @field(StateMachine.Operation, field.name);
                 if (@intFromEnum(operation) < constants.vsr_operations_reserved) {
                     @compileError("StateMachine.Operation is reserved");
                 }
             }
-            for (@typeInfo(Operation).Enum.fields) |field| {
+            for (@typeInfo(Operation).@"enum".fields) |field| {
                 const vsr_operation = @field(Operation, field.name);
                 switch (vsr_operation) {
                     // The StateMachine can convert a `vsr.Operation.pulse` into a valid operation.
@@ -338,7 +344,7 @@ pub const RegisterRequest = extern struct {
     /// When command=prepare, batch_size_limit > 0 and batch_size_limit ≤ message_body_size_max.
     /// (Note that this does *not* include the `@sizeOf(Header)`.)
     batch_size_limit: u32,
-    reserved: [252]u8 = [_]u8{0} ** 252,
+    reserved: [252]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(RegisterRequest) == 256);
@@ -349,7 +355,7 @@ pub const RegisterRequest = extern struct {
 
 pub const RegisterResult = extern struct {
     batch_size_limit: u32,
-    reserved: [60]u8 = [_]u8{0} ** 60,
+    reserved: [60]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(RegisterResult) == 64);
@@ -361,7 +367,7 @@ pub const RegisterResult = extern struct {
 pub const BlockRequest = extern struct {
     block_checksum: u128,
     block_address: u64,
-    reserved: [8]u8 = [_]u8{0} ** 8,
+    reserved: [8]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(BlockRequest) == 32);
@@ -393,7 +399,7 @@ pub const ReconfigurationRequest = extern struct {
     ///
     /// At the moment, we require this to be equal to the old count.
     standby_count: u8,
-    reserved: [54]u8 = [_]u8{0} ** 54,
+    reserved: [54]u8 = @splat(0),
     /// The result of this request. Set to zero by the client and filled-in by the primary when it
     /// accepts a reconfiguration request.
     result: ReconfigurationResult,
@@ -539,7 +545,7 @@ test "ReconfigurationRequest" {
         }
 
         fn to_members(m: anytype) Members {
-            var result = [_]u128{0} ** constants.members_max;
+            var result: [constants.members_max]u128 = @splat(0);
             inline for (m, 0..) |member, index| result[index] = member;
             return result;
         }
@@ -623,7 +629,7 @@ test "ReconfigurationRequest" {
 
 pub const UpgradeRequest = extern struct {
     release: Release,
-    reserved: [12]u8 = [_]u8{0} ** 12,
+    reserved: [12]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(UpgradeRequest) == 16);
@@ -634,7 +640,7 @@ pub const UpgradeRequest = extern struct {
 
 /// To ease investigation of accidents, assign a separate exit status for each fatal condition.
 /// This is a process-global set.
-const FatalReason = enum(u8) {
+pub const FatalReason = enum(u8) {
     cli = 1,
     no_space_left = 2,
     manifest_node_pool_exhausted = 3,
@@ -643,7 +649,7 @@ const FatalReason = enum(u8) {
     forest_tables_count_would_exceed_limit = 6,
     unknown_vsr_command = 7,
 
-    fn exit_status(reason: FatalReason) u8 {
+    pub fn exit_status(reason: FatalReason) u8 {
         return @intFromEnum(reason);
     }
 };
@@ -854,32 +860,45 @@ pub fn parse_addresses(
     while (comma_iterator.next()) |raw_address| : (index += 1) {
         assert(index < out_buffer.len);
         if (raw_address.len == 0) return error.AddressHasTrailingComma;
-        out_buffer[index] = try parse_address_and_port(raw_address);
+        out_buffer[index] = try parse_address_and_port(.{
+            .string = raw_address,
+            .port_default = constants.port,
+        });
     }
     assert(index == address_count);
 
     return out_buffer[0..address_count];
 }
 
-pub fn parse_address_and_port(string: []const u8) !std.net.Address {
-    assert(string.len > 0);
+pub fn parse_address_and_port(
+    options: struct {
+        string: []const u8,
+        port_default: u16,
+    },
+) !std.net.Address {
+    assert(options.string.len > 0);
+    assert(options.port_default > 0);
 
-    if (std.mem.lastIndexOfAny(u8, string, ":.]")) |split| {
-        if (string[split] == ':') {
+    if (std.mem.lastIndexOfAny(u8, options.string, ":.]")) |split| {
+        if (options.string[split] == ':') {
             return parse_address(
-                string[0..split],
-                std.fmt.parseUnsigned(u16, string[split + 1 ..], 10) catch |err| switch (err) {
+                options.string[0..split],
+                std.fmt.parseUnsigned(
+                    u16,
+                    options.string[split + 1 ..],
+                    10,
+                ) catch |err| switch (err) {
                     error.Overflow => return error.PortOverflow,
                     error.InvalidCharacter => return error.PortInvalid,
                 },
             );
         } else {
-            return parse_address(string, constants.port);
+            return parse_address(options.string, options.port_default);
         }
     } else {
         return std.net.Address.parseIp4(
             constants.address,
-            std.fmt.parseUnsigned(u16, string, 10) catch |err| switch (err) {
+            std.fmt.parseUnsigned(u16, options.string, 10) catch |err| switch (err) {
                 error.Overflow => return error.PortOverflow,
                 error.InvalidCharacter => return error.AddressInvalid,
             },
@@ -1035,7 +1054,7 @@ test "parse_addresses: fuzz" {
 
     var prng = stdx.PRNG.from_seed(seed);
 
-    var input_max: [len_max]u8 = .{0} ** len_max;
+    var input_max: [len_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
     for (0..test_count) |_| {
         const len = prng.int_inclusive(usize, len_max);
@@ -1171,7 +1190,7 @@ pub fn root_members(cluster: u128) Members {
     };
     comptime assert(@sizeOf(IdSeed) == 33);
 
-    var result = [_]u128{0} ** constants.members_max;
+    var result: [constants.members_max]u128 = @splat(0);
     var replica: u8 = 0;
     while (replica < constants.members_max) : (replica += 1) {
         const seed = IdSeed{
@@ -1310,7 +1329,7 @@ const ViewChangeHeadersSlice = struct {
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
             if (headers.command == .do_view_change or
                 (headers.command == .start_view and
-                index < constants.pipeline_prepare_queue_max + 1))
+                    index < constants.pipeline_prepare_queue_max + 1))
             {
                 assert(header.op == head.op - index);
             }

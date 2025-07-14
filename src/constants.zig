@@ -658,8 +658,8 @@ comptime {
 // runtime-known number of free blocks.
 //
 // For simplicity for now, size IOPS to always be available.
-pub const lsm_compaction_queue_read_max = 8;
-pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_queue_read_max = 16;
+pub const lsm_compaction_queue_write_max = 16;
 pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
 pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
 
@@ -763,14 +763,12 @@ pub const StateMachineConfig = struct {
     release: vsr.Release,
     message_body_size_max: comptime_int,
     lsm_compaction_ops: comptime_int,
-    vsr_operations_reserved: u8,
 };
 
 pub const state_machine_config = StateMachineConfig{
     .release = config.process.release,
     .message_body_size_max = message_body_size_max,
     .lsm_compaction_ops = lsm_compaction_ops,
-    .vsr_operations_reserved = vsr_operations_reserved,
 };
 
 /// TigerBeetle uses asserts proactively, unless they severely degrade performance. For production,

@@ -3,13 +3,13 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const global_constants = @import("../constants.zig");
+const constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
 const ForestType = @import("../lsm/forest.zig").ForestType;
 
 pub fn StateMachineType(
     comptime Storage: type,
-    comptime config: global_constants.StateMachineConfig,
+    comptime config: constants.StateMachineConfig,
 ) type {
     return struct {
         const StateMachine = @This();
@@ -18,7 +18,7 @@ pub fn StateMachineType(
         pub const Workload = WorkloadType(StateMachine);
 
         pub const Operation = enum(u8) {
-            echo = config.vsr_operations_reserved + 0,
+            echo = constants.vsr_operations_reserved + 0,
         };
 
         pub fn operation_from_vsr(operation: vsr.Operation) ?Operation {
@@ -27,7 +27,7 @@ pub fn StateMachineType(
             return vsr.Operation.to(StateMachine, operation);
         }
 
-        pub const constants = struct {
+        pub const machine_constants = struct {
             pub const message_body_size_max = config.message_body_size_max;
         };
 
@@ -211,7 +211,7 @@ pub fn StateMachineType(
             timestamp: u64,
             operation: Operation,
             input: []align(16) const u8,
-            output: *align(16) [constants.message_body_size_max]u8,
+            output: *align(16) [machine_constants.message_body_size_max]u8,
         ) usize {
             assert(op != 0);
 
@@ -281,7 +281,7 @@ pub fn StateMachineType(
 fn WorkloadType(comptime StateMachine: type) type {
     return struct {
         const Workload = @This();
-        const constants = StateMachine.constants;
+        const constants = StateMachine.machine_constants;
 
         prng: *stdx.PRNG,
         options: Options,

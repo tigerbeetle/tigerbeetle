@@ -56,6 +56,7 @@ create_accounts
 create_transfer
 create_transfers
 credit_account_id
+Datadog
 datastack
 Dconfig
 Dcpu
@@ -190,6 +191,7 @@ myscript
 nack
 nacks
 namespace
+namespaced
 namespaces
 Nearline
 networkd
@@ -244,12 +246,14 @@ queryable
 quickstart
 Rafiki
 Rappa
+rbino
 reactively
 READMEs
 realised
 realtime
 rebalances
 rebase
+recovering_head
 Recurse
 Redpanda
 refactorings
@@ -321,6 +325,7 @@ tbid
 tbtest
 tdaly
 teardown
+Telegraf
 tenatus
 tensorush
 threadpools
@@ -355,6 +360,7 @@ userspace
 usize
 utcnow
 versión
+view_change
 Viewstamped
 virtualized
 Vitesse

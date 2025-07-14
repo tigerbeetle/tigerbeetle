@@ -1319,7 +1319,7 @@ pub const IO = struct {
                 log.info("allocating by writing to the last sector of the file instead...", .{});
 
                 const sector_size = constants.sector_size;
-                const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+                const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                 // Handle partial writes where the physical sector is less than a logical sector:
                 const write_offset = size - sector.len;
@@ -1439,6 +1439,20 @@ pub const IO = struct {
             const err = os.windows.kernel32.GetLastError();
             return os.windows.unexpectedError(err);
         }
+    }
+
+    pub const PReadError = posix.PReadError;
+
+    pub fn aof_blocking_write_all(_: *IO, fd: fd_t, buffer: []const u8) posix.WriteError!void {
+        return common.aof_blocking_write_all(fd, buffer);
+    }
+
+    pub fn aof_blocking_pread_all(_: *IO, fd: fd_t, buffer: []u8, offset: u64) PReadError!usize {
+        return common.aof_blocking_pread_all(fd, buffer, offset);
+    }
+
+    pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
+        return common.aof_blocking_close(fd);
     }
 };
 

@@ -3,6 +3,308 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.50
+
+Released: 2025-07-13
+
+### Internals
+
+- [#3076](https://github.com/tigerbeetle/tigerbeetle/pull/3076)
+
+  Cleanup Zig TODO items that have been resolved with the recent upgrade to Zig 0.14.1.
+
+- [#3071](https://github.com/tigerbeetle/tigerbeetle/pull/3071)
+
+  Always copy fields from `vsr_options` to `build_options`, since Zig 0.14.1 removed anonymous
+  structs. Thanks @rbino!
+
+- [#3075](https://github.com/tigerbeetle/tigerbeetle/pull/3075),
+  [#3074](https://github.com/tigerbeetle/tigerbeetle/pull/3074)
+
+  Use realtime to enforce budget and refresh timeouts in the CFO.
+
+- [#3072](https://github.com/tigerbeetle/tigerbeetle/pull/3072)
+
+  Remove `unwind_tables` from release builds and strip client libraries to reduce binary size.
+
+### TigerTracks 🎧
+
+- [Washday Blues](https://www.youtube.com/watch?v=a77xKtyVKMw)
+
+## TigerBeetle 0.16.49
+
+Released: 2025-07-04
+
+### Safety And Performance
+
+- [#3064](https://github.com/tigerbeetle/tigerbeetle/pull/3064)
+
+  Fix a division by zero when logging CDC metrics, and increase resolution to nanoseconds.
+
+- [#3050](https://github.com/tigerbeetle/tigerbeetle/pull/3050)
+
+  Apply backpressure at primary to mitigate an issue with lagging backups.
+
+### Internals
+
+- [#2705](https://github.com/tigerbeetle/tigerbeetle/pull/2705)
+
+  Upgrade to Zig 0.14.1.
+
+- [#3068](https://github.com/tigerbeetle/tigerbeetle/pull/3068)
+
+  Fix a typo that caused probabilities to be parsed as hexadecimal.
+
+### TigerTracks 🎧
+
+- [Dance of Maria](https://open.spotify.com/track/0f7iz1qAWSz61BdHTXbzvC?si=d1znWf4XR1Gev1RZsgtPpQ)
+
+## TigerBeetle 0.16.48
+
+Released: 2025-07-01
+
+### Internals
+
+- [#3062](https://github.com/tigerbeetle/tigerbeetle/pull/3062)
+
+  Updates the publishing process for the Java client to conform to the Maven Central Repository
+  due to the [OSSRH service end-of-life](https://central.sonatype.org/news/20250326_ossrh_sunset/).
+
+- [#3048](https://github.com/tigerbeetle/tigerbeetle/pull/3048),
+  [#3047](https://github.com/tigerbeetle/tigerbeetle/pull/3047)
+
+  Fixes and improvements for tracing and metrics.
+
+### TigerTracks 🎧
+
+- [All Shook Up](https://www.youtube.com/watch?v=23zLefwiii4&list=RD23zLefwiii4)
+
+## TigerBeetle 0.16.47
+
+Released: 2025-06-27
+
+Note: This release is missing some client libraries in their respective package managers.
+
+### Safety And Performance
+
+- [#3032](https://github.com/tigerbeetle/tigerbeetle/pull/3032)
+
+  Fix ABI assertions in Rust client.
+
+- [#3039](https://github.com/tigerbeetle/tigerbeetle/pull/3039)
+
+  Swarm test different replication configurations in VOPR.
+
+- [#3053](https://github.com/tigerbeetle/tigerbeetle/pull/3053)
+
+  Supports CDC processing for transfers created by versions earlier than `0.16.29`.
+  Fixes a liveness bug that would crash the replica if a CDC query encountered objects
+  created with a schema before [#2507](https://github.com/tigerbeetle/tigerbeetle/pull/2507).
+
+### Features
+
+- [#3038](https://github.com/tigerbeetle/tigerbeetle/pull/3038)
+
+  Add `client_request_round_trip` metric to track end-to-end client request latency.
+
+- [#3043](https://github.com/tigerbeetle/tigerbeetle/pull/3043)
+
+  Support `--clients` alongside `--transfer-batch-delay-us` in `tigerbeetle benchmark`.
+
+- [#3056](https://github.com/tigerbeetle/tigerbeetle/pull/3056)
+
+  The command `tigerbeetle inspect constants` prints VSR queue sizes.
+
+### Internals
+
+- [#3045](https://github.com/tigerbeetle/tigerbeetle/pull/3045)
+
+  Define timeouts in terms of `tick_ms`.
+
+- [#3042](https://github.com/tigerbeetle/tigerbeetle/pull/3042)
+
+  Disable "hint" argument for mmap call, which was observed to cause stack overflow.
+
+### TigerTracks 🎧
+
+- [Wishmaster](https://www.youtube.com/watch?v=XCGQiGEYl4Y)
+
+## TigerBeetle 0.16.46
+
+Released: 2025-06-19
+
+### Safety And Performance
+
+- [#3030](https://github.com/tigerbeetle/tigerbeetle/pull/3030)
+
+  Always build tb_client for Rust client in release mode.
+
+### Internals
+
+- [#3031](https://github.com/tigerbeetle/tigerbeetle/pull/3031)
+
+  Prioritize more important fuzzers in CFO.
+
+### TigerTracks 🎧
+
+- [Geef Mij Maar Amsterdam](https://open.spotify.com/track/2eiYJEuVh8axfumgEGvyPz?si=9821ae99edf24415)
+
+## TigerBeetle 0.16.45
+
+Released: 2025-06-13
+
+This release changes the CDC message header to use AMQP signed integers.
+The new encoding will be handled transparently by RabbitMQ/AMQP clients. However, code changes
+might be necessary if the consumer explicitly relies on the unsigned data type.
+
+### Safety And Performance
+
+- [#3023](https://github.com/tigerbeetle/tigerbeetle/pull/3023)
+
+  Fix a liveness bug related to when replicas are syncing.
+
+- [#3022](https://github.com/tigerbeetle/tigerbeetle/pull/3022)
+
+  Fix a crash related to timing when measuring commit timing.
+
+### Features
+
+- [#2907](https://github.com/tigerbeetle/tigerbeetle/pull/2907)
+
+  Add documentation on how to monitor TigerBeetle, track requests end-to-end for better monitoring.
+
+- [#3019](https://github.com/tigerbeetle/tigerbeetle/pull/3019),
+  [#3029](https://github.com/tigerbeetle/tigerbeetle/pull/3029)
+
+  Improves compatibility of our new CDC connector by supporting AMQP signed integer types, and
+  fixes an assertion that previously overlooked the possibility of receiving an asynchronous
+  `basic_ack` while publishing a batch of messages.
+  Thanks @alvinyan-bond for your feedback!
+
+### Internals
+
+- [#3018](https://github.com/tigerbeetle/tigerbeetle/pull/3018)
+
+  Add a recovery smoke test.
+
+### TigerTracks 🎧
+
+- [The Grid](https://open.spotify.com/track/64VYy2f9QBx26P1YjNQrEc?si=d09a228548b14989)
+
+## TigerBeetle 0.16.44
+
+Released: 2025-06-06
+
+### Features
+
+- [#3006](https://github.com/tigerbeetle/tigerbeetle/pull/3006)
+
+  Improve logging for missing replies by including the op number.
+
+### Internals
+
+- [#3011](https://github.com/tigerbeetle/tigerbeetle/pull/3011)
+
+  DevHub now displays how many fuzz runs are executed per minute (VPM).
+
+- [#3010](https://github.com/tigerbeetle/tigerbeetle/pull/3010)
+
+  Remove `cluster` from the MessageBus as part of the MessageBuffer rework.
+
+- [#2992](https://github.com/tigerbeetle/tigerbeetle/pull/2992)
+
+  Handle all message padding uniformly.
+
+- [#3001](https://github.com/tigerbeetle/tigerbeetle/pull/3001)
+
+  Limit the fuzzer processes to 20GiB of RAM.
+
+- [#3009](https://github.com/tigerbeetle/tigerbeetle/pull/3009)
+
+  Prevent stack probing from actually using all of the stack due to unexpected inlining.
+
+### TigerTracks 🎧
+
+- [Don Toliver - Lose My Mind (feat. Doja Cat)](https://www.youtube.com/watch?v=WWEs82u37Mw)
+
+## TigerBeetle 0.16.43
+
+Released: 2025-05-30
+
+This release includes the `tigerbeetle recover` subcommand, which can be used to _safely_ recover a
+replica that is permanantly lost.
+
+Additionally, it includes Change Data Capture (CDC) support to stream TigerBeetle state to Advanced
+Message Queuing Protocol (AMQP) targets, such as RabbitMQ and other compatible brokers.
+
+Check out the [documentation](https://docs.tigerbeetle.com/operating/) to learn about how to use
+CDC and `tigerbeetle recover`!
+
+
+### Safety And Performance
+
+- [#2996](https://github.com/tigerbeetle/tigerbeetle/pull/2996)
+
+  Add the `tigerbeetle recover` subcommand, to safely recover a replica that is permanantly lost
+  (e.g. if the SSD fails).
+
+  Earlier, the only way to recover a permanantly lost replica was using the `tigerbeetle format`
+  command. Howerver, this was unsafe, as a newly-formatted replica may nack prepares which its
+  previous incarnation acked -- a correctness bug.
+
+- [#2880](https://github.com/tigerbeetle/tigerbeetle/pull/2880)
+
+  Implement an adaptive replication routing protocol to handle changes in network topology.
+
+  To select the best route, primary uses outcome-focused explore-exploit approach. Every once in a
+  while, the primary tries an alternative route, and replaces the current route if the alternative
+  provides better replication latency.
+
+- [#2970](https://github.com/tigerbeetle/tigerbeetle/pull/2970),
+  [#3002](https://github.com/tigerbeetle/tigerbeetle/pull/3002)
+
+  Replica pulls messages from the MessageBus, as opposed to the MessageBus pushing messages.
+
+  Earlier, replicas had to process _every_ message that the bus pushed. This could lead to messages
+  being dropped due to lack of available disk read/write IOPs. Now, a replica can "suspend" certain
+  messages and return to them later when it has enough IOPs.
+
+### Features
+
+- [#2917](https://github.com/tigerbeetle/tigerbeetle/pull/2917)
+
+  CDC support to stream TigerBeetle state to AMQP targets, such as RabbitMQ and other compatible
+  brokers.
+
+  We implement the AMQP 0.9.1 specification instead of AMQP 1.0 as it is simpler and more widely
+  supported (e.g., RabbitMQ only recently added native AMQP 1.0 support).
+
+### Internals
+
+- [#2982](https://github.com/tigerbeetle/tigerbeetle/pull/2982)
+
+  Unify the production and testing AOF code paths to make sure the production AOF is rigorously
+  fuzzed by the VOPR.
+
+- [#2991](https://github.com/tigerbeetle/tigerbeetle/pull/2991)
+
+  Reduce code duplication while erasing IO callbacks' type.
+
+- [#2998](https://github.com/tigerbeetle/tigerbeetle/pull/2998)
+
+  Track debug build times on DevHub.
+
+- [#2987](https://github.com/tigerbeetle/tigerbeetle/pull/2987),
+  [#2988](https://github.com/tigerbeetle/tigerbeetle/pull/2988),
+  [#2997](https://github.com/tigerbeetle/tigerbeetle/pull/2997),
+  [#2999](https://github.com/tigerbeetle/tigerbeetle/pull/2999)
+
+  Miscellaneous improvements and fixes to CI and release.
+
+### TigerTracks 🎧
+
+- [16 CARRIAGES](https://open.spotify.com/track/6XXxKsu3RJeN3ZvbMYrgQW?si=aa3fcce771d542ac)
+
 ## TigerBeetle 0.16.42
 
 Released: 2025-05-23

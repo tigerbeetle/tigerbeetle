@@ -87,6 +87,7 @@ const stdx = @import("../stdx.zig");
 const log = stdx.log.scoped(.clock);
 const constants = @import("../constants.zig");
 const ratio = stdx.PRNG.ratio;
+const Instant = stdx.Instant;
 
 const clock_offset_tolerance_max: u64 =
     constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
@@ -331,6 +332,10 @@ pub fn ClockType(comptime Time: type) type {
         /// duplicate/misdirected heartbeats.
         pub fn monotonic(self: *Clock) u64 {
             return self.time.monotonic();
+        }
+
+        pub fn monotonic_instant(self: *Clock) Instant {
+            return self.time.monotonic_instant();
         }
 
         /// Called by `Replica.on_ping()` when responding to a ping with a pong.
@@ -978,7 +983,7 @@ test "clock: fuzz test" {
     });
     defer simulator.deinit();
 
-    var clock_ticks_without_synchronization = [_]u32{0} ** clock_count;
+    var clock_ticks_without_synchronization: [clock_count]u32 = @splat(0);
     while (simulator.ticks < ticks_max) {
         simulator.tick();
 

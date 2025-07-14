@@ -94,6 +94,24 @@ different. We think from the first principles what the right solution _should_ b
 
 For example, our [TigerStyle](../TIGER_STYLE.md) is an explicitly engineered engineering process.
 
+### Systems Thinking
+
+TigerBeetle is designed to be a part of a larger data processing system. What happens outside of
+TigerBeetle is as important as what's inside:
+
+- Each transfer carries an end-to-end idempotency key: a unique 128-bit ID generated and persisted
+  by the end application (e.g. a mobile phone or a website).
+- Applications do not submit transfers to TigerBeetle directly, going instead through an API
+  gateway.
+- The gateway provides an HTTP API for potentially untrusted clients.
+- The gateway aggregates individual transfers from separate applications into large batches.
+- Gateways are stateless and horizontally scalable. All state is managed by TigerBeetle.
+- End-to-end idempotency keys guarantee that each transfer is processed at most once, even if, due
+  to retry and load-balancing logic, it gets routed through several gateways.
+- TigerBeetle records high-volume business transactions using a debit-credit schema, but transactions
+  include a `user_data` field for linking up with a general purpose database (see
+  [system architecture](https://docs.tigerbeetle.com/coding/system-architecture/)).
+
 ### As Fast as a Hash Table
 
 Here's a mental model for TigerBeetle: a good way to solve financial transactions is an in-memory
@@ -562,9 +580,10 @@ ordering of requests is observed.
 
 ## Conclusion
 
-TigerBeetle is designed to deliver mission-critical safety and 1000x performance. Presently focused
-on financial transactions, it fundamentally solves the challenge of cost-efficiency OLTP at scale
-in a world and future becoming exponentially more transactional.
+TigerBeetle is designed to deliver mission-critical safety and 1000x performance, and power the
+world's transactions. Presently focused on financial transactions, it fundamentally solves the
+challenge of cost-efficient OLTP at scale in a world becoming exponentially more transactional and
+real-time.
 
 ## References
 
@@ -576,7 +595,6 @@ The collection of logical and magical art behind TigerBeetle:
 
 - [The LMAX Exchange Architecture - High Throughput, Low Latency and Plain Old Java -
   2014](https://skillsmatter.com/skillscasts/5247-the-lmax-exchange-architecture-high-throughput-low-latency-and-plain-old-java)
-
   - Sam Adams on the high-level design of LMAX.
 
 - [LMAX Disruptor](https://lmax-exchange.github.io/disruptor/files/Disruptor-1.0.pdf) - A high

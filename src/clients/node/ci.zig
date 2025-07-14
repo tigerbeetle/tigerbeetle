@@ -19,7 +19,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
     for ([_][]const u8{ "test", "benchmark" }) |tester| {
         log.info("testing {s}s", .{tester});
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+            .development = true,
+        });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
@@ -33,7 +35,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.pushd("./samples/" ++ sample);
         defer shell.popd();
 
-        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{});
+        var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+            .development = true,
+        });
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
@@ -74,6 +78,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     tigerbeetle: []const u8,
 }) !void {
     var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
+        .development = true,
         .prebuilt = options.tigerbeetle,
     });
     defer tmp_beetle.deinit(gpa);

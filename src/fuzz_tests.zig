@@ -56,7 +56,35 @@ const CLIArgs = struct {
 };
 
 pub fn main() !void {
+    fuzz.limit_ram();
+
     var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    // Disable "hint" argument for mmap call, which was observed to cause stack overflow.
+    // See https://ziggit.dev/t/stack-probe-puzzle/10291/3 for the full story.
+    gpa_allocator.backing_allocator = .{
+        .ptr = std.heap.page_allocator.ptr,
+        .vtable = &comptime .{
+            .alloc = struct {
+                fn alloc(
+                    ctx: *anyopaque,
+                    len: usize,
+                    ptr_align: std.mem.Alignment,
+                    ret_addr: usize,
+                ) ?[*]u8 {
+                    @atomicStore(
+                        @TypeOf(std.heap.next_mmap_addr_hint),
+                        &std.heap.next_mmap_addr_hint,
+                        null,
+                        .monotonic,
+                    );
+                    return std.heap.page_allocator.vtable.alloc(ctx, len, ptr_align, ret_addr);
+                }
+            }.alloc,
+            .remap = std.heap.page_allocator.vtable.remap,
+            .resize = std.heap.page_allocator.vtable.resize,
+            .free = std.heap.page_allocator.vtable.free,
+        },
+    };
     const gpa = gpa_allocator.allocator();
 
     var args = try std.process.argsWithAllocator(gpa);

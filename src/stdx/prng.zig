@@ -32,6 +32,10 @@ pub const Ratio = struct {
     // Invariant: denominator ≠ 0.
     denominator: u64,
 
+    pub fn zero() Ratio {
+        return .{ .numerator = 0, .denominator = 1 };
+    }
+
     pub fn format(
         r: Ratio,
         comptime fmt: []const u8,
@@ -47,9 +51,9 @@ pub const Ratio = struct {
         const numerator_string, const denominator_string = stdx.cut(value, "/") orelse
             return .{ .err = "expected 'a/b' ratio, but found:" };
 
-        const numerator = std.fmt.parseInt(u64, numerator_string, 16) catch
+        const numerator = std.fmt.parseInt(u64, numerator_string, 10) catch
             return .{ .err = "invalid numerator:" };
-        const denominator = std.fmt.parseInt(u64, denominator_string, 16) catch
+        const denominator = std.fmt.parseInt(u64, denominator_string, 10) catch
             return .{ .err = "invalid denominator:" };
         if (numerator > denominator) {
             return .{ .err = "ratio greater than 1:" };
@@ -62,6 +66,10 @@ test "Ratio.parse_flag_value" {
     assert(std.meta.eql(
         Ratio.parse_flag_value("3/4"),
         .{ .ok = ratio(3, 4) },
+    ));
+    assert(std.meta.eql(
+        Ratio.parse_flag_value("10/100"),
+        .{ .ok = ratio(10, 100) },
     ));
     assert(std.meta.eql(
         Ratio.parse_flag_value("3"),
@@ -130,7 +138,7 @@ fn next(prng: *PRNG) u64 {
 
 test next {
     var prng = from_seed(92);
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         distribution[prng.next() % 8] += 1;
     }
@@ -168,7 +176,7 @@ test fill {
     var buffer_max: [size_max]u8 = undefined;
     var prng = from_seed(32);
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..size_max + 1) |size| {
         // Check that the entire buffer is filled, by filling it over a couple of times
         // and checking that each byte is non-zero at least once.
@@ -195,13 +203,13 @@ test fill {
 /// No biased version is provided --- while biased generation is simpler&faster, the bias can be
 /// quite high depending on max!
 pub fn int_inclusive(prng: *PRNG, Int: anytype, max: Int) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     if (max == std.math.maxInt(Int)) {
         return prng.int(Int);
     }
 
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
-    const bits = @typeInfo(Int).Int.bits;
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
+    const bits = @typeInfo(Int).int.bits;
     const less_than = max + 1;
 
     // adapted from:
@@ -232,7 +240,7 @@ test int_inclusive {
     var prng = from_seed(92);
     for (0..8) |max_usize| {
         const max: u8 = @intCast(max_usize);
-        var distribution: [8]u32 = .{0} ** 8;
+        var distribution: [8]u32 = @splat(0);
         for (0..100) |_| {
             distribution[prng.int_inclusive(u8, max)] += 1;
         }
@@ -240,7 +248,7 @@ test int_inclusive {
         for (distribution[max + 1 ..]) |d| assert(d == 0);
     }
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         const n = prng.int_inclusive(u128, 7);
         distribution[@intCast(n)] += 1;
@@ -279,7 +287,7 @@ pub fn index(prng: *PRNG, slice: anytype) usize {
 test index {
     var prng = from_seed(92);
 
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..100) |_| {
         distribution[index(&prng, &distribution)] += 1;
     }
@@ -290,7 +298,7 @@ test index {
 
 /// Generates a uniform, unbiased integer r such that max ≤ r ≤ max.
 pub fn range_inclusive(prng: *PRNG, Int: type, min: Int, max: Int) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     assert(min <= max);
     return min + prng.int_inclusive(Int, max - min);
 }
@@ -299,7 +307,7 @@ test range_inclusive {
     var prng = from_seed(92);
     for (0..8) |min| {
         for (min..8) |max| {
-            var distribution: [8]u32 = .{0} ** 8;
+            var distribution: [8]u32 = @splat(0);
             for (0..100) |_| {
                 distribution[prng.range_inclusive(usize, min, max)] += 1;
             }
@@ -314,7 +322,7 @@ test range_inclusive {
 ///
 /// That is, fills @sizeOf(T) bytes with random bits.
 pub fn int(prng: *PRNG, Int: type) Int {
-    comptime assert(@typeInfo(Int).Int.signedness == .unsigned);
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
     if (Int == u64) return prng.next();
     if (@sizeOf(Int) < @sizeOf(u64)) return @truncate(prng.next());
     var result: Int = undefined;
@@ -336,7 +344,7 @@ test int {
 
 fn test_bytes_int(Int: type, want: Snap) !void {
     var prng = PRNG.from_seed(92);
-    var distribution: [8]u32 = .{0} ** 8;
+    var distribution: [8]u32 = @splat(0);
     for (0..1000) |_| {
         distribution[@intCast(prng.int(Int) % 8)] += 1;
     }
@@ -381,7 +389,8 @@ test chance {
 
 /// Like enum_weighted, but doesn't require specifying the enum up-front.
 pub fn chances(prng: *PRNG, weights: anytype) std.meta.FieldEnum(@TypeOf(weights)) {
-    return enum_weighted(prng, std.meta.FieldEnum(@TypeOf(weights)), weights);
+    const Enum = std.meta.FieldEnum(@TypeOf(weights));
+    return enum_weighted_impl(prng, Enum, weights);
 }
 
 test chances {
@@ -425,7 +434,11 @@ pub fn EnumWeightsType(E: type) type {
 
 /// Returns a random value of an enum, where probability is proportional to weight.
 pub fn enum_weighted(prng: *PRNG, Enum: type, weights: EnumWeightsType(Enum)) Enum {
-    const fields = @typeInfo(Enum).Enum.fields;
+    return enum_weighted_impl(prng, Enum, weights);
+}
+
+fn enum_weighted_impl(prng: *PRNG, Enum: type, weights: anytype) Enum {
+    const fields = @typeInfo(Enum).@"enum".fields;
     var total: u64 = 0;
     inline for (fields) |field| {
         total += @field(weights, field.name);
@@ -585,7 +598,12 @@ test shuffle {
 }
 
 test "no floating point please" {
-    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, @src().file, 64 * 1024);
+    const path = try std.fs.path.join(std.testing.allocator, &.{
+        "src",
+        @src().file,
+    });
+    defer std.testing.allocator.free(path);
+    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * 1024);
     defer std.testing.allocator.free(file_text);
 
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);

@@ -130,7 +130,7 @@ test "extract_function_name" {
     var buf: [1024]u8 = undefined;
     const func_name = extract_function_name(
         \\define internal fastcc i64 @".vsr.vsr.clock.ClockType(.vsr.time.Time).monotonic"
-        ++
+    ++
         \\(%.vsr.time.Time* %.0.1.val) unnamed_addr #1 !dbg !71485 {
     , &buf).?;
     try std.testing.expectEqualStrings(".vsr.vsr.clock.ClockType.monotonic", func_name);

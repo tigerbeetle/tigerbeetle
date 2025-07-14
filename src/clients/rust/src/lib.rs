@@ -793,20 +793,12 @@ fn assert_abi_compatibility() {
         std::mem::align_of::<tbc::tb_account_t>()
     );
     assert_eq!(
-        std::mem::size_of::<Account>(),
-        std::mem::size_of::<tbc::tb_account_t>()
+        std::mem::size_of::<AccountFlags>(),
+        std::mem::size_of::<tbc::TB_ACCOUNT_FLAGS>()
     );
     assert_eq!(
-        std::mem::align_of::<Account>(),
-        std::mem::align_of::<tbc::tb_account_t>()
-    );
-    assert_eq!(
-        std::mem::size_of::<Transfer>(),
-        std::mem::size_of::<tbc::tb_transfer_t>()
-    );
-    assert_eq!(
-        std::mem::align_of::<Transfer>(),
-        std::mem::align_of::<tbc::tb_transfer_t>()
+        std::mem::align_of::<AccountFlags>(),
+        std::mem::align_of::<tbc::TB_ACCOUNT_FLAGS>()
     );
     assert_eq!(
         std::mem::size_of::<Transfer>(),
@@ -815,6 +807,14 @@ fn assert_abi_compatibility() {
     assert_eq!(
         std::mem::align_of::<Transfer>(),
         std::mem::align_of::<tbc::tb_transfer_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<TransferFlags>(),
+        std::mem::size_of::<tbc::TB_TRANSFER_FLAGS>()
+    );
+    assert_eq!(
+        std::mem::align_of::<TransferFlags>(),
+        std::mem::align_of::<tbc::TB_TRANSFER_FLAGS>()
     );
     assert_eq!(
         std::mem::size_of::<AccountFilter>(),
@@ -823,6 +823,14 @@ fn assert_abi_compatibility() {
     assert_eq!(
         std::mem::align_of::<AccountFilter>(),
         std::mem::align_of::<tbc::tb_account_filter_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<AccountFilterFlags>(),
+        std::mem::size_of::<tbc::TB_ACCOUNT_FILTER_FLAGS>()
+    );
+    assert_eq!(
+        std::mem::align_of::<AccountFilterFlags>(),
+        std::mem::align_of::<tbc::TB_ACCOUNT_FILTER_FLAGS>()
     );
     assert_eq!(
         std::mem::size_of::<AccountBalance>(),
@@ -839,6 +847,14 @@ fn assert_abi_compatibility() {
     assert_eq!(
         std::mem::align_of::<QueryFilter>(),
         std::mem::align_of::<tbc::tb_query_filter_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<QueryFilterFlags>(),
+        std::mem::size_of::<tbc::TB_QUERY_FILTER_FLAGS>()
+    );
+    assert_eq!(
+        std::mem::align_of::<QueryFilterFlags>(),
+        std::mem::align_of::<tbc::TB_QUERY_FILTER_FLAGS>()
     );
 }
 
@@ -1487,7 +1503,7 @@ where
         user_tag: 0xABCD,
         operation: op,
         status: tbc::TB_PACKET_STATUS_TB_PACKET_OK,
-        opaque: Default::default(),
+        opaque: [0; 64],
     });
 
     (packet, rx)

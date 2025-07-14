@@ -22,14 +22,14 @@ pub const PRNG = @import("./stdx/prng.zig");
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
-            .Int => |int| assert(int.signedness == .unsigned),
-            .ComptimeInt => assert(numerator >= 0),
+            .int => |int| assert(int.signedness == .unsigned),
+            .comptime_int => assert(numerator >= 0),
             else => @compileError("div_ceil: invalid numerator type"),
         }
 
         switch (@typeInfo(@TypeOf(denominator))) {
-            .Int => |int| assert(int.signedness == .unsigned),
-            .ComptimeInt => assert(denominator > 0),
+            .int => |int| assert(int.signedness == .unsigned),
+            .comptime_int => assert(denominator > 0),
             else => @compileError("div_ceil: invalid denominator type"),
         }
     }
@@ -189,18 +189,18 @@ pub fn bytes_as_slice(
 ) type: {
     const type_info = @typeInfo(@TypeOf(bytes));
     switch (type_info) {
-        .Pointer => |info| switch (info.size) {
-            .One => switch (@typeInfo(info.child)) {
-                .Array => |array_info| assert(array_info.child == u8),
+        .pointer => |info| switch (info.size) {
+            .one => switch (@typeInfo(info.child)) {
+                .array => |array_info| assert(array_info.child == u8),
                 else => unreachable,
             },
-            .Slice => assert(info.child == u8),
+            .slice => assert(info.child == u8),
             else => unreachable,
         },
         else => unreachable,
     }
 
-    break :type if (type_info.Pointer.is_const) []const T else []T;
+    break :type if (type_info.pointer.is_const) []const T else []T;
 } {
     switch (precision) {
         .exact => {
@@ -293,7 +293,7 @@ pub const log = if (builtin.is_test)
     // Downgrade `err` to `warn` for tests.
     // Zig fails any test that does `log.err`, but we want to test those code paths here.
     struct {
-        pub fn scoped(comptime scope: @Type(.EnumLiteral)) type {
+        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
             const base = std.log.scoped(scope);
             return struct {
                 pub const err = warn;
@@ -309,7 +309,7 @@ else
 /// An alternative to the default logFn from `std.log`, which prepends a UTC timestamp.
 pub fn log_with_timestamp(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -362,14 +362,14 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
 
 fn has_pointers(comptime T: type) bool {
     switch (@typeInfo(T)) {
-        .Pointer => return true,
+        .pointer => return true,
         // Be conservative.
         else => return true,
 
-        .Bool, .Int, .Enum => return false,
+        .bool, .int, .@"enum" => return false,
 
-        .Array => |info| return comptime has_pointers(info.child),
-        .Struct => |info| {
+        .array => |info| return comptime has_pointers(info.child),
+        .@"struct" => |info| {
             inline for (info.fields) |field| {
                 if (comptime has_pointers(field.type)) return true;
             }
@@ -381,10 +381,10 @@ fn has_pointers(comptime T: type) bool {
 /// Checks that a type does not have implicit padding.
 pub fn no_padding(comptime T: type) bool {
     comptime switch (@typeInfo(T)) {
-        .Void => return true,
-        .Int => return @bitSizeOf(T) == 8 * @sizeOf(T),
-        .Array => |info| return no_padding(info.child),
-        .Struct => |info| {
+        .void => return true,
+        .int => return @bitSizeOf(T) == 8 * @sizeOf(T),
+        .array => |info| return no_padding(info.child),
+        .@"struct" => |info| {
             switch (info.layout) {
                 .auto => return false,
                 .@"extern" => {
@@ -420,12 +420,12 @@ pub fn no_padding(comptime T: type) bool {
                 .@"packed" => return @bitSizeOf(T) == 8 * @sizeOf(T),
             }
         },
-        .Enum => |info| {
+        .@"enum" => |info| {
             maybe(info.is_exhaustive);
             return no_padding(info.tag_type);
         },
-        .Pointer => return false,
-        .Union => return false,
+        .pointer => return false,
+        .@"union" => return false,
         else => return false,
     };
 }
@@ -460,7 +460,7 @@ pub inline fn hash_inline(value: anytype) u64 {
         assert(has_unique_representation(@TypeOf(value)));
     }
     return low_level_hash(0, switch (@typeInfo(@TypeOf(value))) {
-        .Struct, .Int => std.mem.asBytes(&value),
+        .@"struct", .int => std.mem.asBytes(&value),
         else => @compileError("unsupported hashing for " ++ @typeName(@TypeOf(value))),
     });
 }
@@ -536,7 +536,7 @@ test "hash_inline" {
 /// updates explicitly in production code.
 pub fn update(base: anytype, diff: anytype) @TypeOf(base) {
     assert(builtin.is_test);
-    assert(@typeInfo(@TypeOf(base)) == .Struct);
+    assert(@typeInfo(@TypeOf(base)) == .@"struct");
 
     var updated = base;
     inline for (std.meta.fields(@TypeOf(diff))) |f| {
@@ -606,7 +606,7 @@ test "stdx.zig: parse_dirty_semver" {
     }
 }
 
-// TODO(zig): Zig 0.11 doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
+// TODO(zig): std doesn't have the statfs / fstatfs syscalls to get the type of a filesystem.
 // Once those are available, this can be removed.
 // The `statfs` definition used by the Linux kernel, and the magic number for tmpfs, from
 // `man 2 fstatfs`.
@@ -639,28 +639,26 @@ pub fn fstatfs(fd: i32, statfs_buf: *StatFs) usize {
     );
 }
 
-// TODO(Zig): https://github.com/ziglang/zig/issues/17592.
 /// True if every value of the type `T` has a unique bit pattern representing it.
 /// In other words, `T` has no unused bits and no padding.
 pub fn has_unique_representation(comptime T: type) bool {
     switch (@typeInfo(T)) {
         else => return false, // TODO can we know if it's true for some of these types ?
 
-        .AnyFrame,
-        .Enum,
-        .ErrorSet,
-        .Fn,
+        .@"enum",
+        .error_set,
+        .@"fn",
         => return true,
 
-        .Bool => return false,
+        .bool => return false,
 
-        .Int => |info| return @sizeOf(T) * 8 == info.bits,
+        .int => |info| return @sizeOf(T) * 8 == info.bits,
 
-        .Pointer => |info| return info.size != .Slice,
+        .pointer => |info| return info.size != .slice,
 
-        .Array => |info| return comptime has_unique_representation(info.child),
+        .array => |info| return comptime has_unique_representation(info.child),
 
-        .Struct => |info| {
+        .@"struct" => |info| {
             // Only consider packed structs unique if they are byte aligned.
             if (info.backing_integer) |backing_integer| {
                 return @sizeOf(T) * 8 == @bitSizeOf(backing_integer);
@@ -677,7 +675,7 @@ pub fn has_unique_representation(comptime T: type) bool {
             return @sizeOf(T) == sum_size;
         },
 
-        .Vector => |info| return comptime has_unique_representation(info.child) and
+        .vector => |info| return comptime has_unique_representation(info.child) and
             @sizeOf(T) == @sizeOf(info.child) * info.len,
     }
 }
@@ -814,7 +812,7 @@ pub fn EnumUnionType(
         };
     }
 
-    return @Type(.{ .Union = .{
+    return @Type(.{ .@"union" = .{
         .layout = .auto,
         .fields = &fields,
         .decls = &.{},
@@ -896,7 +894,7 @@ pub fn array_print(
     args: anytype,
 ) []const u8 {
     const Args = @TypeOf(args);
-    const ArgsStruct = @typeInfo(Args).Struct;
+    const ArgsStruct = @typeInfo(Args).@"struct";
     comptime assert(ArgsStruct.is_tuple);
 
     comptime {
@@ -930,13 +928,29 @@ pub const Instant = struct {
 pub const Duration = struct {
     ns: u64,
 
-    pub fn microseconds(duration: Duration) u64 {
+    // Duration in microseconds, μs, 1/1_000_000 of a second.
+    pub fn us(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_us);
     }
 
-    pub fn milliseconds(duration: Duration) u64 {
+    // Duration in milliseconds, ms, 1/1_000 of a second.
+    pub fn ms(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_ms);
     }
+
+    pub fn min(lhs: Duration, rhs: Duration) Duration {
+        return .{ .ns = @min(lhs.ns, rhs.ns) };
+    }
+
+    pub fn max(lhs: Duration, rhs: Duration) Duration {
+        return .{ .ns = @max(lhs.ns, rhs.ns) };
+    }
+
+    pub const sort = struct {
+        pub fn asc(ctx: void, lhs: Duration, rhs: Duration) bool {
+            return std.sort.asc(u64)(ctx, lhs.ns, rhs.ns);
+        }
+    };
 };
 
 test "Instant/Duration" {
@@ -947,8 +961,8 @@ test "Instant/Duration" {
 
     const duration = instant_2.duration_since(instant_1);
     assert(duration.ns == 1_000_000_000);
-    assert(duration.microseconds() == 1_000_000);
-    assert(duration.milliseconds() == 1_000);
+    assert(duration.us() == 1_000_000);
+    assert(duration.ms() == 1_000);
 }
 
 // DateTime in UTC, intended primarily for logging.

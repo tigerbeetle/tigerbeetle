@@ -226,19 +226,24 @@ fn run_fuzzers(
     var tasks = Tasks.init(shell.arena.allocator());
     defer tasks.deinit();
 
-    // Some fuzzers may complete in under a second.
-    // Ticking only once per second would leave the CPU idle.
-    const second_ticks = 2;
+    const budget_ns = options.budget_seconds * std.time.ns_per_s;
+    var budget_timer = try std.time.Timer.start();
 
-    for (0..options.budget_seconds * second_ticks) |tick| {
-        const second = @divFloor(tick, second_ticks);
-        const tick_first = tick % second_ticks == 0;
-        const tick_final = tick % second_ticks == second_ticks - 1;
-        const iteration_last = tick_final and second == options.budget_seconds - 1;
-        const iteration_pull = tick_first and second % options.refresh_seconds == 0;
-        const iteration_push = (iteration_pull and second > 0) or iteration_last;
+    const refresh_ns = options.refresh_seconds * std.time.ns_per_s;
+    var refresh_timer = try std.time.Timer.start();
+    var refresh_first = true;
 
-        if (iteration_pull) {
+    const timeout_ns = options.timeout_seconds * std.time.ns_per_s;
+
+    while (true) {
+        const iteration_refresh = refresh_first or refresh_timer.read() >= refresh_ns;
+        if (iteration_refresh) refresh_timer.reset();
+
+        const iteration_last = budget_timer.read() >= budget_ns;
+        const iteration_push = (iteration_refresh and !refresh_first) or iteration_last;
+        refresh_first = false;
+
+        if (iteration_refresh) {
             try run_fuzzers_prepare_tasks(&tasks, shell, gh_token);
 
             for (tasks.list.items) |*task| {
@@ -272,7 +277,7 @@ fn run_fuzzers(
                     .seed = seed,
                 });
                 // NB: take timestamp after spawning to exclude build time.
-                const seed_timestamp_start: u64 = @intCast(std.time.timestamp());
+                const seed_timestamp_start: u64 = @intCast(std.time.nanoTimestamp());
 
                 child_or_null.* = .{
                     .child = child.process,
@@ -294,28 +299,13 @@ fn run_fuzzers(
             }
         }
 
-        // Increment the runtime of running tasks.
-        for (children) |*fuzzer_or_null| {
-            if (fuzzer_or_null.*) |*fuzzer| {
-                const task = tasks.get(
-                    std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
-                    fuzzer.seed.commit_sha,
-                    fuzzer.seed.branch,
-                ).?;
-                task.runtime_ticks += 1;
-                // Us a large (arbitrary) constant as the numerator to avoid rounding errors.
-                // Also this ensures that the initial +=1 when starting the process has relatively
-                // little impact, to avoid biasing scheduling in favor of long-running fuzzers.
-                task.runtime_virtual += @divFloor(1000, task.weight);
-            }
-        }
-
-        // Wait a tick before polling for completion.
-        std.time.sleep(@divFloor(1 * std.time.ns_per_s, second_ticks));
+        // Wait 100ms before polling for completion, to avoid hogging the CPU.
+        std.time.sleep(100 * std.time.ns_per_ms);
 
         var running_count: u32 = 0;
         for (children) |*fuzzer_or_null| {
             // Poll for completed fuzzers.
+
             if (fuzzer_or_null.*) |*fuzzer| {
                 running_count += 1;
 
@@ -328,14 +318,15 @@ fn run_fuzzers(
                     }
                 };
 
-                const seed_duration =
-                    @as(u64, @intCast(std.time.timestamp())) - fuzzer.seed.seed_timestamp_start;
-                const seed_expired = !fuzzer_done and seed_duration > options.timeout_seconds;
+                const seed_timestamp_start_ns = fuzzer.seed.seed_timestamp_start;
+                const seed_duration_ns =
+                    @as(u64, @intCast(std.time.nanoTimestamp())) - seed_timestamp_start_ns;
+                const seed_expired = !fuzzer_done and seed_duration_ns > timeout_ns;
 
                 if (fuzzer_done or seed_expired or iteration_last) {
-                    log.debug("will reap '{s}' after {}s{s}", .{
+                    log.debug("will reap '{s}' after {}ms{s}", .{
                         fuzzer.seed.command,
-                        seed_duration,
+                        @divFloor(seed_duration_ns, std.time.ns_per_ms),
                         if (fuzzer_done) "" else " (timeout)",
                     });
 
@@ -353,6 +344,11 @@ fn run_fuzzers(
                     } else {
                         var seed_record = fuzzer.seed;
                         seed_record.ok = std.meta.eql(term, .{ .Exited = 0 });
+                        // Convert seed_timestamp_start to seconds as `devhub.js` relies on it.
+                        seed_record.seed_timestamp_start = @divFloor(
+                            seed_timestamp_start_ns,
+                            std.time.ns_per_s,
+                        );
                         seed_record.seed_timestamp_end = @intCast(std.time.timestamp());
                         if (!seed_record.ok) {
                             seed_record.debug = try shell.fmt("{}", .{term});
@@ -364,6 +360,13 @@ fn run_fuzzers(
                         // Sanity-check that we definitely record all assertion failures.
                         assert(!seeds.getLast().ok);
                     }
+                    const task = tasks.get(
+                        std.meta.stringToEnum(Fuzzer, fuzzer.seed.fuzzer).?,
+                        fuzzer.seed.commit_sha,
+                        fuzzer.seed.branch,
+                    ).?;
+                    task.runtime_total_ns += seed_duration_ns;
+                    task.runtime_virtual += @divFloor(seed_duration_ns, task.weight);
 
                     fuzzer_or_null.* = null;
                 }
@@ -387,18 +390,20 @@ fn run_fuzzers(
             }
             seeds.clearRetainingCapacity();
         }
+
+        if (iteration_last) break;
     }
     assert(seeds.items.len == 0);
 
-    var runtime_total_ticks: u64 = 0;
-    for (tasks.list.items) |*task| runtime_total_ticks += task.runtime_ticks;
+    var runtime_total_ns: u64 = 0;
+    for (tasks.list.items) |*task| runtime_total_ns += task.runtime_total_ns;
     for (tasks.list.items) |*task| {
         log.info("commit={s} fuzzer={s:<24} runtime={}s {d:.2}% (active={})", .{
             task.seed_template.commit_sha[0..7],
             @tagName(task.seed_template.fuzzer),
-            @divFloor(task.runtime_ticks, second_ticks),
-            @as(f64, @floatFromInt(task.runtime_ticks * 100)) /
-                @as(f64, @floatFromInt(runtime_total_ticks)),
+            @divFloor(task.runtime_total_ns, std.time.ns_per_s),
+            @as(f64, @floatFromInt(task.runtime_total_ns * 100)) /
+                @as(f64, @floatFromInt(runtime_total_ns)),
             task.generation == tasks.generation,
         });
     }
@@ -427,7 +432,7 @@ const Tasks = struct {
         /// Inactive tasks have `task.generation < tasks.generation`.
         generation: u64,
         /// This is just used for logging, not scheduling.
-        runtime_ticks: u64,
+        runtime_total_ns: u64,
         /// Weight-adjusted runtime used for scheduling. Always positive and finite.
         /// Cumulative `runtime / weight`, but since `weight` can change over time, this is more
         /// precise.
@@ -435,7 +440,7 @@ const Tasks = struct {
     };
 
     generation: u64 = 1,
-    runtime_init: u64 = 1,
+    runtime_virtual_init: u64 = 1,
 
     list: List,
     map: Map,
@@ -532,8 +537,8 @@ const Tasks = struct {
             assert(task_existing.seed_template.fuzzer == seed_template.fuzzer);
             assert(std.mem.eql(u8, task_existing.working_directory, working_directory));
 
-            if (tasks.runtime_init < task_existing.runtime_virtual) {
-                tasks.runtime_init = task_existing.runtime_virtual;
+            if (tasks.runtime_virtual_init < task_existing.runtime_virtual) {
+                tasks.runtime_virtual_init = task_existing.runtime_virtual;
             } else {
                 if (task_existing.generation == tasks.generation - 1) {
                     // For tasks that were already active, leave their low `runtime_virtual`
@@ -541,7 +546,7 @@ const Tasks = struct {
                 } else {
                     // For tasks which were active in the past, but not in the latest generation,
                     // ensure that they are not starved in the new generation.
-                    task_existing.runtime_virtual = tasks.runtime_init;
+                    task_existing.runtime_virtual = tasks.runtime_virtual_init;
                 }
             }
             task_existing.generation = tasks.generation;
@@ -551,8 +556,8 @@ const Tasks = struct {
                 .seed_template = seed_template,
                 .generation = tasks.generation,
                 .weight = 0, // To be initialized later.
-                .runtime_ticks = 0,
-                .runtime_virtual = tasks.runtime_init,
+                .runtime_total_ns = 0,
+                .runtime_virtual = tasks.runtime_virtual_init,
             });
 
             try tasks.map.putNoClobber(.{
