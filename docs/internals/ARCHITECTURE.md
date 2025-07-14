@@ -100,16 +100,16 @@ TigerBeetle is designed to be a part of a larger data processing system. What ha
 TigerBeetle is as important as what's inside:
 
 - Each transfer carries an end-to-end idempotency key: a unique 128 bit ID generated and persisted
-  by the end application (a mobile phone or a website).
+  by the end application (e.g. a mobile phone or a website).
 - Applications do not submit transfers to TigerBeetle directly, going instead through an API
   gateway.
-- The gateway provides HTTP API for potentially untrusted clients.
+- The gateway provides an HTTP API for potentially untrusted clients.
 - The gateway aggregates individual transfers from separate applications into large batches.
-- Gateways are stateless and horizontally scalable. All the state is managed by TigerBeetle.
+- Gateways are stateless and horizontally scalable. All states are managed by TigerBeetle.
 - End-to-end idempotency keys guarantee that each transfer is processed at most once, even if, due
   to retry and load-balancing logic, it gets routed through several gateways.
 - TigerBeetle records high-volume business transactions under debit-credit schema, but transactions
-  include `user_data` field for linking up with a general purpose database (see
+  include a `user_data` field for linking up with a general purpose database (see
   [system architecture](https://docs.tigerbeetle.com/coding/system-architecture/)).
 
 ### As Fast as a Hash Table
