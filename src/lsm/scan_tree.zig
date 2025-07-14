@@ -282,7 +282,7 @@ pub fn ScanTreeType(
 
         /// Moves the iterator to the next position and returns its `Value` or `null` if the
         /// iterator has no more values to iterate.
-        /// May return `error.ReadAgain` if a data block needs to be loaded, in this case
+        /// May return `error.ReadAgain` if a value block needs to be loaded, in this case
         /// call `read()` and resume the iteration after the read callback.
         pub fn next(self: *ScanTree) error{ReadAgain}!?Value {
             switch (self.state) {
@@ -366,9 +366,9 @@ pub fn ScanTreeType(
                     // or ahead the probe.
                     assert(self.merge_iterator.?.key_popped == null or
                         switch (self.direction) {
-                        .ascending => self.merge_iterator.?.key_popped.? < probe_key,
-                        .descending => self.merge_iterator.?.key_popped.? > probe_key,
-                    });
+                            .ascending => self.merge_iterator.?.key_popped.? < probe_key,
+                            .descending => self.merge_iterator.?.key_popped.? > probe_key,
+                        });
 
                     // Once the underlying streams have been changed, the merge iterator needs
                     // to reset its state, otherwise it may have dirty keys buffered.
@@ -386,7 +386,7 @@ pub fn ScanTreeType(
             if (self.state.buffering.pending_count == 0) self.read_complete();
         }
 
-        /// The next data block for each level is available.
+        /// The next value block for each level is available.
         fn read_complete(self: *ScanTree) void {
             assert(self.state == .buffering);
             assert(self.state.buffering.pending_count == 0);
@@ -463,7 +463,7 @@ pub fn ScanTreeType(
                 .ascending => {
                     while (values.len > 1 and
                         key_from_value(&values[0]) ==
-                        key_from_value(&values[1]))
+                            key_from_value(&values[1]))
                     {
                         values = values[1..];
                     }
@@ -476,7 +476,7 @@ pub fn ScanTreeType(
                     const value_last = values[values.len - 1];
                     while (values.len > 1 and
                         key_from_value(&values[values.len - 1]) ==
-                        key_from_value(&values[values.len - 2]))
+                            key_from_value(&values[values.len - 2]))
                     {
                         values = values[0 .. values.len - 1];
                     }
@@ -665,9 +665,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 .fetching => return error.Drained,
                 .buffered => |values| {
                     assert(values.len > 0);
-                    assert(@intFromPtr(values.ptr) >= @intFromPtr(self.buffer.data_block));
+                    assert(@intFromPtr(values.ptr) >= @intFromPtr(self.buffer.value_block));
                     assert(@intFromPtr(values.ptr) <=
-                        @intFromPtr(self.buffer.data_block) + self.buffer.data_block.len);
+                        @intFromPtr(self.buffer.value_block) + self.buffer.value_block.len);
 
                     const value: *const Value = switch (self.scan.direction) {
                         .ascending => &values[0],
@@ -690,9 +690,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             var values = self.values.buffered;
             assert(values.len > 0);
-            assert(@intFromPtr(values.ptr) >= @intFromPtr(self.buffer.data_block));
+            assert(@intFromPtr(values.ptr) >= @intFromPtr(self.buffer.value_block));
             assert(@intFromPtr(values.ptr) <=
-                @intFromPtr(self.buffer.data_block) + self.buffer.data_block.len);
+                @intFromPtr(self.buffer.value_block) + self.buffer.value_block.len);
 
             defer {
                 assert(self.values == .buffered);
@@ -879,8 +879,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             const Range = struct { start: u32, end: u32 };
             const range_found: ?Range = range: {
-                const keys_max = Table.index_data_keys_used(self.buffer.index_block, .key_max);
-                const keys_min = Table.index_data_keys_used(self.buffer.index_block, .key_min);
+                const keys_max = Table.index_value_keys_used(self.buffer.index_block, .key_max);
+                const keys_min = Table.index_value_keys_used(self.buffer.index_block, .key_min);
                 // The `index_block` *might* contain the key range,
                 // otherwise, it shouldn't have been returned by the manifest.
                 assert(keys_min.len > 0 and keys_max.len > 0);
@@ -917,8 +917,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             };
 
             const index_schema = schema.TableIndex.from(self.buffer.index_block);
-            const data_addresses = index_schema.data_addresses_used(self.buffer.index_block);
-            const data_checksums = index_schema.data_checksums_used(self.buffer.index_block);
+            const data_addresses = index_schema.value_addresses_used(self.buffer.index_block);
+            const data_checksums = index_schema.value_checksums_used(self.buffer.index_block);
             assert(data_addresses.len == data_checksums.len);
 
             self.state = .{
@@ -971,7 +971,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             assert(self.scan.state == .buffering);
             assert(self.scan.state.buffering.pending_count > 0);
 
-            const values = Table.data_block_values_used(value_block);
+            const values = Table.value_block_values_used(value_block);
             const range = binary_search.binary_search_values_range(
                 Key,
                 Value,
@@ -983,9 +983,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
 
             if (range.count > 0) {
                 // The buffer is a whole grid block, but only the matching values should
-                // be copied to save memory bandwidth. The buffer `data block` does not
+                // be copied to save memory bandwidth. The buffer `value block` does not
                 // follow the block layout (e.g. header + values).
-                const buffer: []Value = std.mem.bytesAsSlice(Value, self.buffer.data_block);
+                const buffer: []Value = std.mem.bytesAsSlice(Value, self.buffer.value_block);
                 stdx.copy_disjoint(
                     .exact,
                     Value,
@@ -995,7 +995,7 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
                 // Found values that match the range query.
                 self.values = .{ .buffered = buffer[0..range.count] };
             } else {
-                // The `data_block` *might* contain the key range,
+                // The `value_block` *might* contain the key range,
                 // otherwise, it shouldn't have been returned by the iterator.
                 const key_min = key_from_value(&values[0]);
                 const key_max = key_from_value(&values[values.len - 1]);

@@ -25,7 +25,7 @@ const amqp = @import("./scripts/amqp.zig");
 
 pub fn log_fn(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {

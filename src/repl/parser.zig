@@ -188,12 +188,12 @@ pub const Parser = struct {
         key_to_validate: []const u8,
         value_to_validate: []const u8,
     ) !void {
-        inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_syntax_tree_field| {
+        inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_syntax_tree_field| {
             if (std.mem.eql(u8, @tagName(out.*), object_syntax_tree_field.name)) {
                 const active_value = @field(out, object_syntax_tree_field.name);
                 const ActiveValue = @TypeOf(active_value);
 
-                inline for (@typeInfo(ActiveValue).Struct.fields) |active_value_field| {
+                inline for (@typeInfo(ActiveValue).@"struct".fields) |active_value_field| {
                     if (std.mem.eql(u8, active_value_field.name, key_to_validate)) {
                         // Handle everything but flags, and skip reserved.
                         if (comptime (!std.mem.eql(u8, active_value_field.name, "flags") and
@@ -223,7 +223,7 @@ pub const Parser = struct {
                                 );
                                 inline for (@typeInfo(
                                     active_value_field.type,
-                                ).Struct.fields) |known_flag_field| {
+                                ).@"struct".fields) |known_flag_field| {
                                     if (std.mem.eql(
                                         u8,
                                         known_flag_field.name,
@@ -252,7 +252,7 @@ pub const Parser = struct {
 
     fn parse_int(comptime T: type, input: []const u8) !T {
         const info = @typeInfo(T);
-        comptime assert(info == .Int);
+        comptime assert(info == .int);
 
         // When base is zero the string prefix is examined to detect the true base:
         // "0b", "0o" or "0x", otherwise base=10 is assumed.
@@ -261,7 +261,7 @@ pub const Parser = struct {
         assert(input.len > 0);
         const input_negative = input[0] == '-';
 
-        if (info.Int.signedness == .unsigned and input_negative) {
+        if (info.int.signedness == .unsigned and input_negative) {
             // Negative input means `maxInt - input`.
             // Useful for representing sentinels such as `AMOUNT_MAX`, as `-0`.
             const max = std.math.maxInt(T);
@@ -293,7 +293,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -313,7 +313,7 @@ pub const Parser = struct {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     operation_comptime.state_machine_op(),
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,
@@ -333,7 +333,7 @@ pub const Parser = struct {
             // Expect comma separating objects.
             if (parser.offset < parser.input.len and parser.input[parser.offset] == ',') {
                 parser.offset += 1;
-                inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
+                inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_tree_field| {
                     if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
                         const unwrapped_field = @field(object, object_tree_field.name);
                         arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
@@ -405,7 +405,7 @@ pub const Parser = struct {
 
         // Add final object.
         if (object_has_fields) {
-            inline for (@typeInfo(ObjectSyntaxTree).Union.fields) |object_tree_field| {
+            inline for (@typeInfo(ObjectSyntaxTree).@"union".fields) |object_tree_field| {
                 if (std.mem.eql(u8, @tagName(object), object_tree_field.name)) {
                     const unwrapped_field = @field(object, object_tree_field.name);
                     arguments.appendSliceAssumeCapacity(std.mem.asBytes(&unwrapped_field));
@@ -452,16 +452,16 @@ pub const Parser = struct {
             try parser.terminal.print_error(
                 "Operation must be " ++
                     comptime operations: {
-                    var names: []const u8 = "";
-                    for (std.enums.values(Operation), 0..) |operation, index| {
-                        if (operation == .none) continue;
-                        names = names ++
-                            (if (names.len > 0) ", " else "") ++
-                            (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
-                            @tagName(operation);
-                    }
-                    break :operations names;
-                } ++ ". Got: '{s}'.\n",
+                        var names: []const u8 = "";
+                        for (std.enums.values(Operation), 0..) |operation, index| {
+                            if (operation == .none) continue;
+                            names = names ++
+                                (if (names.len > 0) ", " else "") ++
+                                (if (index == std.enums.values(Operation).len - 1) "or " else "") ++
+                                @tagName(operation);
+                        }
+                        break :operations names;
+                    } ++ ". Got: '{s}'.\n",
                 .{operation_identifier},
             );
             return Error.OperationBad;
@@ -889,7 +889,7 @@ test "parser.zig: Parser account filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .get_account_transfers,
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .credits = true,
@@ -967,7 +967,7 @@ test "parser.zig: Parser query filter successfully" {
                 .timestamp_max = 0,
                 .limit = StateMachine.operation_result_max(
                     .query_transfers,
-                    StateMachine.constants.message_body_size_max,
+                    StateMachine.machine_constants.message_body_size_max,
                 ),
                 .flags = .{
                     .reversed = false,

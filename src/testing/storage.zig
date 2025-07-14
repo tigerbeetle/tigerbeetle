@@ -889,7 +889,7 @@ pub const Storage = struct {
 
     /// Verify that the storage:
     /// - contains the given index block
-    /// - contains every data block referenced by the index block
+    /// - contains every value block referenced by the index block
     pub fn verify_table(storage: *const Storage, index_address: u64, index_checksum: u128) void {
         assert(index_address > 0);
 
@@ -901,15 +901,15 @@ pub const Storage = struct {
         assert(index_block_header.block_type == .index);
 
         for (
-            index_schema.data_addresses_used(index_block),
-            index_schema.data_checksums_used(index_block),
+            index_schema.value_addresses_used(index_block),
+            index_schema.value_checksums_used(index_block),
         ) |address, checksum| {
-            const data_block = storage.grid_block(address).?;
-            const data_block_header = schema.header_from_block(data_block);
+            const value_block = storage.grid_block(address).?;
+            const value_block_header = schema.header_from_block(value_block);
 
-            assert(data_block_header.address == address);
-            assert(data_block_header.checksum == checksum.value);
-            assert(data_block_header.block_type == .data);
+            assert(value_block_header.address == address);
+            assert(value_block_header.checksum == checksum.value);
+            assert(value_block_header.block_type == .value);
         }
     }
 

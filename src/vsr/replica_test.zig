@@ -217,7 +217,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
 
     // Corrupt the whole grid.
     // Manifest blocks will be repaired as each replica opens its forest.
-    // Table index/filter/data blocks will be repaired as the replica commits/compacts.
+    // Table index/filter/value blocks will be repaired as the replica commits/compacts.
     for ([_]TestReplicas{
         t.replica(.R0),
         t.replica(.R1),
@@ -1640,6 +1640,7 @@ test "Cluster: client: empty command=request operation=register body" {
                 .command = .request,
                 .operation = .register,
                 .release = client_release,
+                .previous_request_latency = 0,
             };
             request_header.set_checksum_body(&.{}); // Note the absence of a `vsr.RegisterRequest`.
             request_header.set_checksum();

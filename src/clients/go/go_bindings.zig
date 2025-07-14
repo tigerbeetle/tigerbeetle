@@ -23,15 +23,15 @@ const type_mappings = .{
 
 fn go_type(comptime Type: type) []const u8 {
     switch (@typeInfo(Type)) {
-        .Bool => return "bool",
-        .Enum => return comptime get_mapped_type_name(Type) orelse
+        .bool => return "bool",
+        .@"enum" => return comptime get_mapped_type_name(Type) orelse
             @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
-        .Struct => |info| switch (info.layout) {
+        .@"struct" => |info| switch (info.layout) {
             .@"packed" => return comptime go_type(std.meta.Int(.unsigned, @bitSizeOf(Type))),
             else => return comptime get_mapped_type_name(Type) orelse
                 @compileError("Type " ++ @typeName(Type) ++ " not mapped."),
         },
-        .Int => |info| {
+        .int => |info| {
             assert(info.signedness == .unsigned);
             return switch (info.bits) {
                 1 => "bool",
@@ -56,8 +56,6 @@ fn get_mapped_type_name(comptime Type: type) ?[]const u8 {
 }
 
 fn to_pascal_case(comptime input: []const u8, comptime min_len: ?usize) []const u8 {
-    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
-    // Without comptime blk, the compiler thinks slicing the output on return happens at runtime.
     return comptime blk: {
         var len: usize = 0;
         var output = [_]u8{' '} ** (min_len orelse input.len);
@@ -112,7 +110,7 @@ fn emit_enum(
         tag_type,
     });
 
-    const type_info = @typeInfo(Type).Enum;
+    const type_info = @typeInfo(Type).@"enum";
     const min_len = calculate_min_len(type_info);
     inline for (type_info.fields) |field| {
         if (comptime std.mem.startsWith(u8, field.name, "deprecated_")) continue;
@@ -236,7 +234,7 @@ fn emit_struct(
     comptime var flagsField = false;
     inline for (type_info.fields) |field| {
         switch (@typeInfo(field.type)) {
-            .Array => |array| {
+            .array => |array| {
                 try buffer.writer().print("\t{s} [{d}]{s}\n", .{
                     to_pascal_case(field.name, min_len),
                     array.len,
@@ -285,7 +283,7 @@ fn emit_struct(
         );
 
         switch (@typeInfo(flagType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .@"packed" => inline for (info.fields, 0..) |field, i| {
                     if (comptime std.mem.eql(u8, "padding", field.name)) continue;
 
@@ -330,7 +328,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
         const name = type_mapping[1];
 
         switch (@typeInfo(ZigType)) {
-            .Struct => |info| switch (info.layout) {
+            .@"struct" => |info| switch (info.layout) {
                 .auto => @compileError(
                     "Only packed or extern structs are supported: " ++ @typeName(ZigType),
                 ),
@@ -342,7 +340,7 @@ pub fn generate_bindings(buffer: *std.ArrayList(u8)) !void {
                 ),
                 .@"extern" => try emit_struct(buffer, info, name),
             },
-            .Enum => try emit_enum(
+            .@"enum" => try emit_enum(
                 buffer,
                 ZigType,
                 name,

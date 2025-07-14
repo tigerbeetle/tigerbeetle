@@ -37,13 +37,14 @@ pub const TreeConfig = struct {
 
 pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
     const Key = TreeTable.Key;
-    const Value = TreeTable.Value;
     const tombstone = TreeTable.tombstone;
 
     return struct {
         const Tree = @This();
 
         pub const Table = TreeTable;
+        pub const Value = Table.Value;
+
         pub const TableMemory = @import("table_memory.zig").TableMemoryType(Table);
         pub const Manifest = @import("manifest.zig").ManifestType(Table, Storage);
 
@@ -240,9 +241,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
         /// - .possible if the key may exist in the Manifest but its existence cannot be
         ///  ascertained without IO, along with the level number at which IO must be performed.
         ///
-        /// This function attempts to fetch the index & data blocks for the tables that
+        /// This function attempts to fetch the index & value blocks for the tables that
         /// could contain the key synchronously from the Grid cache. It then attempts to ascertain
-        /// the existence of the key in the data block. If any of the blocks needed to
+        /// the existence of the key in the value block. If any of the blocks needed to
         /// ascertain the existence of the key are not in the Grid cache, it bails out.
         /// The returned `.positive` Value pointer is only valid synchronously.
         pub fn lookup_from_levels_cache(tree: *Tree, snapshot: u64, key: Key) LookupMemoryResult {
@@ -263,15 +264,15 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 };
 
                 const key_blocks = Table.index_blocks_for_key(index_block, key) orelse continue;
-                switch (tree.cached_data_block_search(
-                    key_blocks.data_block_address,
-                    key_blocks.data_block_checksum,
+                switch (tree.cached_value_block_search(
+                    key_blocks.value_block_address,
+                    key_blocks.value_block_checksum,
                     key,
                 )) {
                     .negative => {},
-                    // Key present in the data block.
+                    // Key present in the value block.
                     .positive => |value| return .{ .positive = value },
-                    // Data block was not found in the grid cache. We cannot rule out
+                    // Value block was not found in the grid cache. We cannot rule out
                     // the existence of the key without I/O, and therefore bail out.
                     .block_not_in_cache => return .{ .possible = iterator.level - 1 },
                 }
@@ -284,7 +285,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             return Table.layout.block_value_count_max;
         }
 
-        fn cached_data_block_search(
+        fn cached_value_block_search(
             tree: *Tree,
             address: u64,
             checksum: u128,
@@ -298,8 +299,8 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 address,
                 checksum,
                 .{ .coherent = true },
-            )) |data_block| {
-                if (Table.data_block_search(data_block, key)) |value| {
+            )) |value_block| {
+                if (Table.value_block_search(value_block, key)) |value| {
                     return .{ .positive = value };
                 } else {
                     return .negative;
@@ -369,7 +370,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             index_block_addresses: [constants.lsm_levels]u64,
             index_block_checksums: [constants.lsm_levels]u128,
 
-            data_block: ?struct {
+            value_block: ?struct {
                 address: u64,
                 checksum: u128,
             } = null,
@@ -377,7 +378,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
             callback: *const fn (*Tree.LookupContext, ?*const Value) void,
 
             fn read_index_block(context: *LookupContext) void {
-                assert(context.data_block == null);
+                assert(context.value_block == null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
@@ -393,7 +394,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             fn read_index_block_callback(completion: *Read, index_block: BlockPtrConst) void {
                 const context: *LookupContext = @fieldParentPtr("completion", completion);
-                assert(context.data_block == null);
+                assert(context.value_block == null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
@@ -405,29 +406,29 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                     return;
                 };
 
-                context.data_block = .{
-                    .address = blocks.data_block_address,
-                    .checksum = blocks.data_block_checksum,
+                context.value_block = .{
+                    .address = blocks.value_block_address,
+                    .checksum = blocks.value_block_checksum,
                 };
 
                 context.tree.grid.read_block(
-                    .{ .from_local_or_global_storage = read_data_block_callback },
+                    .{ .from_local_or_global_storage = read_value_block_callback },
                     completion,
-                    context.data_block.?.address,
-                    context.data_block.?.checksum,
+                    context.value_block.?.address,
+                    context.value_block.?.checksum,
                     .{ .cache_read = true, .cache_write = true },
                 );
             }
 
-            fn read_data_block_callback(completion: *Read, data_block: BlockPtrConst) void {
+            fn read_value_block_callback(completion: *Read, value_block: BlockPtrConst) void {
                 const context: *LookupContext = @fieldParentPtr("completion", completion);
-                assert(context.data_block != null);
+                assert(context.value_block != null);
                 assert(context.index_block < context.index_block_count);
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
-                assert(Table.data.block_metadata(data_block).tree_id == context.tree.config.id);
+                assert(Table.data.block_metadata(value_block).tree_id == context.tree.config.id);
 
-                if (Table.data_block_search(data_block, context.key)) |value| {
+                if (Table.value_block_search(value_block, context.key)) |value| {
                     context.callback(context, unwrap_tombstone(value));
                 } else {
                     // The key is not present in this table, check the next level.
@@ -440,9 +441,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 assert(context.index_block_count > 0);
                 assert(context.index_block_count <= constants.lsm_levels);
 
-                // Data block may be null if the key is not contained in the
+                // Value block may be null if the key is not contained in the
                 // index block's key range.
-                maybe(context.data_block == null);
+                maybe(context.value_block == null);
 
                 context.index_block += 1;
                 if (context.index_block == context.index_block_count) {
@@ -451,7 +452,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 }
                 assert(context.index_block < context.index_block_count);
 
-                context.data_block = null;
+                context.value_block = null;
                 context.read_index_block();
             }
         };

@@ -196,7 +196,7 @@ pub const QueueDeclareArguments = struct {
                                     inline else => |tag| comptime "" ++ kebab_case(@tagName(tag)),
                                 } }),
                                 bool => encoder.put(key, .{ .boolean = value }),
-                                u32 => encoder.put(key, .{ .long_uint = value }),
+                                u32 => encoder.put(key, .{ .uint32 = value }),
                                 else => comptime unreachable,
                             }
                         }

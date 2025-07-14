@@ -261,12 +261,13 @@ pub const Runner = struct {
     }
 
     pub fn deinit(self: *Runner, allocator: std.mem.Allocator) void {
+        self.amqp_client.deinit(allocator);
         self.vsr_client.deinit(allocator);
         self.message_pool.deinit(allocator);
-        self.amqp_client.deinit(allocator);
+        self.io.deinit();
         self.buffer.deinit(allocator);
-        allocator.free(self.progress_tracker_queue);
         allocator.free(self.locker_queue);
+        allocator.free(self.progress_tracker_queue);
     }
 
     /// To make the CDC stateless, internal queues are used to store the state:
@@ -869,9 +870,9 @@ const Metrics = struct {
     const TimingSummary = struct {
         timer: std.time.Timer,
 
-        duration_min_ms: ?u64 = null,
-        duration_max_ms: ?u64 = null,
-        duration_sum_ms: u64 = 0,
+        duration_min: ?stdx.Duration = null,
+        duration_max: ?stdx.Duration = null,
+        duration_sum: stdx.Duration = .{ .ns = 0 },
         event_count: u64 = 0,
         count: u64 = 0,
 
@@ -879,14 +880,25 @@ const Metrics = struct {
             metrics: *TimingSummary,
             event_count: u64,
         ) void {
-            const duration_ms: u64 = @divFloor(metrics.timer.read(), std.time.ns_per_ms);
+            metrics.timing(
+                event_count,
+                .{ .ns = metrics.timer.read() },
+            );
+        }
 
-            metrics.duration_min_ms =
-                @min(duration_ms, metrics.duration_min_ms orelse std.math.maxInt(u64));
-            metrics.duration_max_ms = @max(duration_ms, metrics.duration_max_ms orelse 0);
-            metrics.duration_sum_ms += duration_ms;
+        fn timing(
+            metrics: *TimingSummary,
+            event_count: u64,
+            duration: stdx.Duration,
+        ) void {
+            maybe(duration.ns == 0);
+            maybe(event_count == 0);
+
             metrics.count += 1;
             metrics.event_count += event_count;
+            metrics.duration_min = if (metrics.duration_min) |min| duration.min(min) else duration;
+            metrics.duration_max = if (metrics.duration_max) |max| duration.max(max) else duration;
+            metrics.duration_sum.ns += duration.ns;
         }
     };
 
@@ -909,28 +921,31 @@ const Metrics = struct {
         const runner: *const Runner = @alignCast(@fieldParentPtr("metrics", metrics));
         inline for (comptime std.enums.values(Fields)) |field| {
             const summary: *TimingSummary = &@field(metrics, @tagName(field));
-            if (summary.count > 0) {
+            if (summary.count > 0 and summary.duration_sum.ns > 0) {
                 assert(runner.state == .last);
+                assert(summary.duration_min != null);
+                assert(summary.duration_max != null);
+
                 const timestamp_last = switch (field) {
                     .consumer => runner.state.last.consumer_timestamp,
                     .producer => runner.state.last.producer_timestamp,
                 };
                 const event_rate = @divTrunc(
-                    summary.event_count * std.time.ms_per_s,
-                    summary.duration_sum_ms,
+                    summary.event_count * std.time.ns_per_s,
+                    summary.duration_sum.ns,
                 );
-                log.info("{s}: p0={?}ms mean={}ms p100={?}ms " ++
+                log.info("{s}: p0={}ms mean={}ms p100={}ms " ++
                     "event_count={} throughput={} op/s " ++
                     "last timestamp={} ({})", .{
                     @tagName(field),
-                    summary.duration_min_ms,
-                    @divFloor(summary.duration_sum_ms, summary.count),
-                    summary.duration_max_ms,
+                    summary.duration_min.?.ms(),
+                    @divFloor(summary.duration_sum.ms(), summary.count),
+                    summary.duration_max.?.ms(),
                     summary.event_count,
                     event_rate,
                     timestamp_last,
                     stdx.DateTimeUTC.from_timestamp_ms(
-                        timestamp_last / std.time.ns_per_ms,
+                        @divTrunc(timestamp_last, std.time.ns_per_ms),
                     ),
                 });
             }
@@ -1083,7 +1098,7 @@ const ProgressTrackerMessage = struct {
                         "{}",
                         .{message.release},
                     ) catch unreachable });
-                    encoder.put("timestamp", .{ .long_long_uint = message.timestamp });
+                    encoder.put("timestamp", .{ .int64 = @intCast(message.timestamp) });
                 }
             }.write,
         };
@@ -1101,7 +1116,8 @@ const ProgressTrackerMessage = struct {
             while (try iterator.next()) |entry| {
                 if (std.mem.eql(u8, entry.key, "timestamp")) {
                     switch (entry.value) {
-                        .long_long_uint => |value| {
+                        .int64 => |int64| {
+                            const value: u64 = @intCast(int64);
                             if (!TimestampRange.valid(value)) break;
                             timestamp = value;
                         },
@@ -1243,13 +1259,17 @@ pub const Message = struct {
                 fn write(context: *const anyopaque, encoder: *amqp.Encoder.TableEncoder) void {
                     const message: *const Message = @ptrCast(@alignCast(context));
                     encoder.put("event_type", .{ .string = @tagName(message.type) });
-                    encoder.put("ledger", .{ .long_uint = message.ledger });
-                    encoder.put("transfer_code", .{ .short_uint = message.transfer.code });
+
+                    // N.B.: Unsigned integers like u32 and u16 are not universally supported by
+                    // all RabbitMQ clients.
+                    // To ensure compatibility, we promote them to a signed integer.
+                    encoder.put("ledger", .{ .int64 = message.ledger });
+                    encoder.put("transfer_code", .{ .int32 = message.transfer.code });
                     encoder.put("debit_account_code", .{
-                        .short_uint = message.debit_account.code,
+                        .int32 = message.debit_account.code,
                     });
                     encoder.put("credit_account_code", .{
-                        .short_uint = message.credit_account.code,
+                        .int32 = message.credit_account.code,
                     });
                 }
             }.write,
@@ -1279,8 +1299,8 @@ pub const Message = struct {
         var value: T = undefined;
         for (std.meta.fields(T)) |field| {
             @field(value, field.name) = switch (@typeInfo(field.type)) {
-                .Int => std.math.maxInt(field.type),
-                .Enum => max: {
+                .int => std.math.maxInt(field.type),
+                .@"enum" => max: {
                     var name: []const u8 = "";
                     for (std.enums.values(tb.ChangeEventType)) |tag| {
                         if (@tagName(tag).len > name.len) {
@@ -1289,7 +1309,7 @@ pub const Message = struct {
                     }
                     break :max @field(field.type, name);
                 },
-                .Struct => worse_case(field.type),
+                .@"struct" => worse_case(field.type),
                 else => unreachable,
             };
         }
@@ -1320,7 +1340,7 @@ test "amqp: DualBuffer" {
         try testing.expectEqual(@as(usize, event_count_max), producer1_buffer.len);
 
         const producer1_count = prng.range_inclusive(u32, 1, event_count_max);
-        prng.fill(std.mem.asBytes(producer1_buffer[0..producer1_count]));
+        prng.fill(std.mem.sliceAsBytes(producer1_buffer[0..producer1_count]));
         dual_buffer.producer_finish(producer1_count);
 
         // Starts a consumer after the producer has finished:
@@ -1338,7 +1358,7 @@ test "amqp: DualBuffer" {
 
         const producer2_count = prng.range_inclusive(u32, 0, event_count_max);
         maybe(producer2_count == 0); // Testing zeroed producers.
-        prng.fill(std.mem.asBytes(producer2_buffer[0..producer2_count]));
+        prng.fill(std.mem.sliceAsBytes(producer2_buffer[0..producer2_count]));
         dual_buffer.producer_finish(producer2_count);
 
         // Consuming the first producer:
@@ -1429,4 +1449,42 @@ test "amqp: JSON message" {
             \\{"timestamp":"18446744073709551615","type":"two_phase_pending","ledger":4294967295,"transfer":{"id":"340282366920938463463374607431768211455","amount":"340282366920938463463374607431768211455","pending_id":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"timeout":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"debit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"credit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"}}
         ).diff(buffer);
     }
+}
+
+test "amqp: metrics" {
+    var summary: Metrics.TimingSummary = .{
+        .timer = try std.time.Timer.start(),
+    };
+    try testing.expectEqual(@as(u64, 0), summary.count);
+    try testing.expectEqual(@as(u64, 0), summary.event_count);
+    try testing.expectEqual(@as(u64, 0), summary.duration_sum.ns);
+    try testing.expect(summary.duration_max == null);
+    try testing.expect(summary.duration_min == null);
+
+    summary.timing(10, .{ .ns = 50 });
+    try testing.expectEqual(@as(u64, 1), summary.count);
+    try testing.expectEqual(@as(u64, 10), summary.event_count);
+    try testing.expectEqual(@as(u64, 50), summary.duration_sum.ns);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expectEqual(@as(u64, 50), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 50), summary.duration_max.?.ns);
+
+    summary.timing(5, .{ .ns = 100 });
+    try testing.expectEqual(@as(u64, 2), summary.count);
+    try testing.expectEqual(@as(u64, 15), summary.event_count);
+    try testing.expectEqual(@as(u64, 150), summary.duration_sum.ns);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expectEqual(@as(u64, 50), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 100), summary.duration_max.?.ns);
+
+    summary.timing(0, .{ .ns = 10 });
+    try testing.expectEqual(@as(u64, 3), summary.count);
+    try testing.expectEqual(@as(u64, 15), summary.event_count);
+    try testing.expectEqual(@as(u64, 160), summary.duration_sum.ns);
+    try testing.expect(summary.duration_min != null);
+    try testing.expect(summary.duration_max != null);
+    try testing.expectEqual(@as(u64, 10), summary.duration_min.?.ns);
+    try testing.expectEqual(@as(u64, 100), summary.duration_max.?.ns);
 }

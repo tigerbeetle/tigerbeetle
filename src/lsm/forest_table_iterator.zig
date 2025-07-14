@@ -36,13 +36,13 @@ pub fn ForestTableIteratorType(comptime Forest: type) type {
             fields[i] = .{
                 .name = @ptrCast(tree_info.tree_name),
                 .type = TreeTableIteratorType(tree_info.Tree),
-                .default_value = null,
+                .default_value_ptr = null,
                 .is_comptime = false,
                 .alignment = @alignOf(TreeTableIteratorType(tree_info.Tree)),
             };
         }
 
-        break :iterator @Type(.{ .Struct = .{
+        break :iterator @Type(.{ .@"struct" = .{
             .layout = .auto,
             .fields = &fields,
             .decls = &.{},

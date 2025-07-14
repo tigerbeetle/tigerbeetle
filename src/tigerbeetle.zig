@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const stdx = @import("stdx.zig");
+const constants = @import("constants.zig");
 
 pub const Account = extern struct {
     id: u128,
@@ -70,7 +71,7 @@ pub const AccountBalance = extern struct {
     credits_pending: u128,
     credits_posted: u128,
     timestamp: u64,
-    reserved: [56]u8 = [_]u8{0} ** 56,
+    reserved: [56]u8 = @splat(0),
 
     comptime {
         assert(stdx.no_padding(AccountBalance));
@@ -386,6 +387,7 @@ pub const CreateTransferResult = enum(u32) {
     }
 
     comptime {
+        @setEvalBranchQuota(2_000);
         const values = std.enums.values(CreateTransferResult);
         const BitSet = stdx.BitSetType(values.len);
         var set: BitSet = .{};
@@ -421,8 +423,8 @@ pub const CreateTransferResult = enum(u32) {
         }
 
         var type_info = @typeInfo(enum {});
-        type_info.Enum.tag_type = std.meta.Tag(CreateTransferResult);
-        type_info.Enum.fields = &fields;
+        type_info.@"enum".tag_type = std.meta.Tag(CreateTransferResult);
+        type_info.@"enum".fields = &fields;
         break :type @Type(type_info);
     };
 
@@ -479,7 +481,7 @@ pub const QueryFilter = extern struct {
     /// Query by the `code` index.
     /// Use zero for no filter.
     code: u16,
-    reserved: [6]u8 = [_]u8{0} ** 6,
+    reserved: [6]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -526,7 +528,7 @@ pub const AccountFilter = extern struct {
     /// Use zero for no filter.
     code: u16,
 
-    reserved: [58]u8 = [_]u8{0} ** 58,
+    reserved: [58]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -581,7 +583,7 @@ pub const ChangeEvent = extern struct {
 
     ledger: u32,
     type: ChangeEventType,
-    reserved: [39]u8 = [_]u8{0} ** 39,
+    reserved: [39]u8 = @splat(0),
 
     debit_account_id: u128,
     debit_account_debits_pending: u128,
@@ -622,7 +624,7 @@ pub const ChangeEventsFilter = extern struct {
     timestamp_min: u64,
     timestamp_max: u64,
     limit: u32,
-    reserved: [44]u8 = [_]u8{0} ** 44,
+    reserved: [44]u8 = @splat(0),
 
     comptime {
         assert(stdx.no_padding(ChangeEventsFilter));
@@ -630,10 +632,38 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
+// Looking to make backwards incompatible changes here? Make sure to check release.zig for
+// `release_triple_client_min`.
+pub const Operation = enum(u8) {
+    /// Operations exported by TigerBeetle:
+    pulse = constants.vsr_operations_reserved + 0,
+
+    // Deprecated operations not encoded as multi-batch:
+    deprecated_create_accounts = constants.vsr_operations_reserved + 1,
+    deprecated_create_transfers = constants.vsr_operations_reserved + 2,
+    deprecated_lookup_accounts = constants.vsr_operations_reserved + 3,
+    deprecated_lookup_transfers = constants.vsr_operations_reserved + 4,
+    deprecated_get_account_transfers = constants.vsr_operations_reserved + 5,
+    deprecated_get_account_balances = constants.vsr_operations_reserved + 6,
+    deprecated_query_accounts = constants.vsr_operations_reserved + 7,
+    deprecated_query_transfers = constants.vsr_operations_reserved + 8,
+
+    get_change_events = constants.vsr_operations_reserved + 9,
+
+    create_accounts = constants.vsr_operations_reserved + 10,
+    create_transfers = constants.vsr_operations_reserved + 11,
+    lookup_accounts = constants.vsr_operations_reserved + 12,
+    lookup_transfers = constants.vsr_operations_reserved + 13,
+    get_account_transfers = constants.vsr_operations_reserved + 14,
+    get_account_balances = constants.vsr_operations_reserved + 15,
+    query_accounts = constants.vsr_operations_reserved + 16,
+    query_transfers = constants.vsr_operations_reserved + 17,
+};
+
 comptime {
     const target = builtin.target;
 
-    if (target.os.tag != .linux and !target.isDarwin() and target.os.tag != .windows) {
+    if (target.os.tag != .linux and !target.os.tag.isDarwin() and target.os.tag != .windows) {
         @compileError("linux, windows or macos is required for io");
     }
 

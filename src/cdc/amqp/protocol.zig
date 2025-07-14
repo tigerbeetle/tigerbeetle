@@ -165,10 +165,16 @@ pub const ErrorCodes = enum(u16) {
 
 pub const FieldValueTag = enum(u8) {
     boolean = 't',
-    short_short_uint = 'B',
-    short_uint = 'u',
-    long_uint = 'i',
-    long_long_uint = 'l',
+    uint8 = 'B',
+    int8 = 'b',
+    uint16 = 'u',
+    int16 = 's',
+    uint32 = 'i',
+    int32 = 'I',
+    // Both `l` and `L` are decoded as signed integers by RabbitMQ:
+    // https://www.rabbitmq.com/amqp-0-9-1-errata#section_3
+    // https://github.com/rabbitmq/rabbitmq-server/issues/1093#issuecomment-276351183
+    int64 = 'l',
     string = 'S',
     timestamp = 'T',
     field_table = 'F',
@@ -176,14 +182,12 @@ pub const FieldValueTag = enum(u8) {
 
     // We don't send or expect to receive these types from the AMQP server.
     // Only user-defined tables would use them.
-    not_implemented_long_long_int = 'L',
-    not_implemented_long_int = 'I',
-    not_implemented_short_int = 's',
-    not_implemented_short_short_int = 'b',
+    not_implemented_uint64 = 'L',
     not_implemented_field_array = 'A',
     not_implemented_float = 'f',
     not_implemented_double = 'd',
-    not_implemented_decimal_value = 'D',
+    not_implemented_decimal = 'D',
+    not_implemented_byte_array = 'x',
 };
 
 pub const Decoder = struct {
@@ -270,8 +274,8 @@ pub const Decoder = struct {
     }
 
     pub fn read_int(self: *Decoder, comptime T: type) Error!T {
-        comptime assert(@typeInfo(T) == .Int);
-        comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+        comptime assert(@typeInfo(T) == .int);
+        comptime assert(@typeInfo(T).int.signedness == .unsigned);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         if (self.index + @sizeOf(T) > self.buffer.len) return error.BufferExhausted;
         defer {
@@ -283,7 +287,7 @@ pub const Decoder = struct {
     }
 
     pub fn read_enum(self: *Decoder, comptime Enum: type) Error!Enum {
-        comptime assert(@typeInfo(Enum) == .Enum);
+        comptime assert(@typeInfo(Enum) == .@"enum");
         const Int = std.meta.Tag(Enum);
         const value = try self.read_int(Int);
         return std.meta.intToEnum(
@@ -330,23 +334,24 @@ pub const Decoder = struct {
         const tag = try self.read_enum(FieldValueTag);
         const value: FieldValue = switch (tag) {
             .boolean => .{ .boolean = try self.read_bool() },
-            .short_short_uint => .{ .short_short_uint = try self.read_int(u8) },
-            .short_uint => .{ .short_uint = try self.read_int(u16) },
-            .long_uint => .{ .long_uint = try self.read_int(u32) },
-            .long_long_uint => .{ .long_long_uint = try self.read_int(u64) },
+            .uint8 => .{ .uint8 = try self.read_int(u8) },
+            .int8 => .{ .int8 = @bitCast(try self.read_int(u8)) },
+            .uint16 => .{ .uint16 = try self.read_int(u16) },
+            .int16 => .{ .int16 = @bitCast(try self.read_int(u16)) },
+            .uint32 => .{ .uint32 = try self.read_int(u32) },
+            .int32 => .{ .int32 = @bitCast(try self.read_int(u32)) },
+            .int64 => .{ .int64 = @bitCast(try self.read_int(u64)) },
             .string => .{ .string = try self.read_long_string() },
             .timestamp => .{ .timestamp = try self.read_int(u64) },
             .field_table => .{ .field_table = try self.read_table() },
             .void => .void,
 
-            .not_implemented_long_long_int,
-            .not_implemented_long_int,
-            .not_implemented_short_int,
-            .not_implemented_short_short_int,
+            .not_implemented_uint64,
             .not_implemented_field_array,
             .not_implemented_float,
             .not_implemented_double,
-            .not_implemented_decimal_value,
+            .not_implemented_decimal,
+            .not_implemented_byte_array,
             => fatal("AMQP type '{c}' not supported.", .{@intFromEnum(tag)}),
         };
         assert(value == tag);
@@ -492,7 +497,7 @@ pub const Encoder = struct {
     }
 
     pub fn write_int(self: *Encoder, comptime T: type, value: T) void {
-        comptime assert(@typeInfo(T) == .Int);
+        comptime assert(@typeInfo(T) == .int);
         comptime assert(@sizeOf(T) == 1 or @sizeOf(T) == 2 or @sizeOf(T) == 4 or @sizeOf(T) == 8);
         assert(self.index + @sizeOf(T) <= self.buffer.len);
         std.mem.writeInt(T, self.buffer[self.index..][0..@sizeOf(T)], value, .big);
@@ -565,23 +570,24 @@ pub const Encoder = struct {
         self.write_int(u8, @intFromEnum(tag));
         switch (field) {
             .boolean => |value| self.write_bool(value),
-            .short_short_uint => |value| self.write_int(u8, value),
-            .short_uint => |value| self.write_int(u16, value),
-            .long_uint => |value| self.write_int(u32, value),
-            .long_long_uint => |value| self.write_int(u64, value),
+            .uint8 => |value| self.write_int(u8, value),
+            .int8 => |value| self.write_int(u8, @bitCast(value)),
+            .uint16 => |value| self.write_int(u16, value),
+            .int16 => |value| self.write_int(u16, @bitCast(value)),
+            .uint32 => |value| self.write_int(u32, value),
+            .int32 => |value| self.write_int(u32, @bitCast(value)),
+            .int64 => |value| self.write_int(u64, @bitCast(value)),
             .string => |value| self.write_long_string(value),
             .timestamp => |value| self.write_int(u64, value),
             .field_table => |value| self.write_table(value),
             .void => {},
 
-            .not_implemented_long_long_int,
-            .not_implemented_long_int,
-            .not_implemented_short_int,
-            .not_implemented_short_short_int,
+            .not_implemented_uint64,
             .not_implemented_field_array,
             .not_implemented_float,
             .not_implemented_double,
-            .not_implemented_decimal_value,
+            .not_implemented_decimal,
+            .not_implemented_byte_array,
             => fatal("AMQP type '{c}' not supported.", .{@intFromEnum(tag)}),
         }
     }
@@ -670,10 +676,13 @@ pub const Encoder = struct {
 fn FieldValueType(comptime target: enum { encode, decode }) type {
     return union(FieldValueTag) {
         boolean: bool,
-        short_short_uint: u8,
-        short_uint: u16,
-        long_uint: u32,
-        long_long_uint: u64,
+        uint8: u8,
+        int8: i8,
+        uint16: u16,
+        int16: i16,
+        uint32: u32,
+        int32: i32,
+        int64: i64,
         string: []const u8,
         timestamp: u64,
         field_table: switch (target) {
@@ -682,14 +691,12 @@ fn FieldValueType(comptime target: enum { encode, decode }) type {
         },
         void,
 
-        not_implemented_long_long_int,
-        not_implemented_long_int,
-        not_implemented_short_int,
-        not_implemented_short_short_int,
+        not_implemented_uint64,
         not_implemented_field_array,
         not_implemented_float,
         not_implemented_double,
-        not_implemented_decimal_value,
+        not_implemented_decimal,
+        not_implemented_byte_array,
     };
 }
 
@@ -1054,10 +1061,13 @@ const TestingTable = struct {
 
     boolean: ?bool = null,
     string: ?[]const u8 = null,
-    long: ?u64 = null,
-    int: ?u32 = null,
-    short: ?u16 = null,
-    byte: ?u8 = null,
+    int64: ?i64 = null,
+    uint32: ?u32 = null,
+    int32: ?i32 = null,
+    uint16: ?u16 = null,
+    int16: ?i16 = null,
+    uint8: ?u8 = null,
+    int8: ?i8 = null,
     field_table: ?*const TestingTable = null,
     timestamp: ?Timestamp = null,
 
@@ -1073,10 +1083,13 @@ const TestingTable = struct {
                             encoder.put(field.name, switch (std.meta.Child(field.type)) {
                                 bool => .{ .boolean = value },
                                 []const u8 => .{ .string = value },
-                                u64 => .{ .long_long_uint = value },
-                                u32 => .{ .long_uint = value },
-                                u16 => .{ .short_uint = value },
-                                u8 => .{ .short_short_uint = value },
+                                i64 => .{ .int64 = value },
+                                u32 => .{ .uint32 = value },
+                                i32 => .{ .int32 = value },
+                                u16 => .{ .uint16 = value },
+                                i16 => .{ .int16 = value },
+                                u8 => .{ .uint8 = value },
+                                i8 => .{ .int8 = value },
                                 *const TestingTable => .{ .field_table = value.table() },
                                 Timestamp => .{ .timestamp = value },
                                 else => comptime unreachable,
@@ -1103,10 +1116,13 @@ const TestingTable = struct {
                     @field(object, @tagName(field)) = switch (std.meta.Child(Field)) {
                         bool => entry.value.boolean,
                         []const u8 => entry.value.string,
-                        u64 => entry.value.long_long_uint,
-                        u32 => entry.value.long_uint,
-                        u16 => entry.value.short_uint,
-                        u8 => entry.value.short_short_uint,
+                        i64 => entry.value.int64,
+                        u32 => entry.value.uint32,
+                        i32 => entry.value.int32,
+                        u16 => entry.value.uint16,
+                        i16 => entry.value.int16,
+                        u8 => entry.value.uint8,
+                        i8 => entry.value.int8,
                         *const TestingTable => try from_table(arena, entry.value.field_table),
                         Timestamp => @intCast(entry.value.timestamp),
                         else => comptime unreachable,
@@ -1128,7 +1144,7 @@ const TestingTable = struct {
                 const equals = switch (std.meta.Child(field.type)) {
                     bool => value1 == value2,
                     []const u8 => std.mem.eql(u8, value1, value2),
-                    u64, u32, u16, u8 => value1 == value2,
+                    i64, u32, i32, u16, i16, u8, i8 => value1 == value2,
                     *const TestingTable => eql(value1, value2),
                     Timestamp => value1 == value2,
                     else => comptime unreachable,
@@ -1165,8 +1181,12 @@ const TestingTable = struct {
                     options.prng.fill(str);
                     @field(object, field.name) = str;
                 },
-                u64, u32, u16, u8 => |Int| {
+                u32, u16, u8 => |Int| {
                     @field(object, field.name) = options.prng.int(Int);
+                },
+                i64, i32, i16, i8 => |Int| {
+                    const Unsigned = std.meta.Int(.unsigned, @bitSizeOf(Int));
+                    @field(object, field.name) = @bitCast(options.prng.int(Unsigned));
                 },
                 *const TestingTable => {
                     @field(object, field.name) = if (options.recursive)

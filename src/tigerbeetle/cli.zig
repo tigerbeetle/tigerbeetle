@@ -24,6 +24,7 @@ const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
+const Ratio = stdx.PRNG.Ratio;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -36,7 +37,7 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
 
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -49,7 +50,7 @@ const CLIArgs = union(enum) {
         log_debug: bool = false,
 
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -59,7 +60,7 @@ const CLIArgs = union(enum) {
         cache_grid: ?flags.ByteSize = null,
         development: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
 
         // Everything below here is considered experimental, and requires `--experimental` to be
@@ -76,22 +77,27 @@ const CLIArgs = union(enum) {
         cache_transfers_pending: ?flags.ByteSize = null,
         memory_lsm_manifest: ?flags.ByteSize = null,
         memory_lsm_compaction: ?flags.ByteSize = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
+        commit_stall_probability: ?Ratio = null,
 
         // Highly experimental options that will be removed in a future release:
         replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
-        statsd: ?[:0]const u8 = null,
+        statsd: ?[]const u8 = null,
 
         /// AOF (Append Only File) logs all transactions synchronously to disk before replying
         /// to the client. The logic behind this code has been kept as simple as possible -
         /// io_uring or kqueue aren't used, there aren't any fancy data structures. Just a simple
         /// log consisting of logged requests. Much like a redis AOF with fsync=on.
         /// Enabling this will have performance implications.
+        aof_file: ?[]const u8 = null,
+
+        /// Legacy AOF option. Mututally exclusive with aof_file, and will have the same effect as
+        /// setting aof_file to '<data file path>.aof'.
         aof: bool = false,
     };
 
@@ -140,7 +146,7 @@ const CLIArgs = union(enum) {
         id_order: Command.Benchmark.IdOrder = .sequential,
         clients: u32 = 1,
         statsd: ?[]const u8 = null,
-        trace: ?[:0]const u8 = null,
+        trace: ?[]const u8 = null,
         /// When set, don't delete the data file when the benchmark completes.
         file: ?[]const u8 = null,
         addresses: ?[]const u8 = null,
@@ -257,7 +263,7 @@ const CLIArgs = union(enum) {
     const Multiversion = struct {
         log_debug: bool = false,
         positional: struct {
-            path: [:0]const u8,
+            path: []const u8,
         },
     };
 
@@ -449,13 +455,14 @@ const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constan
 ///  appropriate).
 pub const Command = union(enum) {
     const Addresses = stdx.BoundedArrayType(std.net.Address, constants.members_max);
+    const Path = stdx.BoundedArrayType(u8, std.fs.max_path_bytes);
 
     pub const Format = struct {
         cluster: u128,
         replica: u8,
         replica_count: u8,
         development: bool,
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -465,7 +472,7 @@ pub const Command = union(enum) {
         replica: u8,
         replica_count: u8,
         development: bool,
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -486,13 +493,14 @@ pub const Command = union(enum) {
         lsm_forest_node_count: u32,
         timeout_prepare_ticks: ?u64,
         timeout_grid_repair_message_ticks: ?u64,
-        trace: ?[:0]const u8,
+        commit_stall_probability: ?Ratio,
+        trace: ?[]const u8,
         development: bool,
         experimental: bool,
         replicate_closed_loop: bool,
         replicate_star: bool,
-        aof: bool,
-        path: [:0]const u8,
+        aof_file: ?Path,
+        path: []const u8,
         log_debug: bool,
         statsd: ?std.net.Address,
     };
@@ -548,7 +556,7 @@ pub const Command = union(enum) {
         id_order: IdOrder,
         clients: u32,
         statsd: ?[]const u8,
-        trace: ?[:0]const u8,
+        trace: ?[]const u8,
         file: ?[]const u8,
         addresses: ?Addresses,
         seed: ?[]const u8,
@@ -588,7 +596,7 @@ pub const Command = union(enum) {
     };
 
     pub const Multiversion = struct {
-        path: [:0]const u8,
+        path: []const u8,
         log_debug: bool,
     };
 
@@ -748,6 +756,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         "development", "experimental",
     };
     inline for (std.meta.fields(@TypeOf(start))) |field| {
+        @setEvalBranchQuota(4_000);
         const stable_field = comptime for (stable_args) |stable_arg| {
             assert(std.meta.fieldIndex(@TypeOf(start), stable_arg) != null);
             if (std.mem.eql(u8, field.name, stable_arg)) {
@@ -915,6 +924,38 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const lsm_forest_node_count: u32 =
         @intCast(@divExact(lsm_manifest_memory, constants.lsm_manifest_node_size));
 
+    const aof_file: ?Command.Path = if (start.aof) blk: {
+        if (start.aof_file != null) {
+            vsr.fatal(.cli, "--aof is mutually exclusive with --aof-file", .{});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len + 4) {
+            vsr.fatal(.cli, "data file path is too long for --aof. use --aof-file", .{});
+        }
+        aof_file.append_slice_assume_capacity(start.positional.path);
+        aof_file.append_slice_assume_capacity(".aof");
+
+        std.log.warn(
+            "--aof is deprecated. consider switching to '--aof-file={s}'",
+            .{aof_file.const_slice()},
+        );
+
+        break :blk aof_file;
+    } else if (start.aof_file) |start_aof_file| blk: {
+        if (!std.mem.endsWith(u8, start_aof_file, ".aof")) {
+            vsr.fatal(.cli, "--aof-file must end with .aof: '{s}'", .{start_aof_file});
+        }
+
+        var aof_file: Command.Path = .{};
+        if (aof_file.capacity() < start.positional.path.len) {
+            vsr.fatal(.cli, "--aof-file path is too long", .{});
+        }
+        aof_file.append_slice_assume_capacity(start_aof_file);
+
+        break :blk aof_file;
+    } else null;
+
     return .{
         .addresses = addresses,
         .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
@@ -955,12 +996,13 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             start.timeout_grid_repair_message_ms,
             "--timeout-grid-repair-message-ms",
         ),
+        .commit_stall_probability = start.commit_stall_probability,
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
         .replicate_closed_loop = start.replicate_closed_loop,
         .replicate_star = start.replicate_star,
-        .aof = start.aof,
+        .aof_file = aof_file,
         .path = start.positional.path,
         .log_debug = start.log_debug,
         .statsd = if (start.statsd) |statsd_address|

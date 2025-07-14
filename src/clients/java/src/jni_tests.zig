@@ -634,7 +634,7 @@ test "JNI: Call<Type>Method,CallNonVirtual<Type>Method" {
     defer env.delete_local_ref(direct_buffer_class);
 
     const element: u8 = 42;
-    var native_buffer = [_]u8{element} ** 256;
+    var native_buffer: [256]u8 = @splat(element);
     const buffer = env.new_direct_byte_buffer(&native_buffer, @intCast(native_buffer.len));
     try testing.expect(buffer != null);
     defer env.delete_local_ref(buffer);

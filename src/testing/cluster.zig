@@ -51,8 +51,6 @@ pub const Failure = enum(u8) {
 /// with a replica index.
 const client_id_permutation_shift = constants.members_max;
 
-// TODO(Zig): Once Zig is upgraded from 0.13, change StateMachineType from anytype back to
-// fn (comptime Storage: type, comptime constants: anytype) type.
 pub fn ClusterType(comptime StateMachineType: anytype) type {
     return struct {
         const Cluster = @This();
@@ -89,6 +87,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             releases: []const Release,
             client_release: vsr.Release,
             state_machine: StateMachine.Options,
+            replicate_options: Replica.ReplicateOptions = .{},
         };
 
         pub const Callbacks = struct {
@@ -714,6 +713,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release_execute = replica_release_execute_soon,
                     .release_execute_context = null,
                     .test_context = cluster,
+                    .replicate_options = cluster.options.replicate_options,
+                    .commit_stall_probability = null,
                 },
             );
             assert(replica.cluster == cluster.options.cluster_id);
@@ -877,6 +878,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .command = .request,
                 .operation = vsr.Operation.from(StateMachine, request_operation),
                 .size = @intCast(@sizeOf(vsr.Header) + request_body_size),
+                .previous_request_latency = cluster.prng.int(u32),
             };
 
             client.raw_request(
@@ -1038,7 +1040,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         ) void {
             const replica = &cluster.replicas[replica_index];
 
-            var statuses = [_]u8{' '} ** constants.members_max;
+            var statuses: [constants.members_max]u8 = @splat(' ');
             statuses[replica_index] = switch (cluster.replica_health[replica_index]) {
                 .reformatting => ' ',
                 .down => '#',

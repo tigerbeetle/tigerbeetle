@@ -224,8 +224,8 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
                     (std.mem.startsWith(u8, string_value, " account A") or
-                    std.mem.startsWith(u8, string_value, " transfer T") or
-                    std.mem.startsWith(u8, string_value, " transfer   ")))
+                        std.mem.startsWith(u8, string_value, " transfer T") or
+                        std.mem.startsWith(u8, string_value, " transfer   ")))
                 {
                     // Table tests from state_machine.zig. They are intentionally wide.
                     continue;
@@ -632,7 +632,7 @@ const DeadFilesDetector = struct {
     fn path_to_name(path: []const u8) FileName {
         assert(std.mem.endsWith(u8, path, ".zig"));
         const basename = std.fs.path.basename(path);
-        var file_name: FileName = .{0} ** 64;
+        var file_name: FileName = @splat(0);
         assert(basename.len <= file_name.len);
         stdx.copy_disjoint(.inexact, u8, &file_name, basename);
         return file_name;

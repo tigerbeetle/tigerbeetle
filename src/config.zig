@@ -24,21 +24,22 @@ const BuildOptions = struct {
 // Allow setting build-time config either via `build.zig` `Options`, or via a struct in the root
 // file.
 const build_options: BuildOptions = blk: {
-    if (@hasDecl(root, "vsr_options")) {
-        break :blk root.vsr_options;
-    } else {
-        const vsr_options = @import("vsr_options");
-        // Zig's `addOptions` reuses the type, but redeclares it — identical structurally,
-        // but a different type from a nominal typing perspective.
-        var result: BuildOptions = undefined;
-        for (std.meta.fields(BuildOptions)) |field| {
-            @field(result, field.name) = launder_type(
-                field.type,
-                @field(vsr_options, field.name),
-            );
-        }
-        break :blk result;
+    const vsr_options =
+        if (@hasDecl(root, "vsr_options"))
+            root.vsr_options
+        else
+            @import("vsr_options");
+
+    // Both the root file and Zig's `addOptions` expose the struct as identical structurally,
+    // but a different type from a nominal typing perspective.
+    var result: BuildOptions = undefined;
+    for (std.meta.fields(BuildOptions)) |field| {
+        @field(result, field.name) = launder_type(
+            field.type,
+            @field(vsr_options, field.name),
+        );
     }
+    break :blk result;
 };
 
 fn launder_type(comptime T: type, comptime value: anytype) T {
@@ -49,8 +50,8 @@ fn launder_type(comptime T: type, comptime value: anytype) T {
     {
         return value;
     }
-    if (@typeInfo(T) == .Enum) {
-        assert(@typeInfo(@TypeOf(value)) == .Enum);
+    if (@typeInfo(T) == .@"enum") {
+        assert(@typeInfo(@TypeOf(value)) == .@"enum" or @typeInfo(@TypeOf(value)) == .enum_literal);
         return @field(T, @tagName(value));
     }
     unreachable;
@@ -124,8 +125,8 @@ const ConfigProcess = struct {
     clock_epoch_max_ms: u64 = 60000,
     clock_synchronization_window_min_ms: u64 = 2000,
     clock_synchronization_window_max_ms: u64 = 20000,
-    grid_iops_read_max: u64 = 16,
-    grid_iops_write_max: u64 = 16,
+    grid_iops_read_max: u64 = 32,
+    grid_iops_write_max: u64 = 32,
     grid_cache_size_default: u64 = 1024 * 1024 * 1024,
     grid_repair_request_max: usize = 4,
     grid_repair_reads_max: usize = 4,

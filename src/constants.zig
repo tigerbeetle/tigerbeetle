@@ -366,7 +366,7 @@ comptime {
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
     assert(grid_repair_writes_max <=
-        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_data_blocks_max);
+        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_value_blocks_max);
 
     assert(grid_missing_blocks_max > 0);
     assert(grid_missing_tables_max > 0);
@@ -658,8 +658,8 @@ comptime {
 // runtime-known number of free blocks.
 //
 // For simplicity for now, size IOPS to always be available.
-pub const lsm_compaction_queue_read_max = 8;
-pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_queue_read_max = 16;
+pub const lsm_compaction_queue_write_max = 16;
 pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
 pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
 
@@ -669,8 +669,8 @@ pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 ///
 /// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
 ///   tree configuration. (To prevent Grid from depending on StateMachine).
-/// - This counts data blocks, but does not count the index block itself.
-pub const lsm_table_data_blocks_max = table_blocks_max: {
+/// - This counts value blocks, but does not count the index block itself.
+pub const lsm_table_value_blocks_max = table_blocks_max: {
     const checksum_size = @sizeOf(u256);
     const address_size = @sizeOf(u64);
     break :table_blocks_max @divFloor(
@@ -763,14 +763,12 @@ pub const StateMachineConfig = struct {
     release: vsr.Release,
     message_body_size_max: comptime_int,
     lsm_compaction_ops: comptime_int,
-    vsr_operations_reserved: u8,
 };
 
 pub const state_machine_config = StateMachineConfig{
     .release = config.process.release,
     .message_body_size_max = message_body_size_max,
     .lsm_compaction_ops = lsm_compaction_ops,
-    .vsr_operations_reserved = vsr_operations_reserved,
 };
 
 /// TigerBeetle uses asserts proactively, unless they severely degrade performance. For production,

@@ -1319,7 +1319,7 @@ pub const IO = struct {
                 log.info("allocating by writing to the last sector of the file instead...", .{});
 
                 const sector_size = constants.sector_size;
-                const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+                const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                 // Handle partial writes where the physical sector is less than a logical sector:
                 const write_offset = size - sector.len;

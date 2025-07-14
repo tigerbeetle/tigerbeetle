@@ -599,8 +599,8 @@ fn publish(
             const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
             const header_bytes =
                 past_binary_contents[parsed_offsets.x86_64.?.header_offset..][0..@sizeOf(
-                multiversioning.MultiversionHeader,
-            )];
+                    multiversioning.MultiversionHeader,
+                )];
 
             const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
             const release_min = header.past.releases[0];

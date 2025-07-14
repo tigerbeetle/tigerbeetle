@@ -14,8 +14,8 @@ const fuzz = @import("./testing/fuzz.zig");
 /// likely to not only get 0 or maxInt(u64), but also values around maxInt(u63), maxInt(u62), ...,
 /// maxInt(u1).
 pub fn int_edge_biased(prng: *stdx.PRNG, T: anytype) T {
-    const bits = @typeInfo(T).Int.bits;
-    comptime assert(@typeInfo(T).Int.signedness == .unsigned);
+    const bits = @typeInfo(T).int.bits;
+    comptime assert(@typeInfo(T).int.signedness == .unsigned);
 
     // With bits * 2, there's a ~50% chance of generating a uniform integer within the full range,
     // and a ~50% chance of generating an integer biased towards an edge.
@@ -268,7 +268,7 @@ test "int_edge_biased" {
         }
 
         inline for (1..129) |bits| {
-            const IntType = @Type(.{ .Int = .{
+            const IntType = @Type(.{ .int = .{
                 .signedness = .unsigned,
                 .bits = bits,
             } });

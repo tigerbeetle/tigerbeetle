@@ -5,13 +5,13 @@
 //! generic. This is convenient for compaction, but critical for the scrubber and repair queue.
 //!
 //! Index block body schema:
-//! │ [data_block_count_max]u256   │ checksums of data blocks
-//! │ [data_block_count_max]Key    │ the minimum/first key in the respective data block
-//! │ [data_block_count_max]Key    │ the maximum/last key in the respective data block
-//! │ [data_block_count_max]u64    │ addresses of data blocks
+//! │ [value_block_count_max]u256   │ checksums of value blocks
+//! │ [value_block_count_max]Key    │ the minimum/first key in the respective value block
+//! │ [value_block_count_max]Key    │ the maximum/last key in the respective value block
+//! │ [value_block_count_max]u64    │ addresses of value blocks
 //! │ […]u8{0}                     │ padding (to end of block)
 //!
-//! Data block body schema:
+//! Value block body schema:
 //! │ [≤value_count_max]Value  │ At least one value (no empty tables).
 //! │ […]u8{0}                 │ padding (to end of block)
 //!
@@ -63,7 +63,7 @@ pub const BlockType = enum(u8) {
     client_sessions = 2,
     manifest = 3,
     index = 4,
-    data = 5,
+    value = 5,
 
     pub fn valid(block_type: BlockType) bool {
         _ = std.meta.intToEnum(BlockType, @intFromEnum(block_type)) catch return false;
@@ -86,11 +86,11 @@ pub const TableIndex = struct {
     /// - Tables can be decoded without per-tree specialized decoders.
     ///   (In particular, this is useful for the scrubber and the grid repair queue).
     pub const Metadata = extern struct {
-        data_block_count: u32,
-        data_block_count_max: u32,
+        value_block_count: u32,
+        value_block_count_max: u32,
         key_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = [_]u8{0} ** 82,
+        reserved: [82]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -99,59 +99,59 @@ pub const TableIndex = struct {
     };
 
     key_size: u32,
-    data_block_count_max: u32,
+    value_block_count_max: u32,
 
     size: u32,
-    data_checksums_offset: u32,
-    data_checksums_size: u32,
+    value_checksums_offset: u32,
+    value_checksums_size: u32,
     keys_min_offset: u32,
     keys_max_offset: u32,
     keys_size: u32,
-    data_addresses_offset: u32,
-    data_addresses_size: u32,
+    value_addresses_offset: u32,
+    value_addresses_size: u32,
     padding_offset: u32,
     padding_size: u32,
 
     const Parameters = struct {
         key_size: u32,
-        data_block_count_max: u32,
+        value_block_count_max: u32,
     };
 
     pub fn init(parameters: Parameters) TableIndex {
         assert(parameters.key_size > 0);
-        assert(parameters.data_block_count_max > 0);
-        assert(parameters.data_block_count_max <= constants.lsm_table_data_blocks_max);
+        assert(parameters.value_block_count_max > 0);
+        assert(parameters.value_block_count_max <= constants.lsm_table_value_blocks_max);
 
-        const data_checksums_offset = @sizeOf(vsr.Header);
-        const data_checksums_size = parameters.data_block_count_max * checksum_size;
+        const value_checksums_offset = @sizeOf(vsr.Header);
+        const value_checksums_size = parameters.value_block_count_max * checksum_size;
 
-        const keys_size = parameters.data_block_count_max * parameters.key_size;
-        const keys_min_offset = data_checksums_offset + data_checksums_size;
+        const keys_size = parameters.value_block_count_max * parameters.key_size;
+        const keys_min_offset = value_checksums_offset + value_checksums_size;
         const keys_max_offset = keys_min_offset + keys_size;
 
-        const data_addresses_offset = keys_max_offset + keys_size;
-        const data_addresses_size = parameters.data_block_count_max * address_size;
+        const value_addresses_offset = keys_max_offset + keys_size;
+        const value_addresses_size = parameters.value_block_count_max * address_size;
 
-        const padding_offset = data_addresses_offset + data_addresses_size;
+        const padding_offset = value_addresses_offset + value_addresses_size;
         assert(padding_offset <= constants.block_size);
         const padding_size = constants.block_size - padding_offset;
 
         // `keys_size * 2` for counting both key_min and key_max:
-        const size = @sizeOf(vsr.Header) + data_checksums_size +
-            (keys_size * 2) + data_addresses_size;
+        const size = @sizeOf(vsr.Header) + value_checksums_size +
+            (keys_size * 2) + value_addresses_size;
         assert(size <= constants.block_size);
 
         return .{
             .key_size = parameters.key_size,
-            .data_block_count_max = parameters.data_block_count_max,
+            .value_block_count_max = parameters.value_block_count_max,
             .size = size,
-            .data_checksums_offset = data_checksums_offset,
-            .data_checksums_size = data_checksums_size,
+            .value_checksums_offset = value_checksums_offset,
+            .value_checksums_size = value_checksums_size,
             .keys_min_offset = keys_min_offset,
             .keys_max_offset = keys_max_offset,
             .keys_size = keys_size,
-            .data_addresses_offset = data_addresses_offset,
-            .data_addresses_size = data_addresses_size,
+            .value_addresses_offset = value_addresses_offset,
+            .value_addresses_size = value_addresses_size,
             .padding_offset = padding_offset,
             .padding_size = padding_size,
         };
@@ -167,7 +167,7 @@ pub const TableIndex = struct {
         const header_metadata = metadata(index_block);
         const index = TableIndex.init(.{
             .key_size = header_metadata.key_size,
-            .data_block_count_max = header_metadata.data_block_count_max,
+            .value_block_count_max = header_metadata.value_block_count_max,
         });
 
         for (index.padding(index_block)) |padding_area| {
@@ -183,7 +183,7 @@ pub const TableIndex = struct {
         assert(header.block_type == .index);
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
-        assert(header_metadata.data_block_count <= header_metadata.data_block_count_max);
+        assert(header_metadata.value_block_count <= header_metadata.value_block_count_max);
         assert(stdx.zeroed(&header_metadata.reserved));
         return header_metadata;
     }
@@ -194,65 +194,65 @@ pub const TableIndex = struct {
     ) *const Metadata {
         const result = metadata(index_block);
         assert(result.key_size == schema.key_size);
-        assert(result.data_block_count_max == schema.data_block_count_max);
+        assert(result.value_block_count_max == schema.value_block_count_max);
         return result;
     }
 
-    pub inline fn data_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
+    pub inline fn value_addresses(index: *const TableIndex, index_block: BlockPtr) []u64 {
         return @alignCast(mem.bytesAsSlice(
             u64,
-            index_block[index.data_addresses_offset..][0..index.data_addresses_size],
+            index_block[index.value_addresses_offset..][0..index.value_addresses_size],
         ));
     }
 
-    pub inline fn data_addresses_used(
+    pub inline fn value_addresses_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const u64 {
         const slice = mem.bytesAsSlice(
             u64,
-            index_block[index.data_addresses_offset..][0..index.data_addresses_size],
+            index_block[index.value_addresses_offset..][0..index.value_addresses_size],
         );
-        return @alignCast(slice[0..index.data_blocks_used(index_block)]);
+        return @alignCast(slice[0..index.value_blocks_used(index_block)]);
     }
 
-    pub inline fn data_checksums(index: *const TableIndex, index_block: BlockPtr) []Checksum {
+    pub inline fn value_checksums(index: *const TableIndex, index_block: BlockPtr) []Checksum {
         return @alignCast(mem.bytesAsSlice(
             Checksum,
-            index_block[index.data_checksums_offset..][0..index.data_checksums_size],
+            index_block[index.value_checksums_offset..][0..index.value_checksums_size],
         ));
     }
 
-    pub inline fn data_checksums_used(
+    pub inline fn value_checksums_used(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) []const Checksum {
         const slice = mem.bytesAsSlice(
             Checksum,
-            index_block[index.data_checksums_offset..][0..index.data_checksums_size],
+            index_block[index.value_checksums_offset..][0..index.value_checksums_size],
         );
-        return @alignCast(slice[0..index.data_blocks_used(index_block)]);
+        return @alignCast(slice[0..index.value_blocks_used(index_block)]);
     }
 
-    pub inline fn data_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
+    pub inline fn value_blocks_used(index: *const TableIndex, index_block: BlockPtrConst) u32 {
         const header_metadata = block_metadata(index, index_block);
-        assert(header_metadata.data_block_count > 0);
-        assert(header_metadata.data_block_count <= index.data_block_count_max);
-        return header_metadata.data_block_count;
+        assert(header_metadata.value_block_count > 0);
+        assert(header_metadata.value_block_count <= index.value_block_count_max);
+        return header_metadata.value_block_count;
     }
 
     pub fn padding(
         index: *const TableIndex,
         index_block: BlockPtrConst,
     ) [4]struct { start: usize, end: usize } {
-        const data_checksums_skip = index.data_blocks_used(index_block) * checksum_size;
-        const keys_min_skip = index.data_blocks_used(index_block) * index.key_size;
-        const keys_max_skip = index.data_blocks_used(index_block) * index.key_size;
-        const data_addresses_skip = index.data_blocks_used(index_block) * address_size;
+        const value_checksums_skip = index.value_blocks_used(index_block) * checksum_size;
+        const keys_min_skip = index.value_blocks_used(index_block) * index.key_size;
+        const keys_max_skip = index.value_blocks_used(index_block) * index.key_size;
+        const value_addresses_skip = index.value_blocks_used(index_block) * address_size;
         return .{
             .{
-                .start = index.data_checksums_offset + data_checksums_skip,
-                .end = index.data_checksums_offset + index.data_checksums_size,
+                .start = index.value_checksums_offset + value_checksums_skip,
+                .end = index.value_checksums_offset + index.value_checksums_size,
             },
             .{
                 .start = index.keys_min_offset + keys_min_skip,
@@ -263,21 +263,21 @@ pub const TableIndex = struct {
                 .end = index.keys_max_offset + index.keys_size,
             },
             .{
-                .start = index.data_addresses_offset + data_addresses_skip,
-                .end = index.data_addresses_offset + index.data_addresses_size,
+                .start = index.value_addresses_offset + value_addresses_skip,
+                .end = index.value_addresses_offset + index.value_addresses_size,
             },
         };
     }
 };
 
-pub const TableData = struct {
-    /// Stored in every data block's header's `metadata_bytes` field.
+pub const TableValue = struct {
+    /// Stored in every value block's header's `metadata_bytes` field.
     pub const Metadata = extern struct {
         value_count_max: u32,
         value_count: u32,
         value_size: u32,
         tree_id: u16,
-        reserved: [82]u8 = [_]u8{0} ** 82,
+        reserved: [82]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -287,7 +287,7 @@ pub const TableData = struct {
 
     // @sizeOf(Table.Value)
     value_size: u32,
-    // The maximum number of values in a data block.
+    // The maximum number of values in a value block.
     value_count_max: u32,
 
     values_offset: u32,
@@ -301,7 +301,7 @@ pub const TableData = struct {
         value_size: u32,
     };
 
-    pub fn init(parameters: Parameters) TableData {
+    pub fn init(parameters: Parameters) TableValue {
         assert(parameters.value_count_max > 0);
         assert(parameters.value_size > 0);
         assert(std.math.isPowerOfTwo(parameters.value_size));
@@ -324,25 +324,25 @@ pub const TableData = struct {
         };
     }
 
-    pub fn from(data_block: BlockPtrConst) TableData {
-        const header = header_from_block(data_block);
+    pub fn from(value_block: BlockPtrConst) TableValue {
+        const header = header_from_block(value_block);
         assert(header.command == .block);
-        assert(header.block_type == .data);
+        assert(header.block_type == .value);
         assert(header.address > 0);
         assert(header.snapshot > 0);
 
-        const header_metadata = metadata(data_block);
+        const header_metadata = metadata(value_block);
 
-        return TableData.init(.{
+        return TableValue.init(.{
             .value_count_max = header_metadata.value_count_max,
             .value_size = header_metadata.value_size,
         });
     }
 
-    pub fn metadata(data_block: BlockPtrConst) *const Metadata {
-        const header = header_from_block(data_block);
+    pub fn metadata(value_block: BlockPtrConst) *const Metadata {
+        const header = header_from_block(value_block);
         assert(header.command == .block);
-        assert(header.block_type == .data);
+        assert(header.block_type == .value);
 
         const header_metadata = std.mem.bytesAsValue(Metadata, &header.metadata_bytes);
         assert(header_metadata.value_size > 0);
@@ -357,44 +357,44 @@ pub const TableData = struct {
     }
 
     pub inline fn block_metadata(
-        schema: *const TableData,
-        data_block: BlockPtrConst,
+        schema: *const TableValue,
+        value_block: BlockPtrConst,
     ) *const Metadata {
-        const result = metadata(data_block);
+        const result = metadata(value_block);
         assert(result.value_size == schema.value_size);
         assert(result.value_count_max == schema.value_count_max);
         return result;
     }
 
     pub inline fn block_values_bytes(
-        schema: *const TableData,
-        data_block: BlockPtr,
+        schema: *const TableValue,
+        value_block: BlockPtr,
     ) []align(16) u8 {
-        return @alignCast(data_block[schema.values_offset..][0..schema.values_size]);
+        return @alignCast(value_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_bytes_const(
-        schema: *const TableData,
-        data_block: BlockPtrConst,
+        schema: *const TableValue,
+        value_block: BlockPtrConst,
     ) []align(16) const u8 {
-        return @alignCast(data_block[schema.values_offset..][0..schema.values_size]);
+        return @alignCast(value_block[schema.values_offset..][0..schema.values_size]);
     }
 
     pub inline fn block_values_used_bytes(
-        schema: *const TableData,
-        data_block: BlockPtrConst,
+        schema: *const TableValue,
+        value_block: BlockPtrConst,
     ) []align(16) const u8 {
-        const header = header_from_block(data_block);
-        assert(header.block_type == .data);
+        const header = header_from_block(value_block);
+        assert(header.block_type == .value);
 
-        const used_values: u32 = block_metadata(schema, data_block).value_count;
+        const used_values: u32 = block_metadata(schema, value_block).value_count;
         assert(used_values > 0);
         assert(used_values <= schema.value_count_max);
 
         const used_bytes = used_values * schema.value_size;
         assert(@sizeOf(vsr.Header) + used_bytes == header.size);
         assert(header.size <= schema.padding_offset); // This is the maximum padding_offset
-        return schema.block_values_bytes_const(data_block)[0..used_bytes];
+        return schema.block_values_bytes_const(value_block)[0..used_bytes];
     }
 };
 
@@ -404,7 +404,7 @@ pub const TrailerNode = struct {
         previous_trailer_block_checksum: u128,
         previous_trailer_block_checksum_padding: u128 = 0,
         previous_trailer_block_address: u64,
-        reserved: [56]u8 = .{0} ** 56,
+        reserved: [56]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -498,7 +498,7 @@ pub const ManifestNode = struct {
         previous_manifest_block_checksum_padding: u128 = 0,
         previous_manifest_block_address: u64,
         entry_count: u32,
-        reserved: [52]u8 = .{0} ** 52,
+        reserved: [52]u8 = @splat(0),
 
         comptime {
             assert(stdx.no_padding(Metadata));
@@ -521,7 +521,7 @@ pub const ManifestNode = struct {
         value_count: u32,
         tree_id: u16,
         label: Label,
-        reserved: [1]u8 = .{0} ** 1,
+        reserved: [1]u8 = @splat(0),
 
         comptime {
             assert(@sizeOf(TableInfo) == 128);

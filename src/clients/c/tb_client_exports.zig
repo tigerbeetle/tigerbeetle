@@ -232,7 +232,7 @@ pub const Logging = struct {
     /// A logger which defers to an application provided handler.
     pub fn application_logger(
         comptime message_level: std.log.Level,
-        comptime scope: @Type(.EnumLiteral),
+        comptime scope: @Type(.enum_literal),
         comptime format: []const u8,
         args: anytype,
     ) void {

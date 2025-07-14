@@ -312,7 +312,7 @@ pub const Header = extern struct {
         replica: u8 = 0,
         reserved_frame: [12]u8,
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [128]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
@@ -340,7 +340,7 @@ pub const Header = extern struct {
         replica: u8 = 0,
         reserved_frame: [12]u8,
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [128]u8 = @splat(0),
 
         fn invalid_header(_: *const @This()) ?[]const u8 {
             return "deprecated message type";
@@ -365,7 +365,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// Current checkpoint id.
         checkpoint_id: u128,
@@ -374,10 +374,10 @@ pub const Header = extern struct {
 
         ping_timestamp_monotonic: u64,
         release_count: u16,
-        route_padding: [6]u8 = [_]u8{0} ** 6,
+        route_padding: [6]u8 = @splat(0),
         route: u64,
 
-        reserved: [80]u8 = [_]u8{0} ** 80,
+        reserved: [80]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
@@ -416,12 +416,12 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         ping_timestamp_monotonic: u64,
         pong_timestamp_wall: u64,
 
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [112]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
@@ -451,11 +451,11 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         client: u128,
         ping_timestamp_monotonic: u64,
-        reserved: [104]u8 = [_]u8{0} ** 104,
+        reserved: [104]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
@@ -486,10 +486,10 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         ping_timestamp_monotonic: u64,
-        reserved: [120]u8 = [_]u8{0} ** 120,
+        reserved: [120]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
@@ -518,7 +518,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// Clients hash-chain their requests to verify linearizability:
         /// - A session's first request (operation=register) sets `parent=0`.
@@ -553,7 +553,12 @@ pub const Header = extern struct {
         /// A client is allowed to have at most one request inflight at a time.
         request: u32,
         operation: Operation,
-        reserved: [59]u8 = [_]u8{0} ** 59,
+        previous_request_latency_padding: [3]u8 = @splat(0),
+        /// Nanosecond interval measuring the time between when the client first began to construct
+        /// the previous request's body and the time that the client received the corresponding
+        /// reply.
+        previous_request_latency: u32,
+        reserved: [52]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -617,6 +622,7 @@ pub const Header = extern struct {
                     // the check requires the StateMachine type.
                 },
             }
+            if (!stdx.zeroed(&self.previous_request_latency_padding)) return "padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
@@ -639,7 +645,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// A backpointer to the previous prepare checksum for hash chain verification.
         /// This provides a strong guarantee for linearizability across our distributed log
@@ -675,7 +681,7 @@ pub const Header = extern struct {
         request: u32,
         /// The state machine operation to apply.
         operation: Operation,
-        reserved: [3]u8 = [_]u8{0} ** 3,
+        reserved: [3]u8 = @splat(0),
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -806,7 +812,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// The previous prepare's checksum.
         /// (Same as the corresponding Prepare's `parent`.)
@@ -819,11 +825,11 @@ pub const Header = extern struct {
         checkpoint_id: u128,
         client: u128,
         op: u64,
-        commit: u64,
+        commit_min: u64,
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [3]u8 = [_]u8{0} ** 3,
+        reserved: [3]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
@@ -842,7 +848,6 @@ pub const Header = extern struct {
                     }
                     if (self.request != 0) return "root: request != 0";
                     if (self.op != 0) return "root: op != 0";
-                    if (self.commit != 0) return "root: commit != 0";
                     if (self.timestamp != 0) return "root: timestamp != 0";
                 },
                 else => {
@@ -854,7 +859,6 @@ pub const Header = extern struct {
                         if (self.client == 0) return "client == 0";
                     }
                     if (self.op == 0) return "op == 0";
-                    if (self.op <= self.commit) return "op <= commit";
                     if (self.timestamp == 0) return "timestamp == 0";
                     if (self.operation == .register or
                         self.operation == .upgrade)
@@ -893,7 +897,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// The checksum of the corresponding Request.
         request_checksum: u128,
@@ -913,7 +917,7 @@ pub const Header = extern struct {
         timestamp: u64,
         request: u32,
         operation: Operation = .reserved,
-        reserved: [19]u8 = [_]u8{0} ** 19,
+        reserved: [19]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
@@ -957,7 +961,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// The latest committed prepare's checksum.
         commit_checksum: u128,
@@ -974,7 +978,7 @@ pub const Header = extern struct {
 
         timestamp_monotonic: u64,
 
-        reserved: [56]u8 = [_]u8{0} ** 56,
+        reserved: [56]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
@@ -1004,9 +1008,9 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [128]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
@@ -1034,7 +1038,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// A bitset of "present" prepares. If a bit is set, then the corresponding header is not
         /// "blank", the replica has the prepare, and the prepare is not known to be faulty.
@@ -1049,7 +1053,7 @@ pub const Header = extern struct {
         commit_min: u64,
         checkpoint_op: u64,
         log_view: u32,
-        reserved: [68]u8 = [_]u8{0} ** 68,
+        reserved: [68]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
@@ -1080,7 +1084,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// Set to zero for a new view, and to a nonce from an RSV when responding to the RSV.
         nonce: u128,
@@ -1090,7 +1094,7 @@ pub const Header = extern struct {
         commit_max: u64,
         /// The replica's `op_checkpoint`.
         checkpoint_op: u64,
-        reserved: [88]u8 = [_]u8{0} ** 88,
+        reserved: [88]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
@@ -1118,10 +1122,10 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         nonce: u128,
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [112]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
@@ -1150,13 +1154,13 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         /// The minimum op requested (inclusive).
         op_min: u64,
         /// The maximum op requested (inclusive).
         op_max: u64,
-        reserved: [112]u8 = [_]u8{0} ** 112,
+        reserved: [112]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
@@ -1186,12 +1190,12 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         prepare_checksum: u128,
         prepare_checksum_padding: u128 = 0,
         prepare_op: u64,
-        reserved: [88]u8 = [_]u8{0} ** 88,
+        reserved: [88]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
@@ -1221,13 +1225,13 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         reply_checksum: u128,
         reply_checksum_padding: u128 = 0,
         reply_client: u128,
         reply_op: u64,
-        reserved: [72]u8 = [_]u8{0} ** 72,
+        reserved: [72]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
@@ -1258,9 +1262,9 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [128]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
@@ -1287,10 +1291,10 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         client: u128,
-        reserved: [111]u8 = [_]u8{0} ** 111,
+        reserved: [111]u8 = @splat(0),
         reason: Reason,
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
@@ -1344,9 +1348,9 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8,
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
-        reserved: [128]u8 = [_]u8{0} ** 128,
+        reserved: [128]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
@@ -1379,7 +1383,7 @@ pub const Header = extern struct {
         protocol: u16 = vsr.Version,
         command: Command,
         replica: u8 = 0, // Always 0.
-        reserved_frame: [12]u8 = [_]u8{0} ** 12,
+        reserved_frame: [12]u8 = @splat(0),
 
         // Schema is determined by `block_type`.
         metadata_bytes: [metadata_size]u8,
@@ -1388,7 +1392,7 @@ pub const Header = extern struct {
         address: u64,
         snapshot: u64,
         block_type: schema.BlockType,
-        reserved_block: [15]u8 = [_]u8{0} ** 15,
+        reserved_block: [15]u8 = @splat(0),
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .block);
@@ -1414,8 +1418,8 @@ comptime {
         const CommandHeader = Header.Type(command);
         assert(@sizeOf(CommandHeader) == @sizeOf(Header));
         assert(@alignOf(CommandHeader) == @alignOf(Header));
-        assert(@typeInfo(CommandHeader) == .Struct);
-        assert(@typeInfo(CommandHeader).Struct.layout == .@"extern");
+        assert(@typeInfo(CommandHeader) == .@"struct");
+        assert(@typeInfo(CommandHeader).@"struct".layout == .@"extern");
         assert(stdx.no_padding(CommandHeader));
 
         // Verify that the command's header's frame is identical to Header's.

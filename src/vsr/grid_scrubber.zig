@@ -104,12 +104,12 @@ pub fn GridScrubberType(comptime Forest: type) type {
             init,
             done,
             table_index,
-            table_data: struct {
+            table_value: struct {
                 index_checksum: u128,
                 index_address: u64,
                 /// Points to `tour_index_block` once the index block has been read.
                 index_block: ?BlockPtr = null,
-                data_block_index: u32 = 0,
+                value_block_index: u32 = 0,
             },
             /// The manifest log tour iterates manifest blocks in reverse order.
             /// (To ensure that manifest compaction doesn't lead to missed blocks.)
@@ -126,7 +126,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         /// This varies between replicas to minimize risk of data loss.
         tour_tables_origin: ?WrappingForestTableIterator.Origin,
 
-        /// Contains a table index block when tour=table_data.
+        /// Contains a table index block when tour=table_value.
         tour_index_block: BlockPtr,
 
         /// These counters reset after every tour cycle.
@@ -188,7 +188,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                     const tree = scrubber.forest.tree_for_id_const(tree_id);
                     const levels = &tree.manifest.levels;
                     const tree_level_weight = @as(u64, levels[level].tables.len()) *
-                        tree_info.Tree.Table.index.data_block_count_max;
+                        tree_info.Tree.Table.index.value_block_count_max;
                     if (tree_level_weight > 0 and reservoir.replace(prng, tree_level_weight)) {
                         scrubber.tour_tables_origin = .{
                             .level = @intCast(level),
@@ -215,7 +215,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 }
             }
 
-            if (scrubber.tour == .table_data) {
+            if (scrubber.tour == .table_value) {
                 // Skip scrubbing the table data; the table may not exist when state sync finishes.
                 scrubber.tour = .table_index;
             }
@@ -247,8 +247,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 }
             }
 
-            if (scrubber.tour == .table_data) {
-                const index_address = scrubber.tour.table_data.index_address;
+            if (scrubber.tour == .table_value) {
+                const index_address = scrubber.tour.table_value.index_address;
                 assert(!scrubber.forest.grid.free_set.is_free(index_address));
 
                 if (scrubber.forest.grid.free_set
@@ -321,22 +321,23 @@ pub fn GridScrubberType(comptime Forest: type) type {
             });
 
             if (read.status == .repair and
-                scrubber.tour == .table_data and
-                scrubber.tour.table_data.index_block == null and
-                scrubber.tour.table_data.index_checksum == read.read.checksum and
-                scrubber.tour.table_data.index_address == read.read.address)
+                scrubber.tour == .table_value and
+                scrubber.tour.table_value.index_block == null and
+                scrubber.tour.table_value.index_checksum == read.read.checksum and
+                scrubber.tour.table_value.index_address == read.read.address)
             {
-                assert(scrubber.tour.table_data.data_block_index == 0);
+                assert(scrubber.tour.table_value.value_block_index == 0);
 
                 if (result == .valid) {
                     stdx.copy_disjoint(.inexact, u8, scrubber.tour_index_block, result.valid);
-                    scrubber.tour.table_data.index_block = scrubber.tour_index_block;
+                    scrubber.tour.table_value.index_block = scrubber.tour_index_block;
                 } else {
-                    // The scrubber can't scrub the table data blocks until it has the corresponding
-                    // index block. We will wait for the index block, and keep re-scrubbing it until
-                    // it is repaired (or until the block is released by a checkpoint).
+                    // The scrubber can't scrub the table value blocks until it has the
+                    // corresponding index block. We will wait for the index block, and keep
+                    // re-scrubbing it until it is repaired (or until the block is released by
+                    // a checkpoint).
                     //
-                    // (Alternatively, we could just skip past the table data blocks, and we will
+                    // (Alternatively, we could just skip past the table value blocks, and we will
                     // come across them again during the next cycle. But waiting for them makes for
                     // nicer invariants + tests.)
                     log.debug("{}: read_next_callback: waiting for index repair " ++
@@ -390,39 +391,39 @@ pub fn GridScrubberType(comptime Forest: type) type {
                 tour.* = .table_index;
             }
 
-            if (tour.* == .table_data) {
-                const index_block = tour.table_data.index_block orelse {
+            if (tour.* == .table_value) {
+                const index_block = tour.table_value.index_block orelse {
                     // The table index is `null` if:
                     // - It was corrupt when we just scrubbed it.
                     // - Or `grid_scrubber_reads > 1`.
                     // Keep trying until either we find it, or a checkpoint removes it.
                     // (See read_next_callback() for more detail.)
                     return .{
-                        .block_checksum = tour.table_data.index_checksum,
-                        .block_address = tour.table_data.index_address,
+                        .block_checksum = tour.table_value.index_checksum,
+                        .block_address = tour.table_value.index_address,
                         .block_type = .index,
                     };
                 };
 
                 const index_schema = schema.TableIndex.from(index_block);
-                const data_block_index = tour.table_data.data_block_index;
-                if (data_block_index <
-                    index_schema.data_blocks_used(scrubber.tour_index_block))
+                const value_block_index = tour.table_value.value_block_index;
+                if (value_block_index <
+                    index_schema.value_blocks_used(scrubber.tour_index_block))
                 {
-                    tour.table_data.data_block_index += 1;
+                    tour.table_value.value_block_index += 1;
 
-                    const data_block_addresses =
-                        index_schema.data_addresses_used(scrubber.tour_index_block);
-                    const data_block_checksums =
-                        index_schema.data_checksums_used(scrubber.tour_index_block);
+                    const value_block_addresses =
+                        index_schema.value_addresses_used(scrubber.tour_index_block);
+                    const value_block_checksums =
+                        index_schema.value_checksums_used(scrubber.tour_index_block);
                     return .{
-                        .block_checksum = data_block_checksums[data_block_index].value,
-                        .block_address = data_block_addresses[data_block_index],
-                        .block_type = .data,
+                        .block_checksum = value_block_checksums[value_block_index].value,
+                        .block_address = value_block_addresses[value_block_index],
+                        .block_type = .value,
                     };
                 } else {
-                    assert(data_block_index ==
-                        index_schema.data_blocks_used(scrubber.tour_index_block));
+                    assert(value_block_index ==
+                        index_schema.value_blocks_used(scrubber.tour_index_block));
                     tour.* = .table_index;
                 }
             }
@@ -436,7 +437,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
                         );
                     }
 
-                    tour.* = .{ .table_data = .{
+                    tour.* = .{ .table_value = .{
                         .index_checksum = table_info.checksum,
                         .index_address = table_info.address,
                     } };

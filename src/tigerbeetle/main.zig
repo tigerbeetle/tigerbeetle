@@ -40,7 +40,7 @@ pub var log_level_runtime: std.log.Level = .info;
 
 pub fn log_runtime(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -164,7 +164,7 @@ const SigIllHandler = struct {
 
                 var oact: std.posix.Sigaction = undefined;
 
-                try std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
+                std.posix.sigaction(std.posix.SIG.ILL, &act, &oact);
                 original_posix_sigill_handler = oact.handler.sigaction.?;
             },
             else => unreachable,
@@ -178,12 +178,12 @@ const Command = struct {
     io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
-    data_file_path: [:0]const u8,
+    data_file_path: []const u8,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
-        path: [:0]const u8,
+        path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
@@ -345,18 +345,14 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: ?AOF = if (args.aof) blk: {
-            const aof_path = try std.fmt.allocPrint(
-                allocator,
-                "{s}.aof",
-                .{std.fs.path.basename(args.path)},
-            );
-            defer allocator.free(aof_path);
-            std.log.info("{s}", .{aof_path});
+        var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
+            const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
+            const aof_dir_fd = try IO.open_dir(aof_dir);
+            defer std.posix.close(aof_dir_fd);
 
             break :blk try AOF.init(&command.io, .{
-                .dir_fd = command.dir_fd,
-                .relative_path = aof_path,
+                .dir_fd = aof_dir_fd,
+                .relative_path = std.fs.path.basename(aof_file.const_slice()),
             });
         } else null;
         defer if (aof != null) aof.?.close();
@@ -460,6 +456,7 @@ const Command = struct {
             .time = &time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
+            .commit_stall_probability = args.commit_stall_probability,
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
                 .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
@@ -493,10 +490,15 @@ const Command = struct {
         if (multiversion != null) {
             if (args.development) {
                 log.info("multiversioning: upgrade polling disabled due to --development.", .{});
-            } else if (args.experimental) {
-                log.info("multiversioning: upgrade polling disabled due to --experimental.", .{});
             } else {
                 multiversion.?.timeout_start(replica.replica);
+            }
+
+            if (args.experimental) {
+                log.warn("multiversioning: upgrade polling and --experimental enabled - " ++
+                    "make sure to check CLI argument compatibility before upgrading.", .{});
+                log.warn("If the cluster upgrades automatically, and incompatible experimental " ++
+                    "CLI arguments are set, it will crash.", .{});
             }
         }
 
@@ -751,8 +753,8 @@ fn print_value(
     }
 
     switch (@typeInfo(@TypeOf(value))) {
-        .Fn => {}, // Ignore the log() function.
-        .Pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
+        .@"fn" => {}, // Ignore the log() function.
+        .pointer => try std.fmt.format(writer, "{s}=\"{s}\"\n", .{
             field,
             std.fmt.fmtSliceEscapeLower(value),
         }),

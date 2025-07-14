@@ -851,8 +851,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
 
-            if (manifest_log.grid_reservation) |grid_reservation| {
-                manifest_log.grid.forfeit(grid_reservation);
+            if (manifest_log.grid_reservation) |reservation| {
+                manifest_log.grid.forfeit(reservation);
                 manifest_log.grid_reservation = null;
             } else {
                 // Compaction was skipped for this half-bar.
@@ -1166,8 +1166,8 @@ pub const Pace = struct {
         const half_bar_append_entries_max = options.tree_count *
             stdx.div_ceil(constants.lsm_levels, 2) * // Maximum number of compactions/half-bar.
             (compaction.compaction_tables_input_max + // Update snapshot_max.
-            compaction.compaction_tables_input_max + // Remove.
-            compaction.compaction_tables_output_max); // Insert.
+                compaction.compaction_tables_input_max + // Remove.
+                compaction.compaction_tables_output_max); // Insert.
 
         // "A":
         const half_bar_append_blocks_max =
@@ -1193,7 +1193,7 @@ pub const Pace = struct {
             const log_blocks_after =
                 log_blocks_full_max +
                 half_bar_append_blocks_max *
-                stdx.div_ceil(log_blocks_before, half_bar_compact_blocks_max);
+                    stdx.div_ceil(log_blocks_before, half_bar_compact_blocks_max);
 
             if (log_blocks_before == log_blocks_after) {
                 break log_blocks_after;

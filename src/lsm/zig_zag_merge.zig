@@ -141,9 +141,9 @@ pub fn ZigZagMergeIteratorType(
                         it.probe_key_previous == null or
                             key == it.probe_key_previous.? or
                             it.key_ahead(.{
-                            .key_after = key,
-                            .key_before = it.probe_key_previous.?,
-                        }),
+                                .key_after = key,
+                                .key_before = it.probe_key_previous.?,
+                            }),
                     );
 
                     // The keys matches, continuing to the next stream.

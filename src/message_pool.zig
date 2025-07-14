@@ -263,8 +263,8 @@ pub const MessagePool = struct {
     /// - `*Message`
     /// - `*MessageType(command)` for any `command`.
     pub fn unref(pool: *MessagePool, message: anytype) void {
-        assert(@typeInfo(@TypeOf(message)) == .Pointer);
-        assert(!@typeInfo(@TypeOf(message)).Pointer.is_const);
+        assert(@typeInfo(@TypeOf(message)) == .pointer);
+        assert(!@typeInfo(@TypeOf(message)).pointer.is_const);
 
         if (@TypeOf(message) == *Message) {
             pool.unref_base(message);

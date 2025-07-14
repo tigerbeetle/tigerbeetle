@@ -138,6 +138,17 @@ fn main_inspect(
 }
 
 fn inspect_constants(output: std.io.AnyWriter) !void {
+    try output.print("VSR:\n", .{});
+    try print_header(output, 0, "prepare_queue");
+    try output.print("{}\n", .{constants.pipeline_prepare_queue_max});
+    try print_header(output, 0, "request_queue");
+    try output.print("{}\n", .{constants.pipeline_request_queue_max});
+    try print_header(output, 0, "prepare_cache");
+    try output.print("{}\n", .{
+        constants.pipeline_prepare_queue_max + constants.pipeline_request_queue_max,
+    });
+    try output.print("\n", .{});
+
     try output.print("Data File Layout:\n", .{});
     inline for (comptime std.enums.values(vsr.Zone)) |zone| {
         try print_header(output, 0, @tagName(zone));
@@ -561,8 +572,8 @@ const Inspector = struct {
             const wal_prepare_body_valid =
                 wal_prepare.valid_checksum() and
                 wal_prepare.valid_checksum_body(
-                prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
-            );
+                    prepare_buffer[@sizeOf(vsr.Header)..wal_prepare.size],
+                );
 
             const header_pair = [_]*const vsr.Header.Prepare{ wal_header, wal_prepare };
 
@@ -621,8 +632,8 @@ const Inspector = struct {
         const prepare_body_valid =
             prepare_header.valid_checksum() and
             prepare_header.valid_checksum_body(
-            prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
-        );
+                prepare_buffer[@sizeOf(vsr.Header)..prepare_header.size],
+            );
 
         const copies: [2]*const vsr.Header.Prepare = .{ &headers[slot], prepare_header };
 
@@ -753,38 +764,38 @@ const Inspector = struct {
 
         const free_set_blocks_acquired_buffer =
             try inspector.allocator.alignedAlloc(
-            u8,
-            @alignOf(vsr.FreeSet.Word),
-            free_set_blocks_acquired_size,
-        );
+                u8,
+                @alignOf(vsr.FreeSet.Word),
+                free_set_blocks_acquired_size,
+            );
         defer inspector.allocator.free(free_set_blocks_acquired_buffer);
 
         var free_set_blocks_acquired_addresses =
             try std.ArrayList(u64).initCapacity(
-            inspector.allocator,
-            stdx.div_ceil(
-                free_set_blocks_acquired_size,
-                constants.block_size - @sizeOf(vsr.Header),
-            ),
-        );
+                inspector.allocator,
+                stdx.div_ceil(
+                    free_set_blocks_acquired_size,
+                    constants.block_size - @sizeOf(vsr.Header),
+                ),
+            );
         defer free_set_blocks_acquired_addresses.deinit();
 
         const free_set_blocks_released_buffer =
             try inspector.allocator.alignedAlloc(
-            u8,
-            @alignOf(vsr.FreeSet.Word),
-            free_set_blocks_released_size,
-        );
+                u8,
+                @alignOf(vsr.FreeSet.Word),
+                free_set_blocks_released_size,
+            );
         defer inspector.allocator.free(free_set_blocks_released_buffer);
 
         var free_set_blocks_released_addresses =
             try std.ArrayList(u64).initCapacity(
-            inspector.allocator,
-            stdx.div_ceil(
-                free_set_blocks_released_size,
-                constants.block_size - @sizeOf(vsr.Header),
-            ),
-        );
+                inspector.allocator,
+                stdx.div_ceil(
+                    free_set_blocks_released_size,
+                    constants.block_size - @sizeOf(vsr.Header),
+                ),
+            );
         defer free_set_blocks_released_addresses.deinit();
 
         try inspector.read_free_set_bitset(
@@ -819,14 +830,14 @@ const Inspector = struct {
         const SliceOfAlignedWordSlice = []const []align(@alignOf(vsr.FreeSet.Word)) const u8;
         const encoded_free_set_blocks_acquired: SliceOfAlignedWordSlice =
             if (free_set_blocks_acquired_buffer.len != 0)
-            &.{free_set_blocks_acquired_buffer}
-        else
-            &.{};
+                &.{free_set_blocks_acquired_buffer}
+            else
+                &.{};
         const encoded_free_set_blocks_released: SliceOfAlignedWordSlice =
             if (free_set_blocks_released_buffer.len != 0)
-            &.{free_set_blocks_released_buffer}
-        else
-            &.{};
+                &.{free_set_blocks_released_buffer}
+            else
+                &.{};
 
         free_set.open(.{
             .encoded = .{
@@ -1229,18 +1240,18 @@ fn print_struct(
     label: []const u8,
     value: anytype,
 ) !void {
-    comptime assert(@typeInfo(@TypeOf(value)) == .Pointer);
-    comptime assert(@typeInfo(@TypeOf(value)).Pointer.size == .One);
+    comptime assert(@typeInfo(@TypeOf(value)) == .pointer);
+    comptime assert(@typeInfo(@TypeOf(value)).pointer.size == .one);
 
-    const Type = @typeInfo(@TypeOf(value)).Pointer.child;
+    const Type = @typeInfo(@TypeOf(value)).pointer.child;
     // Print structs *without* a custom format() function.
-    if (comptime @typeInfo(Type) == .Struct and !std.meta.hasFn(Type, "format")) {
-        if (@typeInfo(Type).Struct.is_tuple) {
+    if (comptime @typeInfo(Type) == .@"struct" and !std.meta.hasFn(Type, "format")) {
+        if (@typeInfo(Type).@"struct".is_tuple) {
             try output.writeAll(label);
             // Print tuples as a single line.
             inline for (std.meta.fields(Type), 0..) |field, i| {
-                if (@typeInfo(field.type) == .Pointer and
-                    @typeInfo(@typeInfo(field.type).Pointer.child) == .Array)
+                if (@typeInfo(field.type) == .pointer and
+                    @typeInfo(@typeInfo(field.type).pointer.child) == .array)
                 {
                     // Allow inline labels.
                     try output.writeAll(@field(value, field.name));
@@ -1264,8 +1275,8 @@ fn print_struct(
 
     if (Element: {
         const type_info = @typeInfo(Type);
-        if (type_info == .Array) {
-            break :Element @as(?type, type_info.Array.child);
+        if (type_info == .array) {
+            break :Element @as(?type, type_info.array.child);
         }
         break :Element null;
     }) |Element| {
@@ -1293,8 +1304,8 @@ fn print_struct(
 
 fn print_value(output: std.io.AnyWriter, value: anytype) !void {
     const Type = @TypeOf(value);
-    if (@typeInfo(Type) == .Struct) assert(std.meta.hasFn(Type, "format"));
-    assert(@typeInfo(Type) != .Array);
+    if (@typeInfo(Type) == .@"struct") assert(std.meta.hasFn(Type, "format"));
+    assert(@typeInfo(Type) != .array);
 
     if (Type == u128) return output.print("0x{x:0>32}", .{value});
 
@@ -1306,7 +1317,7 @@ fn print_value(output: std.io.AnyWriter, value: anytype) !void {
         }
     }
 
-    if (@typeInfo(Type) == .Enum) {
+    if (@typeInfo(Type) == .@"enum") {
         if (std.enums.tagName(Type, value)) |value_string| {
             return output.print("{s}", .{value_string});
         } else {
@@ -1325,7 +1336,7 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .{ .block_type = .client_sessions, .Schema = schema.TrailerNode },
         .{ .block_type = .manifest, .Schema = schema.ManifestNode },
         .{ .block_type = .index, .Schema = schema.TableIndex },
-        .{ .block_type = .data, .Schema = schema.TableData },
+        .{ .block_type = .value, .Schema = schema.TableValue },
     }) |pair| {
         if (header.block_type == pair.block_type) {
             try print_struct(writer, "header.metadata", pair.Schema.metadata(block));
@@ -1361,26 +1372,26 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .index => {
             const index = schema.TableIndex.from(block);
             for (
-                index.data_addresses_used(block),
-                index.data_checksums_used(block),
+                index.value_addresses_used(block),
+                index.value_checksums_used(block),
                 0..,
-            ) |data_address, data_checksum, i| {
+            ) |value_address, value_checksum, i| {
                 try writer.print(
-                    "data_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
-                    .{ i, data_address, data_checksum.value },
+                    "value_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
+                    .{ i, value_address, value_checksum.value },
                 );
             }
         },
-        .data => {
-            const data = schema.TableData.from(block);
-            const metadata = data.block_metadata(block);
-            const data_bytes = data.block_values_used_bytes(block);
+        .value => {
+            const value_block = schema.TableValue.from(block);
+            const metadata = value_block.block_metadata(block);
+            const value_bytes = value_block.block_values_used_bytes(block);
 
             var label_buffer: [256]u8 = undefined;
             inline for (StateMachine.Forest.tree_infos) |tree_info| {
                 if (metadata.tree_id == tree_info.tree_id) {
                     for (
-                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes),
+                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, value_bytes),
                         0..,
                     ) |*value, i| {
                         var label_stream = std.io.fixedBufferStream(&label_buffer);
@@ -1595,7 +1606,7 @@ fn GroupByType(comptime count_max: usize) type {
         const BitSet = stdx.BitSetType(count_max);
 
         count: usize = 0,
-        checksums: [count_max]?u128 = [_]?u128{null} ** count_max,
+        checksums: [count_max]?u128 = @splat(null),
         matches: [count_max]BitSet = undefined,
 
         pub fn compare(group_by: *GroupBy, bytes: []const u8) void {

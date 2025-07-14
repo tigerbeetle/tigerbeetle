@@ -77,7 +77,7 @@ pub const Route = stdx.BoundedArrayType(u8, constants.replicas_max);
 const OpHistory = struct {
     op: u64,
     prepare: Instant,
-    prepare_ok: [constants.replicas_max]Duration = .{latency_max} ** constants.replicas_max,
+    prepare_ok: [constants.replicas_max]Duration = @splat(latency_max),
     present: stdx.BitSetType(constants.replicas_max) = .{},
 
     fn root() OpHistory {
@@ -215,7 +215,7 @@ pub fn init(options: struct {
         .b = route,
         .b_cost = null,
 
-        .history = .{OpHistory.root()} ** history_max,
+        .history = @splat(.root()),
     };
 }
 
@@ -374,7 +374,7 @@ test route_decode {
     for (0..200_000) |_| {
         const replica_count = prng.range_inclusive(u8, 1, constants.replicas_max);
 
-        var code_bytes: [8]u8 = .{0} ** 8;
+        var code_bytes: [8]u8 = @splat(0);
         for (&code_bytes) |*byte| {
             byte.* = if (prng.chance(ratio(replica_count + 1, 8)))
                 prng.int_inclusive(u8, constants.replicas_max + 1)
@@ -565,7 +565,7 @@ fn history_empty(routing: *Routing) bool {
 }
 
 pub fn history_reset(routing: *Routing) void {
-    routing.history = .{OpHistory.root()} ** history_max;
+    routing.history = @splat(.root());
     routing.a_cost = null;
     routing.b_cost = null;
 }
@@ -949,7 +949,7 @@ test "Routing fuzz" {
             for (0..constants.replicas_max) |replica| {
                 assert(visited.is_set(replica) ==
                     (replica < member_count and
-                    replica != env.view % env.routing.replica_count));
+                        replica != env.view % env.routing.replica_count));
             }
         }
 

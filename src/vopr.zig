@@ -251,14 +251,13 @@ pub fn main() !void {
         }
         const requests_done = simulator.requests_replied == simulator.options.requests_max;
         const upgrades_done =
-            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health|
-        {
-            if (health != .up) continue;
-            const release_latest = releases[simulator.replica_releases_limit - 1].release;
-            if (replica.release.value == release_latest.value) {
-                break true;
-            }
-        } else false;
+            for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
+                if (health != .up) continue;
+                const release_latest = releases[simulator.replica_releases_limit - 1].release;
+                if (replica.release.value == release_latest.value) {
+                    break true;
+                }
+            } else false;
 
         if (requests_done and upgrades_done) break;
     } else {
@@ -406,6 +405,10 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
                 .cache_entries_transfers = if (prng.boolean()) 256 else 0,
                 .cache_entries_transfers_pending = if (prng.boolean()) 256 else 0,
             },
+        },
+        .replicate_options = .{
+            .closed_loop = prng.chance(ratio(1, 5)),
+            .star = prng.chance(ratio(1, 5)),
         },
     };
 
@@ -932,9 +935,8 @@ pub const Simulator = struct {
             }
         }
 
-        if (core_recovering == 0) return false;
-
         const quorums = vsr.quorums(simulator.options.cluster.replica_count);
+        assert(quorums.view_change <= core_replicas);
         return quorums.view_change > core_replicas - core_recovering;
     }
 
@@ -1000,14 +1002,38 @@ pub const Simulator = struct {
         // smaller log_view may have an outdated version of the same uncommitted op. There may be
         // at most a pipeline of uncommitted headers in the cluster.
         const pipeline_max = constants.pipeline_prepare_queue_max;
-        var uncommitted_headers = [_]?vsr.Header.Prepare{null} ** pipeline_max;
+        var uncommitted_headers: [pipeline_max]?vsr.Header.Prepare = @splat(null);
         if (cluster_commit_max < cluster_op_head) {
             for (simulator.cluster.replicas) |replica| {
                 if (!simulator.core_repairable_replica(Cluster.Replica, &replica)) continue;
 
                 if (replica.log_view < cluster_log_view) continue;
                 for (cluster_commit_max + 1..cluster_op_head + 1) |op| {
-                    if (replica.journal.header_with_op(op)) |header| {
+                    if (header: {
+                        if (replica.superblock.working.vsr_state.log_view <
+                            replica.superblock.working.vsr_state.view)
+                        {
+                            // When we are view-changing, our journal headers may contain headers
+                            // which were truncated then restored due to restart. If a view change
+                            // completes then that will be resolved, but if the view-change is stuck
+                            // (e.g. due to "quorum received, awaiting repair") then they may
+                            // linger, so if we only looked at the journal headers it would appear
+                            // as if the replicas disagreed about the uncommitted headers.
+                            const headers_count = replica.superblock.working.vsr_headers_count;
+                            const headers =
+                                replica.superblock.working.vsr_headers_all[0..headers_count];
+                            for (headers) |*header| {
+                                if (header.op == op) {
+                                    break :header switch (vsr.Headers.dvc_header_type(header)) {
+                                        .valid => header,
+                                        .blank => null,
+                                    };
+                                }
+                            } else break :header null;
+                        } else {
+                            break :header replica.journal.header_with_op(op);
+                        }
+                    }) |header| {
                         if (uncommitted_headers[op % pipeline_max]) |header_existing| {
                             assert(header_existing.op == header.op);
                             assert(header_existing.view == header.view);
@@ -1481,7 +1507,7 @@ pub const Simulator = struct {
             simulator.replica_releases[replica.replica] <
             simulator.replica_releases_limit and
             (simulator.core.is_set(replica.replica) or
-            simulator.prng.chance(simulator.options.replica_release_catchup_probability));
+                simulator.prng.chance(simulator.options.replica_release_catchup_probability));
         if (restart_upgrade) simulator.replica_upgrade(replica.replica);
 
         const restart_random =
@@ -1705,7 +1731,7 @@ var log_performance_mode: bool = false;
 
 fn log_override(
     comptime level: std.log.Level,
-    comptime scope: @TypeOf(.EnumLiteral),
+    comptime scope: @TypeOf(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {

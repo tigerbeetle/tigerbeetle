@@ -121,12 +121,11 @@ pub const IO = struct {
         // We must use the same clock source used by io_uring (CLOCK_MONOTONIC) since we specify the
         // timeout below as an absolute value. Otherwise, we may deadlock if the clock sources are
         // dramatically different. Any kernel that supports io_uring will support CLOCK_MONOTONIC.
-        var current_ts: posix.timespec = undefined;
-        posix.clock_gettime(posix.CLOCK.MONOTONIC, &current_ts) catch unreachable;
+        const current_ts = posix.clock_gettime(posix.CLOCK.MONOTONIC) catch unreachable;
         // The absolute CLOCK_MONOTONIC time after which we may return from this function:
         const timeout_ts: os.linux.kernel_timespec = .{
-            .tv_sec = current_ts.tv_sec,
-            .tv_nsec = current_ts.tv_nsec + nanoseconds,
+            .sec = current_ts.sec,
+            .nsec = current_ts.nsec + nanoseconds,
         };
         var timeouts: usize = 0;
         var etime = false;
@@ -177,8 +176,8 @@ pub const IO = struct {
         // 2) potentially queues more SQEs to take advantage more of the next flush_submissions().
         while (self.completed.pop()) |completion| {
             if (completion.operation == .timeout and
-                completion.operation.timeout.timespec.tv_sec == 0 and
-                completion.operation.timeout.timespec.tv_nsec == 0)
+                completion.operation.timeout.timespec.sec == 0 and
+                completion.operation.timeout.timespec.nsec == 0)
             {
                 // Zero-duration timeouts are a special case, and aren't listed in `awaiting`.
                 maybe(self.awaiting.empty());
@@ -704,6 +703,7 @@ pub const IO = struct {
                                 .OPNOTSUPP => error.OperationNotSupported,
                                 .PIPE => error.BrokenPipe,
                                 .TIMEDOUT => error.ConnectionTimedOut,
+                                .CANCELED => error.Canceled,
                                 else => |errno| stdx.unexpected_errno("send", errno),
                             };
                             break :blk err;
@@ -1126,6 +1126,7 @@ pub const IO = struct {
         BrokenPipe,
         ConnectionTimedOut,
         ConnectionRefused,
+        Canceled,
     } || posix.UnexpectedError;
 
     pub fn send(
@@ -1225,7 +1226,7 @@ pub const IO = struct {
             .callback = erase_types(Context, TimeoutError!void, callback),
             .operation = .{
                 .timeout = .{
-                    .timespec = .{ .tv_sec = 0, .tv_nsec = nanoseconds },
+                    .timespec = .{ .sec = 0, .nsec = nanoseconds },
                 },
             },
         };
@@ -1621,7 +1622,7 @@ pub const IO = struct {
                         "of the file instead...", .{});
 
                     const sector_size = constants.sector_size;
-                    const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+                    const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                     // Handle partial writes where the physical sector is
                     // less than a logical sector:
@@ -1737,7 +1738,7 @@ pub const IO = struct {
     fn fs_supports_direct_io(dir_fd: fd_t) !bool {
         if (!@hasField(posix.O, "DIRECT")) return false;
 
-        var cookie: [16]u8 = .{'0'} ** 16;
+        var cookie: [16]u8 = @splat('0');
         _ = stdx.array_print(16, &cookie, "{0x}", .{std.crypto.random.int(u64)});
 
         const path: [:0]const u8 = "fs_supports_direct_io-" ++ cookie ++ "";
