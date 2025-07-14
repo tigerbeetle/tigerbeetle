@@ -217,7 +217,7 @@ test "Cluster: recovery: grid corruption (disjoint)" {
 
     // Corrupt the whole grid.
     // Manifest blocks will be repaired as each replica opens its forest.
-    // Table index/filter/data blocks will be repaired as the replica commits/compacts.
+    // Table index/filter/value blocks will be repaired as the replica commits/compacts.
     for ([_]TestReplicas{
         t.replica(.R0),
         t.replica(.R1),

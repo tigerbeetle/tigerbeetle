@@ -505,13 +505,13 @@ pub fn CompactionType(
 
             var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
             while (level_a_value_block_iterator.next()) |block| {
-                values_in_flight += Table.data_block_values_used(block.ptr).len;
+                values_in_flight += Table.value_block_values_used(block.ptr).len;
             }
             values_in_flight -= compaction.level_a_position.value;
 
             var level_b_value_block_iterator = compaction.level_b_value_block.iterator();
             while (level_b_value_block_iterator.next()) |block| {
-                values_in_flight += Table.data_block_values_used(block.ptr).len;
+                values_in_flight += Table.value_block_values_used(block.ptr).len;
             }
 
             values_in_flight -= compaction.level_b_position.value;
@@ -956,9 +956,9 @@ pub fn CompactionType(
             assert(compaction.stage == .beat_quota_done);
             switch (compaction.table_builder.state) {
                 .no_blocks => {},
-                .index_and_data_block => {
+                .index_and_value_block => {
                     assert(!compaction.table_builder.index_block_full());
-                    assert(!compaction.table_builder.data_block_full());
+                    assert(!compaction.table_builder.value_block_full());
                     assert(!compaction.quotas.bar_exhausted());
                 },
                 .index_block => {
@@ -1077,7 +1077,7 @@ pub fn CompactionType(
                     if (compaction.pool.?.block_acquire()) |block| {
                         assert(block.stage == .free);
                         block.stage = .build_value_block;
-                        compaction.table_builder.set_data_block(block.ptr);
+                        compaction.table_builder.set_value_block(block.ptr);
                         compaction.table_builder_value_block = block;
                     } else {
                         assert(compaction.output_blocks.count > 0);
@@ -1146,10 +1146,10 @@ pub fn CompactionType(
                     if (compaction.level_a_index_block.head()) |index_block| {
                         if (index_block.stage == .read_index_block_done) {
                             const index_schema = schema.TableIndex.from(index_block.ptr);
-                            const data_blocks_count =
-                                index_schema.data_blocks_used(index_block.ptr);
+                            const value_blocks_count =
+                                index_schema.value_blocks_used(index_block.ptr);
                             if (!compaction.level_a_value_block.full() and
-                                level_a_value_block_next < data_blocks_count)
+                                level_a_value_block_next < value_blocks_count)
                             {
                                 if (compaction.pool.?.block_acquire()) |block| {
                                     const read = compaction.pool.?.reads.acquire().?;
@@ -1175,11 +1175,11 @@ pub fn CompactionType(
                 if (compaction.level_b_index_block.head()) |index_block| {
                     if (index_block.stage == .read_index_block_done) {
                         const index_schema = schema.TableIndex.from(index_block.ptr);
-                        const data_blocks_count =
-                            index_schema.data_blocks_used(index_block.ptr);
+                        const value_blocks_count =
+                            index_schema.value_blocks_used(index_block.ptr);
 
                         if (!compaction.level_b_value_block.full() and
-                            level_b_value_block_next < data_blocks_count)
+                            level_b_value_block_next < value_blocks_count)
                         {
                             if (compaction.pool.?.block_acquire()) |block| {
                                 const read = compaction.pool.?.reads.acquire().?;
@@ -1224,12 +1224,12 @@ pub fn CompactionType(
 
                 assert(levels_exhausted == compaction.quotas.bar_exhausted());
 
-                if (compaction.table_builder.state == .index_and_data_block) {
+                if (compaction.table_builder.state == .index_and_value_block) {
                     if (level_a_exhausted and level_b_exhausted) {
                         assert(compaction.stage == .beat_quota_done);
                     } else if ((level_a_exhausted or level_a_ready) and
                         (level_b_exhausted or level_b_ready) and
-                        !compaction.table_builder.data_block_full())
+                        !compaction.table_builder.value_block_full())
                     {
                         const cpu = compaction.pool.?.cpus.acquire().?;
                         compaction.merge(cpu);
@@ -1238,9 +1238,9 @@ pub fn CompactionType(
 
                     // Write value and index blocks. It is important for correctness that both the
                     // value block and index block are written together. Otherwise, we may end up
-                    // overflowing the index block's capacity for data block addresses.
+                    // overflowing the index block's capacity for value block addresses.
                     if (compaction.output_blocks.spare_capacity() >= 2) {
-                        if (compaction.table_builder.data_block_full()) {
+                        if (compaction.table_builder.value_block_full()) {
                             assert(!compaction.output_blocks.full());
                             const write = compaction.pool.?.writes.acquire().?;
                             compaction.write_value_block(write, .{
@@ -1271,10 +1271,10 @@ pub fn CompactionType(
         fn compaction_dispatch_beat_quota_done(compaction: *Compaction) void {
             assert(compaction.stage == .beat_quota_done);
 
-            if (compaction.table_builder.state == .index_and_data_block and
-                (compaction.table_builder.data_block_full() or compaction.quotas.bar_exhausted()))
+            if (compaction.table_builder.state == .index_and_value_block and
+                (compaction.table_builder.value_block_full() or compaction.quotas.bar_exhausted()))
             {
-                if (compaction.table_builder.data_block_empty()) {
+                if (compaction.table_builder.value_block_empty()) {
                     assert(compaction.quotas.bar_exhausted());
                     const value_block = compaction.table_builder_value_block.?;
                     compaction.table_builder_value_block = null;
@@ -1328,9 +1328,9 @@ pub fn CompactionType(
 
             switch (compaction.table_builder.state) {
                 .no_blocks => {},
-                .index_and_data_block => {
+                .index_and_value_block => {
                     assert(!compaction.table_builder.index_block_full());
-                    assert(!compaction.table_builder.data_block_full());
+                    assert(!compaction.table_builder.value_block_full());
                     assert(!compaction.quotas.bar_exhausted());
                 },
                 .index_block => {
@@ -1459,9 +1459,9 @@ pub fn CompactionType(
             const index_schema = schema.TableIndex.from(index_block.ptr);
 
             const value_block_address =
-                index_schema.data_addresses_used(index_block.ptr)[value_block_index];
+                index_schema.value_addresses_used(index_block.ptr)[value_block_index];
             const value_block_checksum =
-                index_schema.data_checksums_used(index_block.ptr)[value_block_index];
+                index_schema.value_checksums_used(index_block.ptr)[value_block_index];
 
             read.block = value_block;
             read.compaction = compaction;
@@ -1482,16 +1482,16 @@ pub fn CompactionType(
         ) void {
             const index_schema = schema.TableIndex.from(index_block);
             const index_block_address = Table.block_address(index_block);
-            const data_block_addresses = index_schema.data_addresses_used(index_block);
+            const value_block_addresses = index_schema.value_addresses_used(index_block);
 
             // Tables are released when the index block is no longer needed. Given that the same
             // index block can get re-read across the bar, the same table can be released twice.
             if (compaction.grid.free_set.is_released(index_block_address)) {
-                for (data_block_addresses) |address| {
+                for (value_block_addresses) |address| {
                     assert(compaction.grid.free_set.is_released(address));
                 }
             } else {
-                compaction.grid.release(data_block_addresses);
+                compaction.grid.release(value_block_addresses);
                 compaction.grid.release(&.{index_block_address});
             }
         }
@@ -1505,7 +1505,7 @@ pub fn CompactionType(
             assert(block.stage == .read_value_block);
             stdx.copy_disjoint(.exact, u8, block.ptr, value_block);
             block.stage = .read_value_block_done;
-            compaction.counters.in += Table.data_block_values_used(block.ptr).len;
+            compaction.counters.in += Table.value_block_values_used(block.ptr).len;
             compaction.compaction_dispatch();
         }
 
@@ -1528,7 +1528,7 @@ pub fn CompactionType(
                 block.stage = .merge;
             }
 
-            assert(compaction.table_builder.state == .index_and_data_block);
+            assert(compaction.table_builder.state == .index_and_value_block);
 
             cpu.compaction = compaction;
             compaction.grid.on_next_tick(merge_callback, &cpu.next_tick);
@@ -1538,7 +1538,7 @@ pub fn CompactionType(
             const cpu: *ResourcePool.CPU = @fieldParentPtr("next_tick", next_tick);
             const compaction: *Compaction = cpu.parent(Compaction);
             compaction.pool.?.cpus.release(cpu);
-            assert(compaction.table_builder.state == .index_and_data_block);
+            assert(compaction.table_builder.state == .index_and_value_block);
 
             compaction.grid.trace.start(.{ .compact_beat_merge = .{
                 .tree = @enumFromInt(compaction.tree.config.id),
@@ -1549,7 +1549,7 @@ pub fn CompactionType(
             assert(values_source_a != null or values_source_b != null);
 
             const values_target = compaction.table_builder
-                .data_block_values()[compaction.table_builder.value_count..];
+                .value_block_values()[compaction.table_builder.value_count..];
 
             inline for ([_]?[]const Value{
                 values_source_a,
@@ -1645,7 +1645,7 @@ pub fn CompactionType(
                     .disk => {
                         if (compaction.level_a_value_block.head()) |block| {
                             assert(block.stage == .merge);
-                            break :values Table.data_block_values_used(block.ptr);
+                            break :values Table.value_block_values_used(block.ptr);
                         } else {
                             break :values null;
                         }
@@ -1656,7 +1656,7 @@ pub fn CompactionType(
             const level_b_values_used: ?[]const Value = values: {
                 if (compaction.level_b_value_block.head()) |block| {
                     assert(block.stage == .merge);
-                    break :values Table.data_block_values_used(block.ptr);
+                    break :values Table.value_block_values_used(block.ptr);
                 } else {
                     break :values null;
                 }
@@ -1705,7 +1705,7 @@ pub fn CompactionType(
                 if (compaction.level_a_value_block.head()) |value_block| {
                     assert(value_block.stage == .merge);
                     if (compaction.level_a_position.value ==
-                        Table.data_block_values_used(value_block.ptr).len)
+                        Table.value_block_values_used(value_block.ptr).len)
                     {
                         _ = compaction.level_a_value_block.pop();
 
@@ -1715,15 +1715,15 @@ pub fn CompactionType(
                         const index_block = compaction.level_a_index_block.head().?;
                         assert(index_block.stage == .read_index_block_done);
                         const index_schema = schema.TableIndex.from(index_block.ptr);
-                        const data_blocks_count =
-                            index_schema.data_blocks_used(index_block.ptr);
+                        const value_blocks_count =
+                            index_schema.value_blocks_used(index_block.ptr);
 
                         // It is imperative that we pop the index block when the final value block
                         // is popped. While it is tempting to pop the index block when we issue
                         // a read for the final value block, this would be incorrect as it would
                         // lead to an incorrect index being computed for level_a_value_block_next
                         // in `compaction_dispatch`.
-                        if (compaction.level_a_position.value_block == data_blocks_count) {
+                        if (compaction.level_a_position.value_block == value_blocks_count) {
                             compaction.level_a_position.index_block += 1;
                             assert(compaction.level_a_position.index_block == 1);
                             compaction.level_a_position.value_block = 0;
@@ -1748,7 +1748,7 @@ pub fn CompactionType(
             if (compaction.level_b_value_block.head()) |value_block| {
                 assert(value_block.stage == .merge);
                 if (compaction.level_b_position.value ==
-                    Table.data_block_values_used(value_block.ptr).len)
+                    Table.value_block_values_used(value_block.ptr).len)
                 {
                     _ = compaction.level_b_value_block.pop().?;
                     compaction.level_b_position.value_block += 1;
@@ -1757,15 +1757,15 @@ pub fn CompactionType(
                     const index_block = compaction.level_b_index_block.head().?;
                     assert(index_block.stage == .read_index_block_done);
                     const index_schema = schema.TableIndex.from(index_block.ptr);
-                    const data_blocks_count =
-                        index_schema.data_blocks_used(index_block.ptr);
+                    const value_blocks_count =
+                        index_schema.value_blocks_used(index_block.ptr);
 
                     // It is imperative that we pop the index block when the final value block
                     // is popped. While it is tempting to pop the index block when we issue
                     // a read for the final value block, this would be incorrect as it would
                     // lead to an incorrect index being computed for level_b_value_block_next
                     // in `compaction_dispatch`.
-                    if (compaction.level_b_position.value_block == data_blocks_count) {
+                    if (compaction.level_b_position.value_block == value_blocks_count) {
                         compaction.level_b_position.index_block += 1;
                         compaction.level_b_position.value_block = 0;
 
@@ -1799,11 +1799,11 @@ pub fn CompactionType(
         ) void {
             const block = compaction.table_builder_value_block.?;
             assert(block.stage == .build_value_block);
-            assert(compaction.table_builder.data_block == block.ptr);
+            assert(compaction.table_builder.value_block == block.ptr);
             assert(!compaction.output_blocks.full());
 
             compaction.counters.out += compaction.table_builder.value_count;
-            compaction.table_builder.data_block_finish(.{
+            compaction.table_builder.value_block_finish(.{
                 .cluster = compaction.grid.superblock.working.cluster,
                 .release = compaction.grid.superblock.working.vsr_state.checkpoint.release,
                 .address = options.address,

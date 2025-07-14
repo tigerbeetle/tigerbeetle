@@ -1222,7 +1222,7 @@ pub fn ReplicaType(
             for (&self.grid_repair_table_bitsets, 0..) |*bitset, i| {
                 errdefer for (self.grid_repair_table_bitsets[0..i]) |*b| b.deinit(allocator);
                 bitset.* = try std.DynamicBitSetUnmanaged
-                    .initEmpty(allocator, constants.lsm_table_data_blocks_max);
+                    .initEmpty(allocator, constants.lsm_table_value_blocks_max);
             }
             errdefer for (&self.grid_repair_table_bitsets) |*b| b.deinit(allocator);
 

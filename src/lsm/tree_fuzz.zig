@@ -368,7 +368,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
                 beat_index_blocks_max += stdx.div_ceil(
                     beat_value_blocks_max,
-                    Table.data_block_count_max,
+                    Table.value_block_count_max,
                 );
             }
 
