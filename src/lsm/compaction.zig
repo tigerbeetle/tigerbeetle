@@ -956,7 +956,15 @@ pub fn CompactionType(
             assert(compaction.stage == .beat_quota_done);
             switch (compaction.table_builder.state) {
                 .no_blocks => {},
-                .index_block, .index_and_data_block => assert(!compaction.quotas.bar_exhausted()),
+                .index_and_data_block => {
+                    assert(!compaction.table_builder.index_block_full());
+                    assert(!compaction.table_builder.data_block_full());
+                    assert(!compaction.quotas.bar_exhausted());
+                },
+                .index_block => {
+                    assert(!compaction.table_builder.index_block_full());
+                    assert(!compaction.quotas.bar_exhausted());
+                },
             }
 
             if (compaction.table_info_a.? == .immutable) {
@@ -1320,7 +1328,15 @@ pub fn CompactionType(
 
             switch (compaction.table_builder.state) {
                 .no_blocks => {},
-                .index_and_data_block, .index_block => assert(!compaction.quotas.bar_exhausted()),
+                .index_and_data_block => {
+                    assert(!compaction.table_builder.index_block_full());
+                    assert(!compaction.table_builder.data_block_full());
+                    assert(!compaction.quotas.bar_exhausted());
+                },
+                .index_block => {
+                    assert(!compaction.table_builder.index_block_full());
+                    assert(!compaction.quotas.bar_exhausted());
+                },
             }
 
             var level_a_value_block_iterator = compaction.level_a_value_block.iterator();
