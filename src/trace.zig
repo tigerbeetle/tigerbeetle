@@ -114,298 +114,293 @@ pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate
 
 const trace_span_size_max = 1024;
 
-pub fn TracerType() type {
-    return struct {
-        time: Time,
-        replica_index: u8,
-        options: Options,
-        buffer: []u8,
-        statsd: StatsD,
+pub const Tracer = @This();
 
-        events_started: [EventTracing.stack_count]?stdx.Instant = @splat(null),
-        events_metric: []?EventMetricAggregate,
-        events_timing: []?EventTimingAggregate,
+time: Time,
+replica_index: u8,
+options: Options,
+buffer: []u8,
+statsd: StatsD,
 
-        time_start: stdx.Instant,
+events_started: [EventTracing.stack_count]?stdx.Instant = @splat(null),
+events_metric: []?EventMetricAggregate,
+events_timing: []?EventTimingAggregate,
 
-        const Tracer = @This();
+time_start: stdx.Instant,
 
-        pub const Options = struct {
-            /// The tracer still validates start/stop state even when writer=null.
-            writer: ?std.io.AnyWriter = null,
-            statsd_options: union(enum) {
-                log,
-                udp: struct {
-                    io: *IO,
-                    address: std.net.Address,
-                },
-            } = .log,
-        };
+pub const Options = struct {
+    /// The tracer still validates start/stop state even when writer=null.
+    writer: ?std.io.AnyWriter = null,
+    statsd_options: union(enum) {
+        log,
+        udp: struct {
+            io: *IO,
+            address: std.net.Address,
+        },
+    } = .log,
+};
 
-        pub fn init(
-            allocator: std.mem.Allocator,
-            time: Time,
-            cluster: u128,
-            replica_index: u8,
-            options: Options,
-        ) !Tracer {
-            if (options.writer) |writer| {
-                try writer.writeAll("[\n");
-            }
+pub fn init(
+    allocator: std.mem.Allocator,
+    time: Time,
+    cluster: u128,
+    replica_index: u8,
+    options: Options,
+) !Tracer {
+    if (options.writer) |writer| {
+        try writer.writeAll("[\n");
+    }
 
-            const buffer = try allocator.alloc(u8, trace_span_size_max);
-            errdefer allocator.free(buffer);
+    const buffer = try allocator.alloc(u8, trace_span_size_max);
+    errdefer allocator.free(buffer);
 
-            var statsd = try switch (options.statsd_options) {
-                .log => StatsD.init_log(allocator, cluster, replica_index),
-                .udp => |statsd_options| StatsD.init_udp(
-                    allocator,
-                    cluster,
-                    replica_index,
-                    statsd_options.io,
-                    statsd_options.address,
-                ),
-            };
-            errdefer statsd.deinit(allocator);
+    var statsd = try switch (options.statsd_options) {
+        .log => StatsD.init_log(allocator, cluster, replica_index),
+        .udp => |statsd_options| StatsD.init_udp(
+            allocator,
+            cluster,
+            replica_index,
+            statsd_options.io,
+            statsd_options.address,
+        ),
+    };
+    errdefer statsd.deinit(allocator);
 
-            const events_metric =
-                try allocator.alloc(?EventMetricAggregate, EventMetric.slot_count);
-            errdefer allocator.free(events_metric);
-            @memset(events_metric, null);
+    const events_metric =
+        try allocator.alloc(?EventMetricAggregate, EventMetric.slot_count);
+    errdefer allocator.free(events_metric);
+    @memset(events_metric, null);
 
-            const events_timing =
-                try allocator.alloc(?EventTimingAggregate, EventTiming.slot_count);
-            errdefer allocator.free(events_timing);
-            @memset(events_timing, null);
+    const events_timing =
+        try allocator.alloc(?EventTimingAggregate, EventTiming.slot_count);
+    errdefer allocator.free(events_timing);
+    @memset(events_timing, null);
 
-            return .{
-                .time = time,
-                .replica_index = replica_index,
-                .options = options,
-                .buffer = buffer,
-                .statsd = statsd,
+    return .{
+        .time = time,
+        .replica_index = replica_index,
+        .options = options,
+        .buffer = buffer,
+        .statsd = statsd,
 
-                .events_metric = events_metric,
-                .events_timing = events_timing,
+        .events_metric = events_metric,
+        .events_timing = events_timing,
 
-                .time_start = time.monotonic_instant(),
-            };
-        }
-
-        pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
-            allocator.free(tracer.events_timing);
-            allocator.free(tracer.events_metric);
-            tracer.statsd.deinit(allocator);
-            allocator.free(tracer.buffer);
-            tracer.* = undefined;
-        }
-
-        /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will
-        /// result in only the last value being submitted.
-        pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
-            const timing_slot = event.slot();
-            tracer.events_metric[timing_slot] = .{
-                .event = event,
-                .value = value,
-            };
-        }
-
-        /// Counters are cumulative values that only increase.
-        pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
-            const timing_slot = event.slot();
-            if (tracer.events_metric[timing_slot]) |*metric| {
-                metric.value +|= value;
-            } else {
-                tracer.events_metric[timing_slot] = .{
-                    .event = event,
-                    .value = value,
-                };
-            }
-        }
-
-        pub fn start(tracer: *Tracer, event: Event) void {
-            const event_tracing = event.as(EventTracing);
-            const event_timing = event.as(EventTiming);
-            const stack = event_tracing.stack();
-
-            const time_now = tracer.time.monotonic_instant();
-
-            assert(tracer.events_started[stack] == null);
-            tracer.events_started[stack] = time_now;
-
-            log.debug(
-                "{}: {s}({}): start: {}",
-                .{ tracer.replica_index, @tagName(event), event_tracing, event_timing },
-            );
-
-            const writer = tracer.options.writer orelse return;
-            const time_elapsed = time_now.duration_since(tracer.time_start);
-
-            var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
-
-            // String tid's would be much more useful.
-            // They are supported by both Chrome and Perfetto, but rejected by Spall.
-            buffer_stream.writer().print("{{" ++
-                "\"pid\":{[process_id]}," ++
-                "\"tid\":{[thread_id]}," ++
-                "\"ph\":\"{[event]c}\"," ++
-                "\"ts\":{[timestamp]}," ++
-                "\"cat\":\"{[category]s}\"," ++
-                "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
-                "\"args\":{[args]s}" ++
-                "}},\n", .{
-                .process_id = tracer.replica_index,
-                .thread_id = event_tracing.stack(),
-                .category = @tagName(event),
-                .event = 'B',
-                .timestamp = time_elapsed.us(),
-                .event_tracing = event_tracing,
-                .event_timing = event_timing,
-                .args = std.json.Formatter(Event){ .value = event, .options = .{} },
-            }) catch {
-                log.err("{}: {s}({}): event too large: {}", .{
-                    tracer.replica_index,
-                    @tagName(event),
-                    event_tracing,
-                    event_timing,
-                });
-                return;
-            };
-
-            writer.writeAll(buffer_stream.getWritten()) catch |err| {
-                std.debug.panic("Tracer.start: {}\n", .{err});
-            };
-        }
-
-        pub fn stop(tracer: *Tracer, event: Event) void {
-            const us_log_threshold_ns = 5 * std.time.ns_per_ms;
-
-            const event_tracing = event.as(EventTracing);
-            const event_timing = event.as(EventTiming);
-            const stack = event_tracing.stack();
-
-            const event_start = tracer.events_started[stack].?;
-            const event_end = tracer.time.monotonic_instant();
-            const event_duration = event_end.duration_since(event_start);
-
-            assert(tracer.events_started[stack] != null);
-            tracer.events_started[stack] = null;
-
-            // Double leading space to align with 'start: '.
-            log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
-                tracer.replica_index,
-                @tagName(event),
-                event_tracing,
-                event_timing,
-                if (event_duration.ns < us_log_threshold_ns)
-                    event_duration.us()
-                else
-                    event_duration.ms(),
-                if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
-            });
-
-            tracer.timing(event_timing, event_duration);
-
-            tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
-        }
-
-        pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
-            const stack_base = EventTracing.stack_bases.get(event_tag);
-            const cardinality = EventTracing.stack_limits.get(event_tag);
-            const event_end = tracer.time.monotonic_instant();
-            for (stack_base..stack_base + cardinality) |stack| {
-                if (tracer.events_started[stack]) |_| {
-                    log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
-
-                    const event_duration = event_end.duration_since(tracer.time_start);
-
-                    tracer.events_started[stack] = null;
-                    tracer.write_stop(@intCast(stack), event_duration);
-                }
-            }
-        }
-
-        fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
-            const writer = tracer.options.writer orelse return;
-            var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
-
-            buffer_stream.writer().print(
-                "{{" ++
-                    "\"pid\":{[process_id]}," ++
-                    "\"tid\":{[thread_id]}," ++
-                    "\"ph\":\"{[event]c}\"," ++
-                    "\"ts\":{[timestamp]}" ++
-                    "}},\n",
-                .{
-                    .process_id = tracer.replica_index,
-                    .thread_id = stack,
-                    .event = 'E',
-                    .timestamp = time_elapsed.us(),
-                },
-            ) catch unreachable;
-
-            writer.writeAll(buffer_stream.getWritten()) catch |err| {
-                std.debug.panic("Tracer.stop: {}\n", .{err});
-            };
-        }
-
-        pub fn emit_metrics(tracer: *Tracer) void {
-            tracer.start(.metrics_emit);
-            defer tracer.stop(.metrics_emit);
-
-            tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| {
-                assert(err == error.Busy);
-                return;
-            };
-
-            // For statsd, the right thing is to reset metrics between emitting. For something like
-            // Prometheus, this would have to be removed.
-            @memset(tracer.events_metric, null);
-            @memset(tracer.events_timing, null);
-        }
-
-        // Timing works by storing the min, max, sum and count of each value provided. The avg is
-        // calculated from sum and count at emit time.
-        //
-        // When these are emitted upstream (via statsd, currently), upstream must apply different
-        // aggregations:
-        // * min/max/avg are considered gauges for aggregation: last value wins.
-        // * sum/count are considered counters for aggregation: they are added to the existing
-        // values.
-        //
-        // This matches the default behavior of the `g` and `c` statsd types respectively.
-        pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) void {
-            const timing_slot = event_timing.slot();
-
-            if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
-                if (constants.verify) {
-                    assert(std.meta.eql(event_timing_existing.event, event_timing));
-                }
-
-                const timing_existing = event_timing_existing.values;
-                event_timing_existing.values = .{
-                    .duration_min = timing_existing.duration_min.min(duration),
-                    .duration_max = timing_existing.duration_min.max(duration),
-                    .duration_sum = .{ .ns = timing_existing.duration_sum.ns +| duration.ns },
-                    .count = timing_existing.count +| 1,
-                };
-            } else {
-                tracer.events_timing[timing_slot] = .{
-                    .event = event_timing,
-                    .values = .{
-                        .duration_min = duration,
-                        .duration_max = duration,
-                        .duration_sum = duration,
-                        .count = 1,
-                    },
-                };
-            }
-        }
+        .time_start = time.monotonic_instant(),
     };
 }
 
+pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
+    allocator.free(tracer.events_timing);
+    allocator.free(tracer.events_metric);
+    tracer.statsd.deinit(allocator);
+    allocator.free(tracer.buffer);
+    tracer.* = undefined;
+}
+
+/// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will
+/// result in only the last value being submitted.
+pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
+    const timing_slot = event.slot();
+    tracer.events_metric[timing_slot] = .{
+        .event = event,
+        .value = value,
+    };
+}
+
+/// Counters are cumulative values that only increase.
+pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
+    const timing_slot = event.slot();
+    if (tracer.events_metric[timing_slot]) |*metric| {
+        metric.value +|= value;
+    } else {
+        tracer.events_metric[timing_slot] = .{
+            .event = event,
+            .value = value,
+        };
+    }
+}
+
+pub fn start(tracer: *Tracer, event: Event) void {
+    const event_tracing = event.as(EventTracing);
+    const event_timing = event.as(EventTiming);
+    const stack = event_tracing.stack();
+
+    const time_now = tracer.time.monotonic_instant();
+
+    assert(tracer.events_started[stack] == null);
+    tracer.events_started[stack] = time_now;
+
+    log.debug(
+        "{}: {s}({}): start: {}",
+        .{ tracer.replica_index, @tagName(event), event_tracing, event_timing },
+    );
+
+    const writer = tracer.options.writer orelse return;
+    const time_elapsed = time_now.duration_since(tracer.time_start);
+
+    var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
+
+    // String tid's would be much more useful.
+    // They are supported by both Chrome and Perfetto, but rejected by Spall.
+    buffer_stream.writer().print("{{" ++
+        "\"pid\":{[process_id]}," ++
+        "\"tid\":{[thread_id]}," ++
+        "\"ph\":\"{[event]c}\"," ++
+        "\"ts\":{[timestamp]}," ++
+        "\"cat\":\"{[category]s}\"," ++
+        "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
+        "\"args\":{[args]s}" ++
+        "}},\n", .{
+        .process_id = tracer.replica_index,
+        .thread_id = event_tracing.stack(),
+        .category = @tagName(event),
+        .event = 'B',
+        .timestamp = time_elapsed.us(),
+        .event_tracing = event_tracing,
+        .event_timing = event_timing,
+        .args = std.json.Formatter(Event){ .value = event, .options = .{} },
+    }) catch {
+        log.err("{}: {s}({}): event too large: {}", .{
+            tracer.replica_index,
+            @tagName(event),
+            event_tracing,
+            event_timing,
+        });
+        return;
+    };
+
+    writer.writeAll(buffer_stream.getWritten()) catch |err| {
+        std.debug.panic("Tracer.start: {}\n", .{err});
+    };
+}
+
+pub fn stop(tracer: *Tracer, event: Event) void {
+    const us_log_threshold_ns = 5 * std.time.ns_per_ms;
+
+    const event_tracing = event.as(EventTracing);
+    const event_timing = event.as(EventTiming);
+    const stack = event_tracing.stack();
+
+    const event_start = tracer.events_started[stack].?;
+    const event_end = tracer.time.monotonic_instant();
+    const event_duration = event_end.duration_since(event_start);
+
+    assert(tracer.events_started[stack] != null);
+    tracer.events_started[stack] = null;
+
+    // Double leading space to align with 'start: '.
+    log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
+        tracer.replica_index,
+        @tagName(event),
+        event_tracing,
+        event_timing,
+        if (event_duration.ns < us_log_threshold_ns)
+            event_duration.us()
+        else
+            event_duration.ms(),
+        if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
+    });
+
+    tracer.timing(event_timing, event_duration);
+
+    tracer.write_stop(stack, event_end.duration_since(tracer.time_start));
+}
+
+pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
+    const stack_base = EventTracing.stack_bases.get(event_tag);
+    const cardinality = EventTracing.stack_limits.get(event_tag);
+    const event_end = tracer.time.monotonic_instant();
+    for (stack_base..stack_base + cardinality) |stack| {
+        if (tracer.events_started[stack]) |_| {
+            log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
+
+            const event_duration = event_end.duration_since(tracer.time_start);
+
+            tracer.events_started[stack] = null;
+            tracer.write_stop(@intCast(stack), event_duration);
+        }
+    }
+}
+
+fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
+    const writer = tracer.options.writer orelse return;
+    var buffer_stream = std.io.fixedBufferStream(tracer.buffer);
+
+    buffer_stream.writer().print(
+        "{{" ++
+            "\"pid\":{[process_id]}," ++
+            "\"tid\":{[thread_id]}," ++
+            "\"ph\":\"{[event]c}\"," ++
+            "\"ts\":{[timestamp]}" ++
+            "}},\n",
+        .{
+            .process_id = tracer.replica_index,
+            .thread_id = stack,
+            .event = 'E',
+            .timestamp = time_elapsed.us(),
+        },
+    ) catch unreachable;
+
+    writer.writeAll(buffer_stream.getWritten()) catch |err| {
+        std.debug.panic("Tracer.stop: {}\n", .{err});
+    };
+}
+
+pub fn emit_metrics(tracer: *Tracer) void {
+    tracer.start(.metrics_emit);
+    defer tracer.stop(.metrics_emit);
+
+    tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| {
+        assert(err == error.Busy);
+        return;
+    };
+
+    // For statsd, the right thing is to reset metrics between emitting. For something like
+    // Prometheus, this would have to be removed.
+    @memset(tracer.events_metric, null);
+    @memset(tracer.events_timing, null);
+}
+
+// Timing works by storing the min, max, sum and count of each value provided. The avg is
+// calculated from sum and count at emit time.
+//
+// When these are emitted upstream (via statsd, currently), upstream must apply different
+// aggregations:
+// * min/max/avg are considered gauges for aggregation: last value wins.
+// * sum/count are considered counters for aggregation: they are added to the existing
+// values.
+//
+// This matches the default behavior of the `g` and `c` statsd types respectively.
+pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) void {
+    const timing_slot = event_timing.slot();
+
+    if (tracer.events_timing[timing_slot]) |*event_timing_existing| {
+        if (constants.verify) {
+            assert(std.meta.eql(event_timing_existing.event, event_timing));
+        }
+
+        const timing_existing = event_timing_existing.values;
+        event_timing_existing.values = .{
+            .duration_min = timing_existing.duration_min.min(duration),
+            .duration_max = timing_existing.duration_min.max(duration),
+            .duration_sum = .{ .ns = timing_existing.duration_sum.ns +| duration.ns },
+            .count = timing_existing.count +| 1,
+        };
+    } else {
+        tracer.events_timing[timing_slot] = .{
+            .event = event_timing,
+            .values = .{
+                .duration_min = duration,
+                .duration_max = duration,
+                .duration_sum = duration,
+                .count = 1,
+            },
+        };
+    }
+}
+
 test "trace json" {
-    const Tracer = TracerType();
     const TimeSim = @import("testing/time.zig").TimeSim;
     const Snap = @import("testing/snaptest.zig").Snap;
     const snap = Snap.snap;
@@ -439,7 +434,6 @@ test "trace json" {
 }
 
 test "timing overflow" {
-    const Tracer = TracerType();
     const TimeSim = @import("testing/time.zig").TimeSim;
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);

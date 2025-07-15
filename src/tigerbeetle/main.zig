@@ -18,7 +18,7 @@ const inspect = @import("inspect.zig");
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const TimeOS = vsr.time.TimeOS;
-const Tracer = vsr.trace.TracerType();
+const Tracer = vsr.trace.Tracer;
 pub const Storage = vsr.storage.StorageType(IO, Tracer);
 const AOF = vsr.aof.AOFType(IO);
 

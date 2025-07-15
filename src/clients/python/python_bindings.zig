@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 
-const Tracer = vsr.trace.TracerType();
+const Tracer = vsr.trace.Tracer;
 const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const tb = vsr.tigerbeetle;

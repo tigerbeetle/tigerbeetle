@@ -10,7 +10,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Tracer = vsr.trace.Tracer;
 
 const log = std.log.scoped(.aof);
 
