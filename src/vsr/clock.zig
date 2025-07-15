@@ -610,12 +610,10 @@ fn minimum_one_way_delay(a: ?Sample, b: ?Sample) ?Sample {
 
 const testing = std.testing;
 const OffsetType = @import("../testing/time.zig").OffsetType;
-const DeterministicTime = @import("../testing/time.zig").TimeSim;
-const DeterministicClock = Clock;
 
 const ClockUnitTestContainer = struct {
-    time: DeterministicTime,
-    clock: DeterministicClock,
+    time: TimeSim,
+    clock: Clock,
     rtt: u64 = 300 * std.time.ns_per_ms,
     owd: u64 = 150 * std.time.ns_per_ms,
     learn_interval: u64 = 5,
@@ -634,7 +632,7 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try DeterministicClock.init(allocator, self.time.time(), .{
+            .clock = try Clock.init(allocator, self.time.time(), .{
                 .replica_count = 3,
                 .replica = 0,
                 .quorum = 2,
@@ -809,8 +807,8 @@ const ClockSimulator = struct {
     options: Options,
     ticks: u64 = 0,
     network: PacketSimulatorType(Packet),
-    times: []DeterministicTime,
-    clocks: []DeterministicClock,
+    times: []TimeSim,
+    clocks: []Clock,
     prng: stdx.PRNG,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) !ClockSimulator {
@@ -822,10 +820,10 @@ const ClockSimulator = struct {
         });
         errdefer network.deinit(allocator);
 
-        var times = try allocator.alloc(DeterministicTime, options.clock_count);
+        var times = try allocator.alloc(TimeSim, options.clock_count);
         errdefer allocator.free(times);
 
-        var clocks = try allocator.alloc(DeterministicClock, options.clock_count);
+        var clocks = try allocator.alloc(Clock, options.clock_count);
         errdefer allocator.free(clocks);
 
         var prng = stdx.PRNG.from_seed(options.network_options.seed);
@@ -845,7 +843,7 @@ const ClockSimulator = struct {
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try DeterministicClock.init(allocator, times[replica].time(), .{
+            clock.* = try Clock.init(allocator, times[replica].time(), .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
                 .quorum = @divFloor(options.clock_count, 2) + 1,
