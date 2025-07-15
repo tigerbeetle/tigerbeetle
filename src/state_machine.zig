@@ -5540,6 +5540,7 @@ const TestAction = union(enum) {
     commit: TestContext.StateMachine.Operation,
     account: TestCreateAccount,
     transfer: TestCreateTransfer,
+    transfer_and_return: TestCreateAndReturnTransfer,
 
     lookup_account: struct {
         id: u128,
@@ -5666,6 +5667,76 @@ const TestCreateTransfer = struct {
     result: CreateTransferResult,
 
     fn event(t: TestCreateTransfer) Transfer {
+        return .{
+            .id = t.id,
+            .debit_account_id = t.debit_account_id,
+            .credit_account_id = t.credit_account_id,
+            .amount = t.amount,
+            .pending_id = t.pending_id,
+            .user_data_128 = t.user_data_128,
+            .user_data_64 = t.user_data_64,
+            .user_data_32 = t.user_data_32,
+            .timeout = t.timeout,
+            .ledger = t.ledger,
+            .code = t.code,
+            .flags = .{
+                .linked = t.flags_linked != null,
+                .pending = t.flags_pending != null,
+                .post_pending_transfer = t.flags_post_pending_transfer != null,
+                .void_pending_transfer = t.flags_void_pending_transfer != null,
+                .balancing_debit = t.flags_balancing_debit != null,
+                .balancing_credit = t.flags_balancing_credit != null,
+                .imported = t.flags_imported != null,
+                .closing_debit = t.flags_closing_debit != null,
+                .closing_credit = t.flags_closing_credit != null,
+                .padding = t.flags_padding,
+            },
+            .timestamp = t.timestamp,
+        };
+    }
+};
+
+const TestCreateAndReturnTransfer = struct {
+    const Balance = struct {
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+    };
+
+    id: u128,
+    debit_account_id: u128,
+    credit_account_id: u128,
+    amount: u128 = 0,
+    pending_id: u128 = 0,
+    user_data_128: u128 = 0,
+    user_data_64: u64 = 0,
+    user_data_32: u32 = 0,
+    timeout: u32 = 0,
+    ledger: u32,
+    code: u16,
+    flags_linked: ?enum { LNK } = null,
+    flags_pending: ?enum { PEN } = null,
+    flags_post_pending_transfer: ?enum { POS } = null,
+    flags_void_pending_transfer: ?enum { VOI } = null,
+    flags_balancing_debit: ?enum { BDR } = null,
+    flags_balancing_credit: ?enum { BCR } = null,
+    flags_imported: ?enum { IMP } = null,
+    flags_closing_debit: ?enum { CDR } = null,
+    flags_closing_credit: ?enum { CCR } = null,
+    flags_padding: u5 = 0,
+    timestamp: u64 = 0,
+    result: CreateTransferResult,
+    transfer_set: ?struct {
+        transfer_timestamp: u128,
+        amount: u128,
+    } = null,
+    account_balances_set: ?struct {
+        dr_account: Balance,
+        cr_account: Balance,
+    } = null,
+
+    fn event(t: TestCreateAndReturnTransfer) Transfer {
         return .{
             .id = t.id,
             .debit_account_id = t.debit_account_id,
@@ -5838,6 +5909,37 @@ fn check(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
+    const update_transfers = struct {
+        fn update_transfers(
+            transfers: *std.AutoHashMap(u128, Transfer),
+            t: anytype,
+            event: *Transfer,
+        ) !void {
+            if (event.pending_id != 0) {
+                // Fill in default values.
+                const t_pending = transfers.get(event.pending_id).?;
+                inline for (.{
+                    "debit_account_id",
+                    "credit_account_id",
+                    "ledger",
+                    "code",
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                }) |field| {
+                    if (@field(event, field) == 0) {
+                        @field(event, field) = @field(t_pending, field);
+                    }
+                }
+
+                if (event.flags.void_pending_transfer) {
+                    if (event.amount == 0) event.amount = t_pending.amount;
+                }
+            }
+            try transfers.put(t.id, event.*);
+        }
+    }.update_transfers;
+
     var context: TestContext = undefined;
     try context.init(allocator);
     defer context.deinit(allocator);
@@ -5911,7 +6013,6 @@ fn check(test_table: []const u8) !void {
                         event.timestamp = context.state_machine.prepare_timestamp + 1 +
                             @divExact(request.items.len, @sizeOf(Account));
                     }
-
                     try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
@@ -5932,29 +6033,7 @@ fn check(test_table: []const u8) !void {
                         event.timestamp = context.state_machine.prepare_timestamp + 1 +
                             @divExact(request.items.len, @sizeOf(Transfer));
                     }
-
-                    if (event.pending_id != 0) {
-                        // Fill in default values.
-                        const t_pending = transfers.get(event.pending_id).?;
-                        inline for (.{
-                            "debit_account_id",
-                            "credit_account_id",
-                            "ledger",
-                            "code",
-                            "user_data_128",
-                            "user_data_64",
-                            "user_data_32",
-                        }) |field| {
-                            if (@field(event, field) == 0) {
-                                @field(event, field) = @field(t_pending, field);
-                            }
-                        }
-
-                        if (event.flags.void_pending_transfer) {
-                            if (event.amount == 0) event.amount = t_pending.amount;
-                        }
-                    }
-                    try transfers.put(t.id, event);
+                    try update_transfers(&transfers, &t, &event);
                 } else {
                     const result = CreateTransfersResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
@@ -5962,6 +6041,58 @@ fn check(test_table: []const u8) !void {
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
                 }
+            },
+            .transfer_and_return => |t| {
+                assert(operation == null or operation.? == .create_and_return_transfers);
+                operation = .create_and_return_transfers;
+
+                var event = t.event();
+                try request.appendSlice(std.mem.asBytes(&event));
+                if (t.result == .ok) {
+                    if (t.timestamp == 0) {
+                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
+                            @divExact(request.items.len, @sizeOf(Transfer));
+                    }
+                    try update_transfers(&transfers, &t, &event);
+                }
+
+                var result = CreateAndReturnTransfersResult{
+                    .result = t.result,
+                    .flags = .{
+                        .transfer_set = false,
+                        .account_balances_set = false,
+                    },
+                    .timestamp = 0,
+                    .amount = 0,
+                    .debit_account_debits_pending = 0,
+                    .debit_account_debits_posted = 0,
+                    .debit_account_credits_pending = 0,
+                    .debit_account_credits_posted = 0,
+                    .credit_account_debits_pending = 0,
+                    .credit_account_debits_posted = 0,
+                    .credit_account_credits_pending = 0,
+                    .credit_account_credits_posted = 0,
+                };
+
+                if (t.transfer_set) |value| {
+                    result.flags.transfer_set = true;
+                    result.timestamp = transfers.get(value.transfer_timestamp).?.timestamp;
+                    result.amount = value.amount;
+                }
+
+                if (t.account_balances_set) |value| {
+                    result.flags.account_balances_set = true;
+                    result.debit_account_debits_pending = value.dr_account.debits_pending;
+                    result.debit_account_debits_posted = value.dr_account.debits_posted;
+                    result.debit_account_credits_pending = value.dr_account.credits_pending;
+                    result.debit_account_credits_posted = value.dr_account.credits_posted;
+                    result.credit_account_debits_pending = value.cr_account.debits_pending;
+                    result.credit_account_debits_posted = value.cr_account.debits_posted;
+                    result.credit_account_credits_pending = value.cr_account.credits_pending;
+                    result.credit_account_credits_posted = value.cr_account.credits_posted;
+                }
+
+                try reply.appendSlice(std.mem.asBytes(&result));
             },
             .lookup_account => |a| {
                 assert(operation == null or operation.? == .lookup_accounts);
@@ -7122,6 +7253,122 @@ test "create_transfers: per-transfer balance invariant" {
         \\ lookup_account A2 0  0 0 40 _
         \\ lookup_account A3 0  0 0  0 _
         \\ commit lookup_accounts
+    );
+}
+
+// The goal is to ensure that:
+// 1. all CreateTransferResult enums are covered, with the same order as `create_transfers`.
+// 2. results (transfer timestamp, amount, and balances) are returned as expected.
+test "create_and_return_transfers" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L2 C2   _   _   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A5  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
+        \\ commit create_accounts
+
+        // Set up initial balances.
+        \\ setup A1  100   200    0     0
+        \\ setup A2    0     0    0     0
+        \\ setup A3    0     0  110   210
+        \\ setup A4   20   500    0   700
+        \\ setup A5    0  1100   10  1000
+
+        // Bump the state machine time to `maxInt - 3s` for testing timeout overflow.
+        \\ tick -3 seconds
+
+        // Test errors by descending precedence.
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _  P1 1 timestamp_must_be_zero _ _
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _  P1 _ reserved_flag _ _
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_zero _ _
+        \\ transfer_and_return  -0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_zero _ _
+        \\ transfer_and_return  T1 -0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A8 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_zero _ _
+        \\ transfer_and_return  T1 A8 -0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A8 A8    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_be_different _ _
+        \\ transfer_and_return  T1 A8 A9    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ pending_id_must_be_zero _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    1 L0 C0   _   _   _   _   _   _ _  _   _   _ _ timeout_reserved_for_pending_transfer _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  CDR _   _ _ closing_transfer_must_be_pending _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  _   CCR _ _ closing_transfer_must_be_pending _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ ledger_must_not_be_zero _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _   _   _ _ code_must_not_be_zero _ _
+        // `debit_account_not_found` is a transient error, T1 cannot be reused:
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_not_found _ _
+        \\ transfer_and_return  T1 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        // `credit_account_not_found` is a transient error, T2 cannot be reused:
+        \\ transfer_and_return  T2 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found _ _
+        \\ transfer_and_return  T2 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T3 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_have_the_same_ledger _ _
+        \\ transfer_and_return  T3 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts _ _
+        \\ transfer_and_return  T3 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_pending _ _  // amount = max - A1.debits_pending + 1
+        \\ transfer_and_return  T3 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_pending _ _ // amount = max - A3.credits_pending + 1
+        \\ transfer_and_return  T3 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_posted _ _   // amount = max - A1.debits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_posted _ _  // amount = max - A3.credits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits _ _          // amount = max - A1.debits_pending - A1.debits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits _ _         // amount = max - A3.credits_pending - A3.credits_posted + 1
+        \\ transfer_and_return  T3 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout _ _
+        \\ transfer_and_return  T3 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      _                  20  500    0  700        0 1100   10 1000
+        \\
+        // `exceeds_credits` is a transient error, T3 cannot be reused:
+        \\ transfer_and_return  T3 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T4 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      _                  20  500   0   700        0 1100   10 1000
+        \\
+        // `exceeds_debits` is a transient error, T4 cannot be reused:
+        \\ transfer_and_return  T4 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T5 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ ok
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      T5 123            223  200    0    0        0    0  233  210
+        \\
+        // Ensure that idempotence is checked first:
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L2 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_ledger _ _
+        \\ transfer_and_return   T5 A1 A3   -0   _ U1 U1 U1   _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ exists_with_different_flags _ _
+        \\ transfer_and_return   T5 A3 A1   -0   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_debit_account_id _ _
+        \\ transfer_and_return   T5 A1 A4   -0   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_credit_account_id _ _
+        \\ transfer_and_return   T5 A1 A3   -0   _ U1 U1 U1   1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_amount _ _
+        \\ transfer_and_return   T5 A1 A3  123   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_128 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _ U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_64 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _ U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_32 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   2 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_timeout _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_code _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T5 123           223  200    0    0        0   0  233  210
+        \\
+        \\ transfer_and_return   T6 A3 A1    7   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T6  7              0    7  233  210      223 200    0    7
+        \\
+        \\ transfer_and_return   T7 A1 A3    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T7  3            223  203    0    7        0   7  233  213
+        \\
+        \\ transfer_and_return   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T8  0            223  203    0    7        0   7  233  213
+        \\
+        \\ transfer_and_return  T10 A1 A3   10   _  _  _  _ _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T10 10            233  203    0    7        0   7  243  213
+        \\
+        // Transfer with AMOUNT_MAX returns the actual amount.
+        \\ transfer_and_return  T11 A1 A3   -0 T10  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T11 10            223  213    0    7        0   7  233  223
+        \\
+        \\ transfer_and_return  T11 A1 A3   -0 T10  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T11 10            223  213    0    7        0   7  233  223
+        \\
+        \\ commit create_and_return_transfers
     );
 }
 
