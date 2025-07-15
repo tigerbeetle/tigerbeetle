@@ -155,7 +155,7 @@ pub fn ReplicaType(
         const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
         const Journal = vsr.JournalType(Replica, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
-        const Clock = vsr.ClockType();
+        const Clock = vsr.Clock;
         const ForestTableIterator = ForestTableIteratorType(Forest);
         const Tracer = Storage.Tracer;
 
