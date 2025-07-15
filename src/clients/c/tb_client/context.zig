@@ -185,7 +185,6 @@ pub fn ContextType(
         };
 
         gpa: GPA,
-        allocator: std.mem.Allocator,
         time_os: TimeOS,
         client_id: u128,
         cluster_id: u128,
