@@ -103,6 +103,7 @@ const constants = @import("constants.zig");
 const stdx = @import("stdx.zig");
 const Duration = stdx.Duration;
 const IO = @import("io.zig").IO;
+const Time = @import("time.zig").Time;
 const StatsD = @import("trace/statsd.zig").StatsD;
 pub const Event = @import("trace/event.zig").Event;
 pub const EventMetric = @import("trace/event.zig").EventMetric;
@@ -113,9 +114,9 @@ pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate
 
 const trace_span_size_max = 1024;
 
-pub fn TracerType(comptime Time: type) type {
+pub fn TracerType() type {
     return struct {
-        time: *Time,
+        time: Time,
         replica_index: u8,
         options: Options,
         buffer: []u8,
@@ -143,7 +144,7 @@ pub fn TracerType(comptime Time: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            time: *Time,
+            time: Time,
             cluster: u128,
             replica_index: u8,
             options: Options,
@@ -404,27 +405,27 @@ pub fn TracerType(comptime Time: type) type {
 }
 
 test "trace json" {
-    const Time = @import("testing/time.zig").Time;
-    const Tracer = TracerType(Time);
+    const Tracer = TracerType();
+    const TimeSim = @import("testing/time.zig").TimeSim;
     const Snap = @import("testing/snaptest.zig").Snap;
     const snap = Snap.snap;
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var time = Time.init_simple();
+    var time_sim = TimeSim.init_simple();
 
-    var trace = try Tracer.init(std.testing.allocator, &time, 0, 0, .{
+    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), 0, 0, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);
 
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
-    time.ticks += 1;
+    time_sim.ticks += 1;
     trace.start(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
-    time.ticks += 2;
+    time_sim.ticks += 2;
     trace.stop(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
-    time.ticks += 3;
+    time_sim.ticks += 3;
     trace.stop(.{ .replica_commit = .{ .stage = .idle, .op = 456 } });
 
     try snap(@src(),
@@ -438,14 +439,14 @@ test "trace json" {
 }
 
 test "timing overflow" {
-    const Time = @import("testing/time.zig").Time;
-    const Tracer = TracerType(Time);
+    const Tracer = TracerType();
+    const TimeSim = @import("testing/time.zig").TimeSim;
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var time = Time.init_simple();
-    var trace = try Tracer.init(std.testing.allocator, &time, 0, 0, .{
+    var time_sim = TimeSim.init_simple();
+    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), 0, 0, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);

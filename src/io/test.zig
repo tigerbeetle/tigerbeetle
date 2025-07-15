@@ -5,6 +5,7 @@ const posix = std.posix;
 const testing = std.testing;
 const assert = std.debug.assert;
 
+const TimeOS = @import("../time.zig").TimeOS;
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
@@ -283,15 +284,16 @@ test "timeout" {
         const Context = @This();
 
         io: IO,
-        timer: *Time,
+        timer: Time,
         count: u32 = 0,
         stop_time: u64 = 0,
 
         fn run_test() !void {
-            var timer = Time{};
+            var time_os = TimeOS{};
+            const timer = time_os.time();
             const start_time = timer.monotonic();
             var self: Context = .{
-                .timer = &timer,
+                .timer = timer,
                 .io = try IO.init(32, 0),
             };
             defer self.io.deinit();
@@ -355,7 +357,8 @@ test "event" {
             self.event = try self.io.open_event();
             defer self.io.close_event(self.event);
 
-            var timer = Time{};
+            var time_os = TimeOS{};
+            const timer = time_os.time();
             const start = timer.monotonic();
 
             // Listen to the event and spawn a thread that triggers the completion after some time.

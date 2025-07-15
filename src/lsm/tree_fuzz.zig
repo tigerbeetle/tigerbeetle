@@ -13,7 +13,7 @@ const Ratio = stdx.PRNG.Ratio;
 const log = std.log.scoped(.lsm_tree_fuzz);
 
 const Direction = @import("../direction.zig").Direction;
-const Time = @import("../testing/time.zig").Time;
+const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -135,7 +135,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         state: State,
         storage: *Storage,
-        time: Time,
+        time_sim: TimeSim,
         trace: Storage.Tracer,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
@@ -164,8 +164,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.time = Time.init_simple();
-            env.trace = try Storage.Tracer.init(gpa, &env.time, 0, replica, .{});
+            env.time_sim = TimeSim.init_simple();
+            env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
             defer env.trace.deinit(gpa);
 
             env.superblock = try SuperBlock.init(gpa, .{

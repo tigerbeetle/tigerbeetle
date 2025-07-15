@@ -1,7 +1,7 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
-const Instant = stdx.Instant;
+const Time = @import("../time.zig").Time;
 
 pub const OffsetType = enum {
     linear,
@@ -10,7 +10,7 @@ pub const OffsetType = enum {
     non_ideal,
 };
 
-pub const Time = struct {
+pub const TimeSim = struct {
     /// The duration of a single tick in nanoseconds.
     resolution: u64,
 
@@ -37,7 +37,18 @@ pub const Time = struct {
     /// The instant in time chosen as the origin of this time source.
     epoch: i64 = 0,
 
-    pub fn init_simple() Time {
+    pub fn time(self: *TimeSim) Time {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .monotonic = monotonic,
+                .realtime = realtime,
+                .tick = tick,
+            },
+        };
+    }
+
+    pub fn init_simple() TimeSim {
         return .{
             .resolution = constants.tick_ms * std.time.ns_per_ms,
             .offset_type = .linear,
@@ -46,19 +57,19 @@ pub const Time = struct {
         };
     }
 
-    pub fn monotonic(self: *Time) u64 {
+    fn monotonic(context: *anyopaque) u64 {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
         return self.ticks * self.resolution;
     }
 
-    pub fn monotonic_instant(self: *Time) Instant {
-        return .{ .ns = self.monotonic() };
+    fn realtime(context: *anyopaque) i64 {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
+        return self.epoch + @as(i64, @intCast(monotonic(context))) - self.offset(self.ticks);
     }
 
-    pub fn realtime(self: *Time) i64 {
-        return self.epoch + @as(i64, @intCast(self.monotonic())) - self.offset(self.ticks);
-    }
-
-    pub fn offset(self: *Time, ticks: u64) i64 {
+    pub fn offset(self: *TimeSim, ticks: u64) i64 {
         switch (self.offset_type) {
             .linear => {
                 const drift_per_tick = self.offset_coefficient_A;
@@ -89,7 +100,9 @@ pub const Time = struct {
         }
     }
 
-    pub fn tick(self: *Time) void {
+    fn tick(context: *anyopaque) void {
+        const self: *TimeSim = @ptrCast(@alignCast(context));
+
         self.ticks += 1;
     }
 };

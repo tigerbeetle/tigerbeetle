@@ -376,6 +376,8 @@ fn run_cdc_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
+    var time_os = vsr.time.TimeOS{};
+
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
         stdx.unique_u128(),
     });
@@ -441,7 +443,7 @@ fn run_cdc_test(
     //   at most one batch is duplicated.
     // - Start multiple CDC jobs to stress the lock queue.
     var vsr_context: VSRContext = undefined;
-    try vsr_context.init(gpa, tmp_beetle.port);
+    try vsr_context.init(gpa, time_os.time(), tmp_beetle.port);
     defer vsr_context.deinit(gpa);
 
     var count: u32 = 0;
@@ -697,7 +699,6 @@ const VSRContext = struct {
     const Client = vsr.ClientType(
         StateMachine,
         vsr.message_bus.MessageBusClient,
-        vsr.time.Time,
     );
 
     client: Client,
@@ -707,7 +708,7 @@ const VSRContext = struct {
     buffer: []tb.ChangeEvent,
     results: ?usize,
 
-    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, port: u16) !void {
+    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
         errdefer self.io.deinit();
 
@@ -721,7 +722,7 @@ const VSRContext = struct {
                 .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = 1,
-                .time = .{},
+                .time = time,
                 .message_pool = &self.message_pool,
                 .message_bus_options = .{
                     .configuration = &.{address},

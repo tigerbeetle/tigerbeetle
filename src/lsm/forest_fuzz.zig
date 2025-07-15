@@ -13,7 +13,7 @@ const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
-const Time = @import("../testing/time.zig").Time;
+const TimeSim = @import("../testing/time.zig").TimeSim;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
 const StateMachine = @import("../state_machine.zig")
@@ -113,7 +113,7 @@ const Environment = struct {
 
     state: State,
     storage: *Storage,
-    time: Time,
+    time_sim: TimeSim,
     trace: Storage.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context,
@@ -126,8 +126,8 @@ const Environment = struct {
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.time = Time.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, &env.time, 0, replica, .{});
+        env.time_sim = TimeSim.init_simple();
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
 
         env.superblock = try SuperBlock.init(gpa, .{
             .storage = env.storage,

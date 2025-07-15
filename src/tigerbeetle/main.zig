@@ -17,7 +17,8 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Tracer = vsr.trace.TracerType(Time);
+const TimeOS = vsr.time.TimeOS;
+const Tracer = vsr.trace.TracerType();
 pub const Storage = vsr.storage.StorageType(IO, Tracer);
 const AOF = vsr.aof.AOFType(IO);
 
@@ -27,10 +28,10 @@ pub const StateMachine =
     vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 pub const Grid = vsr.GridType(Storage);
 
-const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient, Time);
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
-    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage, Time);
+    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
@@ -65,6 +66,9 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
+    var time_os = TimeOS{};
+    const time = time_os.time();
+
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
 
@@ -87,11 +91,11 @@ pub fn main() !void {
             .release = config.process.release,
             .view = null,
         }),
-        .recover => |*args| try Command.reformat(allocator, args),
-        .start => |*args| try Command.start(arena.allocator(), args),
+        .recover => |*args| try Command.reformat(allocator, time, args),
+        .start => |*args| try Command.start(allocator, time, args),
         .version => |*args| try Command.version(allocator, args.verbose),
-        .repl => |*args| try Command.repl(arena.allocator(), args),
-        .benchmark => |*args| try benchmark_driver.main(allocator, args),
+        .repl => |*args| try Command.repl(allocator, time, args),
+        .benchmark => |*args| try benchmark_driver.main(allocator, time, args),
         .inspect => |*args| inspect.main(allocator, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
@@ -104,7 +108,7 @@ pub fn main() !void {
             try vsr.multiversioning.print_information(allocator, args.path, stdout);
             try stdout_buffer.flush();
         },
-        .amqp => |*args| try Command.amqp(allocator, args),
+        .amqp => |*args| try Command.amqp(allocator, time, args),
     }
 }
 
@@ -261,7 +265,7 @@ const Command = struct {
         });
     }
 
-    pub fn reformat(allocator: mem.Allocator, args: *const cli.Command.Recover) !void {
+    pub fn reformat(allocator: mem.Allocator, time: Time, args: *const cli.Command.Recover) !void {
         var command: Command = undefined;
         try command.init(allocator, args.path, .{
             .must_create = true,
@@ -276,7 +280,7 @@ const Command = struct {
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
-            .time = .{},
+            .time = time,
             .message_pool = &message_pool,
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
@@ -325,7 +329,7 @@ const Command = struct {
         std.debug.panic("error: client evicted: {s}", .{@tagName(eviction.header.reason)});
     }
 
-    pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
+    pub fn start(base_allocator: mem.Allocator, time: Time, args: *const cli.Command.Start) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
         const allocator = counting_allocator.allocator();
 
@@ -438,7 +442,6 @@ const Command = struct {
 
         const trace_writer = if (trace_file) |file| file.writer() else null;
 
-        var time: Time = .{};
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -453,7 +456,7 @@ const Command = struct {
             .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
-            .time = &time,
+            .time = time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
             .commit_stall_probability = args.commit_stall_probability,
@@ -634,12 +637,12 @@ const Command = struct {
         try stdout_buffer.flush();
     }
 
-    pub fn repl(allocator: mem.Allocator, args: *const cli.Command.Repl) !void {
-        const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient, Time);
+    pub fn repl(allocator: mem.Allocator, time: Time, args: *const cli.Command.Repl) !void {
+        const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
 
         var repl_instance = try Repl.init(
             allocator,
-            .{},
+            time,
             .{
                 .cluster_id = args.cluster,
                 .addresses = args.addresses.const_slice(),
@@ -651,10 +654,11 @@ const Command = struct {
         try repl_instance.run(args.statements);
     }
 
-    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.AMQP) !void {
+    pub fn amqp(allocator: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
         var runner: vsr.cdc.Runner = undefined;
         try runner.init(
             allocator,
+            time,
             .{
                 .cluster_id = args.cluster,
                 .addresses = args.addresses.const_slice(),

@@ -19,6 +19,7 @@ const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
+const Time = @import("../time.zig").Time;
 const Duration = stdx.Duration;
 const marks = @import("../testing/marks.zig");
 const Ratio = stdx.PRNG.Ratio;
@@ -141,7 +142,6 @@ pub fn ReplicaType(
     comptime StateMachine: type,
     comptime MessageBus: type,
     comptime Storage: type,
-    comptime Time: type,
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
@@ -155,7 +155,7 @@ pub fn ReplicaType(
         const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
         const Journal = vsr.JournalType(Replica, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
-        const Clock = vsr.ClockType(Time);
+        const Clock = vsr.ClockType();
         const ForestTableIterator = ForestTableIteratorType(Forest);
         const Tracer = Storage.Tracer;
 
@@ -610,7 +610,7 @@ pub fn ReplicaType(
             storage: *Storage,
             message_pool: *MessagePool,
             nonce: Nonce,
-            time: *Time,
+            time: Time,
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
@@ -1038,7 +1038,7 @@ pub fn ReplicaType(
             replica_index: u8,
             pipeline_requests_limit: u32,
             nonce: Nonce,
-            time: *Time,
+            time: Time,
             storage: *Storage,
             aof: ?*AOF,
             message_pool: *MessagePool,

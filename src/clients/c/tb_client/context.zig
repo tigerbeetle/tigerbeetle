@@ -15,6 +15,7 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 
 const IO = vsr.io.IO;
+const TimeOS = vsr.time.TimeOS;
 const message_pool = vsr.message_pool;
 
 const MessagePool = message_pool.MessagePool;
@@ -185,6 +186,7 @@ pub fn ContextType(
 
         gpa: GPA,
         allocator: std.mem.Allocator,
+        time_os: TimeOS,
         client_id: u128,
         cluster_id: u128,
         addresses_copy: []const u8,
@@ -246,6 +248,9 @@ pub fn ContextType(
             context.addresses_copy = try allocator.dupe(u8, addresses);
             errdefer allocator.free(context.addresses_copy);
 
+            context.time_os = .{};
+            const time = context.time_os.time();
+
             log.debug("{}: init: parsing vsr addresses: {s}", .{ context.client_id, addresses });
             context.addresses = .{};
             const addresses_parsed = vsr.parse_addresses(
@@ -293,7 +298,7 @@ pub fn ContextType(
                     .id = context.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
-                    .time = .{},
+                    .time = time,
                     .message_pool = &context.message_pool,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),

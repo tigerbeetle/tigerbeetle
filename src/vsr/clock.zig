@@ -88,6 +88,8 @@ const log = stdx.log.scoped(.clock);
 const constants = @import("../constants.zig");
 const ratio = stdx.PRNG.ratio;
 const Instant = stdx.Instant;
+const Time = @import("../time.zig").Time;
+const TimeSim = @import("../testing/time.zig").TimeSim;
 
 const clock_offset_tolerance_max: u64 =
     constants.clock_offset_tolerance_max_ms * std.time.ns_per_ms;
@@ -97,7 +99,7 @@ const window_max: u64 = constants.clock_synchronization_window_max_ms * std.time
 
 const Marzullo = @import("marzullo.zig").Marzullo;
 
-pub fn ClockType(comptime Time: type) type {
+pub fn ClockType() type {
     return struct {
         const Clock = @This();
 
@@ -172,7 +174,7 @@ pub fn ClockType(comptime Time: type) type {
         quorum: u8,
 
         /// The underlying time source for this clock (system time or deterministic time).
-        time: *Time,
+        time: Time,
 
         /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
         /// At least `constants.clock_synchronization_window_min_ms` is needed for this to be ready
@@ -191,7 +193,7 @@ pub fn ClockType(comptime Time: type) type {
 
         pub fn init(
             allocator: std.mem.Allocator,
-            time: *Time,
+            time: Time,
             options: struct {
                 /// The size of the cluster, i.e. the number of clock sources (including this
                 /// replica).
@@ -612,8 +614,8 @@ pub fn ClockType(comptime Time: type) type {
 
 const testing = std.testing;
 const OffsetType = @import("../testing/time.zig").OffsetType;
-const DeterministicTime = @import("../testing/time.zig").Time;
-const DeterministicClock = ClockType(DeterministicTime);
+const DeterministicTime = @import("../testing/time.zig").TimeSim;
+const DeterministicClock = ClockType();
 
 const ClockUnitTestContainer = struct {
     time: DeterministicTime,
@@ -636,7 +638,7 @@ const ClockUnitTestContainer = struct {
                 .offset_coefficient_A = offset_coefficient_A,
                 .offset_coefficient_B = offset_coefficient_B,
             },
-            .clock = try DeterministicClock.init(allocator, &self.time, .{
+            .clock = try DeterministicClock.init(allocator, self.time.time(), .{
                 .replica_count = 3,
                 .replica = 0,
                 .quorum = 2,
@@ -645,10 +647,10 @@ const ClockUnitTestContainer = struct {
     }
 
     pub fn run_till_tick(self: *ClockUnitTestContainer, tick: u64) void {
-        while (self.clock.time.ticks < tick) {
+        while (self.time.ticks < tick) {
             self.clock.time.tick();
 
-            if (@mod(self.clock.time.ticks, self.learn_interval) == 0) {
+            if (@mod(self.time.ticks, self.learn_interval) == 0) {
                 const on_pong_time = self.clock.monotonic();
                 const m0 = on_pong_time - self.rtt;
                 const t1: i64 = @intCast(on_pong_time - self.owd);
@@ -667,7 +669,7 @@ const ClockUnitTestContainer = struct {
     };
     pub fn ticks_to_perform_assertions(self: *ClockUnitTestContainer) [3]AssertionPoint {
         var ret: [3]AssertionPoint = undefined;
-        switch (self.clock.time.offset_type) {
+        switch (self.time.offset_type) {
             .linear => {
                 // For the first (OWD/drift per tick) ticks, the offset < OWD. This means that the
                 // Marzullo interval is [0,0] (the offset and OWD are 0 for a replica w.r.t.
@@ -677,10 +679,10 @@ const ClockUnitTestContainer = struct {
                 // and replica 2. The `clock.realtime_synchronized` will be clamped to the lower
                 // bound. Therefore the `clock.realtime_synchronized` will be offset by the OWD.
                 const threshold = self.owd /
-                    @as(u64, @intCast(self.clock.time.offset_coefficient_A));
+                    @as(u64, @intCast(self.time.offset_coefficient_A));
                 ret[0] = .{
                     .tick = threshold,
-                    .expected_offset = self.clock.time.offset(threshold - self.learn_interval),
+                    .expected_offset = self.time.offset(threshold - self.learn_interval),
                 };
                 ret[1] = .{
                     .tick = threshold + 100,
@@ -693,29 +695,29 @@ const ClockUnitTestContainer = struct {
             },
             .periodic => {
                 ret[0] = .{
-                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 4)),
+                    .tick = @intCast(@divTrunc(self.time.offset_coefficient_B, 4)),
                     .expected_offset = @intCast(self.owd),
                 };
                 ret[1] = .{
-                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B, 2)),
+                    .tick = @intCast(@divTrunc(self.time.offset_coefficient_B, 2)),
                     .expected_offset = 0,
                 };
                 ret[2] = .{
-                    .tick = @intCast(@divTrunc(self.clock.time.offset_coefficient_B * 3, 4)),
+                    .tick = @intCast(@divTrunc(self.time.offset_coefficient_B * 3, 4)),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
             .step => {
                 ret[0] = .{
-                    .tick = @intCast(self.clock.time.offset_coefficient_B - 10),
+                    .tick = @intCast(self.time.offset_coefficient_B - 10),
                     .expected_offset = 0,
                 };
                 ret[1] = .{
-                    .tick = @intCast(self.clock.time.offset_coefficient_B + 10),
+                    .tick = @intCast(self.time.offset_coefficient_B + 10),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
                 ret[2] = .{
-                    .tick = @intCast(self.clock.time.offset_coefficient_B + 10),
+                    .tick = @intCast(self.time.offset_coefficient_B + 10),
                     .expected_offset = -@as(i64, @intCast(self.owd)),
                 };
             },
@@ -847,7 +849,7 @@ const ClockSimulator = struct {
                 .offset_coefficient_C = 10,
             };
 
-            clock.* = try DeterministicClock.init(allocator, &times[replica], .{
+            clock.* = try DeterministicClock.init(allocator, times[replica].time(), .{
                 .replica_count = options.clock_count,
                 .replica = @intCast(replica),
                 .quorum = @divFloor(options.clock_count, 2) + 1,
@@ -880,8 +882,8 @@ const ClockSimulator = struct {
             clock.tick();
         }
 
-        for (self.clocks) |*clock| {
-            if (clock.time.ticks % self.options.ping_timeout == 0) {
+        for (self.clocks, self.times) |*clock, *time| {
+            if (time.ticks % self.options.ping_timeout == 0) {
                 const m0 = clock.monotonic();
                 for (self.clocks, 0..) |_, target| {
                     if (target != clock.replica) {
@@ -946,14 +948,14 @@ test "clock: fuzz test" {
 
     const ticks_max: u64 = 1_000_000;
     const clock_count: u8 = 3;
-    const SystemTime = @import("../testing/time.zig").Time;
+    const SystemTime = @import("../testing/time.zig").TimeSim;
     var system_time = SystemTime{
         .resolution = constants.tick_ms * std.time.ns_per_ms,
         .offset_type = .linear,
         .offset_coefficient_A = 0,
         .offset_coefficient_B = 0,
     };
-    const seed: u64 = @intCast(system_time.realtime());
+    const seed: u64 = @intCast(system_time.time().realtime());
     var min_sync_error: u64 = 1_000_000_000;
     var max_sync_error: u64 = 0;
     var max_clock_offset: u64 = 0;
@@ -988,7 +990,7 @@ test "clock: fuzz test" {
         simulator.tick();
 
         for (simulator.clocks, 0..) |*clock, index| {
-            const offset = clock.time.offset(simulator.ticks);
+            const offset = simulator.times[index].offset(simulator.ticks);
             const abs_offset: u64 = if (offset >= 0) @intCast(offset) else @intCast(-offset);
             max_clock_offset = if (abs_offset > max_clock_offset) abs_offset else max_clock_offset;
             min_clock_offset = if (abs_offset < min_clock_offset) abs_offset else min_clock_offset;

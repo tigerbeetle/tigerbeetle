@@ -5065,7 +5065,7 @@ test "sum_overflows" {
 }
 
 pub const TestContext = struct {
-    const Time = @import("testing/time.zig").Time;
+    const TimeSim = @import("testing/time.zig").TimeSim;
     const Storage = @import("testing/storage.zig").Storage;
     const Tracer = Storage.Tracer;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
@@ -5081,7 +5081,7 @@ pub const TestContext = struct {
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
-    time: Time,
+    time_sim: TimeSim,
     trace: Tracer,
     superblock: SuperBlock,
     grid: Grid,
@@ -5101,9 +5101,9 @@ pub const TestContext = struct {
             },
         );
         errdefer ctx.storage.deinit(allocator);
-        ctx.time = Time.init_simple();
+        ctx.time_sim = TimeSim.init_simple();
 
-        ctx.trace = try Tracer.init(allocator, &ctx.time, 0, 0, .{});
+        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), 0, 0, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

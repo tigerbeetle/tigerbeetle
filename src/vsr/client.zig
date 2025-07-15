@@ -7,6 +7,7 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
+const Time = vsr.time.Time;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -17,12 +18,10 @@ const log = stdx.log.scoped(.client);
 pub fn ClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time_: type,
 ) type {
     return struct {
         const Client = @This();
 
-        pub const Time = Time_;
         pub const StateMachine = StateMachine_;
         pub const Request = struct {
             pub const Callback = *const fn (
