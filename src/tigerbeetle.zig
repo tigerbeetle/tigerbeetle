@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
+const vsr = @import("vsr.zig");
 const stdx = @import("stdx.zig");
 const constants = @import("constants.zig");
 
@@ -837,8 +838,55 @@ pub const CreateAndReturnTransfersResult = extern struct {
         };
     }
 
-    pub fn exists(transfer: *const Transfer) CreateAndReturnTransfersResult {
+    pub fn exists(
+        transfer: *const Transfer,
+        account_event: ?*const vsr.state_machine.AccountEvent,
+    ) CreateAndReturnTransfersResult {
         assert(transfer.timestamp != 0);
+        if (account_event) |history| {
+            const has_balance = has_balance: {
+                switch (history.schema()) {
+                    .current => {
+                        assert(history.timestamp == transfer.timestamp);
+                        assert(transfer.amount == history.amount);
+                        assert(transfer.debit_account_id == history.dr_account_id);
+                        assert(transfer.credit_account_id == history.cr_account_id);
+                        break :has_balance true;
+                    },
+                    .former => |former| {
+                        // The former schema may store single-sided balances if one of
+                        // the accounts doesn’t have the history flag.
+                        assert(transfer.timestamp == former.timestamp);
+                        if (former.dr_account_id != 0) assert(
+                            transfer.debit_account_id == former.dr_account_id,
+                        );
+                        if (former.cr_account_id != 0) assert(
+                            transfer.credit_account_id == former.cr_account_id,
+                        );
+                        break :has_balance former.dr_account_id != 0 and former.cr_account_id != 0;
+                    },
+                }
+            };
+
+            if (has_balance) return .{
+                .result = .exists,
+                .flags = .{
+                    .transfer_set = true,
+                    .account_balances_set = true,
+                },
+                .timestamp = transfer.timestamp,
+                .amount = transfer.amount,
+                .debit_account_debits_pending = history.dr_debits_pending,
+                .debit_account_debits_posted = history.dr_debits_posted,
+                .debit_account_credits_pending = history.dr_credits_pending,
+                .debit_account_credits_posted = history.dr_credits_posted,
+                .credit_account_debits_pending = history.cr_debits_pending,
+                .credit_account_debits_posted = history.cr_debits_posted,
+                .credit_account_credits_pending = history.cr_credits_pending,
+                .credit_account_credits_posted = history.cr_credits_posted,
+            };
+        }
+
         return .{
             .result = .exists,
             .flags = .{

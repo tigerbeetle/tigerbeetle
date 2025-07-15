@@ -525,20 +525,20 @@ def test_create_and_return_transfers_exists(client):
     assert len(outcome_exists) == 1
     assert outcome_exists[0].result == tb.CreateTransferResult.EXISTS
     assert (outcome_exists[0].flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET) == tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET
-    assert (outcome_exists[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.NONE
+    assert (outcome_exists[0].flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET) == tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET
 
     assert outcome_exists[0].timestamp == outcome[0].timestamp
     assert outcome_exists[0].amount == outcome[0].amount
 
-    assert outcome_exists[0].credit_account_debits_pending == 0
-    assert outcome_exists[0].credit_account_debits_posted == 0
-    assert outcome_exists[0].credit_account_credits_pending == 0
-    assert outcome_exists[0].credit_account_credits_posted == 0
+    assert outcome_exists[0].credit_account_debits_pending == outcome[0].credit_account_debits_pending
+    assert outcome_exists[0].credit_account_debits_posted == outcome[0].credit_account_debits_posted
+    assert outcome_exists[0].credit_account_credits_pending == outcome[0].credit_account_credits_pending
+    assert outcome_exists[0].credit_account_credits_posted == outcome[0].credit_account_credits_posted
 
-    assert outcome_exists[0].debit_account_debits_pending == 0
-    assert outcome_exists[0].debit_account_debits_posted == 0
-    assert outcome_exists[0].debit_account_credits_pending == 0
-    assert outcome_exists[0].debit_account_credits_posted == 0
+    assert outcome_exists[0].debit_account_debits_pending == outcome[0].debit_account_debits_pending
+    assert outcome_exists[0].debit_account_debits_posted == outcome[0].debit_account_debits_posted
+    assert outcome_exists[0].debit_account_credits_pending == outcome[0].debit_account_credits_pending
+    assert outcome_exists[0].debit_account_credits_posted == outcome[0].debit_account_credits_posted
 
 def test_create_and_return_transfers_exceeds(client):
     account_a = tb.Account(

@@ -657,20 +657,20 @@ test('can create and return a transfer exists', async (): Promise<void> => {
   const outcome_exists = await client.createAndReturnTransfers([transfer])
   assert.strictEqual(outcome_exists.length, 1)
   assert.strictEqual(outcome_exists[0].result, CreateTransferError.exists)
-  assert.strictEqual(outcome_exists[0].flags, CreateAndReturnTransfersResultFlags.transfer_set)
+  assert.strictEqual(outcome_exists[0].flags, CreateAndReturnTransfersResultFlags.transfer_set | CreateAndReturnTransfersResultFlags.account_balances_set)
 
   assert.strictEqual(outcome_exists[0].timestamp, outcome[0].timestamp)
   assert.strictEqual(outcome_exists[0].amount, outcome[0].amount)
 
-  assert.strictEqual(outcome_exists[0].debit_account_debits_pending, 0n)
-  assert.strictEqual(outcome_exists[0].debit_account_debits_posted, 0n)
-  assert.strictEqual(outcome_exists[0].debit_account_credits_pending, 0n)
-  assert.strictEqual(outcome_exists[0].debit_account_credits_posted, 0n)
+  assert.strictEqual(outcome_exists[0].debit_account_debits_pending, outcome[0].debit_account_debits_pending)
+  assert.strictEqual(outcome_exists[0].debit_account_debits_posted, outcome[0].debit_account_debits_posted)
+  assert.strictEqual(outcome_exists[0].debit_account_credits_pending, outcome[0].debit_account_credits_pending)
+  assert.strictEqual(outcome_exists[0].debit_account_credits_posted, outcome[0].debit_account_credits_posted)
 
-  assert.strictEqual(outcome_exists[0].credit_account_debits_pending, 0n)
-  assert.strictEqual(outcome_exists[0].credit_account_debits_posted, 0n)
-  assert.strictEqual(outcome_exists[0].credit_account_credits_pending, 0n)
-  assert.strictEqual(outcome_exists[0].credit_account_credits_posted, 0n)
+  assert.strictEqual(outcome_exists[0].credit_account_debits_pending, outcome[0].credit_account_debits_pending)
+  assert.strictEqual(outcome_exists[0].credit_account_debits_posted, outcome[0].credit_account_debits_posted)
+  assert.strictEqual(outcome_exists[0].credit_account_credits_pending, outcome[0].credit_account_credits_pending)
+  assert.strictEqual(outcome_exists[0].credit_account_credits_posted, outcome[0].credit_account_credits_posted)
 })
 
 test('can create and return a transfer exceeds', async (): Promise<void> => {

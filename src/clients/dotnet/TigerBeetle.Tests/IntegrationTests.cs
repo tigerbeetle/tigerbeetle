@@ -969,19 +969,19 @@ public class IntegrationTests
         Assert.IsTrue(transfersExistsOutcome.Length == 1);
         Assert.AreEqual(CreateTransferResult.Exists, transfersExistsOutcome[0].Result);
         Assert.IsTrue(transfersExistsOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.TransferSet));
-        Assert.IsFalse(transfersExistsOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
+        Assert.IsTrue(transfersExistsOutcome[0].Flags.HasFlag(CreateAndReturnTransfersResultFlags.AccountBalancesSet));
 
         Assert.AreEqual(transfersOutcome[0].Timestamp, transfersExistsOutcome[0].Timestamp);
         Assert.AreEqual(transfersOutcome[0].Amount, transfersExistsOutcome[0].Amount);
 
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountDebitsPending);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountDebitsPosted);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountCreditsPending);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].CreditAccountCreditsPosted);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountDebitsPending);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountDebitsPosted);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountCreditsPending);
-        Assert.AreEqual(UInt128.Zero, transfersExistsOutcome[0].DebitAccountCreditsPosted);
+        Assert.AreEqual(transfersOutcome[0].CreditAccountDebitsPending, transfersExistsOutcome[0].CreditAccountDebitsPending);
+        Assert.AreEqual(transfersOutcome[0].CreditAccountDebitsPosted, transfersExistsOutcome[0].CreditAccountDebitsPosted);
+        Assert.AreEqual(transfersOutcome[0].CreditAccountCreditsPending, transfersExistsOutcome[0].CreditAccountCreditsPending);
+        Assert.AreEqual(transfersOutcome[0].CreditAccountCreditsPosted, transfersExistsOutcome[0].CreditAccountCreditsPosted);
+        Assert.AreEqual(transfersOutcome[0].DebitAccountDebitsPending, transfersExistsOutcome[0].DebitAccountDebitsPending);
+        Assert.AreEqual(transfersOutcome[0].DebitAccountDebitsPosted, transfersExistsOutcome[0].DebitAccountDebitsPosted);
+        Assert.AreEqual(transfersOutcome[0].DebitAccountCreditsPending, transfersExistsOutcome[0].DebitAccountCreditsPending);
+        Assert.AreEqual(transfersOutcome[0].DebitAccountCreditsPosted, transfersExistsOutcome[0].DebitAccountCreditsPosted);
     }
 
 

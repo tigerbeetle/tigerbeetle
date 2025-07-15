@@ -93,6 +93,137 @@ pub const tree_ids = struct {
     };
 };
 
+/// Object value of the `AccountEvents` groove.
+pub const AccountEvent = extern struct {
+    dr_account_id: u128,
+    dr_debits_pending: u128,
+    dr_debits_posted: u128,
+    dr_credits_pending: u128,
+    dr_credits_posted: u128,
+    cr_account_id: u128,
+    cr_debits_pending: u128,
+    cr_debits_posted: u128,
+    cr_credits_pending: u128,
+    cr_credits_posted: u128,
+    timestamp: u64,
+    dr_account_timestamp: u64,
+    cr_account_timestamp: u64,
+    dr_account_flags: AccountFlags,
+    cr_account_flags: AccountFlags,
+    transfer_flags: TransferFlags,
+    transfer_pending_flags: TransferFlags,
+    transfer_pending_id: u128,
+    amount_requested: u128,
+    amount: u128,
+    ledger: u32,
+
+    /// Although similar to `TransferPending.status`, this index tracks the event,
+    /// not the original pending transfer.
+    /// Examples: (No such index exists in `Transfers.flags`)
+    ///   "All voided or expired events today."
+    ///   "All single-phase or posted events today."
+    ///
+    ///  Value   | Description
+    /// ---------|-----------------------------------------------------
+    /// `none`   | This event is a regular transfer.
+    /// `pending`| This event is a pending transfer.
+    /// `posted` | This event posted a pending transfer.
+    /// `voided` | This event voided a pending transfer.
+    /// `expired`| This event expired a pending transfer,
+    ///            the `timestamp` does not relate to a transfer.
+    ///
+    /// See `transfer_pending_id` for tracking the pending transfer.
+    /// It will be `zero` for `none` and `pending`.
+    transfer_pending_status: TransferPendingStatus,
+    reserved: [11]u8 = @splat(0),
+
+    /// Previous schema before the changes introduced by PR #2507.
+    pub const Former = extern struct {
+        dr_account_id: u128,
+        dr_debits_pending: u128,
+        dr_debits_posted: u128,
+        dr_credits_pending: u128,
+        dr_credits_posted: u128,
+        cr_account_id: u128,
+        cr_debits_pending: u128,
+        cr_debits_posted: u128,
+        cr_credits_pending: u128,
+        cr_credits_posted: u128,
+        timestamp: u64,
+        reserved: [88]u8 = @splat(0),
+
+        comptime {
+            assert(stdx.no_padding(Former));
+            assert(@sizeOf(Former) == @sizeOf(AccountEvent));
+            assert(@alignOf(Former) == @alignOf(AccountEvent));
+
+            // Asserting the fields are identical.
+            for (std.meta.fields(Former)) |field_former| {
+                if (std.mem.eql(u8, field_former.name, "reserved")) continue;
+                const field = std.meta.fields(AccountEvent)[
+                    std.meta.fieldIndex(
+                        AccountEvent,
+                        field_former.name,
+                    ).?
+                ];
+                assert(field_former.type == field.type);
+                assert(field_former.alignment == field.alignment);
+                assert(@offsetOf(AccountEvent, field_former.name) ==
+                    @offsetOf(Former, field_former.name));
+            }
+        }
+    };
+
+    /// Checks the object and returns whether it was created
+    /// using the current or the former schema.
+    pub fn schema(self: *const AccountEvent) union(enum) {
+        current,
+        former: *const AccountEvent.Former,
+    } {
+        assert(self.timestamp != 0);
+
+        const former: *const AccountEvent.Former = @ptrCast(self);
+        if (stdx.zeroed(&former.reserved)) {
+            // In the former schema:
+            // Balances for accounts without the `history` flag weren’t stored.
+            // If neither side had the `history` flag, the entire object wasn’t stored.
+            assert(former.dr_account_id != 0 or former.cr_account_id != 0);
+
+            return .{ .former = former };
+        }
+
+        assert(self.dr_account_timestamp != 0);
+        assert(self.dr_account_id != 0);
+        assert(self.cr_account_timestamp != 0);
+        assert(self.cr_account_id != 0);
+        assert(self.ledger != 0);
+        switch (self.transfer_pending_status) {
+            .none, .pending => assert(self.transfer_pending_id == 0),
+            .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
+        }
+        assert(stdx.zeroed(&self.reserved));
+        return .current;
+    }
+
+    comptime {
+        assert(stdx.no_padding(AccountEvent));
+        assert(@sizeOf(AccountEvent) == 256);
+        assert(@alignOf(AccountEvent) == 16);
+    }
+};
+
+/// Object value of the `TransferPending` groove.
+pub const TransferPending = extern struct {
+    timestamp: u64,
+    status: TransferPendingStatus,
+    padding: [7]u8 = @splat(0),
+
+    comptime {
+        assert(stdx.no_padding(TransferPending));
+        assert(@sizeOf(TransferPending) == 16);
+    }
+};
+
 pub fn StateMachineType(
     comptime Storage: type,
     comptime config: constants.StateMachineConfig,
@@ -240,18 +371,6 @@ pub fn StateMachineType(
             },
         );
 
-        pub const TransferPending = extern struct {
-            timestamp: u64,
-            status: TransferPendingStatus,
-            padding: [7]u8 = @splat(0),
-
-            comptime {
-                // Assert that there is no implicit padding.
-                assert(@sizeOf(TransferPending) == 16);
-                assert(stdx.no_padding(TransferPending));
-            }
-        };
-
         const AccountEventsGroove = GrooveType(
             Storage,
             AccountEvent,
@@ -361,127 +480,9 @@ pub fn StateMachineType(
                     }.prunable,
                 },
                 .orphaned_ids = false,
-                .objects_cache = false,
+                .objects_cache = true,
             },
         );
-
-        pub const AccountEvent = extern struct {
-            dr_account_id: u128,
-            dr_debits_pending: u128,
-            dr_debits_posted: u128,
-            dr_credits_pending: u128,
-            dr_credits_posted: u128,
-            cr_account_id: u128,
-            cr_debits_pending: u128,
-            cr_debits_posted: u128,
-            cr_credits_pending: u128,
-            cr_credits_posted: u128,
-            timestamp: u64,
-            dr_account_timestamp: u64,
-            cr_account_timestamp: u64,
-            dr_account_flags: AccountFlags,
-            cr_account_flags: AccountFlags,
-            transfer_flags: TransferFlags,
-            transfer_pending_flags: TransferFlags,
-            transfer_pending_id: u128,
-            amount_requested: u128,
-            amount: u128,
-            ledger: u32,
-
-            /// Although similar to `TransferPending.status`, this index tracks the event,
-            /// not the original pending transfer.
-            /// Examples: (No such index exists in `Transfers.flags`)
-            ///   "All voided or expired events today."
-            ///   "All single-phase or posted events today."
-            ///
-            ///  Value   | Description
-            /// ---------|-----------------------------------------------------
-            /// `none`   | This event is a regular transfer.
-            /// `pending`| This event is a pending transfer.
-            /// `posted` | This event posted a pending transfer.
-            /// `voided` | This event voided a pending transfer.
-            /// `expired`| This event expired a pending transfer,
-            ///            the `timestamp` does not relate to a transfer.
-            ///
-            /// See `transfer_pending_id` for tracking the pending transfer.
-            /// It will be `zero` for `none` and `pending`.
-            transfer_pending_status: TransferPendingStatus,
-            reserved: [11]u8 = @splat(0),
-
-            /// Previous schema before the changes introduced by PR #2507.
-            const Former = extern struct {
-                dr_account_id: u128,
-                dr_debits_pending: u128,
-                dr_debits_posted: u128,
-                dr_credits_pending: u128,
-                dr_credits_posted: u128,
-                cr_account_id: u128,
-                cr_debits_pending: u128,
-                cr_debits_posted: u128,
-                cr_credits_pending: u128,
-                cr_credits_posted: u128,
-                timestamp: u64,
-                reserved: [88]u8 = @splat(0),
-
-                comptime {
-                    assert(stdx.no_padding(Former));
-                    assert(@sizeOf(Former) == @sizeOf(AccountEvent));
-                    assert(@alignOf(Former) == @alignOf(AccountEvent));
-
-                    // Asserting the fields are identical.
-                    for (std.meta.fields(Former)) |field_former| {
-                        if (std.mem.eql(u8, field_former.name, "reserved")) continue;
-                        const field = std.meta.fields(AccountEvent)[
-                            std.meta.fieldIndex(
-                                AccountEvent,
-                                field_former.name,
-                            ).?
-                        ];
-                        assert(field_former.type == field.type);
-                        assert(field_former.alignment == field.alignment);
-                        assert(@offsetOf(AccountEvent, field_former.name) ==
-                            @offsetOf(Former, field_former.name));
-                    }
-                }
-            };
-
-            /// Checks the object and returns whether it was created
-            /// using the current or the former schema.
-            fn schema(self: *const AccountEvent) union(enum) {
-                current,
-                former: *const AccountEvent.Former,
-            } {
-                assert(self.timestamp != 0);
-
-                const former: *const AccountEvent.Former = @ptrCast(self);
-                if (stdx.zeroed(&former.reserved)) {
-                    // In the former schema:
-                    // Balances for accounts without the `history` flag weren’t stored.
-                    // If neither side had the `history` flag, the entire object wasn’t stored.
-                    assert(former.dr_account_id != 0 or former.cr_account_id != 0);
-
-                    return .{ .former = former };
-                }
-
-                assert(self.dr_account_timestamp != 0);
-                assert(self.dr_account_id != 0);
-                assert(self.cr_account_timestamp != 0);
-                assert(self.cr_account_id != 0);
-                assert(self.ledger != 0);
-                switch (self.transfer_pending_status) {
-                    .none, .pending => assert(self.transfer_pending_id == 0),
-                    .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
-                }
-                assert(stdx.zeroed(&self.reserved));
-                return .current;
-            }
-
-            comptime {
-                assert(stdx.no_padding(AccountEvent));
-                assert(@sizeOf(AccountEvent) == 256);
-                assert(@alignOf(AccountEvent) == 16);
-            }
-        };
 
         pub const Workload = WorkloadType(StateMachine);
 
@@ -810,6 +811,7 @@ pub fn StateMachineType(
             accounts: AccountsGroove.PrefetchContext,
             transfers: TransfersGroove.PrefetchContext,
             transfers_pending: TransfersPendingGroove.PrefetchContext,
+            account_events: AccountEventsGroove.PrefetchContext,
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
@@ -1376,6 +1378,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.prefetch_setup(null);
             self.forest.grooves.transfers.prefetch_setup(null);
             self.forest.grooves.transfers_pending.prefetch_setup(null);
+            self.forest.grooves.account_events.prefetch_setup(null);
 
             // Prefetch starts timing for an operation.
             self.metrics.timer.reset();
@@ -1537,6 +1540,17 @@ pub fn StateMachineType(
                 }
             }
 
+            if (self.prefetch_operation == .create_and_return_transfers) {
+                // Looking up account events for the existing transfers.
+                // When processing `create_and_return_transfers`, we need to return the
+                // balance as part of the `exists` idempotency validation.
+                for (transfers) |*t| {
+                    if (self.get_transfer(t.id)) |exists| {
+                        self.forest.grooves.account_events.prefetch_enqueue(exists.timestamp);
+                    }
+                }
+            }
+
             if (transfers.len > 0 and
                 transfers[0].flags.imported)
             {
@@ -1578,6 +1592,25 @@ pub fn StateMachineType(
             assert(self.prefetch_operation == .create_transfers or
                 self.prefetch_operation == .create_and_return_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
+
+            self.prefetch_context = .null;
+
+            if (self.prefetch_operation == .create_and_return_transfers) {
+                self.forest.grooves.account_events.prefetch(
+                    prefetch_create_transfers_callback_account_events,
+                    self.prefetch_context.get(.account_events),
+                );
+            } else {
+                self.prefetch_finish();
+            }
+        }
+
+        fn prefetch_create_transfers_callback_account_events(
+            completion: *AccountEventsGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.account_events, completion);
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation == .create_and_return_transfers);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -4086,7 +4119,7 @@ pub fn StateMachineType(
                 // Since both `t` and `e` have the same `pending_id`,
                 // it must be a valid transfer.
                 const p = self.get_transfer(t.pending_id).?;
-                return post_or_void_pending_transfer_exists(operation, t, e, &p);
+                return self.post_or_void_pending_transfer_exists(operation, t, e, &p);
             } else {
                 if (t.debit_account_id != e.debit_account_id) {
                     return .exists_with_different_debit_account_id;
@@ -4130,7 +4163,10 @@ pub fn StateMachineType(
 
                 return switch (operation) {
                     .create_transfers, .deprecated_create_transfers => .exists,
-                    .create_and_return_transfers => .exists(e),
+                    .create_and_return_transfers => .exists(
+                        e,
+                        if (self.get_account_event(e.timestamp)) |*event| event else null,
+                    ),
                     else => comptime unreachable,
                 };
             }
@@ -4372,6 +4408,7 @@ pub fn StateMachineType(
         }
 
         fn post_or_void_pending_transfer_exists(
+            self: *const StateMachine,
             comptime operation: Operation,
             t: *const Transfer,
             e: *const Transfer,
@@ -4458,7 +4495,10 @@ pub fn StateMachineType(
 
             return switch (operation) {
                 .create_transfers, .deprecated_create_transfers => .exists,
-                .create_and_return_transfers => .exists(e),
+                .create_and_return_transfers => .exists(
+                    e,
+                    if (self.get_account_event(e.timestamp)) |*event| event else null,
+                ),
                 else => comptime unreachable,
             };
         }
@@ -4569,6 +4609,14 @@ pub fn StateMachineType(
         ) ?TransferPending {
             return switch (self.forest.grooves.transfers_pending.get(pending_timestamp)) {
                 .found_object => |a| a,
+                .found_orphaned_id => unreachable,
+                .not_found => null,
+            };
+        }
+
+        fn get_account_event(self: *const StateMachine, timestamp: u64) ?AccountEvent {
+            return switch (self.forest.grooves.account_events.get(timestamp)) {
+                .found_object => |e| e,
                 .found_orphaned_id => unreachable,
                 .not_found => null,
             };
@@ -4813,7 +4861,10 @@ pub fn StateMachineType(
                     ),
                 },
                 .account_events = .{
-                    .prefetch_entries_for_read_max = 0,
+                    // We look up account events for transfers that failed with `exists`,
+                    // so we can return the same result as would have been returned during `ok`.
+                    .prefetch_entries_for_read_max = machine_constants.batch_max
+                        .create_and_return_transfers,
                     // We don't need to update the history, it's append only.
                     .prefetch_entries_for_update_max = 0,
                     .cache_entries_max = 0,
@@ -5136,7 +5187,6 @@ fn ChangeEventsScanLookupType(
 
     return struct {
         const AccountEventsLookup = @This();
-        const AccountEvent = AccountEventsGroove.ObjectTree.Table.Value;
         const ScanTree = ScanTreeType(
             void,
             AccountEventsGroove.ObjectTree,

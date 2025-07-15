@@ -38,10 +38,29 @@ Constraints:
 When set, the transfer's [`timestamp`](../transfer.md#timestamp)
 and [`amount`](../transfer.md#amount) are returned.
 
+- Always set when the transfer was successfully created with result
+  [`ok`](./create_transfers.md#ok) or when the transfer already
+  [`exists`](./create_transfers.md#exists).
+
 #### `flags.account_balances_set`
 
 When set, the [debit account](../transfer.md#debit_account_id)
 and [credit account](../transfer.md#credit_account_id) balance amounts are returned.
+
+- Always set when the transfer was successfully created with the result
+  [`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
+  (e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits) or
+  [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
+
+- Always set when the transfer already [`exists`](./create_transfers.md#exists).
+
+  <details>
+    <summary>Transfers created by releases earlier than 0.16.29</summary>
+
+    Only set if both the debit and credit accounts have the
+    [`flags.history`](../account.md#flagshistory) enabled.
+
+  </details>
 
 ### `timestamp`
 
@@ -52,10 +71,6 @@ Check [`flags.transfer_set`](#flagstransfer_set) to verify if this field is pres
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
-
-- Always set when the transfer was successfully created with result [`ok`](./create_transfers.md#ok)
-or when the transfer already exists (e.g., result [`exists`](./create_transfers.md#exists)).
-  Zero otherwise.
 
 ### `amount`
 
@@ -72,10 +87,6 @@ Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
 
-- Always set when the transfer was successfully created with result [`ok`](./create_transfers.md#ok)
-or when the transfer already exists (e.g., result [`exists`](./create_transfers.md#exists)).
-  Zero otherwise.
-
 ### `debit_account_debits_pending`
 
 The [debit account](../transfer.md#debit_account_id)'s
@@ -87,12 +98,6 @@ is present in the result.
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
-
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
 
 ### `debit_account_debits_posted`
 
@@ -106,12 +111,6 @@ Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
 
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
-
 ### `debit_account_credits_pending`
 
 The [debit account](../transfer.md#debit_account_id)'s
@@ -123,12 +122,6 @@ is present in the result.
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
-
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
 
 ### `debit_account_credits_posted`
 
@@ -142,12 +135,6 @@ Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
 
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
-
 ### `credit_account_debits_pending`
 
 The [credit account](../transfer.md#credit_account_id)'s
@@ -159,12 +146,6 @@ is present in the result.
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
-
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
 
 ### `credit_account_debits_posted`
 
@@ -178,12 +159,6 @@ Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
 
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
-
 ### `credit_account_credits_pending`
 
 The [credit account](../transfer.md#credit_account_id)'s
@@ -196,12 +171,6 @@ Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
 
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
-
 ### `credit_account_credits_posted`
 
 The [credit account](../transfer.md#credit_account_id)'s
@@ -213,12 +182,6 @@ is present in the result.
 Constraints:
 
 - Type is 128-bit unsigned integer (16 bytes).
-
-- Always set when the transfer was successfully created with the result
-[`ok`](./create_transfers.md#ok) or when the transfer failed due to balance validation
-(e.g., result [`exceeds_debits`](./create_transfers.md#exceeds_debits)
-or [`exceeds_credits`](./create_transfers.md#exceeds_credits)).
-  Zero otherwise.
 
 ## Client libraries
 

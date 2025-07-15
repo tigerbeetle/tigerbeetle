@@ -777,10 +777,13 @@ pub const AccountingAuditor = struct {
                 }
             }
 
-            if (outcome.flags.transfer_set) {
-                assert(outcome.result == .ok or outcome.result == .exists);
+            // TODO: handle .exists!
+            assert(outcome.result != .exists);
 
-                assert(outcome.timestamp == transfer_timestamp); // TODO: handle .exists!
+            if (outcome.flags.transfer_set) {
+                assert(outcome.result == .ok);
+
+                assert(outcome.timestamp == transfer_timestamp);
                 assert(outcome.amount == transfer.amount);
             } else {
                 assert(outcome.result != .ok);
@@ -811,6 +814,7 @@ pub const AccountingAuditor = struct {
                 assert(outcome.credit_account_credits_posted == cr.credits_posted);
             } else {
                 assert(outcome.result != .ok);
+                assert(outcome.result != .exists);
                 assert(outcome.result != .exceeds_debits);
                 assert(outcome.result != .exceeds_credits);
 

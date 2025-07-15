@@ -1066,19 +1066,27 @@ public class IntegrationTest {
         assertEquals(CreateTransferResult.Exists, createTransferExistsOutcome.getResult());
         assertTrue(CreateAndReturnTransferResultFlags
                 .hasTransferSet(createTransferExistsOutcome.getFlags()));
-        assertFalse(CreateAndReturnTransferResultFlags
+        assertTrue(CreateAndReturnTransferResultFlags
                 .hasAccountBalancesSet(createTransferExistsOutcome.getFlags()));
         assertEquals(createTransferOutcome.getTimestamp(),
                 createTransferExistsOutcome.getTimestamp());
         assertEquals(createTransferOutcome.getAmount(), createTransferExistsOutcome.getAmount());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getCreditAccountDebitsPending());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getCreditAccountDebitsPosted());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getCreditAccountCreditsPending());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getCreditAccountCreditsPosted());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getDebitAccountDebitsPending());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getDebitAccountDebitsPosted());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getDebitAccountCreditsPending());
-        assertEquals(BigInteger.ZERO, createTransferExistsOutcome.getDebitAccountCreditsPosted());
+        assertEquals(createTransferOutcome.getCreditAccountDebitsPending(),
+                createTransferExistsOutcome.getCreditAccountDebitsPending());
+        assertEquals(createTransferOutcome.getCreditAccountDebitsPosted(),
+                createTransferExistsOutcome.getCreditAccountDebitsPosted());
+        assertEquals(createTransferOutcome.getCreditAccountCreditsPending(),
+                createTransferExistsOutcome.getCreditAccountCreditsPending());
+        assertEquals(createTransferOutcome.getCreditAccountCreditsPosted(),
+                createTransferExistsOutcome.getCreditAccountCreditsPosted());
+        assertEquals(createTransferOutcome.getDebitAccountDebitsPending(),
+                createTransferExistsOutcome.getDebitAccountDebitsPending());
+        assertEquals(createTransferOutcome.getDebitAccountDebitsPosted(),
+                createTransferExistsOutcome.getDebitAccountDebitsPosted());
+        assertEquals(createTransferOutcome.getDebitAccountCreditsPending(),
+                createTransferExistsOutcome.getDebitAccountCreditsPending());
+        assertEquals(createTransferOutcome.getDebitAccountCreditsPosted(),
+                createTransferExistsOutcome.getDebitAccountCreditsPosted());
     }
 
     @Test

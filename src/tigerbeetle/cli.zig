@@ -971,7 +971,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
             "--cache-transfers",
         ),
         .cache_transfers_pending = parse_cache_size_to_count(
-            StateMachine.TransferPending,
+            vsr.state_machine.TransferPending,
             TransfersPendingValuesCache,
             start.cache_transfers_pending orelse defaults.cache_transfers_pending,
             "--cache-transfers-pending",
