@@ -102,37 +102,33 @@ const Marzullo = @import("marzullo.zig").Marzullo;
 pub const Clock = @This();
 
 const Sample = struct {
-    /// The relative difference between our wall clock reading and that of the remote clock
-    //source.
+    /// The relative difference between our wall clock reading and that of the remote clock source.
     clock_offset: i64,
     one_way_delay: u64,
 };
 
 const Epoch = struct {
-    /// The best clock offset sample per remote clock source (with minimum one way delay)
-    /// collected over the course of a window period of several seconds.
+    /// The best clock offset sample per remote clock source (with minimum one way delay) collected
+    /// over the course of a window period of several seconds.
     sources: []?Sample,
 
     /// The total number of samples learned while synchronizing this epoch.
     samples: usize,
 
-    /// The monotonic clock timestamp when this epoch began. We use this to measure elapsed
-    /// time.
+    /// The monotonic clock timestamp when this epoch began. We use this to measure elapsed time.
     monotonic: u64,
 
-    /// The wall clock timestamp when this epoch began. We add the elapsed monotonic time to
-    /// this plus the synchronized clock offset to arrive at a synchronized realtime
-    /// timestamp. We capture this realtime when starting the epoch, before we take any
-    /// samples, to guard against any jumps in the system's realtime clock from impacting
-    /// our measurements.
+    /// The wall clock timestamp when this epoch began. We add the elapsed monotonic time to this
+    /// plus the synchronized clock offset to arrive at a synchronized realtime timestamp. We
+    /// capture this realtime when starting the epoch, before we take any samples, to guard against
+    /// any jumps in the system's realtime clock from impacting our measurements.
     realtime: i64,
 
-    /// Once we have enough source clock offset samples in agreement, the epoch is
-    /// synchronized. We then have lower and upper bounds on the true cluster time, and can
-    /// install this epoch for subsequent clock readings. This epoch is then valid for
-    /// several seconds, while clock drift has not had enough time to accumulate into any
-    /// significant clock skew, and while we collect samples for the next epoch to refresh
-    /// and replace this one.
+    /// Once we have enough source clock offset samples in agreement, the epoch is / synchronized.
+    /// We then have lower and upper bounds on the true cluster time, and can / install this epoch
+    /// for subsequent clock readings. This epoch is then valid for / several seconds, while clock
+    /// drift has not had enough time to accumulate into any / significant clock skew, and while we
+    /// collect samples for the next epoch to refresh / and replace this one.
     synchronized: ?Marzullo.Interval,
 
     /// A guard to prevent synchronizing too often without having learned any new samples.
@@ -175,8 +171,7 @@ quorum: u8,
 time: Time,
 
 /// An epoch from which the clock can read synchronized clock timestamps within safe bounds.
-/// At least `constants.clock_synchronization_window_min_ms` is needed for this to be ready
-/// to use.
+/// At least `constants.clock_synchronization_window_min_ms` is needed for this to be ready to use.
 epoch: Epoch,
 
 /// The next epoch (collecting samples and being synchronized) to replace the current epoch.
@@ -245,8 +240,7 @@ pub fn deinit(self: *Clock, allocator: std.mem.Allocator) void {
 
 /// Called by `Replica.on_pong()` with:
 /// * the index of the `replica` that has replied to our ping with a pong,
-/// * our monotonic timestamp `m0` embedded in the ping we sent, carried over
-///   into this pong,
+/// * our monotonic timestamp `m0` embedded in the ping we sent, carried over into this pong,
 /// * the remote replica's `realtime()` timestamp `t1`, and
 /// * our monotonic timestamp `m2` as captured by our `Replica.on_pong()` handler.
 pub fn learn(self: *Clock, replica: u8, m0: u64, t1: i64, m2: u64) void {
@@ -256,9 +250,9 @@ pub fn learn(self: *Clock, replica: u8, m0: u64, t1: i64, m2: u64) void {
 
     // Our m0 and m2 readings should always be monotonically increasing if not equal.
     // Crucially, it is possible for a very fast network to have m0 == m2, especially where
-    // `constants.tick_ms` is at a more course granularity. We must therefore tolerate RTT=0
-    // or otherwise we would have a liveness bug simply because we would be throwing away
-    // perfectly good clock samples.
+    // `constants.tick_ms` is at a more course granularity. We must therefore tolerate RTT=0 or
+    // otherwise we would have a liveness bug simply because we would be throwing away perfectly
+    // good clock samples.
     // This condition should never be true. Reject this as a bad sample:
     if (m0 > m2) {
         log.warn("{}: learn: m0={} > m2={}", .{ self.replica, m0, m2 });
@@ -321,8 +315,8 @@ pub fn learn(self: *Clock, replica: u8, m0: u64, t1: i64, m2: u64) void {
 
     self.window.samples += 1;
 
-    // We decouple calls to `synchronize()` so that it's not triggered by these network
-    // events. Otherwise, excessive duplicate network packets would burn the CPU.
+    // We decouple calls to `synchronize()` so that it's not triggered by these network events.
+    // Otherwise, excessive duplicate network packets would burn the CPU.
     self.window.learned = true;
 }
 
@@ -344,13 +338,11 @@ pub fn realtime(self: *Clock) i64 {
     return self.time.realtime();
 }
 
-/// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the
-/// primary's clock is not synchronized with the cluster, it must wait until it is.
-/// it is.
+/// Called by `Replica.on_request()` when the primary wants to timestamp a batch. If the primary's
+/// clock is not synchronized with the cluster, it must wait until it is.
 /// Returns the system time clamped to be within our synchronized lower and upper bounds.
-/// This is complementary to NTP and allows clusters with very accurate time to make use of
-/// it, while providing guard rails for when NTP is partitioned or unable to correct quickly
-/// enough.
+/// This is complementary to NTP and allows clusters with very accurate time to make use of it,
+/// while providing guard rails for when NTP is partitioned or unable to correct quickly enough.
 pub fn realtime_synchronized(self: *Clock) ?i64 {
     if (self.synchronization_disabled) {
         return self.realtime();
@@ -403,26 +395,26 @@ pub fn tick(self: *Clock) void {
     }
 }
 
-/// Estimates the asymmetric delay for a sample compared to the previous window,
-/// according to Algorithm 1 from Section 4.2,
+/// Estimates the asymmetric delay for a sample compared to the previous window, according to
+/// Algorithm 1 from Section 4.2,
 /// "A System for Clock Synchronization in an Internet of Things".
 ///
-/// Note that it is impossible to estimate persistent asymmetric delay, as these two
-/// situations are indistinguishable:
+/// Note that it is impossible to estimate persistent asymmetric delay, as these two situations are
+/// indistinguishable:
 /// - A and B have synchronized clocks and a 50ms symmetrical delay.
 /// - B's clock is 50ms ahead, A → B delay is 0ms, B → A delay is 100ms.
 ///
 /// In both of these cases, A and B observe that a ping-pong round trip takes 100ms and that
 /// a pong's timestamp is 50ms ahead of ping's timestamp.
 ///
-/// Instead, the model here is of a one-time delay --- a particular ping or pong message
-/// got delayed because it had a large prepare message in front of it in the send queue, a
-/// network packet got lost, or a pigeon got eaten by a cat.
+/// Instead, the model here is of a one-time delay --- a particular ping or pong message got delayed
+/// because it had a large prepare message in front of it in the send queue, a network packet got
+/// lost, or a pigeon got eaten by a cat.
 ///
-/// The delay happened either for the ping (forward path) or for the pong (reverse path)
-/// message. Assuming that the minimum RTT seen before is a no-delay situation, the
-/// magnitude of a delay for the current sample can be estimated as RTT - min(RTT), and the
-/// direction (forward/reverse) distinguished by comparing unadjusted clock offsets.
+/// The delay happened either for the ping (forward path) or for the pong (reverse path) message.
+/// Assuming that the minimum RTT seen before is a no-delay situation, the magnitude of a delay for
+/// the current sample can be estimated as RTT - min(RTT), and the direction (forward/reverse)
+/// distinguished by comparing unadjusted clock offsets.
 ///
 /// Previous window is used to determine min(RTT).
 fn estimate_asymmetric_delay(
@@ -479,18 +471,15 @@ fn synchronize(self: *Clock) void {
     }
 
     if (!self.window.learned) return;
-    // Do not reset `learned` any earlier than this (before we have attempted to
-    // synchronize).
+    // Do not reset `learned` any earlier than this (before we have attempted to synchronize).
     self.window.learned = false;
 
-    // Starting with the most clock offset tolerance, while we have a quorum, find the best
-    // smallest interval with the least clock offset tolerance, reducing tolerance at each
-    // step:
+    // Starting with the most clock offset tolerance, while we have a quorum, find the best smallest
+    // interval with the least clock offset tolerance, reducing tolerance at each step:
     var tolerance: u64 = clock_offset_tolerance_max;
     var terminate = false;
     var rounds: usize = 0;
-    // Do at least one round if tolerance=0 and cap the number of rounds to avoid runaway
-    // loops.
+    // Do at least one round if tolerance=0 and cap the number of rounds to avoid runaway loops.
     while (!terminate and rounds < 64) : (tolerance /= 2) {
         if (tolerance == 0) terminate = true;
         rounds += 1;
@@ -498,17 +487,16 @@ fn synchronize(self: *Clock) void {
         const interval = Marzullo.smallest_interval(self.window_tuples(tolerance));
         if (interval.sources_true < self.quorum) break;
 
-        // The new interval may reduce the number of `sources_true` while also decreasing
-        // error. In other words, provided we maintain a quorum, we prefer tighter tolerance
-        // bounds.
+        // The new interval may reduce the number of `sources_true` while also decreasing error. In
+        // other words, provided we maintain a quorum, we prefer tighter tolerance bounds.
         self.window.synchronized = interval;
     }
 
     // Wait for more accurate samples or until we timeout the window for lack of quorum:
     if (self.window.synchronized == null) return;
 
-    // Transitioning from not being synchronized to being synchronized - log out a message
-    // for the operator, as the counterpoint to `no agreement on cluster time`.
+    // Transitioning from not being synchronized to being synchronized - log out a message for the
+    // operator, as the counterpoint to `no agreement on cluster time`.
     if (self.epoch.synchronized == null and self.window.synchronized != null) {
         const new_interval = self.window.synchronized.?;
         log.info("{}: synchronized: accuracy={}", .{
