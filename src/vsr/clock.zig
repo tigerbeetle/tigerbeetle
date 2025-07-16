@@ -364,7 +364,7 @@ pub fn round_trip_time_median_ns(self: *const Clock) ?u64 {
     for (self.window.sources, 0..) |source, replica_index| {
         if (self.replica != replica_index) {
             if (source) |sampled| {
-                one_way_delays.append_assume_capacity(sampled.one_way_delay);
+                one_way_delays.push(sampled.one_way_delay);
             }
         }
     }

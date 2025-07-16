@@ -225,7 +225,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                     continue;
                 }
 
-                successful_transfer_ids.append_assume_capacity(transfer.id);
+                successful_transfer_ids.push(transfer.id);
 
                 if (transfer.flags.pending) {
                     try testing.expect(!model.pending_transfers.contains(transfer.id));

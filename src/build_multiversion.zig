@@ -588,13 +588,13 @@ fn build_multiversion_body(shell: *Shell, options: struct {
             break :blk offset;
         };
 
-        releases.append_assume_capacity(past_release);
-        checksums.append_assume_capacity(past_checksum);
-        offsets.append_assume_capacity(offset);
-        sizes.append_assume_capacity(past_size);
-        flags_.append_assume_capacity(past_flag);
-        git_commits.append_assume_capacity(past_commit);
-        release_client_mins.append_assume_capacity(past_release_client_min);
+        releases.push(past_release);
+        checksums.push(past_checksum);
+        offsets.push(offset);
+        sizes.push(past_size);
+        flags_.push(past_flag);
+        git_commits.push(past_commit);
+        release_client_mins.push(past_release_client_min);
     }
 
     const old_current_release_offset = blk: {
@@ -616,13 +616,13 @@ fn build_multiversion_body(shell: *Shell, options: struct {
 
     // All of these are in ascending order, so the old current release goes last:
 
-    releases.append_assume_capacity(old_current_release);
-    checksums.append_assume_capacity(header.current_checksum);
-    offsets.append_assume_capacity(old_current_release_offset);
-    sizes.append_assume_capacity(old_current_release_size);
-    flags_.append_assume_capacity(old_current_release_flags);
-    git_commits.append_assume_capacity(header.current_git_commit);
-    release_client_mins.append_assume_capacity(header.current_release_client_min);
+    releases.push(old_current_release);
+    checksums.push(header.current_checksum);
+    offsets.push(old_current_release_offset);
+    sizes.push(old_current_release_size);
+    flags_.push(old_current_release_flags);
+    git_commits.push(header.current_git_commit);
+    release_client_mins.push(header.current_release_client_min);
     try unpacked.append(old_current_release_output_name);
 
     const body_file = try shell.cwd.createFile(options.output, .{ .exclusive = true });

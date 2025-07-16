@@ -84,7 +84,7 @@ pub fn main(
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
     defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
     for (0..cli_args.clients) |_| {
-        message_pools.append_assume_capacity(try MessagePool.init(allocator, .client));
+        message_pools.push(try MessagePool.init(allocator, .client));
     }
 
     std.log.info("Benchmark running against {any}", .{addresses});
@@ -93,7 +93,7 @@ pub fn main(
     defer for (clients.slice()) |*client| client.deinit(allocator);
 
     for (0..cli_args.clients) |i| {
-        clients.append_assume_capacity(try Client.init(allocator, .{
+        clients.push(try Client.init(allocator, .{
             .id = stdx.unique_u128(),
             .cluster = cluster_id,
             .replica_count = @intCast(addresses.len),

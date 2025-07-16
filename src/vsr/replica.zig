@@ -1776,7 +1776,7 @@ pub fn ReplicaType(
 
                     for (releases) |release| {
                         if (release.value > self.release.value) {
-                            upgrade_targets.*.?.releases.append_assume_capacity(release);
+                            upgrade_targets.*.?.releases.push(release);
                         }
                     }
                 }
@@ -11051,7 +11051,7 @@ const DVCQuorum = struct {
                 assert(message.header.command == .do_view_change);
                 assert(message.header.replica == replica);
 
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
@@ -11066,7 +11066,7 @@ const DVCQuorum = struct {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.const_slice()) |message| {
             if (message.header.log_view == log_view) {
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
@@ -11080,7 +11080,7 @@ const DVCQuorum = struct {
             assert(message.header.log_view <= log_view_max_);
 
             if (message.header.log_view < log_view_max_) {
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
