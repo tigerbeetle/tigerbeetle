@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Tracer = vsr.trace.Tracer;
 const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,

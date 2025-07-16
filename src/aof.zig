@@ -10,7 +10,7 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Tracer = vsr.trace.Tracer;
 
 const log = std.log.scoped(.aof);
 
@@ -300,7 +300,7 @@ pub fn AOFType(comptime IO: type) type {
                 Storage,
                 constants.state_machine_config,
             );
-            const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+            const Client = vsr.ClientType(StateMachine, MessageBus);
 
             client: *Client,
             io: *IO,
@@ -310,6 +310,7 @@ pub fn AOFType(comptime IO: type) type {
             pub fn init(
                 io: *IO,
                 allocator: std.mem.Allocator,
+                time: vsr.time.Time,
                 addresses: []std.net.Address,
             ) !ReplayClient {
                 assert(addresses.len > 0);
@@ -330,7 +331,7 @@ pub fn AOFType(comptime IO: type) type {
                         .id = stdx.unique_u128(),
                         .cluster = 0,
                         .replica_count = @intCast(addresses.len),
-                        .time = .{},
+                        .time = time,
                         .message_pool = message_pool,
                         .message_bus_options = .{
                             .configuration = addresses,
@@ -880,6 +881,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
+    var time_os = vsr.time.TimeOS{};
+    const time = time_os.time();
+
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
@@ -926,7 +930,7 @@ pub fn main() !void {
 
         var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
         const addresses_parsed = try vsr.parse_addresses(addresses.?, &addresses_buffer);
-        var replay = try AOFReplayClient.init(&io, allocator, addresses_parsed);
+        var replay = try AOFReplayClient.init(&io, allocator, time, addresses_parsed);
         defer replay.deinit(allocator);
 
         try replay.replay(&it);

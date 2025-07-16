@@ -32,9 +32,8 @@ pub fn ReplicaReformatType(
     comptime StateMachine: type,
     comptime MessageBus: type,
     comptime Storage: type,
-    comptime Time: type,
 ) type {
-    const Client = vsr.ClientType(StateMachine, MessageBus, Time);
+    const Client = vsr.ClientType(StateMachine, MessageBus);
     const SuperBlock = vsr.SuperBlockType(Storage);
 
     return struct {

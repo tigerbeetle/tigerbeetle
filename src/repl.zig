@@ -5,7 +5,8 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Time = vsr.time.Time;
+const Tracer = vsr.trace.Tracer;
 const StaticAllocator = @import("static_allocator.zig");
 const Storage = vsr.storage.StorageType(IO, Tracer);
 const StateMachine = vsr.state_machine.StateMachineType(
@@ -27,8 +28,8 @@ const repl_history_entry_bytes_without_nul = 511;
 
 const ReplBufferBoundedArray = stdx.BoundedArrayType(u8, repl_history_entry_bytes_without_nul);
 
-pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
-    const Client = vsr.ClientType(StateMachine, MessageBus, Time);
+pub fn ReplType(comptime MessageBus: type) type {
+    const Client = vsr.ClientType(StateMachine, MessageBus);
 
     // Requires 512 * 256 == 128KiB of stack space.
     const HistoryBuffer = RingBufferType(

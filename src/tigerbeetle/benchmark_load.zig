@@ -22,10 +22,11 @@ const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
+const Time = vsr.time.Time;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = @import("./main.zig").StateMachine;
-const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+const Client = vsr.ClientType(StateMachine, MessageBus);
 const tb = vsr.tigerbeetle;
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
@@ -35,6 +36,7 @@ const cli = @import("./cli.zig");
 
 pub fn main(
     allocator: std.mem.Allocator,
+    time: Time,
     addresses: []const std.net.Address,
     cli_args: *const cli.Command.Benchmark,
 ) !void {
@@ -95,7 +97,7 @@ pub fn main(
             .id = stdx.unique_u128(),
             .cluster = cluster_id,
             .replica_count = @intCast(addresses.len),
-            .time = .{},
+            .time = time,
             .message_pool = &message_pools.slice()[i],
             .message_bus_options = .{ .configuration = addresses, .io = &io },
         }));
