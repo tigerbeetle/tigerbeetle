@@ -165,7 +165,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.storage = storage;
 
             env.time_sim = TimeSim.init_simple();
-            env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
+            env.trace = try Storage.Tracer.init(
+                gpa,
+                env.time_sim.time(),
+                .{ .replica = .{ .cluster = 0, .replica_index = replica } },
+                .{},
+            );
             defer env.trace.deinit(gpa);
 
             env.superblock = try SuperBlock.init(gpa, .{

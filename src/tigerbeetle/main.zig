@@ -442,6 +442,15 @@ const Command = struct {
 
         const trace_writer = if (trace_file) |file| file.writer() else null;
 
+        var tracer = try Tracer.init(allocator, time, .unknown, .{
+            .writer = if (trace_writer) |writer| writer.any() else null,
+            .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
+                .io = &command.io,
+                .address = statsd_address,
+            } } else .log,
+        });
+        defer tracer.deinit(allocator);
+
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -474,13 +483,7 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer_options = .{
-                .writer = if (trace_writer) |writer| writer.any() else null,
-                .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
-                    .io = &command.io,
-                    .address = statsd_address,
-                } } else .log,
-            },
+            .tracer = &tracer,
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
                 .star = args.replicate_star,
