@@ -165,7 +165,11 @@ export function id(): bigint {
     timestamp = idLastTimestamp
   } else {
     idLastTimestamp = timestamp
-    randomFillSync(idLastBuffer)
+    // NB: in Node 24 (24.0.2) randomFillSync appears to not accept a DataView,
+    // contrary to its documentation and previous behavior. As workaround
+    // we turn the DataView it into a typed array buffer and fill that.
+    const array = new Uint8Array(idLastBuffer.buffer, idLastBuffer.byteOffset, idLastBuffer.byteLength);
+    randomFillSync(array)
   }
 
   // Increment the u80 in idLastBuffer using carry arithmetic on u32s (as JS doesn't have fast u64).
