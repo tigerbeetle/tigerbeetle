@@ -117,7 +117,7 @@ const trace_span_size_max = 1024;
 pub const Tracer = @This();
 
 time: Time,
-replica_index: u8,
+process_id: ProcessID,
 options: Options,
 buffer: []u8,
 statsd: StatsD,
@@ -127,6 +127,28 @@ events_metric: []?EventMetricAggregate,
 events_timing: []?EventTimingAggregate,
 
 time_start: stdx.Instant,
+
+pub const ProcessID = union(enum) {
+    unknown,
+    replica: struct {
+        cluster: u128,
+        replica_index: u8,
+    },
+
+    pub fn format(
+        self: @This(),
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        _ = fmt;
+        _ = options;
+        try switch (self) {
+            .unknown => writer.writeByte('_'),
+            .replica => |replica| try writer.print("{d}", .{replica.replica_index}),
+        };
+    }
+};
 
 pub const Options = struct {
     /// The tracer still validates start/stop state even when writer=null.
@@ -143,8 +165,7 @@ pub const Options = struct {
 pub fn init(
     allocator: std.mem.Allocator,
     time: Time,
-    cluster: u128,
-    replica_index: u8,
+    process_id: ProcessID,
     options: Options,
 ) !Tracer {
     if (options.writer) |writer| {
@@ -155,11 +176,10 @@ pub fn init(
     errdefer allocator.free(buffer);
 
     var statsd = try switch (options.statsd_options) {
-        .log => StatsD.init_log(allocator, cluster, replica_index),
+        .log => StatsD.init_log(allocator, process_id),
         .udp => |statsd_options| StatsD.init_udp(
             allocator,
-            cluster,
-            replica_index,
+            process_id,
             statsd_options.io,
             statsd_options.address,
         ),
@@ -178,7 +198,7 @@ pub fn init(
 
     return .{
         .time = time,
-        .replica_index = replica_index,
+        .process_id = process_id,
         .options = options,
         .buffer = buffer,
         .statsd = statsd,
@@ -196,6 +216,16 @@ pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
     tracer.statsd.deinit(allocator);
     allocator.free(tracer.buffer);
     tracer.* = undefined;
+}
+
+/// We learn the cluster id and replica index after opening the datafile.
+pub fn set_replica(tracer: *Tracer, options: struct { cluster: u128, replica: u8 }) void {
+    const process_id = ProcessID{ .replica = .{
+        .cluster = options.cluster,
+        .replica_index = options.replica,
+    } };
+    tracer.process_id = process_id;
+    tracer.statsd.process_id = process_id;
 }
 
 /// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will / result in
@@ -233,7 +263,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
 
     log.debug(
         "{}: {s}({}): start: {}",
-        .{ tracer.replica_index, @tagName(event), event_tracing, event_timing },
+        .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
     );
 
     const writer = tracer.options.writer orelse return;
@@ -252,7 +282,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
         "\"args\":{[args]s}" ++
         "}},\n", .{
-        .process_id = tracer.replica_index,
+        .process_id = tracer.process_id,
         .thread_id = event_tracing.stack(),
         .category = @tagName(event),
         .event = 'B',
@@ -262,7 +292,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         .args = std.json.Formatter(Event){ .value = event, .options = .{} },
     }) catch {
         log.err("{}: {s}({}): event too large: {}", .{
-            tracer.replica_index,
+            tracer.process_id,
             @tagName(event),
             event_tracing,
             event_timing,
@@ -291,7 +321,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 
     // Double leading space to align with 'start: '.
     log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
-        tracer.replica_index,
+        tracer.process_id,
         @tagName(event),
         event_tracing,
         event_timing,
@@ -313,7 +343,7 @@ pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     const event_end = tracer.time.monotonic_instant();
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
-            log.debug("{}: {s}: cancel", .{ tracer.replica_index, @tagName(event_tag) });
+            log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
 
             const event_duration = event_end.duration_since(tracer.time_start);
 
@@ -335,7 +365,7 @@ fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
             "\"ts\":{[timestamp]}" ++
             "}},\n",
         .{
-            .process_id = tracer.replica_index,
+            .process_id = tracer.process_id,
             .thread_id = stack,
             .event = 'E',
             .timestamp = time_elapsed.us(),
@@ -409,7 +439,7 @@ test "trace json" {
 
     var time_sim = TimeSim.init_simple();
 
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), 0, 0, .{
+    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);
@@ -424,10 +454,10 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":8,"ph":"E","ts":30000},
-        \\{"pid":0,"tid":0,"ph":"E","ts":60000},
+        \\{"pid":_,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":_,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":_,"tid":8,"ph":"E","ts":30000},
+        \\{"pid":_,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);
 }
@@ -439,7 +469,7 @@ test "timing overflow" {
     defer trace_buffer.deinit();
 
     var time_sim = TimeSim.init_simple();
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), 0, 0, .{
+    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);

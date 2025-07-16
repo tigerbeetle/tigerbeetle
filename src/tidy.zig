@@ -237,7 +237,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 // trace.zig's JSON snapshot test.
                 if (std.mem.endsWith(u8, file.path, "trace.zig") and
-                    std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
+                    std.mem.startsWith(u8, string_value, "{\"pid\":_,\"tid\":")) continue;
 
                 // AMQP encoder snapshot test.
                 if (std.mem.endsWith(u8, file.path, "cdc/amqp/protocol.zig") and

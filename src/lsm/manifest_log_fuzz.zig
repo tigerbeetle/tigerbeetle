@@ -296,11 +296,11 @@ const Environment = struct {
         env.time_sim = TimeSim.init_simple();
 
         fields_initialized += 1;
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .unknown, .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), .unknown, .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -562,7 +562,7 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.gpa);
-            test_trace.* = try Storage.Tracer.init(env.gpa, env.time_sim.time(), 0, 0, .{});
+            test_trace.* = try Storage.Tracer.init(env.gpa, env.time_sim.time(), .unknown, .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().

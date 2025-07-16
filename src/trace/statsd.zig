@@ -3,6 +3,8 @@ const stdx = @import("../stdx.zig");
 
 const assert = std.debug.assert;
 
+const ProcessID = @import("../trace.zig").ProcessID;
+
 const IO = @import("../io.zig").IO;
 
 const EventMetric = @import("event.zig").EventMetric;
@@ -64,7 +66,7 @@ const statsd_line_size_max = line_size_max: {
         format_metric(
             buffer_writer,
             .{ .metric = .{ .aggregate = event } },
-            .{ .cluster = 0, .replica = 0 },
+            .unknown,
         ) catch unreachable;
         line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
     }
@@ -74,7 +76,7 @@ const statsd_line_size_max = line_size_max: {
             format_metric(
                 buffer_writer,
                 .{ .timing = .{ .aggregate = event, .stat = stat } },
-                .{ .cluster = 0, .replica = 0 },
+                .unknown,
             ) catch unreachable;
             line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
         }
@@ -106,8 +108,7 @@ comptime {
 }
 
 pub const StatsD = struct {
-    cluster: u128,
-    replica: u8,
+    process_id: ProcessID,
     implementation: union(enum) {
         udp: struct {
             socket: std.posix.socket_t,
@@ -124,8 +125,7 @@ pub const StatsD = struct {
     /// Creates a statsd instance, which will send UDP packets via the IO instance provided.
     pub fn init_udp(
         allocator: std.mem.Allocator,
-        cluster: u128,
-        replica: u8,
+        process_id: ProcessID,
         io: *IO,
         address: std.net.Address,
     ) !StatsD {
@@ -138,11 +138,10 @@ pub const StatsD = struct {
         // 'Connect' the UDP socket, so we can just send() to it normally.
         try std.posix.connect(socket, &address.any, address.getOsSockLen());
 
-        log.info("{}: sending statsd metrics to {}", .{ replica, address });
+        log.info("{}: sending statsd metrics to {}", .{ process_id, address });
 
         return .{
-            .cluster = cluster,
-            .replica = replica,
+            .process_id = process_id,
             .implementation = .{
                 .udp = .{
                     .socket = socket,
@@ -157,15 +156,13 @@ pub const StatsD = struct {
     // so that all of the other code can run and be tested in the simulator.
     pub fn init_log(
         allocator: std.mem.Allocator,
-        cluster: u128,
-        replica: u8,
+        process_id: ProcessID,
     ) !StatsD {
         const send_buffer = try allocator.create([packet_count_max * packet_size_max]u8);
         errdefer allocator.destroy(send_buffer);
 
         return .{
-            .cluster = cluster,
-            .replica = replica,
+            .process_id = process_id,
             .implementation = .log,
             .send_buffer = send_buffer,
         };
@@ -195,7 +192,7 @@ pub const StatsD = struct {
         // This is also a load-bearing check: see send_callback().
         if (self.send_in_flight_count != 0) {
             log.err("{}: {} / {} packets still in flight; skipping emit", .{
-                self.replica,
+                self.process_id,
                 self.send_in_flight_count,
                 packet_count_max,
             });
@@ -205,7 +202,7 @@ pub const StatsD = struct {
         if (self.implementation == .udp and self.implementation.udp.send_callback_error_count > 0) {
             log.warn(
                 "{}: failed to send {} packets",
-                .{ self.replica, self.implementation.udp.send_callback_error_count },
+                .{ self.process_id, self.implementation.udp.send_callback_error_count },
             );
             self.implementation.udp.send_callback_error_count = 0;
         }
@@ -231,13 +228,10 @@ pub const StatsD = struct {
 
                 for (stats) |stat| {
                     const send_position_before = send_stream.getPos() catch unreachable;
-                    format_metric(send_writer, stat, .{
-                        .cluster = self.cluster,
-                        .replica = self.replica,
-                    }) catch |err| {
+                    format_metric(send_writer, stat, self.process_id) catch |err| {
                         // This shouldn't ever happen, but don't allow metrics to kill the system.
                         assert(err == error.NoSpaceLeft);
-                        log.err("{}: insufficient buffer space", .{self.replica});
+                        log.err("{}: insufficient buffer space", .{self.process_id});
                         break;
                     };
 
@@ -247,7 +241,7 @@ pub const StatsD = struct {
                     if (send_ready + send_size > packet_size_max) {
                         assert(send_ready > 0);
                         if (send_sizes.full()) {
-                            log.err("{}: insufficient packet count", .{self.replica});
+                            log.err("{}: insufficient packet count", .{self.process_id});
                             break;
                         } else {
                             send_sizes.push(send_ready);
@@ -261,7 +255,7 @@ pub const StatsD = struct {
         }
         if (send_ready > 0) {
             if (send_sizes.full()) {
-                log.err("{}: insufficient packet count", .{self.replica});
+                log.err("{}: insufficient packet count", .{self.process_id});
             } else {
                 send_sizes.push(send_ready);
             }
@@ -271,7 +265,7 @@ pub const StatsD = struct {
         for (send_sizes.const_slice()) |send_size| {
             if (self.send_in_flight_count >= self.send_completions.len) {
                 // This shouldn't ever happen, but don't allow metrics to kill the system.
-                log.err("{}: insufficient packets to emit any metrics", .{self.replica});
+                log.err("{}: insufficient packets to emit any metrics", .{self.process_id});
                 return;
             }
             const completion = &self.send_completions[self.send_in_flight_count];
@@ -294,7 +288,7 @@ pub const StatsD = struct {
                 );
             },
             .log => {
-                log.debug("{}: statsd packet: {s}", .{ self.replica, send_buffer });
+                log.debug("{}: statsd packet: {s}", .{ self.process_id, send_buffer });
                 StatsD.send_callback(self, send_completion, send_buffer.len);
             },
         }
@@ -324,7 +318,7 @@ const Stat = union(enum) {
 fn format_metric(
     writer: anytype,
     stat: Stat,
-    options: struct { cluster: u128, replica: u8 },
+    process_id: ProcessID,
 ) error{NoSpaceLeft}!void {
     const stat_name = switch (stat) {
         inline else => |stat_data| @tagName(stat_data.aggregate.event),
@@ -344,14 +338,19 @@ fn format_metric(
         },
     };
 
+    const cluster: u128, const replica: u8 = switch (process_id) {
+        .unknown => .{ 0, 0 },
+        .replica => |replica| .{ replica.cluster, replica.replica_index },
+    };
+
     try writer.print("tb.{[name]s}{[name_suffix]s}:{[value]d}|{[statsd_type]s}" ++
         "|#cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
         .name = stat_name,
         .name_suffix = stat_suffix,
         .statsd_type = stat_type,
         .value = stat_value,
-        .cluster = options.cluster,
-        .replica = options.replica,
+        .cluster = cluster,
+        .replica = replica,
     });
 
     switch (stat) {
