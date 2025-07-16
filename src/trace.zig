@@ -198,8 +198,8 @@ pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
     tracer.* = undefined;
 }
 
-/// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will
-/// result in only the last value being submitted.
+/// Gauges work on a last-set wins. Multiple calls to .gauge() followed by an emit will / result in
+/// only the last value being submitted.
 pub fn gauge(tracer: *Tracer, event: EventMetric, value: u64) void {
     const timing_slot = event.slot();
     tracer.events_metric[timing_slot] = .{
@@ -362,14 +362,13 @@ pub fn emit_metrics(tracer: *Tracer) void {
     @memset(tracer.events_timing, null);
 }
 
-// Timing works by storing the min, max, sum and count of each value provided. The avg is
-// calculated from sum and count at emit time.
+// Timing works by storing the min, max, sum and count of each value provided. The avg is calculated
+// from sum and count at emit time.
 //
 // When these are emitted upstream (via statsd, currently), upstream must apply different
 // aggregations:
 // * min/max/avg are considered gauges for aggregation: last value wins.
-// * sum/count are considered counters for aggregation: they are added to the existing
-// values.
+// * sum/count are considered counters for aggregation: they are added to the existing values.
 //
 // This matches the default behavior of the `g` and `c` statsd types respectively.
 pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) void {
