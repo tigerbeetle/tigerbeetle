@@ -136,7 +136,7 @@ pub const ProcessID = union(enum) {
     },
 
     pub fn format(
-        self: @This(),
+        self: ProcessID,
         comptime fmt: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
@@ -220,7 +220,7 @@ pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
 
 /// We learn the cluster id and replica index after opening the datafile.
 pub fn set_replica(tracer: *Tracer, options: struct { cluster: u128, replica: u8 }) void {
-    const process_id = ProcessID{ .replica = .{
+    const process_id: ProcessID = .{ .replica = .{
         .cluster = options.cluster,
         .replica_index = options.replica,
     } };
