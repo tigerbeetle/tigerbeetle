@@ -292,6 +292,5 @@ See also:
 - [Flexible Paxos](https://fpaxos.github.io/)
 
 ## Further reading
-
-- [Viewstamped Replication Revisited](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+- [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)
