@@ -32,7 +32,7 @@ Storage:
 |             `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)                                                                                     |
 |             `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)                                                                                     |
 |                 `request` |  client |      primary | [Normal](#protocol-normal)                                                                                                                 |
-|                 `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
+|                 `prepare` | primary |      replica | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
 |              `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
 |                   `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
