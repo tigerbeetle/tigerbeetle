@@ -145,30 +145,30 @@ The following examples show the state of two accounts in three steps:
 ### Post Full Pending Amount
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
+| :---------- | :--------- | :---------- | :--------- | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
-|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
-|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
-|         `w` |  123 + `x` |         `y` |  123 + `z` | `A`                  | `B`                   |        123 | `post_pending_transfer` |
+|  `w`        |  `x`       | `y`         |  `z`       | -                    | -                     |          - | -                       |
+|  `w` + 123  |  `x`       | `y` + 123   |  `z`       | `A`                  | `B`                   |        123 | `pending`               |
+|  `w`        |  `x`+ 123  | `y`         |  `z` + 123 | `A`                  | `B`                   |        123 | `post_pending_transfer` |
 
 ### Post Partial Pending Amount
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
+| :---------- | :--------- | :---------- | :--------- | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
-|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
-|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
-|         `w` |  100 + `x` |         `y` |  100 + `z` | `A`                  | `B`                   |        100 | `post_pending_transfer` |
+|  `w`        |  `x`       |  `y`        | `z`        | -                    | -                     |          - | -                       |
+|  `w` + 123  |  `x`       |  `y` + 123  | `z`        | `A`                  | `B`                   |        123 | `pending`               |
+|  `w`        |  `x` + 100 |  `y`        | `z` + 100  | `A`                  | `B`                   |        100 | `post_pending_transfer` |
 
 ### Void Pending Transfer
 
 | Account `A` |            | Account `B` |            | Transfers            |                       |            |                         |
-| ----------: | ---------: | ----------: | ---------: | :------------------- | :-------------------- | ---------: | :---------------------- |
+| :---------- | :--------- | :---------- | :--------- | :------------------- | :-------------------- | ---------: | :---------------------- |
 |  **debits** |            | **credits** |            |                      |                       |            |                         |
 | **pending** | **posted** | **pending** | **posted** | **debit_account_id** | **credit_account_id** | **amount** | **flags**               |
-|         `w` |        `x` |         `y` |        `z` | -                    | -                     |          - | -                       |
-|   123 + `w` |        `x` |   123 + `y` |        `z` | `A`                  | `B`                   |        123 | `pending`               |
-|         `w` |        `x` |         `y` |        `z` | `A`                  | `B`                   |        123 | `void_pending_transfer` |
+|  `w`        |        `x` |  `y`        |        `z` | -                    | -                     |          - | -                       |
+|  `w` + 123  |        `x` |  `y` + 123  |        `z` | `A`                  | `B`                   |        123 | `pending`               |
+|  `w`        |        `x` |  `y`        |        `z` | `A`                  | `B`                   |        123 | `void_pending_transfer` |
 
