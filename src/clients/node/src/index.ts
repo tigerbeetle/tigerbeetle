@@ -149,7 +149,14 @@ export function createClient (args: ClientInitArgs): Client {
 }
 
 let idLastTimestamp = 0;
-let idLastBuffer = new DataView(new ArrayBuffer(16));
+
+// These are two references to the same buffer.
+// We only need the `Uint8Array` because in Node 24, but not earlier, `crypto.randomFillSync`
+// rejects `DataView` typed arguments.
+const idLastBuffer = new DataView(new ArrayBuffer(16));
+const idLastBufferArray = new Uint8Array(
+    idLastBuffer.buffer, idLastBuffer.byteOffset, idLastBuffer.byteLength
+);
 
 /**
  * Generates a Universally Unique and Sortable Identifier as a u128 bigint.
@@ -165,11 +172,7 @@ export function id(): bigint {
     timestamp = idLastTimestamp
   } else {
     idLastTimestamp = timestamp
-    // NB: in Node 24 (24.0.2) randomFillSync appears to not accept a DataView,
-    // contrary to its documentation and previous behavior. As workaround
-    // we turn the DataView it into a typed array buffer and fill that.
-    const array = new Uint8Array(idLastBuffer.buffer, idLastBuffer.byteOffset, idLastBuffer.byteLength);
-    randomFillSync(array)
+    randomFillSync(idLastBufferArray)
   }
 
   // Increment the u80 in idLastBuffer using carry arithmetic on u32s (as JS doesn't have fast u64).
