@@ -1748,9 +1748,9 @@ pub const Budget = struct {
 };
 
 pub fn block_count_max(storage_size_limit: u64) usize {
-    const shard_count_limit: usize = @intCast(@divFloor(
+    const block_count_limit: usize = @intCast(@divFloor(
         storage_size_limit - superblock.data_file_size_min,
-        constants.block_size * FreeSet.shard_bits,
+        constants.block_size,
     ));
-    return shard_count_limit * FreeSet.shard_bits;
+    return stdx.div_ceil(block_count_limit, FreeSet.shard_bits) * FreeSet.shard_bits;
 }

@@ -34,6 +34,7 @@ pub fn ewah(comptime Word: type) type {
 
         pub const MarkerUniformCount = std.meta.Int(.unsigned, word_bits / 2 - 1); // Word=u64 → u31
         pub const MarkerLiteralCount = std.meta.Int(.unsigned, word_bits / 2); // Word=u64 → u32
+        pub const DecodeError = error{TargetTooSmall};
 
         const Marker = packed struct(Word) {
             // Whether the uniform word is all 0s or all 1s.
@@ -62,96 +63,82 @@ pub fn ewah(comptime Word: type) type {
             return @bitCast(mark);
         }
 
-        pub const Decoder = struct {
-            /// The number of bytes of the source buffer (the encoded data) that still need to be
-            /// processed.
-            source_size_remaining: usize,
+        /// Returns the number of *words* written to `target_words` by this invocation.
+        // TODO Refactor to return an error when `source_chunk` is invalid, so that we can test
+        // invalid encodings.
+        pub fn decode_chunks(
             target_words: []Word,
-            target_index: usize = 0,
-            source_literal_words: usize = 0,
+            source_chunks: []const []align(@alignOf(Word)) const u8,
+        ) DecodeError!usize {
+            var target_index: usize = 0;
+            var source_index: usize = 0;
+            var source_literal_words: usize = 0;
 
-            /// Returns the number of *words* written to `target_words` by this invocation.
-            // TODO Refactor to return an error when `source_chunk` is invalid,
-            // so that we can test invalid encodings.
-            pub fn decode_chunk(
-                decoder: *Decoder,
-                source_chunk: []align(@alignOf(Word)) const u8,
-            ) usize {
+            for (source_chunks) |source_chunk| {
                 assert(source_chunk.len % @sizeOf(Word) == 0);
 
-                decoder.source_size_remaining -= source_chunk.len;
-
                 const source_words = mem.bytesAsSlice(Word, source_chunk);
-                const target_words = decoder.target_words;
                 assert(disjoint_slices(u8, Word, source_chunk, target_words));
 
-                var source_index: usize = 0;
-                var target_index: usize = decoder.target_index;
-                defer decoder.target_index = target_index;
+                source_index = 0;
+                while (source_index < source_words.len) {
+                    // Consume literals pending from the previous iteration of the current source
+                    // chunk, or the previous source chunk.
+                    const literal_words_used = @min(
+                        source_literal_words,
+                        source_words.len - source_index,
+                    );
 
-                if (decoder.source_literal_words > 0) {
-                    const literal_word_count_chunk =
-                        @min(decoder.source_literal_words, source_words.len);
+                    if (target_index + literal_words_used > target_words.len) {
+                        return error.TargetTooSmall;
+                    }
 
                     stdx.copy_disjoint(
                         .exact,
                         Word,
-                        target_words[target_index..][0..literal_word_count_chunk],
-                        source_words[source_index..][0..literal_word_count_chunk],
+                        target_words[target_index..][0..literal_words_used],
+                        source_words[source_index..][0..literal_words_used],
                     );
-                    source_index += literal_word_count_chunk;
-                    target_index += literal_word_count_chunk;
-                    decoder.source_literal_words -= literal_word_count_chunk;
-                }
+                    source_index += literal_words_used;
+                    target_index += literal_words_used;
+                    source_literal_words -= literal_words_used;
 
-                while (source_index < source_words.len) {
-                    assert(decoder.source_literal_words == 0);
+                    if (source_index == source_words.len) break;
 
+                    // Once all pending literals have been consumed, parse the next Marker, which
+                    // tells us how many uniform words and literal words follow it.
+                    assert(source_literal_words == 0);
                     const marker: *const Marker = @ptrCast(&source_words[source_index]);
                     source_index += 1;
+
+                    // If the uniform word is 0, we optimistically continue even if target_words
+                    // are exhausted. This helps us handle the scenario where we're decoding a
+                    // bigger free set into a smaller one, wherein there are no set bits in the
+                    // bigger free set past the smaller free set's capacity.
+                    if (marker.uniform_bit == 1 and
+                        target_index + marker.uniform_word_count > target_words.len)
+                    {
+                        return error.TargetTooSmall;
+                    }
+
+                    const uniform_words_used = @min(
+                        marker.uniform_word_count,
+                        target_words.len - target_index,
+                    );
+
                     @memset(
-                        target_words[target_index..][0..marker.uniform_word_count],
+                        target_words[target_index..][0..uniform_words_used],
                         if (marker.uniform_bit == 1) ~@as(Word, 0) else 0,
                     );
-                    target_index += marker.uniform_word_count;
 
-                    const literal_word_count_chunk =
-                        @min(marker.literal_word_count, source_words.len - source_index);
-                    stdx.copy_disjoint(
-                        .exact,
-                        Word,
-                        target_words[target_index..][0..literal_word_count_chunk],
-                        source_words[source_index..][0..literal_word_count_chunk],
-                    );
-                    source_index += literal_word_count_chunk;
-                    target_index += literal_word_count_chunk;
-                    decoder.source_literal_words =
-                        marker.literal_word_count - literal_word_count_chunk;
+                    target_index += uniform_words_used;
+                    source_literal_words = marker.literal_word_count;
                 }
-                assert(source_index <= source_words.len);
+                assert(source_index == source_words.len);
                 assert(target_index <= target_words.len);
-
-                return target_index - decoder.target_index;
             }
 
-            pub fn done(decoder: *const Decoder) bool {
-                assert(decoder.target_index <= decoder.target_words.len);
-
-                if (decoder.source_size_remaining == 0) {
-                    assert(decoder.source_literal_words == 0);
-                    return true;
-                } else {
-                    maybe(decoder.source_literal_words == 0);
-                    return false;
-                }
-            }
-        };
-
-        pub fn decode_chunks(target_words: []Word, source_size: usize) Decoder {
-            return .{
-                .target_words = target_words,
-                .source_size_remaining = source_size,
-            };
+            return target_index;
         }
 
         // (This is a helper for testing only.)
@@ -162,8 +149,7 @@ pub fn ewah(comptime Word: type) type {
             assert(source.len % @sizeOf(Word) == 0);
             assert(disjoint_slices(u8, Word, source, target_words));
 
-            var decoder = decode_chunks(target_words, source.len);
-            return decoder.decode_chunk(source);
+            return decode_chunks(target_words, &.{source}) catch unreachable;
         }
 
         pub const Encoder = struct {
