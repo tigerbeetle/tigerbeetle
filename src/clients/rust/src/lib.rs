@@ -15,12 +15,17 @@ use std::future::Future;
 use std::os::raw::{c_char, c_void};
 use std::{mem, ptr};
 
+// The generated bindings.
+// These are not part of the public API but are re-exported hidden
+// so that the vortex driver can parse the TB protocol directly.
 #[allow(unused)]
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
 #[allow(non_snake_case)]
 #[rustfmt::skip]
-mod tb_client;
+#[doc(hidden)]
+pub mod tb_client;
+
 use tb_client as tbc;
 
 mod conversions;
@@ -568,7 +573,7 @@ impl core::fmt::Display for CreateAccountResult {
             Self::ImportedEventTimestampMustNotRegress => {
                 f.write_str("imported event timestamp must not regress")
             }
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -760,7 +765,7 @@ impl core::fmt::Display for CreateTransferResult {
             Self::OverflowsTimeout => f.write_str("overflows timeout"),
             Self::ExceedsCredits => f.write_str("exceeds credits"),
             Self::ExceedsDebits => f.write_str("exceeds debits"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -787,7 +792,7 @@ impl core::fmt::Display for InitStatus {
             Self::AddressLimitExceeded => f.write_str("address limit exceeded"),
             Self::SystemResources => f.write_str("system resources"),
             Self::NetworkSubsystem => f.write_str("network subsystem"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -804,7 +809,7 @@ impl core::fmt::Display for ClientStatus {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         match self {
             Self::Invalid => f.write_str("invalid"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -833,7 +838,7 @@ impl core::fmt::Display for PacketStatus {
             Self::ClientShutdown => f.write_str("client shutdown"),
             Self::InvalidOperation => f.write_str("invalid operation"),
             Self::InvalidDataSize => f.write_str("invalid data size"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
+            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
