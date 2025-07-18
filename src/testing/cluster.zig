@@ -714,6 +714,18 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
             } else unreachable;
 
+            // Re-initialize the trace to get a clean state.
+            cluster.replica_tracers[replica_index].deinit(cluster.allocator);
+            cluster.replica_tracers[replica_index] = try Tracer.init(
+                cluster.allocator,
+                cluster.replica_times[replica_index].time(),
+                .{ .replica = .{
+                    .cluster = cluster.replicas[replica_index].cluster,
+                    .replica = @intCast(replica_index),
+                } },
+                .{},
+            );
+
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
             cluster.aofs[replica_index].reset();
             cluster.aof_ios[replica_index].reset();
