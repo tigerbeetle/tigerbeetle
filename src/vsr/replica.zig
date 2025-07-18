@@ -483,7 +483,7 @@ pub fn ReplicaType(
         repair_messages_budget_grid: vsr.Budget,
 
         repair_messages_budget_journal: vsr.Budget,
-        repair_messages_inflight_prepare: std.AutoArrayHashMapUnmanaged(u64, void),
+        repair_prepares_requested: PreparesRequested,
 
         // The op number which should be set as op_min for the next request_headers call.
         // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
@@ -1088,14 +1088,12 @@ pub fn ReplicaType(
             assert(self.repair_messages_budget_journal.available ==
                 self.repair_messages_budget_journal.capacity);
 
-            var repair_messages_inflight_prepare: std.AutoArrayHashMapUnmanaged(u64, void) = .{};
-            try repair_messages_inflight_prepare.ensureTotalCapacity(
+            self.repair_prepares_requested = try PreparesRequested.init(
                 allocator,
                 repair_messages_budget_journal_max,
             );
-            errdefer repair_messages_inflight_prepare.deinit(allocator);
 
-            self.repair_messages_inflight_prepare = repair_messages_inflight_prepare;
+            errdefer self.repair_prepares_requested.deinit(allocator);
 
             // Ensure each replica can have a maximum of two inflight grid repair messages
             // (`request_blocks`) per remote replica, at any point of time.
@@ -1283,7 +1281,7 @@ pub fn ReplicaType(
                     stdx.PRNG.ratio(2, 5),
                 .repair_messages_budget_grid = self.repair_messages_budget_grid,
                 .repair_messages_budget_journal = self.repair_messages_budget_journal,
-                .repair_messages_inflight_prepare = self.repair_messages_inflight_prepare,
+                .repair_prepares_requested = self.repair_prepares_requested,
                 .nonce = options.nonce,
                 .clock = self.clock,
                 .journal = self.journal,
@@ -1445,7 +1443,7 @@ pub fn ReplicaType(
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
             self.grid.deinit(allocator);
-            self.repair_messages_inflight_prepare.deinit(allocator);
+            self.repair_prepares_requested.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
             switch (self.pipeline) {
@@ -2361,17 +2359,18 @@ pub fn ReplicaType(
                 const write_initiated = self.write_prepare(message, .repair);
 
                 if (write_initiated) {
+                    // Increment budget iff we had requested this prepare.
+                    if (self.repair_prepares_requested.remove(message.header.*) == .removed) {
+                        self.repair_messages_budget_journal.refill(1);
+                    }
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
                     if (self.status == .normal and self.backup()) {
                         self.commit_journal();
                     }
 
-                    // Increment budget and initiate repair so `repair_header`/`request_prepare`
-                    // network messages can be sent concurrently while writing this prepare.
-                    self.repair_messages_budget_journal.refill(1);
-                    _ = self.repair_messages_inflight_prepare.swapRemove(message.header.op);
-
+                    // Initiate repair so `repair_header`/`request_prepare` network messages can be
+                    // sent concurrently while writing this prepare.
                     self.repair();
                 }
             }
@@ -3645,7 +3644,7 @@ pub fn ReplicaType(
 
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
-            self.repair_messages_inflight_prepare.clearRetainingCapacity();
+            self.repair_prepares_requested.reset();
 
             self.repair();
         }
@@ -8001,9 +8000,9 @@ pub fn ReplicaType(
                 .prepare_checksum = checksum,
             };
 
-            const repair_inflight =
-                self.repair_messages_inflight_prepare.getOrPutAssumeCapacity(op);
-            if (repair_inflight.found_existing) return false;
+            if (self.repair_prepares_requested.add(header.*) == .already_present) {
+                return false;
+            }
 
             assert(self.repair_messages_budget_journal.spend(1));
 
@@ -10076,7 +10075,8 @@ pub fn ReplicaType(
             // committing again.
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
-            self.repair_messages_inflight_prepare.clearRetainingCapacity();
+            self.repair_prepares_requested.reset();
+
             if (self.repair_timeout.ticking) self.repair_timeout.reset();
 
             log.info("{}: sync: ops={}..{}", .{
@@ -11408,6 +11408,42 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
     }
     return headers;
 }
+
+const PreparesRequested = struct {
+    set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
+
+    pub fn init(gpa: Allocator, capacity: u32) !PreparesRequested {
+        var prepares_requested_set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
+        try prepares_requested_set.ensureTotalCapacity(gpa, capacity);
+        errdefer prepares_requested_set.deinit();
+
+        return .{ .set = prepares_requested_set };
+    }
+
+    pub fn deinit(prepares_requested: *PreparesRequested, gpa: Allocator) void {
+        prepares_requested.set.deinit(gpa);
+    }
+
+    pub fn add(
+        prepares_requested: *PreparesRequested,
+        header: Header.Prepare,
+    ) enum { added, already_present } {
+        const header_added = prepares_requested.set.getOrPutAssumeCapacity(header);
+        return if (!header_added.found_existing) .added else .already_present;
+    }
+
+    pub fn remove(
+        prepares_requested: *PreparesRequested,
+        header: Header.Prepare,
+    ) enum { removed, not_present } {
+        const header_removed = prepares_requested.set.swapRemove(header);
+        return if (header_removed) .removed else .not_present;
+    }
+
+    pub fn reset(prepares_requested: *PreparesRequested) void {
+        prepares_requested.set.clearRetainingCapacity();
+    }
+};
 
 /// The PipelineQueue belongs to a normal-status primary. It consists of two queues:
 /// - A prepare queue, containing all messages currently being prepared.
