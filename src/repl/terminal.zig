@@ -24,6 +24,8 @@ pub const Terminal = struct {
     stderr: ?std.fs.File.Writer,
 
     buffer_in: stdx.BoundedArrayType(u8, buffer_in_capacity),
+    empty_ctrl_c_count: u8 = 0,
+    line_empty: bool = true,
 
     pub fn init(
         self: *Terminal,
@@ -95,7 +97,22 @@ pub const Terminal = struct {
         // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return .ctrld,
-            std.ascii.control_code.etx => return .ctrlc,
+            std.ascii.control_code.etx => return {
+                if (!self.line_empty) {
+                    self.empty_ctrl_c_count = 0;
+                    return .ctrlc;
+                }
+
+                self.empty_ctrl_c_count += 1;
+                if (self.empty_ctrl_c_count >= 2) {
+                    try self.prompt_mode_unset();
+                    try self.print("\n", .{});
+                    std.process.exit(0);
+                }
+
+                try self.print("\n> ", .{});
+                return .ctrlc;
+            },
             std.ascii.control_code.ff => return .ctrll,
             std.ascii.control_code.soh => return .ctrla,
             std.ascii.control_code.enq => return .ctrle,
@@ -104,7 +121,11 @@ pub const Terminal = struct {
             std.ascii.control_code.dle => return .ctrlp,
             std.ascii.control_code.so => return .ctrln,
             std.ascii.control_code.vt => return .ctrlk,
-            std.ascii.control_code.cr, std.ascii.control_code.lf => return .newline,
+            std.ascii.control_code.cr, std.ascii.control_code.lf => {
+                self.line_empty = true;
+                self.empty_ctrl_c_count = 0;
+                return .newline;
+            },
             std.ascii.control_code.bs, std.ascii.control_code.del => return .backspace,
             std.ascii.control_code.ht => return .tab,
             std.ascii.control_code.esc => {
