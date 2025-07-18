@@ -2360,10 +2360,12 @@ pub fn ReplicaType(
                 log.debug("{}: on_repair: repairing journal", .{self.replica});
                 const write_initiated = self.write_prepare(message, .repair);
 
-                if (self.status == .normal and self.backup() and write_initiated) {
+                if (write_initiated) {
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
-                    self.commit_journal();
+                    if (self.status == .normal and self.backup()) {
+                        self.commit_journal();
+                    }
 
                     // Increment budget and initiate repair so `repair_header`/`request_prepare`
                     // network messages can be sent concurrently while writing this prepare.
@@ -7806,7 +7808,7 @@ pub fn ReplicaType(
 
             // Don't check the repair budget for a potential primary in view change, use the full
             // write bandwidth for repair.
-            if (self.status == .normal and self.repair_messages_budget_journal.available == 0) {
+            if (self.repair_messages_budget_journal.available == 0) {
                 log.debug("{}: repair_prepares: waiting for repair budget", .{self.replica});
                 return;
             }
@@ -7999,44 +8001,30 @@ pub fn ReplicaType(
                 .prepare_checksum = checksum,
             };
 
-            if (self.status == .view_change) {
-                // Only the primary is allowed to do repairs in a view change. Don't check the
-                // repair budget for the potential primary, use the full write bandwidth for repair.
-                assert(self.primary_index(self.view) == self.replica);
+            const repair_inflight =
+                self.repair_messages_inflight_prepare.getOrPutAssumeCapacity(op);
+            if (repair_inflight.found_existing) return false;
 
-                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
-                log.debug(
-                    "{}: repair_prepare: op={} checksum={} (uncommitted, {s}, view_change)",
-                    .{
-                        self.replica,
-                        op,
-                        checksum,
-                        reason,
-                    },
-                );
-                self.send_header_to_other_replicas(@bitCast(request_prepare));
-            } else {
-                const repair_inflight =
-                    self.repair_messages_inflight_prepare.getOrPutAssumeCapacity(op);
-                if (repair_inflight.found_existing) return false;
+            assert(self.repair_messages_budget_journal.spend(1));
 
-                assert(self.repair_messages_budget_journal.spend(1));
-
-                const nature = if (op > self.commit_max) "uncommitted" else "committed";
-                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
-                log.debug("{}: repair_prepare: op={} checksum={} ({s}, {s})", .{
+            const nature = if (op > self.commit_max) "uncommitted" else "committed";
+            const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
+            log.debug(
+                "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
+                .{
                     self.replica,
                     op,
                     checksum,
                     nature,
                     reason,
-                });
+                    @tagName(self.status),
+                },
+            );
 
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(request_prepare),
-                );
-            }
+            self.send_header_to_replica(
+                self.choose_any_other_replica(),
+                @bitCast(request_prepare),
+            );
 
             return true;
         }
