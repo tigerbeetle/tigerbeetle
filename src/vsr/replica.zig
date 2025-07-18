@@ -4637,8 +4637,10 @@ pub fn ReplicaType(
                 }
                 break :commit_min_min min;
             };
-            assert(commit_min_min <= self.commit_min);
-            const commit_lag = self.commit_min - commit_min_min;
+            // An old primary may have committed ahead of us (the new primary), but not participated
+            // in the DVC quorum.
+            assert(commit_min_min <= self.commit_min + constants.pipeline_prepare_queue_max);
+            const commit_lag = self.commit_min -| commit_min_min;
 
             const stall_ms = ms: {
                 if (!pipeline_waiting) break :ms 0;
