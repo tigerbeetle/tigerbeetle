@@ -269,12 +269,14 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             errdefer allocator.free(replica_tracers);
 
             for (replica_tracers, 0..) |*tracer, replica_index| {
+                errdefer for (replica_tracers[0..replica_index]) |*t| t.deinit(allocator);
                 const time = replica_times[replica_index].time();
                 tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
                     .cluster = options.cluster.cluster_id,
                     .replica_index = @intCast(replica_index),
                 } }, .{});
             }
+            errdefer for (replica_tracers) |*tracer| tracer.deinit(allocator);
 
             const replicas = try allocator.alloc(Replica, node_count);
             errdefer allocator.free(replicas);
