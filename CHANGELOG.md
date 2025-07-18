@@ -3,6 +3,69 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.51
+
+Released: 2025-07-18
+
+
+### Safety And Performance
+
+- [#3096](https://github.com/tigerbeetle/tigerbeetle/pull/3096)
+
+  Fix incorrect assert in the commit stall logic.
+
+  This assert could cause the primary to crash while it is injecting a commit stall, if an old
+  primary has committed ahead of it.
+
+- [#3008](https://github.com/tigerbeetle/tigerbeetle/pull/3008)
+
+  Improve compaction scheduling algorithm to be more performant and memory efficient.
+
+  Earlier, during each beat, we used to compact each active tree and level, leading to multiple
+  context switches. Now, we compact each tree and level to completion before moving on to the next.
+
+### Features
+
+- [#3086](https://github.com/tigerbeetle/tigerbeetle/pull/3086)
+
+  Add metrics that track the time taken to complete read and write IO.
+
+### Internals
+
+- [#3087](https://github.com/tigerbeetle/tigerbeetle/pull/3087)
+
+  Remove comptime type specialization on Time and replace it with a runtime interface.
+
+- [#3085](https://github.com/tigerbeetle/tigerbeetle/pull/3085)
+
+  Change all instances of data block -> value block, more aptly named for blocks containing values.
+
+- [#3084](https://github.com/tigerbeetle/tigerbeetle/pull/3084)
+
+  Update [architecture documentation](docs/internals/ARCHITECTURE.md#systems-thinking) to explain
+  how to correctly integrate TigerBeetle into a larger data processing system.
+
+- [#3083](https://github.com/tigerbeetle/tigerbeetle/pull/3083)
+
+  Fix example for voiding pending transfers in the dotnet, go, node, and python clients.
+
+- [#3082](https://github.com/tigerbeetle/tigerbeetle/pull/3082),
+  [#3091](https://github.com/tigerbeetle/tigerbeetle/pull/3091)
+
+  Fix broken link to the Viewstamped Replication paper and some typos in the documentation.
+
+- [#3078](https://github.com/tigerbeetle/tigerbeetle/pull/3078)
+
+  Fix VOPR false positive where we erroneously find two different versions of an uncommitted header.
+
+- [#2990](https://github.com/tigerbeetle/tigerbeetle/pull/2990)
+
+  Refine BoundedArrayType API, renaming functions to be shorter and consistent with Queue and Stack.
+
+### TigerTracks 🎧
+
+- [LOVE.](https://open.spotify.com/track/6PGoSes0D9eUDeeAafB2As?si=18f44aa580644f66)
+
 ## TigerBeetle 0.16.50
 
 Released: 2025-07-13
