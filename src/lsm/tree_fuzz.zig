@@ -168,7 +168,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.trace = try Storage.Tracer.init(
                 gpa,
                 env.time_sim.time(),
-                .{ .replica = .{ .cluster = 0, .replica_index = replica } },
+                .{ .replica = .{ .cluster = 0, .replica = replica } },
                 .{},
             );
             defer env.trace.deinit(gpa);

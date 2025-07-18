@@ -132,8 +132,10 @@ pub const ProcessID = union(enum) {
     unknown,
     replica: struct {
         cluster: u128,
-        replica_index: u8,
+        replica: u8,
     },
+
+    pub const replica_test: ProcessID = .{ .replica = .{ .cluster = 0, .replica = 0 } };
 
     pub fn format(
         self: ProcessID,
@@ -145,7 +147,7 @@ pub const ProcessID = union(enum) {
         _ = options;
         try switch (self) {
             .unknown => writer.writeByte('_'),
-            .replica => |replica| try writer.print("{d}", .{replica.replica_index}),
+            .replica => |replica| try writer.print("{d}", .{replica.replica}),
         };
     }
 };
@@ -222,7 +224,7 @@ pub fn deinit(tracer: *Tracer, allocator: std.mem.Allocator) void {
 pub fn set_replica(tracer: *Tracer, options: struct { cluster: u128, replica: u8 }) void {
     const process_id: ProcessID = .{ .replica = .{
         .cluster = options.cluster,
-        .replica_index = options.replica,
+        .replica = options.replica,
     } };
     tracer.process_id = process_id;
     tracer.statsd.process_id = process_id;
@@ -381,9 +383,8 @@ pub fn emit_metrics(tracer: *Tracer) void {
     tracer.start(.metrics_emit);
     defer tracer.stop(.metrics_emit);
 
-    tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| {
-        assert(err == error.Busy);
-        return;
+    tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| switch (err) {
+        error.Busy, error.UnknownProcess => return,
     };
 
     // For statsd, the right thing is to reset metrics between emitting. For something like
@@ -444,6 +445,8 @@ test "trace json" {
     });
     defer trace.deinit(std.testing.allocator);
 
+    trace.set_replica(.{ .cluster = 0, .replica = 0 });
+
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
     time_sim.ticks += 1;
     trace.start(.{ .compact_beat = .{ .tree = @enumFromInt(1), .level_b = 1 } });
@@ -454,10 +457,10 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":_,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":_,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":_,"tid":8,"ph":"E","ts":30000},
-        \\{"pid":_,"tid":0,"ph":"E","ts":60000},
+        \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":0,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":0,"tid":8,"ph":"E","ts":30000},
+        \\{"pid":0,"tid":0,"ph":"E","ts":60000},
         \\
     ).diff(trace_buffer.items);
 }
@@ -473,6 +476,8 @@ test "timing overflow" {
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);
+
+    trace.set_replica(.{ .cluster = 0, .replica = 0 });
 
     const event: EventTiming = .replica_aof_write;
     const value: Duration = .{ .ns = std.math.maxInt(u64) - 1 };

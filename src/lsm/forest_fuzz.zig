@@ -130,7 +130,7 @@ const Environment = struct {
         env.trace = try Storage.Tracer.init(
             gpa,
             env.time_sim.time(),
-            .{ .replica = .{ .cluster = 0, .replica_index = replica } },
+            .{ .replica = .{ .cluster = 0, .replica = replica } },
             .{},
         );
 
