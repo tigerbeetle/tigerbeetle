@@ -13,6 +13,7 @@ const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
 const tb = @import("../tigerbeetle.zig");
 
+const fixtures = @import("../testing/fixtures.zig");
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Account = @import("../tigerbeetle.zig").Account;
 const Storage = @import("../testing/storage.zig").Storage;
@@ -99,7 +100,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_format,
         superblock_open,
         free_set_open,
         forest_init,
@@ -126,28 +126,21 @@ const Environment = struct {
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(
-            gpa,
-            env.time_sim.time(),
-            .{ .replica = .{ .cluster = 0, .replica = replica } },
-            .{},
-        );
+        env.time_sim = fixtures.time(.{});
+        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{ .replica = replica });
+        errdefer env.trace.deinit(gpa);
 
-        env.superblock = try SuperBlock.init(gpa, .{
-            .storage = env.storage,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
+        env.superblock = try fixtures.superblock(gpa, env.storage, .{});
+        errdefer env.supreblock.deinit(gpa);
 
-        env.grid = try Grid.init(gpa, .{
-            .superblock = &env.superblock,
-            .trace = &env.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
+        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock);
+
+        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = Forest
                 .compaction_blocks_released_per_pipeline_max() +
                 Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
         });
+        errdefer env.grid.deinit(gpa);
 
         env.scan_lookup_buffer = try gpa.alloc(
             tb.Account,
@@ -160,10 +153,10 @@ const Environment = struct {
     }
 
     fn deinit(env: *Environment, gpa: std.mem.Allocator) void {
-        env.superblock.deinit(gpa);
-        env.grid.deinit(gpa);
-        env.trace.deinit(gpa);
         gpa.free(env.scan_lookup_buffer);
+        env.grid.deinit(gpa);
+        env.superblock.deinit(gpa);
+        env.trace.deinit(gpa);
     }
 
     pub fn run(gpa: std.mem.Allocator, storage: *Storage, fuzz_ops: []const FuzzOp) !void {
@@ -172,16 +165,7 @@ const Environment = struct {
         try env.init(gpa, storage);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .release = vsr.Release.minimum,
-            .replica = replica,
-            .replica_count = replica_count,
-            .view = null,
-        });
-        try env.tick_until_state_change(.superblock_format, .superblock_open);
-
+        env.change_state(.init, .superblock_open);
         try env.open(gpa);
         defer env.close(gpa);
 
@@ -258,7 +242,7 @@ const Environment = struct {
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_open, .free_set_open);
+        env.change_state(.init, .free_set_open);
     }
 
     fn grid_open_callback(grid: *Grid) void {
@@ -862,22 +846,6 @@ const Environment = struct {
     }
 };
 
-pub fn run_fuzz_ops(
-    gpa: std.mem.Allocator,
-    storage_options: Storage.Options,
-    fuzz_ops: []const FuzzOp,
-) !void {
-    // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        storage_options,
-    );
-    defer storage.deinit(gpa);
-
-    try Environment.run(gpa, &storage, fuzz_ops);
-}
-
 fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     return fuzz.random_id(prng, Int, .{
         .average_hot = 8,
@@ -1120,8 +1088,9 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    try run_fuzz_ops(gpa, Storage.Options{
-        .seed = prng.int(u64),
+    // Init mocked storage.
+    var storage = try fixtures.storage(gpa, .{
+        .size = 1 * GiB,
         .read_latency_min = 0,
         .read_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
         .write_latency_min = 0,
@@ -1129,7 +1098,13 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
         .crash_fault_probability = Ratio.zero(),
-    }, fuzz_ops);
+        .format = .{},
+    });
+    defer storage.deinit(gpa);
+
+    try Environment.run(gpa, &storage, fuzz_ops);
 
     log.info("Passed!", .{});
 }
+
+const GiB = 1 << 30;

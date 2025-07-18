@@ -430,17 +430,19 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
     }
 }
 
+const fixtures = @import("./testing/fixtures.zig");
+
 test "trace json" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
     const Snap = @import("testing/snaptest.zig").Snap;
     const snap = Snap.snap;
 
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var time_sim = TimeSim.init_simple();
+    var time_sim = fixtures.time(.{});
+    const time = time_sim.time();
 
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
+    var trace = try Tracer.init(std.testing.allocator, time, .unknown, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);
@@ -466,13 +468,13 @@ test "trace json" {
 }
 
 test "timing overflow" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
-
     var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
     defer trace_buffer.deinit();
 
-    var time_sim = TimeSim.init_simple();
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
+    var time_sim = fixtures.time(.{});
+    const time = time_sim.time();
+
+    var trace = try Tracer.init(std.testing.allocator, time, .unknown, .{
         .writer = trace_buffer.writer().any(),
     });
     defer trace.deinit(std.testing.allocator);

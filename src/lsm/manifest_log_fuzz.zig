@@ -26,6 +26,7 @@ const schema = @import("./schema.zig");
 const compaction_tables_input_max = @import("./compaction.zig").compaction_tables_input_max;
 const TableInfo = schema.ManifestNode.TableInfo;
 const ratio = stdx.PRNG.ratio;
+const fixtures = @import("../testing/fixtures.zig");
 
 const tree_count = 20;
 const manifest_log_compaction_pace = ManifestLogPace.init(.{
@@ -37,6 +38,7 @@ const manifest_log_compaction_pace = ManifestLogPace.init(.{
     .tables_max = schema.ManifestNode.entry_count_max * 100,
     .compact_extra_blocks = constants.lsm_manifest_compact_extra_blocks,
 });
+const MiB = 1024 * 1024;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
@@ -58,16 +60,8 @@ fn run_fuzz(
     prng: *stdx.PRNG,
     events: []const ManifestEvent,
 ) !void {
-    const storage_options: Storage.Options = .{
-        .seed = prng.int(u64),
-        .read_latency_min = 1,
-        .read_latency_mean = prng.range_inclusive(u64, 1, 40),
-        .write_latency_min = 1,
-        .write_latency_mean = prng.range_inclusive(u64, 1, 40),
-    };
-
     var env: Environment = undefined;
-    try env.init(gpa, storage_options);
+    try env.init(gpa, prng);
     defer env.deinit();
 
     {
@@ -255,19 +249,14 @@ fn generate_events(
 const Environment = struct {
     gpa: std.mem.Allocator,
     storage: Storage,
-    storage_verify: Storage,
     time_sim: TimeSim,
     trace: Storage.Tracer,
-    trace_verify: Storage.Tracer,
     superblock: SuperBlock,
-    superblock_verify: SuperBlock,
     superblock_context: SuperBlock.Context,
 
     grid: Grid,
-    grid_verify: Grid,
 
     manifest_log: ManifestLog,
-    manifest_log_verify: ManifestLog,
     manifest_log_model: ManifestLogModel,
     manifest_log_opening: ?ManifestLogModel.TableMap,
     pending: u32,
@@ -275,7 +264,7 @@ const Environment = struct {
     fn init(
         env: *Environment, // In-place construction for stable addresses.
         gpa: std.mem.Allocator,
-        storage_options: Storage.Options,
+        prng: *stdx.PRNG,
     ) !void {
         comptime var fields_initialized = 0;
 
@@ -283,25 +272,22 @@ const Environment = struct {
         env.gpa = gpa;
 
         fields_initialized += 1;
-        env.storage =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
+        env.storage = try fixtures.storage(gpa, .{
+            .seed = prng.int(u64),
+            .read_latency_min = 1,
+            .read_latency_mean = prng.range_inclusive(u64, 1, 40),
+            .write_latency_min = 1,
+            .write_latency_mean = prng.range_inclusive(u64, 1, 40),
+            .format = .{},
+        });
         errdefer env.storage.deinit(gpa);
 
         fields_initialized += 1;
-        env.storage_verify =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
-        errdefer env.storage_verify.deinit(gpa);
+        env.time_sim = fixtures.time();
 
         fields_initialized += 1;
-        env.time_sim = TimeSim.init_simple();
-
-        fields_initialized += 1;
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.trace = try fixtures.tracer(gpa, env.time_sim.time());
         errdefer env.trace.deinit(gpa);
-
-        fields_initialized += 1;
-        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
-        errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
         env.superblock = try SuperBlock.init(gpa, .{
@@ -311,21 +297,12 @@ const Environment = struct {
         errdefer env.superblock.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock_verify = try SuperBlock.init(gpa, .{
-            .storage = &env.storage_verify,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
-        errdefer env.superblock_verify.deinit(gpa);
-
-        fields_initialized += 1;
         env.superblock_context = undefined;
 
         fields_initialized += 1;
-        env.grid = try Grid.init(gpa, .{
+        env.grid = try fixtures.grid(gpa, .{
             .superblock = &env.superblock,
             .trace = &env.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
             // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
             // FreeSet.blocks_released_prior_checkpoint_durability.
             .blocks_released_prior_checkpoint_durability_max = Grid
@@ -334,26 +311,8 @@ const Environment = struct {
         errdefer env.grid.deinit(gpa);
 
         fields_initialized += 1;
-        env.grid_verify = try Grid.init(gpa, .{
-            .superblock = &env.superblock_verify,
-            .trace = &env.trace_verify,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
-            .blocks_released_prior_checkpoint_durability_max = 0,
-        });
-        errdefer env.grid_verify.deinit(gpa);
-
-        fields_initialized += 1;
         try env.manifest_log.init(gpa, &env.grid, &manifest_log_compaction_pace);
         errdefer env.manifest_log.deinit(gpa);
-
-        fields_initialized += 1;
-        try env.manifest_log_verify.init(
-            gpa,
-            &env.grid_verify,
-            &manifest_log_compaction_pace,
-        );
-        errdefer env.manifest_log_verify.deinit(gpa);
 
         fields_initialized += 1;
         env.manifest_log_model = try ManifestLogModel.init(gpa);
@@ -370,15 +329,10 @@ const Environment = struct {
     fn deinit(env: *Environment) void {
         assert(env.manifest_log_opening == null);
         env.manifest_log_model.deinit();
-        env.manifest_log_verify.deinit(env.gpa);
         env.manifest_log.deinit(env.gpa);
-        env.grid_verify.deinit(env.gpa);
         env.grid.deinit(env.gpa);
-        env.superblock_verify.deinit(env.gpa);
         env.superblock.deinit(env.gpa);
-        env.trace_verify.deinit(env.gpa);
         env.trace.deinit(env.gpa);
-        env.storage_verify.deinit(env.gpa);
         env.storage.deinit(env.gpa);
         env.* = undefined;
     }

@@ -5046,6 +5046,7 @@ fn ChangeEventsScanLookupType(
 const testing = std.testing;
 const expect = testing.expect;
 const expectEqual = testing.expectEqual;
+const fixtures = @import("./testing/fixtures.zig");
 
 fn sum_overflows_test(comptime Int: type) !void {
     try expectEqual(false, sum_overflows(Int, math.maxInt(Int), 0));
@@ -5101,14 +5102,13 @@ pub const TestContext = struct {
             },
         );
         errdefer ctx.storage.deinit(allocator);
-        ctx.time_sim = TimeSim.init_simple();
+        ctx.time_sim = fixtures.time(.{});
 
-        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), .unknown, .{});
+        ctx.trace = try fixtures.tracer(allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
-        ctx.superblock = try SuperBlock.init(allocator, .{
-            .storage = &ctx.storage,
-            .storage_size_limit = data_file_size_min,
+        ctx.superblock = try fixtures.superblock(allocator, &ctx.storage, .{
+            .open = true,
         });
         errdefer ctx.superblock.deinit(allocator);
 
@@ -5116,13 +5116,7 @@ pub const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
 
-        ctx.grid = try Grid.init(allocator, .{
-            .superblock = &ctx.superblock,
-            .trace = &ctx.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
-            .blocks_released_prior_checkpoint_durability_max = 0,
-        });
+        ctx.grid = try fixtures.grid(allocator, &ctx.trace, &ctx.superblock);
         errdefer ctx.grid.deinit(allocator);
 
         try ctx.state_machine.init(allocator, &ctx.grid, .{
