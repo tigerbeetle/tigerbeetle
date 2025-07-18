@@ -7805,8 +7805,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            // Don't check the repair budget for a potential primary in view change, use the full
-            // write bandwidth for repair.
             if (self.repair_messages_budget_journal.available == 0) {
                 log.debug("{}: repair_prepares: waiting for repair budget", .{self.replica});
                 return;
@@ -7937,6 +7935,8 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(self.journal.dirty.bit(slot));
+            assert(self.journal.writes.available() > 0);
+            assert(self.repair_messages_budget_journal.available > 0);
 
             // We may be appending to or repairing the journal concurrently.
             // We do not want to re-request any of these prepares unnecessarily.
@@ -8020,10 +8020,16 @@ pub fn ReplicaType(
                 },
             );
 
-            self.send_header_to_replica(
-                self.choose_any_other_replica(),
-                @bitCast(request_prepare),
-            );
+            if (self.status == .view_change) {
+                // Only the primary is allowed to do repairs in a view change.
+                assert(self.primary_index(self.view) == self.replica);
+                self.send_header_to_other_replicas(@bitCast(request_prepare));
+            } else {
+                self.send_header_to_replica(
+                    self.choose_any_other_replica(),
+                    @bitCast(request_prepare),
+                );
+            }
 
             return true;
         }
