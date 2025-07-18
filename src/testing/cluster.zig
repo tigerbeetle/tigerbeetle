@@ -273,7 +273,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 const time = replica_times[replica_index].time();
                 tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
                     .cluster = options.cluster.cluster_id,
-                    .replica_index = @intCast(replica_index),
+                    .replica = @intCast(replica_index),
                 } }, .{});
             }
             errdefer for (replica_tracers) |*tracer| tracer.deinit(allocator);

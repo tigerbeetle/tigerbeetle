@@ -1,10 +1,10 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
-
 const assert = std.debug.assert;
 
-const ProcessID = @import("../trace.zig").ProcessID;
+const constants = @import("../constants.zig");
 
+const ProcessID = @import("../trace.zig").ProcessID;
 const IO = @import("../io.zig").IO;
 
 const EventMetric = @import("event.zig").EventMetric;
@@ -66,7 +66,7 @@ const statsd_line_size_max = line_size_max: {
         format_metric(
             buffer_writer,
             .{ .metric = .{ .aggregate = event } },
-            .unknown,
+            .{ .cluster = std.math.maxInt(u128), .replica = constants.members_max - 1 },
         ) catch unreachable;
         line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
     }
@@ -76,7 +76,7 @@ const statsd_line_size_max = line_size_max: {
             format_metric(
                 buffer_writer,
                 .{ .timing = .{ .aggregate = event, .stat = stat } },
-                .unknown,
+                .{ .cluster = std.math.maxInt(u128), .replica = constants.members_max - 1 },
             ) catch unreachable;
             line_size_max = @max(line_size_max, buffer_stream.getPos() catch unreachable);
         }
@@ -181,7 +181,15 @@ pub const StatsD = struct {
         self: *StatsD,
         events_metric: []const ?EventMetricAggregate,
         events_timing: []const ?EventTimingAggregate,
-    ) error{Busy}!void {
+    ) error{ Busy, UnknownProcess }!void {
+        const cluster, const replica = switch (self.process_id) {
+            .unknown => {
+                log.err("{}: process id unknown; skipping emit", .{self.process_id});
+                return error.UnknownProcess;
+            },
+            .replica => |replica| .{ replica.cluster, replica.replica },
+        };
+
         // This really should not happen; it means we're emitting so many packets, on a short
         // enough emit timeout, that the kernel hasn't been able to process them all (UDP doesn't
         // block or provide back-pressure like a TCP socket).
@@ -228,7 +236,10 @@ pub const StatsD = struct {
 
                 for (stats) |stat| {
                     const send_position_before = send_stream.getPos() catch unreachable;
-                    format_metric(send_writer, stat, self.process_id) catch |err| {
+                    format_metric(send_writer, stat, .{
+                        .cluster = cluster,
+                        .replica = replica,
+                    }) catch |err| {
                         // This shouldn't ever happen, but don't allow metrics to kill the system.
                         assert(err == error.NoSpaceLeft);
                         log.err("{}: insufficient buffer space", .{self.process_id});
@@ -318,7 +329,7 @@ const Stat = union(enum) {
 fn format_metric(
     writer: anytype,
     stat: Stat,
-    process_id: ProcessID,
+    options: struct { cluster: u128, replica: u8 },
 ) error{NoSpaceLeft}!void {
     const stat_name = switch (stat) {
         inline else => |stat_data| @tagName(stat_data.aggregate.event),
@@ -338,19 +349,14 @@ fn format_metric(
         },
     };
 
-    const cluster: u128, const replica: u8 = switch (process_id) {
-        .unknown => .{ 0, 0 },
-        .replica => |replica| .{ replica.cluster, replica.replica_index },
-    };
-
     try writer.print("tb.{[name]s}{[name_suffix]s}:{[value]d}|{[statsd_type]s}" ++
         "|#cluster:{[cluster]x:0>32},replica:{[replica]d}", .{
         .name = stat_name,
         .name_suffix = stat_suffix,
         .statsd_type = stat_type,
         .value = stat_value,
-        .cluster = cluster,
-        .replica = replica,
+        .cluster = options.cluster,
+        .replica = options.replica,
     });
 
     switch (stat) {
