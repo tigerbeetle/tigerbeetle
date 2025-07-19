@@ -141,21 +141,10 @@ pub fn ContextType(comptime Word: type) type {
                 encoded_size += encoder.encode_chunk(@alignCast(chunk));
             }
 
-            var decoder = Codec.decode_chunks(context.decoded_actual[0..], encoded_size);
-            var decoded_actual_size: usize = 0;
-            var decoder_input_offset: usize = 0;
-            while (decoder_input_offset < encoded_size) {
-                const chunk_size = @min(
-                    encoded_size - decoder_input_offset,
-                    options.decode_chunk_words_count * @sizeOf(Word),
-                );
-
-                const chunk = context.encoded_actual[decoder_input_offset..][0..chunk_size];
-
-                decoded_actual_size += decoder.decode_chunk(@alignCast(chunk));
-                decoder_input_offset += chunk_size;
-            }
-            assert(decoder.done());
+            const decoded_actual_size = Codec.decode_chunks(
+                context.decoded_actual[0..],
+                &.{context.encoded_actual[0..encoded_size]},
+            ) catch unreachable;
 
             try std.testing.expectEqual(decoded_expect.len, decoded_actual_size);
             try std.testing.expectEqualSlices(
