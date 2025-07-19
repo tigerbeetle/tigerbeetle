@@ -918,6 +918,10 @@ pub fn array_print(
 pub const Instant = struct {
     ns: u64,
 
+    pub fn add(now: Instant, duration: Duration) Instant {
+        return .{ .ns = now.ns + duration.ns };
+    }
+
     pub fn duration_since(now: Instant, earlier: Instant) Duration {
         assert(now.ns >= earlier.ns);
         const elapsed_ns = now.ns - earlier.ns;
@@ -951,6 +955,15 @@ pub const Duration = struct {
             return std.sort.asc(u64)(ctx, lhs.ns, rhs.ns);
         }
     };
+
+    pub fn format(
+        duration: Duration,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
+    }
 };
 
 test "Instant/Duration" {

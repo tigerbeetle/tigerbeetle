@@ -127,7 +127,12 @@ const Environment = struct {
         env.storage = storage;
 
         env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
+        env.trace = try Storage.Tracer.init(
+            gpa,
+            env.time_sim.time(),
+            .{ .replica = .{ .cluster = 0, .replica = replica } },
+            .{},
+        );
 
         env.superblock = try SuperBlock.init(gpa, .{
             .storage = env.storage,
@@ -1010,7 +1015,11 @@ pub fn generate_fuzz_ops(
         const modifier = switch (modifier_tag) {
             .normal => FuzzOpModifier{ .normal = {} },
             .crash_after_ticks => FuzzOpModifier{
-                .crash_after_ticks = fuzz.random_int_exponential(prng, usize, io_latency_mean),
+                .crash_after_ticks = fuzz.random_int_exponential(
+                    prng,
+                    usize,
+                    io_latency_mean_ticks,
+                ),
             },
         };
         switch (modifier) {
@@ -1102,7 +1111,8 @@ fn generate_put_account(
     } };
 }
 
-const io_latency_mean = 20;
+const io_latency_mean_ticks = 20;
+const io_latency_mean_ms: u64 = io_latency_mean_ticks * constants.tick_ms;
 
 pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
@@ -1117,10 +1127,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
 
     try run_fuzz_ops(gpa, Storage.Options{
         .seed = prng.int(u64),
-        .read_latency_min = 0,
-        .read_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
-        .write_latency_min = 0,
-        .write_latency_mean = prng.range_inclusive(u64, 0, io_latency_mean),
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
         // We can't actually recover from a crash in this fuzzer since we would need
         // to transfer state from a different replica to continue.
         .crash_fault_probability = Ratio.zero(),

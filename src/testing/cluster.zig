@@ -59,6 +59,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub const NetworkOptions = @import("cluster/network.zig").NetworkOptions;
         pub const Storage = @import("storage.zig").Storage;
         pub const StorageFaultAtlas = @import("storage.zig").ClusterFaultAtlas;
+        pub const Tracer = Storage.Tracer;
         pub const ReplicaFormat = vsr.ReplicaFormatType(Storage);
         pub const SuperBlock = vsr.SuperBlockType(Storage);
         pub const MessageBus = @import("cluster/message_bus.zig").MessageBus;
@@ -128,6 +129,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replicas: []Replica,
         replica_pools: []MessagePool,
         replica_times: []TimeSim,
+        replica_tracers: []Tracer,
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
         replica_reformats: []?ReplicaReformat,
@@ -262,6 +264,19 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .offset_coefficient_A = 0,
                 .offset_coefficient_B = 0,
             });
+
+            const replica_tracers = try allocator.alloc(Tracer, node_count);
+            errdefer allocator.free(replica_tracers);
+
+            for (replica_tracers, 0..) |*tracer, replica_index| {
+                errdefer for (replica_tracers[0..replica_index]) |*t| t.deinit(allocator);
+                const time = replica_times[replica_index].time();
+                tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
+                    .cluster = options.cluster.cluster_id,
+                    .replica = @intCast(replica_index),
+                } }, .{});
+            }
+            errdefer for (replica_tracers) |*tracer| tracer.deinit(allocator);
 
             const replicas = try allocator.alloc(Replica, node_count);
             errdefer allocator.free(replicas);
@@ -416,6 +431,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .replicas = replicas,
                 .replica_pools = replica_pools,
                 .replica_times = replica_times,
+                .replica_tracers = replica_tracers,
                 .replica_health = replica_health,
                 .replica_upgrades = replica_upgrades,
                 .replica_reformats = replica_reformats,
@@ -480,6 +496,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .reformatting => cluster.replica_reformats[i].?.deinit(cluster.allocator),
                 }
             }
+            for (cluster.replica_tracers) |*tracer| tracer.deinit(cluster.allocator);
             for (cluster.replica_pools) |*pool| pool.deinit(cluster.allocator);
             for (cluster.storages) |*storage| storage.deinit(cluster.allocator);
 
@@ -505,6 +522,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.replica_upgrades);
             cluster.allocator.free(cluster.replica_health);
             cluster.allocator.free(cluster.replica_times);
+            cluster.allocator.free(cluster.replica_tracers);
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
@@ -696,6 +714,18 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 }
             } else unreachable;
 
+            // Re-initialize the trace to get a clean state.
+            cluster.replica_tracers[replica_index].deinit(cluster.allocator);
+            cluster.replica_tracers[replica_index] = try Tracer.init(
+                cluster.allocator,
+                cluster.replica_times[replica_index].time(),
+                .{ .replica = .{
+                    .cluster = cluster.replicas[replica_index].cluster,
+                    .replica = @intCast(replica_index),
+                } },
+                .{},
+            );
+
             cluster.releases_bundled[replica_index] = options.releases_bundled.*;
             cluster.aofs[replica_index].reset();
             cluster.aof_ios[replica_index].reset();
@@ -720,6 +750,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .release_execute = replica_release_execute_soon,
                     .release_execute_context = null,
                     .test_context = cluster,
+                    .tracer = &cluster.replica_tracers[replica_index],
                     .replicate_options = cluster.options.replicate_options,
                     .commit_stall_probability = null,
                 },

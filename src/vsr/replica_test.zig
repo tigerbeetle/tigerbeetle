@@ -9,6 +9,7 @@ const allocator = std.testing.allocator;
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
@@ -2003,19 +2004,19 @@ const TestContext = struct {
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
                 .seed = prng.int(u64),
-                .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
-                .one_way_delay_min = prng.int_inclusive(u16, 2),
+                .one_way_delay_mean = fuzz.range_inclusive_ms(&prng, 30, 120),
+                .one_way_delay_min = fuzz.range_inclusive_ms(&prng, 0, 20),
 
                 .path_maximum_capacity = 10,
-                .path_clog_duration_mean = 0,
+                .path_clog_duration_mean = .{ .ns = 0 },
                 .path_clog_probability = Ratio.zero(),
                 .recorded_count_max = 16,
             },
             .storage = .{
-                .read_latency_min = 1,
-                .read_latency_mean = 5,
-                .write_latency_min = 1,
-                .write_latency_mean = 5,
+                .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+                .read_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
+                .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+                .write_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
             },
             .storage_fault_atlas = .{
                 .faulty_superblock = false,

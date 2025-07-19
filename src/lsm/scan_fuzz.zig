@@ -516,7 +516,7 @@ const Environment = struct {
         prng: *stdx.PRNG,
     ) !void {
         env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
@@ -944,10 +944,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         constants.storage_size_limit_default,
         Storage.Options{
             .seed = prng.int(u64),
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = .{ .ns = 0 },
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = .{ .ns = 0 },
             .crash_fault_probability = Ratio.zero(),
         },
     );

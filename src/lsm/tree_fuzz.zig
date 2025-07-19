@@ -165,7 +165,12 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.storage = storage;
 
             env.time_sim = TimeSim.init_simple();
-            env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
+            env.trace = try Storage.Tracer.init(
+                gpa,
+                env.time_sim.time(),
+                .{ .replica = .{ .cluster = 0, .replica = replica } },
+                .{},
+            );
             defer env.trace.deinit(gpa);
 
             env.superblock = try SuperBlock.init(gpa, .{
@@ -935,10 +940,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .replica_index = 0,
-        .read_latency_min = 0,
-        .read_latency_mean = prng.range_inclusive(u64, 0, 20),
-        .write_latency_min = 0,
-        .write_latency_mean = prng.range_inclusive(u64, 0, 20),
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
         .read_fault_probability = Ratio.zero(),
         .write_fault_probability = Ratio.zero(),
         .fault_atlas = &storage_fault_atlas,

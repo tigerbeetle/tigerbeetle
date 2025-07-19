@@ -60,10 +60,10 @@ fn run_fuzz(
 ) !void {
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
-        .read_latency_min = 1,
-        .read_latency_mean = prng.range_inclusive(u64, 1, 40),
-        .write_latency_min = 1,
-        .write_latency_mean = prng.range_inclusive(u64, 1, 40),
+        .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .read_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
+        .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .write_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
     };
 
     var env: Environment = undefined;
@@ -296,11 +296,11 @@ const Environment = struct {
         env.time_sim = TimeSim.init_simple();
 
         fields_initialized += 1;
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -562,7 +562,12 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.gpa);
-            test_trace.* = try Storage.Tracer.init(env.gpa, env.time_sim.time(), 0, 0, .{});
+            test_trace.* = try Storage.Tracer.init(
+                env.gpa,
+                env.time_sim.time(),
+                .replica_test,
+                .{},
+            );
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().

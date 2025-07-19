@@ -450,9 +450,8 @@ const start_defaults_development = StartDefaults{
 const lsm_compaction_block_count_min = StateMachine.Forest.Options.compaction_block_count_min;
 const lsm_compaction_block_memory_min = lsm_compaction_block_count_min * constants.block_size;
 
-/// While CLIArgs store raw arguments as passed on the command line, Command ensures that
-/// arguments are properly validated and desugared (e.g, sizes converted to counts where
-///  appropriate).
+/// While CLIArgs store raw arguments as passed on the command line, Command ensures that arguments
+/// are properly validated and desugared (e.g, sizes converted to counts where appropriate).
 pub const Command = union(enum) {
     const Addresses = stdx.BoundedArrayType(std.net.Address, constants.members_max);
     const Path = stdx.BoundedArrayType(u8, std.fs.max_path_bytes);

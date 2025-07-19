@@ -596,7 +596,7 @@ pub fn ReplicaType(
         /// Simulator hooks.
         event_callback: ?*const fn (replica: *const Replica, event: ReplicaEvent) void = null,
 
-        trace: Tracer,
+        trace: *Tracer,
         trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
@@ -614,7 +614,7 @@ pub fn ReplicaType(
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
-            tracer_options: Tracer.Options = .{},
+            tracer: *Tracer,
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
@@ -678,14 +678,11 @@ pub fn ReplicaType(
                 return error.NoAddress;
             }
 
-            self.trace = try Tracer.init(
-                allocator,
-                options.time,
-                self.superblock.working.cluster,
-                replica,
-                options.tracer_options,
-            );
-            errdefer if (!initialized) self.trace.deinit(allocator);
+            self.trace = options.tracer;
+            self.trace.set_replica(.{
+                .cluster = self.superblock.working.cluster,
+                .replica = replica,
+            });
 
             // Initialize the replica:
             try self.init(allocator, .{
@@ -1208,7 +1205,7 @@ pub fn ReplicaType(
 
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
-                .trace = &self.trace,
+                .trace = self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
@@ -1415,7 +1412,7 @@ pub fn ReplicaType(
                 .aof = options.aof,
                 .replicate_options = options.replicate_options,
             };
-            options.storage.set_tracer(&self.trace);
+            options.storage.set_tracer(self.trace);
             self.routing.view_change(self.view);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
@@ -1434,7 +1431,6 @@ pub fn ReplicaType(
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
 
-            self.trace.deinit(allocator);
             self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
@@ -4637,8 +4633,10 @@ pub fn ReplicaType(
                 }
                 break :commit_min_min min;
             };
-            assert(commit_min_min <= self.commit_min);
-            const commit_lag = self.commit_min - commit_min_min;
+            // An old primary may have committed ahead of us (the new primary), but not participated
+            // in the DVC quorum.
+            assert(commit_min_min <= self.commit_min + constants.pipeline_prepare_queue_max);
+            const commit_lag = self.commit_min -| commit_min_min;
 
             const stall_ms = ms: {
                 if (!pipeline_waiting) break :ms 0;
