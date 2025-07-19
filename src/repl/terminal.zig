@@ -95,7 +95,14 @@ pub const Terminal = struct {
         // https://en.wikipedia.org/wiki/C0_and_C1_control_codes
         switch (try stdin.readByte()) {
             std.ascii.control_code.eot => return .ctrld,
-            std.ascii.control_code.etx => return .ctrlc,
+            std.ascii.control_code.etx => {
+                const current_position = try self.get_cursor_position();
+                // column 1 is initial position
+                if (current_position.column > 1) return .ctrlc;
+                try self.prompt_mode_unset();
+                try self.print("\n", .{});
+                std.process.exit(0);
+            },
             std.ascii.control_code.ff => return .ctrll,
             std.ascii.control_code.soh => return .ctrla,
             std.ascii.control_code.enq => return .ctrle,
