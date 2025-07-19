@@ -150,6 +150,13 @@ pub const ProcessID = union(enum) {
             .replica => |replica| try writer.print("{d}", .{replica.replica}),
         };
     }
+
+    pub fn json(self: ProcessID) u8 {
+        return switch (self) {
+            .unknown => 0,
+            .replica => |replica| replica.replica,
+        };
+    }
 };
 
 pub const Options = struct {
@@ -284,7 +291,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         "\"name\":\"{[category]s} {[event_tracing]} {[event_timing]}\"," ++
         "\"args\":{[args]s}" ++
         "}},\n", .{
-        .process_id = tracer.process_id,
+        .process_id = tracer.process_id.json(),
         .thread_id = event_tracing.stack(),
         .category = @tagName(event),
         .event = 'B',
@@ -367,7 +374,7 @@ fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
             "\"ts\":{[timestamp]}" ++
             "}},\n",
         .{
-            .process_id = tracer.process_id,
+            .process_id = tracer.process_id.json(),
             .thread_id = stack,
             .event = 'E',
             .timestamp = time_elapsed.us(),
