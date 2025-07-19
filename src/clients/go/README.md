@@ -485,6 +485,64 @@ transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
 // Error handling omitted.
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```go
+transfers := []Transfer{{
+	ID:              ToUint128(10),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	Amount:          ToUint128(99),
+	Ledger:          1,
+	Code:            1,
+	Flags: TransferFlags{
+		Pending: true,
+	}.ToUint16(),
+}, {
+	ID:              ToUint128(11),
+	DebitAccountID:  ToUint128(101),
+	CreditAccountID: ToUint128(102),
+	PendingID:       ToUint128(10),
+	Amount:          AmountMax, // The actual amount depends on the pending transfer.
+	Ledger:          1,
+	Code:            1,
+	Flags: TransferFlags{
+		PostPendingTransfer: true,
+	}.ToUint16(),
+}}
+
+transfersOutcome, err := client.CreateAndReturnTransfers(transfers)
+if err != nil {
+	log.Printf("Error creating transfers: %s", err)
+	return
+}
+
+for _, outcome := range transfersOutcome {
+	log.Printf("Transfer result: %s", outcome.Result)
+
+	if outcome.TransferWithOutcomeEventResultFlags().TransferSet {
+		log.Printf("Transfer timestamp: %d amount: %v.", outcome.Timestamp, outcome.Amount.BigInt())
+	}
+
+	if outcome.TransferWithOutcomeEventResultFlags().AccountBalancesSet {
+		log.Printf("Debit account debits pending: %v", outcome.DebitAccountDebitsPending.BigInt())
+		log.Printf("Debit account debits posted: %v", outcome.DebitAccountDebitsPosted.BigInt())
+		log.Printf("Debit account credits pending: %v", outcome.DebitAccountCreditsPending.BigInt())
+		log.Printf("Debit account credits posted: %v", outcome.DebitAccountCreditsPosted.BigInt())
+
+		log.Printf("Credit account debits pending: %v", outcome.CreditAccountDebitsPending.BigInt())
+		log.Printf("Credit account debits posted: %v", outcome.CreditAccountDebitsPosted.BigInt())
+		log.Printf("Credit account credits pending: %v", outcome.CreditAccountCreditsPending.BigInt())
+		log.Printf("Credit account credits posted: %v", outcome.CreditAccountCreditsPosted.BigInt())
+	}
+}
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We

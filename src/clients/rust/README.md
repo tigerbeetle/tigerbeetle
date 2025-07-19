@@ -270,6 +270,17 @@ appropriate accounts and **not** apply them to the `debits_posted` and
 // // todo
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```rust
+// // todo
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We

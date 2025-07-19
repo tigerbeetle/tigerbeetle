@@ -846,6 +846,115 @@ public struct CreateTransfersResult
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
+public struct CreateAndReturnTransfersResult
+{
+    public const int SIZE = 160;
+
+
+    private CreateTransferResult result;
+
+    private CreateAndReturnTransfersResultFlags flags;
+
+    private ulong timestamp;
+
+    private UInt128 amount;
+
+    private UInt128 debitAccountDebitsPending;
+
+    private UInt128 debitAccountDebitsPosted;
+
+    private UInt128 debitAccountCreditsPending;
+
+    private UInt128 debitAccountCreditsPosted;
+
+    private UInt128 creditAccountDebitsPending;
+
+    private UInt128 creditAccountDebitsPosted;
+
+    private UInt128 creditAccountCreditsPending;
+
+    private UInt128 creditAccountCreditsPosted;
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#result
+    /// </summary>
+    public CreateTransferResult Result { get => result; internal set => result = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flags
+    /// </summary>
+    public CreateAndReturnTransfersResultFlags Flags { get => flags; internal set => flags = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#timestamp
+    /// </summary>
+    public ulong Timestamp { get => timestamp; internal set => timestamp = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#amount
+    /// </summary>
+    public UInt128 Amount { get => amount; internal set => amount = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_debits_pending
+    /// </summary>
+    public UInt128 DebitAccountDebitsPending { get => debitAccountDebitsPending; internal set => debitAccountDebitsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_debits_posted
+    /// </summary>
+    public UInt128 DebitAccountDebitsPosted { get => debitAccountDebitsPosted; internal set => debitAccountDebitsPosted = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_credits_pending
+    /// </summary>
+    public UInt128 DebitAccountCreditsPending { get => debitAccountCreditsPending; internal set => debitAccountCreditsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_credits_posted
+    /// </summary>
+    public UInt128 DebitAccountCreditsPosted { get => debitAccountCreditsPosted; internal set => debitAccountCreditsPosted = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_debits_pending
+    /// </summary>
+    public UInt128 CreditAccountDebitsPending { get => creditAccountDebitsPending; internal set => creditAccountDebitsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_debits_posted
+    /// </summary>
+    public UInt128 CreditAccountDebitsPosted { get => creditAccountDebitsPosted; internal set => creditAccountDebitsPosted = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_credits_pending
+    /// </summary>
+    public UInt128 CreditAccountCreditsPending { get => creditAccountCreditsPending; internal set => creditAccountCreditsPending = value; }
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_credits_posted
+    /// </summary>
+    public UInt128 CreditAccountCreditsPosted { get => creditAccountCreditsPosted; internal set => creditAccountCreditsPosted = value; }
+
+}
+
+[Flags]
+public enum CreateAndReturnTransfersResultFlags : uint
+{
+    None = 0,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flagstransfer_set
+    /// </summary>
+    TransferSet = 1 << 0,
+
+    /// <summary>
+    /// https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flagsaccount_balances_set
+    /// </summary>
+    AccountBalancesSet = 1 << 1,
+
+}
+
+[StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct AccountFilter
 {
     public const int SIZE = 128;
@@ -1217,6 +1326,8 @@ internal enum TBOperation : byte
     QueryAccounts = 144,
 
     QueryTransfers = 145,
+
+    CreateAndReturnTransfers = 146,
 
 }
 

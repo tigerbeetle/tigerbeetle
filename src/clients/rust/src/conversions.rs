@@ -34,7 +34,7 @@ impl From<tbc::tb_create_accounts_result_t> for CreateAccountResult {
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO => LedgerMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO => CodeMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS => ImportedEventTimestampMustNotRegress,
-            v => Unknown(v),
+            v => panic!("Invalid CreateAccountResult={0}", v),
         }
     }
 }
@@ -114,7 +114,7 @@ impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT => OverflowsTimeout,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_CREDITS => ExceedsCredits,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_DEBITS => ExceedsDebits,
-            v => Unknown(v),
+            v => panic!("Invalid CreateTransferResult={0}", v),
         }
     }
 }

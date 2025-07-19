@@ -93,6 +93,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
                 .create_accounts,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 .get_account_transfers,
@@ -833,7 +834,7 @@ pub fn ReplType(comptime MessageBus: type) type {
             arguments: *std.ArrayListUnmanaged(u8),
         ) !void {
             const operation_type = switch (operation) {
-                .create_accounts, .create_transfers => "create",
+                .create_accounts, .create_transfers, .create_and_return_transfers => "create",
                 .get_account_transfers, .get_account_balances => "get",
                 .lookup_accounts, .lookup_transfers => "lookup",
                 .query_accounts, .query_transfers => "query",
@@ -841,7 +842,11 @@ pub fn ReplType(comptime MessageBus: type) type {
             };
             const object_type = switch (operation) {
                 .create_accounts, .lookup_accounts, .query_accounts => "accounts",
-                .create_transfers, .lookup_transfers, .query_transfers => "transfers",
+                .create_transfers,
+                .create_and_return_transfers,
+                .lookup_transfers,
+                .query_transfers,
+                => "transfers",
                 .get_account_transfers => "account transfers",
                 .get_account_balances => "account balances",
                 else => unreachable,
@@ -880,9 +885,10 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_object(repl: *Repl, object: anytype) !void {
-            assert(@TypeOf(object.*) == tb.Account or
+            comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
-                @TypeOf(object.*) == tb.AccountBalance);
+                @TypeOf(object.*) == tb.AccountBalance or
+                @TypeOf(object.*) == tb.CreateAndReturnTransfersResult);
 
             try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).@"struct".fields, 0..) |object_field, i| {
@@ -984,6 +990,20 @@ pub fn ReplType(comptime MessageBus: type) type {
                                 "Failed to create transfer ({}): {any}.\n",
                                 .{ reason.index, reason.result },
                             );
+                        }
+                    }
+                },
+                .create_and_return_transfers => {
+                    const create_transfer_results = stdx.bytes_as_slice(
+                        .exact,
+                        tb.CreateAndReturnTransfersResult,
+                        result,
+                    );
+                    if (create_transfer_results.len == 0) {
+                        try repl.fail("No transfers were created.\n", .{});
+                    } else {
+                        for (create_transfer_results) |*outcome| {
+                            try repl.display_object(outcome);
                         }
                     }
                 },

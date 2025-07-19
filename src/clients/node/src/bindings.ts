@@ -775,6 +775,91 @@ export type CreateTransfersError = {
 
 
 /**
+* See [CreateAndReturnTransfersResult](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#)
+*/
+export type CreateAndReturnTransfersResult = {
+
+  /**
+  * See [result](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#result)
+  */
+  result: CreateTransferError
+
+  /**
+  * See [flags](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flags)
+  */
+  flags: number
+
+  /**
+  * See [timestamp](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#timestamp)
+  */
+  timestamp: bigint
+
+  /**
+  * See [amount](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#amount)
+  */
+  amount: bigint
+
+  /**
+  * See [debit_account_debits_pending](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_debits_pending)
+  */
+  debit_account_debits_pending: bigint
+
+  /**
+  * See [debit_account_debits_posted](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_debits_posted)
+  */
+  debit_account_debits_posted: bigint
+
+  /**
+  * See [debit_account_credits_pending](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_credits_pending)
+  */
+  debit_account_credits_pending: bigint
+
+  /**
+  * See [debit_account_credits_posted](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#debit_account_credits_posted)
+  */
+  debit_account_credits_posted: bigint
+
+  /**
+  * See [credit_account_debits_pending](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_debits_pending)
+  */
+  credit_account_debits_pending: bigint
+
+  /**
+  * See [credit_account_debits_posted](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_debits_posted)
+  */
+  credit_account_debits_posted: bigint
+
+  /**
+  * See [credit_account_credits_pending](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_credits_pending)
+  */
+  credit_account_credits_pending: bigint
+
+  /**
+  * See [credit_account_credits_posted](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#credit_account_credits_posted)
+  */
+  credit_account_credits_posted: bigint
+}
+
+
+/**
+* See [CreateAndReturnTransfersResultFlags](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flags)
+*/
+export enum CreateAndReturnTransfersResultFlags {
+  none = 0,
+
+  /**
+  * See [transfer_set](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flagstransfer_set)
+  */
+  transfer_set = (1 << 0),
+
+  /**
+  * See [account_balances_set](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers#flagsaccount_balances_set)
+  */
+  account_balances_set = (1 << 1),
+}
+
+
+/**
 * See [AccountFilter](https://docs.tigerbeetle.com/reference/account-filter#)
 */
 export type AccountFilter = {
@@ -920,5 +1005,6 @@ export enum Operation {
   get_account_balances = 143,
   query_accounts = 144,
   query_transfers = 145,
+  create_and_return_transfers = 146,
 }
 

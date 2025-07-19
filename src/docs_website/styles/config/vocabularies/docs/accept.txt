@@ -55,6 +55,7 @@ create_account
 create_accounts
 create_transfer
 create_transfers
+create_and_return_transfers
 credit_account_id
 Datadog
 datastack

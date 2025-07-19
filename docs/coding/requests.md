@@ -17,6 +17,8 @@ event in the request.
 
 - [`create_accounts`](../reference/requests/create_accounts.md): create [`Account`s](../reference/account.md)
 - [`create_transfers`](../reference/requests/create_transfers.md): create [`Transfer`s](../reference/transfer.md)
+- [`create_and_return_transfers`](../reference/requests/create_and_return_transfers.md): create
+  [`Transfer`s](../reference/transfer.md) returning the outcome of the operation.
 - [`lookup_accounts`](../reference/requests/lookup_accounts.md): fetch `Account`s by `id`
 - [`lookup_transfers`](../reference/requests/lookup_transfers.md): fetch `Transfer`s by `id`
 - [`get_account_transfers`](../reference/requests/get_account_transfers.md): fetch `Transfer`s by `debit_account_id` or
@@ -32,16 +34,17 @@ _More request types, including more powerful queries, are coming soon!_
 
 Each request has a corresponding _event_ and _result_ type:
 
-| Request Type            | Event                                                                 | Result                                                                              |
-| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `create_accounts`       | [`Account`](../reference/requests/create_accounts.md#event)           | [`CreateAccountResult`](../reference/requests/create_accounts.md#result)            |
-| `create_transfers`      | [`Transfer`](../reference/requests/create_transfers.md#event)         | [`CreateTransferResult`](../reference/requests/create_transfers.md#result)          |
-| `lookup_accounts`       | [`Account.id`](../reference/requests/lookup_accounts.md#event)        | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing             |
-| `lookup_transfers`      | [`Transfer.id`](../reference/requests/lookup_transfers.md#event)      | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing           |
-| `get_account_transfers` | [`AccountFilter`](../reference/account-filter.md)                     | [`Transfer`](../reference/requests/get_account_transfers.md#result) or nothing      |
-| `get_account_balances`  | [`AccountFilter`](../reference/account-filter.md)                     | [`AccountBalance`](../reference/requests/get_account_balances.md#result) or nothing |
-| `query_accounts`        | [`QueryFilter`](../reference/query-filter.md)                         | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing             |
-| `query_transfers`       | [`QueryFilter`](../reference/query-filter.md)                         | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing           |
+| Request Type                    | Event                                                            | Result                                                                                             |
+| --------------------------------| ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `create_accounts`               | [`Account`](../reference/requests/create_accounts.md#event)      | [`CreateAccountResult`](../reference/requests/create_accounts.md#result)                           |
+| `create_transfers`              | [`Transfer`](../reference/requests/create_transfers.md#event)    | [`CreateTransferResult`](../reference/requests/create_transfers.md#result)                         |
+| `create_and_return_transfers` | [`Transfer`](../reference/requests/create_transfers.md#event)    | [`CreateAndReturnTransfersResult`](../reference/requests/create_and_return_transfers.md#result) |
+| `lookup_accounts`               | [`Account.id`](../reference/requests/lookup_accounts.md#event)   | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing                            |
+| `lookup_transfers`              | [`Transfer.id`](../reference/requests/lookup_transfers.md#event) | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing                          |
+| `get_account_transfers`         | [`AccountFilter`](../reference/account-filter.md)                | [`Transfer`](../reference/requests/get_account_transfers.md#result) or nothing                     |
+| `get_account_balances`          | [`AccountFilter`](../reference/account-filter.md)                | [`AccountBalance`](../reference/requests/get_account_balances.md#result) or nothing                |
+| `query_accounts`                | [`QueryFilter`](../reference/query-filter.md)                    | [`Account`](../reference/requests/lookup_accounts.md#result) or nothing                            |
+| `query_transfers`               | [`QueryFilter`](../reference/query-filter.md)                    | [`Transfer`](../reference/requests/lookup_transfers.md#result) or nothing                          |
 
 ### Idempotency
 
@@ -56,16 +59,17 @@ events in each request.
 
 In the default configuration, the maximum batch sizes for each request type are:
 
-| Request Type            | Request Batch Size (Events) | Reply Batch Size (Results) |
-| ----------------------- | --------------------------: | -------------------------: |
-| `lookup_accounts`       |                        8189 |                       8189 |
-| `lookup_transfers`      |                        8189 |                       8189 |
-| `create_accounts`       |                        8189 |                       8189 |
-| `create_transfers`      |                        8189 |                       8189 |
-| `get_account_transfers` |                           1 |                       8189 |
-| `get_account_balances`  |                           1 |                       8189 |
-| `query_accounts`        |                           1 |                       8189 |
-| `query_transfers`       |                           1 |                       8189 |
+| Request Type                    | Request Batch Size (Events) | Reply Batch Size (Results) |
+| --------------------------------| --------------------------: | -------------------------: |
+| `lookup_accounts`               |                        8189 |                       8189 |
+| `lookup_transfers`              |                        8189 |                       8189 |
+| `create_accounts`               |                        8189 |                       8189 |
+| `create_transfers`              |                        8189 |                       8189 |
+| `create_and_return_transfers` |                        6551 |                       6551 |
+| `get_account_transfers`         |                           1 |                       8189 |
+| `get_account_balances`          |                           1 |                       8189 |
+| `query_accounts`                |                           1 |                       8189 |
+| `query_transfers`               |                           1 |                       8189 |
 
 TigerBeetle clients automatically batch events. Therefore, it is recommended to share the client
 instances between multiple threads or tasks to have events batched transparently.

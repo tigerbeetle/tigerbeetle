@@ -16,6 +16,8 @@ const type_mappings = .{
     .{ tb.CreateTransferResult, "CreateTransferResult", "Transfer" },
     .{ tb.CreateAccountsResult, "AccountEventResult" },
     .{ tb.CreateTransfersResult, "TransferEventResult" },
+    .{ tb.CreateAndReturnTransfersResult, "TransferWithOutcomeEventResult" },
+    .{ tb.CreateAndReturnTransfersResultFlags, "TransferWithOutcomeEventResultFlags" },
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
@@ -268,6 +270,8 @@ fn emit_struct(
             tb.AccountFilterFlags
         else if (comptime std.mem.eql(u8, name, "QueryFilter"))
             tb.QueryFilterFlags
+        else if (comptime std.mem.eql(u8, name, "TransferWithOutcomeEventResult"))
+            tb.CreateAndReturnTransfersResultFlags
         else
             unreachable;
         // Conversion from packed to struct (e.g. Account.AccountFlags())
