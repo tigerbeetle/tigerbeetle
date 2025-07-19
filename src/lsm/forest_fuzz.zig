@@ -127,7 +127,12 @@ const Environment = struct {
         env.storage = storage;
 
         env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, replica, .{});
+        env.trace = try Storage.Tracer.init(
+            gpa,
+            env.time_sim.time(),
+            .{ .replica = .{ .cluster = 0, .replica = replica } },
+            .{},
+        );
 
         env.superblock = try SuperBlock.init(gpa, .{
             .storage = env.storage,

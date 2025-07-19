@@ -5103,7 +5103,7 @@ pub const TestContext = struct {
         errdefer ctx.storage.deinit(allocator);
         ctx.time_sim = TimeSim.init_simple();
 
-        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), 0, 0, .{});
+        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), .replica_test, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

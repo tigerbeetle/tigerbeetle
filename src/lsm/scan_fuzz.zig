@@ -516,7 +516,7 @@ const Environment = struct {
         prng: *stdx.PRNG,
     ) !void {
         env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), 0, 0, .{});
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
