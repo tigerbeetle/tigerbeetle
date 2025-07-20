@@ -14,6 +14,7 @@ const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const TimeSim = @import("../testing/time.zig").TimeSim;
@@ -293,14 +294,14 @@ const Environment = struct {
         errdefer env.storage_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.time_sim = TimeSim.init_simple();
+        env.time_sim = fixtures.time(.{});
 
         fields_initialized += 1;
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.trace_verify = try fixtures.tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -562,12 +563,7 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.gpa);
-            test_trace.* = try Storage.Tracer.init(
-                env.gpa,
-                env.time_sim.time(),
-                .replica_test,
-                .{},
-            );
+            test_trace.* = try fixtures.tracer(env.gpa, env.time_sim.time(), .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().

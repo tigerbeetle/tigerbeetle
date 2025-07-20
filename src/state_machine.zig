@@ -5071,6 +5071,8 @@ pub const TestContext = struct {
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("vsr/grid.zig").GridType(Storage);
+    const fixtures = @import("testing/fixtures.zig");
+
     pub const StateMachine = StateMachineType(Storage, .{
         .release = vsr.Release.minimum,
         // Overestimate the batch size because the test never compacts.
@@ -5101,9 +5103,9 @@ pub const TestContext = struct {
             },
         );
         errdefer ctx.storage.deinit(allocator);
-        ctx.time_sim = TimeSim.init_simple();
+        ctx.time_sim = fixtures.time(.{});
 
-        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), .replica_test, .{});
+        ctx.trace = try fixtures.tracer(allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

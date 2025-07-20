@@ -1,6 +1,5 @@
 const std = @import("std");
 const stdx = @import("../stdx.zig");
-const constants = @import("../constants.zig");
 const Time = @import("../time.zig").Time;
 
 pub const OffsetType = enum {
@@ -45,15 +44,6 @@ pub const TimeSim = struct {
                 .realtime = realtime,
                 .tick = tick,
             },
-        };
-    }
-
-    pub fn init_simple() TimeSim {
-        return .{
-            .resolution = constants.tick_ms * std.time.ns_per_ms,
-            .offset_type = .linear,
-            .offset_coefficient_A = 0,
-            .offset_coefficient_B = 0,
         };
     }
 

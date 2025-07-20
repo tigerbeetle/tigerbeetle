@@ -135,8 +135,6 @@ pub const ProcessID = union(enum) {
         replica: u8,
     },
 
-    pub const replica_test: ProcessID = .{ .replica = .{ .cluster = 0, .replica = 0 } };
-
     pub fn format(
         self: ProcessID,
         comptime fmt: []const u8,
@@ -437,22 +435,30 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
     }
 }
 
+const fixtures = @import("testing/fixtures.zig");
+
 test "trace json" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
     const Snap = @import("testing/snaptest.zig").Snap;
     const snap = Snap.snap;
+    const gpa = std.testing.allocator;
 
-    var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer trace_buffer.deinit();
+    var trace_buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer trace_buffer.deinit(gpa);
 
-    var time_sim = TimeSim.init_simple();
+    var time_sim = fixtures.time(.{});
 
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
-        .writer = trace_buffer.writer().any(),
+    var trace = try fixtures.tracer(gpa, time_sim.time(), .{
+        .writer = trace_buffer.writer(gpa).any(),
+        .process_id = .unknown,
     });
-    defer trace.deinit(std.testing.allocator);
+    defer trace.deinit(gpa);
 
-    trace.set_replica(.{ .cluster = 0, .replica = 0 });
+    // Check that JSON is valid even while process id not known.
+    trace.start(.metrics_emit);
+    time_sim.ticks += 1;
+    trace.stop(.metrics_emit);
+
+    trace.set_replica(.{ .cluster = 1, .replica = 1 });
 
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
     time_sim.ticks += 1;
@@ -464,25 +470,22 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":8,"ph":"E","ts":30000},
-        \\{"pid":0,"tid":0,"ph":"E","ts":60000},
+        \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
+        \\{"pid":0,"tid":208,"ph":"E","ts":10000},
+        \\{"pid":1,"tid":0,"ph":"B","ts":10000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":1,"tid":8,"ph":"E","ts":40000},
+        \\{"pid":1,"tid":0,"ph":"E","ts":70000},
         \\
     ).diff(trace_buffer.items);
 }
 
 test "timing overflow" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
+    const gpa = std.testing.allocator;
 
-    var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer trace_buffer.deinit();
-
-    var time_sim = TimeSim.init_simple();
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
-        .writer = trace_buffer.writer().any(),
-    });
-    defer trace.deinit(std.testing.allocator);
+    var time_sim = fixtures.time(.{});
+    var trace = try fixtures.tracer(gpa, time_sim.time(), .{});
+    defer trace.deinit(gpa);
 
     trace.set_replica(.{ .cluster = 0, .replica = 0 });
 

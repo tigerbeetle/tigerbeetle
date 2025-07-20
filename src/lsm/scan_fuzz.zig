@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
@@ -515,8 +516,8 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.time_sim = fixtures.time(.{});
+        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{

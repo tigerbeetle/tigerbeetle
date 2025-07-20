@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
@@ -162,13 +163,8 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.time_sim = TimeSim.init_simple();
-            env.trace = try Storage.Tracer.init(
-                gpa,
-                env.time_sim.time(),
-                .{ .replica = .{ .cluster = 0, .replica = replica } },
-                .{},
-            );
+            env.time_sim = fixtures.time(.{});
+            env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
             defer env.trace.deinit(gpa);
 
             env.superblock = try SuperBlock.init(gpa, .{
