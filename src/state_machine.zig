@@ -5092,17 +5092,9 @@ pub const TestContext = struct {
     busy: bool,
 
     pub fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
-        ctx.storage = try Storage.init(
-            allocator,
-            4096,
-            .{
-                .read_latency_min = .{ .ns = 0 },
-                .read_latency_mean = .{ .ns = 0 },
-                .write_latency_min = .{ .ns = 0 },
-                .write_latency_mean = .{ .ns = 0 },
-            },
-        );
+        ctx.storage = try fixtures.storage(allocator, .{ .size = 4096 });
         errdefer ctx.storage.deinit(allocator);
+
         ctx.time_sim = fixtures.time(.{});
 
         ctx.trace = try fixtures.tracer(allocator, ctx.time_sim.time(), .{});

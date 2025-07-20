@@ -59,8 +59,9 @@ fn run_fuzz(
     prng: *stdx.PRNG,
     events: []const ManifestEvent,
 ) !void {
-    const storage_options: Storage.Options = .{
+    const storage_options: fixtures.StorageOptions = .{
         .seed = prng.int(u64),
+        .size = constants.storage_size_limit_default,
         .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
         .read_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
         .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
@@ -276,7 +277,7 @@ const Environment = struct {
     fn init(
         env: *Environment, // In-place construction for stable addresses.
         gpa: std.mem.Allocator,
-        storage_options: Storage.Options,
+        storage_options: fixtures.StorageOptions,
     ) !void {
         comptime var fields_initialized = 0;
 
@@ -284,13 +285,11 @@ const Environment = struct {
         env.gpa = gpa;
 
         fields_initialized += 1;
-        env.storage =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
+        env.storage = try fixtures.storage(gpa, storage_options);
         errdefer env.storage.deinit(gpa);
 
         fields_initialized += 1;
-        env.storage_verify =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
+        env.storage_verify = try fixtures.storage(gpa, storage_options);
         errdefer env.storage_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -307,14 +306,14 @@ const Environment = struct {
         fields_initialized += 1;
         env.superblock = try SuperBlock.init(gpa, .{
             .storage = &env.storage,
-            .storage_size_limit = constants.storage_size_limit_default,
+            .storage_size_limit = storage_options.size,
         });
         errdefer env.superblock.deinit(gpa);
 
         fields_initialized += 1;
         env.superblock_verify = try SuperBlock.init(gpa, .{
             .storage = &env.storage_verify,
-            .storage_size_limit = constants.storage_size_limit_default,
+            .storage_size_limit = storage_options.size,
         });
         errdefer env.superblock_verify.deinit(gpa);
 

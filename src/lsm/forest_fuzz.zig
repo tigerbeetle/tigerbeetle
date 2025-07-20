@@ -8,7 +8,6 @@ const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
-const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
@@ -1106,20 +1105,14 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     defer gpa.free(fuzz_ops);
 
     // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        .{
-            .seed = prng.int(u64),
-            .read_latency_min = .{ .ns = 0 },
-            .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
-            .write_latency_min = .{ .ns = 0 },
-            .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
-            // We can't actually recover from a crash in this fuzzer since we would need
-            // to transfer state from a different replica to continue.
-            .crash_fault_probability = Ratio.zero(),
-        },
-    );
+    var storage = try fixtures.storage(gpa, .{
+        .seed = prng.int(u64),
+        .size = constants.storage_size_limit_default,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
+    });
     defer storage.deinit(gpa);
 
     try Environment.run(gpa, &storage, fuzz_ops);

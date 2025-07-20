@@ -24,6 +24,7 @@ const SuperBlockHeader = @import("superblock.zig").SuperBlockHeader;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const ratio = stdx.PRNG.ratio;
@@ -51,9 +52,9 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     });
     defer storage_fault_atlas.deinit(gpa);
 
-    const storage_options: Storage.Options = .{
-        .replica_index = 0,
+    const storage_options: fixtures.StorageOptions = .{
         .seed = prng.int(u64),
+        .size = superblock_zone_size,
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = .{ .ns = 0 },
         .read_latency_mean = .{ .ns = 0 },
@@ -76,10 +77,10 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
         .fault_atlas = &storage_fault_atlas,
     };
 
-    var storage = try Storage.init(gpa, superblock_zone_size, storage_options);
+    var storage = try fixtures.storage(gpa, storage_options);
     defer storage.deinit(gpa);
 
-    var storage_verify = try Storage.init(gpa, superblock_zone_size, storage_options);
+    var storage_verify = try fixtures.storage(gpa, storage_options);
     defer storage_verify.deinit(gpa);
 
     var superblock = try SuperBlock.init(gpa, .{

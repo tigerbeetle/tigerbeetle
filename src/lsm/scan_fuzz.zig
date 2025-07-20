@@ -940,18 +940,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
     // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        Storage.Options{
-            .seed = prng.int(u64),
-            .read_latency_min = .{ .ns = 0 },
-            .read_latency_mean = .{ .ns = 0 },
-            .write_latency_min = .{ .ns = 0 },
-            .write_latency_mean = .{ .ns = 0 },
-            .crash_fault_probability = Ratio.zero(),
-        },
-    );
+    var storage = try fixtures.storage(gpa, .{
+        .seed = prng.int(u64),
+        .size = constants.storage_size_limit_default,
+    });
     defer storage.deinit(gpa);
 
     const commits_max: u32 = @intCast(

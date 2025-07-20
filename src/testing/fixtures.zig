@@ -17,11 +17,17 @@
 //! - It could be convenient to export types themselves, in addition to constructors, but we avoid
 //!   introducing two ways to import something.
 const std = @import("std");
+const stdx = @import("../stdx.zig");
+const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
+const Ratio = stdx.PRNG.Ratio;
+const Duration = stdx.Duration;
 
 const Time = @import("../time.zig").Time;
 const OffsetType = @import("./time.zig").OffsetType;
 const Tracer = @import("../trace.zig").Tracer;
+const Storage = @import("./storage.zig").Storage;
+const ClusterFaultAtlas = @import("./storage.zig").ClusterFaultAtlas;
 
 const TimeSim = @import("./time.zig").TimeSim;
 
@@ -47,4 +53,42 @@ pub fn tracer(gpa: std.mem.Allocator, t: Time, options: struct {
     process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = 0, .replica = 0 } },
 }) !Tracer {
     return Tracer.init(gpa, t, options.process_id, .{ .writer = options.writer });
+}
+
+pub const StorageOptions = struct {
+    // Default to small size to make sure that tests that can be fast are fast.
+    size: u32 = 4096,
+
+    seed: u64 = 0,
+
+    read_latency_min: Duration = .{ .ns = 0 },
+    read_latency_mean: Duration = .{ .ns = 0 },
+
+    write_latency_min: Duration = .{ .ns = 0 },
+    write_latency_mean: Duration = .{ .ns = 0 },
+
+    read_fault_probability: Ratio = .zero(),
+    write_fault_probability: Ratio = .zero(),
+    write_misdirect_probability: Ratio = .zero(),
+    crash_fault_probability: Ratio = .zero(),
+
+    fault_atlas: ?*const ClusterFaultAtlas = null,
+};
+
+pub fn storage(
+    gpa: std.mem.Allocator,
+    options: StorageOptions,
+) !Storage {
+    return try Storage.init(gpa, options.size, .{
+        .seed = options.seed,
+        .read_latency_min = options.read_latency_min,
+        .read_latency_mean = options.read_latency_mean,
+        .write_latency_min = options.write_latency_min,
+        .write_latency_mean = options.write_latency_mean,
+        // Faults makes sense only in the cluster.
+        .read_fault_probability = .zero(),
+        .write_fault_probability = .zero(),
+        .write_misdirect_probability = .zero(),
+        .crash_fault_probability = .zero(),
+    });
 }
