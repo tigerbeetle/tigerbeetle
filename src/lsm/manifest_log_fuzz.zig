@@ -73,9 +73,6 @@ fn run_fuzz(
     defer env.deinit();
 
     {
-        env.format_superblock();
-        env.wait(&env.manifest_log);
-
         env.open_superblock();
         env.wait(&env.manifest_log);
 
@@ -288,6 +285,8 @@ const Environment = struct {
         env.storage = try fixtures.storage(gpa, storage_options);
         errdefer env.storage.deinit(gpa);
 
+        try fixtures.storage_format(gpa, &env.storage, .{});
+
         fields_initialized += 1;
         env.storage_verify = try fixtures.storage(gpa, storage_options);
         errdefer env.storage_verify.deinit(gpa);
@@ -383,23 +382,6 @@ const Environment = struct {
         }
     }
 
-    fn format_superblock(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
-            .cluster = 0,
-            .release = vsr.Release.minimum,
-            .replica = 0,
-            .replica_count = 6,
-            .view = null,
-        });
-    }
-
-    fn format_superblock_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", context);
-        env.pending -= 1;
-    }
-
     fn open_superblock(env: *Environment) void {
         assert(env.pending == 0);
         env.pending += 1;
@@ -489,7 +471,7 @@ const Environment = struct {
             &env.superblock_context,
             .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(0);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.header.op);
                     header.set_checksum();
                     break :header header;

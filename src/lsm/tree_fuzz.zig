@@ -117,7 +117,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         const State = enum {
             init,
-            superblock_format,
             superblock_open,
             free_set_open,
             tree_init,
@@ -241,16 +240,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             gpa: std.mem.Allocator,
             fuzz_ops: []const FuzzOp,
         ) !void {
-            env.change_state(.init, .superblock_format);
-            env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-                .cluster = cluster,
-                .release = vsr.Release.minimum,
-                .replica = replica,
-                .replica_count = replica_count,
-                .view = null,
-            });
-
-            env.tick_until_state_change(.superblock_format, .superblock_open);
+            env.change_state(.init, .superblock_open);
             env.superblock.open(superblock_open_callback, &env.superblock_context);
 
             env.tick_until_state_change(.superblock_open, .free_set_open);
@@ -278,11 +268,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree.open_complete();
 
             try env.apply(gpa, fuzz_ops);
-        }
-
-        fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-            env.change_state(.superblock_format, .superblock_open);
         }
 
         fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -935,7 +920,6 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    // Init mocked storage.
     var storage = try fixtures.storage(gpa, .{
         .size = constants.storage_size_limit_default,
         .seed = prng.int(u64),
@@ -945,6 +929,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
     });
     defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
 
     switch (table_usage) {
         inline else => |usage| {

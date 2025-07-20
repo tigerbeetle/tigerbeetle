@@ -22,6 +22,7 @@ const std = @import("std");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
+const assert = std.debug.assert;
 const Ratio = stdx.PRNG.Ratio;
 const Duration = stdx.Duration;
 
@@ -33,6 +34,9 @@ const ClusterFaultAtlas = @import("./storage.zig").ClusterFaultAtlas;
 const SuperBlock = vsr.SuperBlockType(Storage);
 
 const TimeSim = @import("./time.zig").TimeSim;
+
+pub const cluster: u128 = 0;
+pub const replica: u8 = 0;
 
 pub fn time(options: struct {
     resolution: u64 = constants.tick_ms * std.time.ns_per_ms,
@@ -53,7 +57,7 @@ pub fn time(options: struct {
 
 pub fn tracer(gpa: std.mem.Allocator, t: Time, options: struct {
     writer: ?std.io.AnyWriter = null,
-    process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = 0, .replica = 0 } },
+    process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = cluster, .replica = replica } },
 }) !Tracer {
     return Tracer.init(gpa, t, options.process_id, .{ .writer = options.writer });
 }
@@ -93,6 +97,48 @@ pub fn storage(
         .write_misdirect_probability = .zero(),
         .crash_fault_probability = .zero(),
     });
+}
+
+pub fn storage_format(
+    gpa: std.mem.Allocator,
+    s: *Storage,
+    format_options: struct {
+        cluster: u128 = cluster,
+        replica: u8 = replica,
+        replica_count: u8 = constants.replicas_max,
+        release: vsr.Release = vsr.Release.minimum,
+    },
+) !void {
+    assert(s.reads.count() == 0);
+    assert(s.writes.count() == 0);
+
+    var format_superblock = try superblock(gpa, s, .{});
+    defer format_superblock.deinit(gpa);
+
+    const Context = struct {
+        superblock_context: SuperBlock.Context = undefined,
+        done: bool = false,
+        fn callback(superblock_context: *SuperBlock.Context) void {
+            const self: *@This() = @fieldParentPtr("superblock_context", superblock_context);
+            assert(!self.done);
+            self.done = true;
+        }
+    };
+    var context: Context = .{};
+
+    format_superblock.format(Context.callback, &context.superblock_context, .{
+        .cluster = format_options.cluster,
+        .replica = format_options.replica,
+        .replica_count = format_options.replica_count,
+        .release = format_options.release,
+        .view = null,
+    });
+    for (0..10_000) |_| {
+        if (context.done) break;
+        s.run();
+    } else @panic("superblock format loop stuck");
+    assert(s.reads.count() == 0);
+    assert(s.writes.count() == 0);
 }
 
 pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {

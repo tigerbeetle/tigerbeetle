@@ -440,9 +440,6 @@ const QuerySpecFuzzer = struct {
 };
 
 const Environment = struct {
-    const cluster = 0;
-    const replica = 0;
-    const replica_count = 1;
     const node_count = 1024;
 
     // This is the smallest size that set_associative_cache will allow us.
@@ -474,7 +471,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_format,
         superblock_open,
         free_set_open,
         forest_init,
@@ -527,7 +523,7 @@ const Environment = struct {
             .time_sim = env.time_sim,
             .trace = env.trace,
 
-            .superblock = try fixtures.superblock(gpa, env.storag, .{}),
+            .superblock = try fixtures.superblock(gpa, env.storage, .{}),
 
             .grid = try Grid.init(gpa, .{
                 .superblock = &env.superblock,
@@ -572,15 +568,7 @@ const Environment = struct {
         try env.init(gpa, storage, prng);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .release = vsr.Release.minimum,
-            .replica = replica,
-            .replica_count = replica_count,
-            .view = null,
-        });
-        try env.tick_until_state_change(.superblock_format, .superblock_open);
+        env.change_state(.init, .superblock_open);
 
         try env.open(gpa);
         defer env.close(gpa);
@@ -845,7 +833,7 @@ const Environment = struct {
 
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(cluster);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = env.checkpoint_op.?;
                     header.set_checksum();
                     break :header header;
@@ -881,11 +869,6 @@ const Environment = struct {
 
             env.checkpoint_op = null;
         }
-    }
-
-    fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_format, .superblock_open);
     }
 
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
@@ -941,6 +924,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .size = constants.storage_size_limit_default,
     });
     defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
 
     const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse prng.range_inclusive(u32, 1, 1024),

@@ -70,10 +70,6 @@ const ScanParams = struct {
 };
 
 const Environment = struct {
-    const cluster = 32;
-    const replica = 4;
-    const replica_count = 6;
-
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
     const cache_entries_max = GrooveAccounts.ObjectsCache.Cache.value_count_max_multiple;
@@ -99,7 +95,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_format,
         superblock_open,
         free_set_open,
         forest_init,
@@ -164,16 +159,7 @@ const Environment = struct {
         try env.init(gpa, storage);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .release = vsr.Release.minimum,
-            .replica = replica,
-            .replica_count = replica_count,
-            .view = null,
-        });
-        try env.tick_until_state_change(.superblock_format, .superblock_open);
-
+        env.change_state(.init, .superblock_open);
         try env.open(gpa);
         defer env.close(gpa);
 
@@ -243,11 +229,6 @@ const Environment = struct {
         env.forest.deinit(gpa);
     }
 
-    fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_format, .superblock_open);
-    }
-
     fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
         const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
         env.change_state(.superblock_open, .free_set_open);
@@ -287,7 +268,7 @@ const Environment = struct {
 
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .header = header: {
-                var header = vsr.Header.Prepare.root(cluster);
+                var header = vsr.Header.Prepare.root(fixtures.cluster);
                 header.op = env.checkpoint_op.?;
                 header.set_checksum();
                 break :header header;
@@ -1111,6 +1092,8 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
     });
     defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
 
     try Environment.run(gpa, &storage, fuzz_ops);
 
