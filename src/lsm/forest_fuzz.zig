@@ -858,22 +858,6 @@ const Environment = struct {
     }
 };
 
-pub fn run_fuzz_ops(
-    gpa: std.mem.Allocator,
-    storage_options: Storage.Options,
-    fuzz_ops: []const FuzzOp,
-) !void {
-    // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        storage_options,
-    );
-    defer storage.deinit(gpa);
-
-    try Environment.run(gpa, &storage, fuzz_ops);
-}
-
 fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     return fuzz.random_id(prng, Int, .{
         .average_hot = 8,
@@ -1121,16 +1105,24 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    try run_fuzz_ops(gpa, Storage.Options{
-        .seed = prng.int(u64),
-        .read_latency_min = .{ .ns = 0 },
-        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
-        .write_latency_min = .{ .ns = 0 },
-        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
-        // We can't actually recover from a crash in this fuzzer since we would need
-        // to transfer state from a different replica to continue.
-        .crash_fault_probability = Ratio.zero(),
-    }, fuzz_ops);
+    // Init mocked storage.
+    var storage = try Storage.init(
+        gpa,
+        constants.storage_size_limit_default,
+        .{
+            .seed = prng.int(u64),
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
+            // We can't actually recover from a crash in this fuzzer since we would need
+            // to transfer state from a different replica to continue.
+            .crash_fault_probability = Ratio.zero(),
+        },
+    );
+    defer storage.deinit(gpa);
+
+    try Environment.run(gpa, &storage, fuzz_ops);
 
     log.info("Passed!", .{});
 }
