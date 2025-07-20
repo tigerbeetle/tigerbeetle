@@ -83,14 +83,12 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     var storage_verify = try fixtures.storage(gpa, storage_options);
     defer storage_verify.deinit(gpa);
 
-    var superblock = try SuperBlock.init(gpa, .{
-        .storage = &storage,
+    var superblock = try fixtures.superblock(gpa, &storage, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock.deinit(gpa);
 
-    var superblock_verify = try SuperBlock.init(gpa, .{
-        .storage = &storage_verify,
+    var superblock_verify = try fixtures.superblock(gpa, &storage_verify, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock_verify.deinit(gpa);

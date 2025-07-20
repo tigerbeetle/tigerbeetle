@@ -304,17 +304,11 @@ const Environment = struct {
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock = try SuperBlock.init(gpa, .{
-            .storage = &env.storage,
-            .storage_size_limit = storage_options.size,
-        });
+        env.superblock = try fixtures.superblock(gpa, &env.storage, .{});
         errdefer env.superblock.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock_verify = try SuperBlock.init(gpa, .{
-            .storage = &env.storage_verify,
-            .storage_size_limit = storage_options.size,
-        });
+        env.superblock_verify = try fixtures.superblock(gpa, &env.storage_verify, .{});
         errdefer env.superblock_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -567,13 +561,7 @@ const Environment = struct {
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
             test_superblock.deinit(env.gpa);
-            test_superblock.* = try SuperBlock.init(
-                env.gpa,
-                .{
-                    .storage = test_storage,
-                    .storage_size_limit = constants.storage_size_limit_default,
-                },
-            );
+            test_superblock.* = try fixtures.superblock(env.gpa, &env.storage, .{});
 
             test_grid.deinit(env.gpa);
             test_grid.* = try Grid.init(env.gpa, .{

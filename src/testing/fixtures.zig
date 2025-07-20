@@ -14,6 +14,8 @@
 //! - Most options should have defaults. This is intentional deviation from TigerStyle, as, for
 //!   tests, we gain a useful property: all options that are set are meaningful for a particular
 //!   test.
+//! - All dependent fixtures are passed in positionally because they can't be defaulted and their
+//!   types are unique.
 //! - It could be convenient to export types themselves, in addition to constructors, but we avoid
 //!   introducing two ways to import something.
 const std = @import("std");
@@ -28,6 +30,7 @@ const OffsetType = @import("./time.zig").OffsetType;
 const Tracer = @import("../trace.zig").Tracer;
 const Storage = @import("./storage.zig").Storage;
 const ClusterFaultAtlas = @import("./storage.zig").ClusterFaultAtlas;
+const SuperBlock = vsr.SuperBlockType(Storage);
 
 const TimeSim = @import("./time.zig").TimeSim;
 
@@ -56,8 +59,7 @@ pub fn tracer(gpa: std.mem.Allocator, t: Time, options: struct {
 }
 
 pub const StorageOptions = struct {
-    // Default to small size to make sure that tests that can be fast are fast.
-    size: u32 = 4096,
+    size: u32,
 
     seed: u64 = 0,
 
@@ -90,5 +92,14 @@ pub fn storage(
         .write_fault_probability = .zero(),
         .write_misdirect_probability = .zero(),
         .crash_fault_probability = .zero(),
+    });
+}
+
+pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {
+    storage_size_limit: ?u64 = null,
+}) !SuperBlock {
+    return try SuperBlock.init(gpa, .{
+        .storage = s,
+        .storage_size_limit = options.storage_size_limit orelse s.size,
     });
 }

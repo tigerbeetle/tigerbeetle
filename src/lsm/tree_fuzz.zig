@@ -167,10 +167,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
             defer env.trace.deinit(gpa);
 
-            env.superblock = try SuperBlock.init(gpa, .{
-                .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_default,
-            });
+            env.superblock = try fixtures.superblock(gpa, env.storage, .{});
             defer env.superblock.deinit(gpa);
 
             env.grid = try Grid.init(gpa, .{

@@ -527,10 +527,7 @@ const Environment = struct {
             .time_sim = env.time_sim,
             .trace = env.trace,
 
-            .superblock = try SuperBlock.init(gpa, .{
-                .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_default,
-            }),
+            .superblock = try fixtures.superblock(gpa, env.storag, .{}),
 
             .grid = try Grid.init(gpa, .{
                 .superblock = &env.superblock,
@@ -939,7 +936,6 @@ const Environment = struct {
 pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
-    // Init mocked storage.
     var storage = try fixtures.storage(gpa, .{
         .seed = prng.int(u64),
         .size = constants.storage_size_limit_default,

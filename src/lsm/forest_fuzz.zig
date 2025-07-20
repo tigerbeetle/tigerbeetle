@@ -129,10 +129,7 @@ const Environment = struct {
         env.time_sim = fixtures.time(.{});
         env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
 
-        env.superblock = try SuperBlock.init(gpa, .{
-            .storage = env.storage,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
+        env.superblock = try fixtures.superblock(gpa, env.storage, .{});
 
         env.grid = try Grid.init(gpa, .{
             .superblock = &env.superblock,

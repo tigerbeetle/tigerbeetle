@@ -5100,8 +5100,7 @@ pub const TestContext = struct {
         ctx.trace = try fixtures.tracer(allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
-        ctx.superblock = try SuperBlock.init(allocator, .{
-            .storage = &ctx.storage,
+        ctx.superblock = try fixtures.superblock(allocator, &ctx.storage, .{
             .storage_size_limit = data_file_size_min,
         });
         errdefer ctx.superblock.deinit(allocator);
