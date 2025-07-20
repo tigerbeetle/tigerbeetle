@@ -131,9 +131,7 @@ const Environment = struct {
         errdefer env.trace.deinit(gpa);
 
         env.superblock = try fixtures.superblock(gpa, env.storage, .{});
-        errdefer env.supreblock.deinit(gpa);
-
-        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock);
+        errdefer env.superblock.deinit(gpa);
 
         env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = Forest
@@ -1009,8 +1007,8 @@ fn generate_compact(options: struct { op: u64, persisted_op: u64 }) FuzzOpAction
         // Checkpoint at the normal rate.
         // TODO Make LSM (and this fuzzer) unaware of VSR's checkpoint schedule.
         options.op == vsr.Checkpoint.trigger_for_checkpoint(
-            vsr.Checkpoint.checkpoint_after(options.persisted_op),
-        );
+        vsr.Checkpoint.checkpoint_after(options.persisted_op),
+    );
 
     // Checkpoint is considered durable when a replica is committing/compacting the (pipeline + 1)ᵗʰ
     // prepare after checkpoint trigger. See `op_repair_min` in `replica.zig` for more context.

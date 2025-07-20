@@ -283,10 +283,10 @@ const Environment = struct {
         errdefer env.storage.deinit(gpa);
 
         fields_initialized += 1;
-        env.time_sim = fixtures.time();
+        env.time_sim = fixtures.time(.{});
 
         fields_initialized += 1;
-        env.trace = try fixtures.tracer(gpa, env.time_sim.time());
+        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
@@ -300,9 +300,7 @@ const Environment = struct {
         env.superblock_context = undefined;
 
         fields_initialized += 1;
-        env.grid = try fixtures.grid(gpa, .{
-            .superblock = &env.superblock,
-            .trace = &env.trace,
+        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
             // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
             // FreeSet.blocks_released_prior_checkpoint_durability.
             .blocks_released_prior_checkpoint_durability_max = Grid

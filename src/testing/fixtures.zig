@@ -25,10 +25,14 @@ pub fn time(options: struct {}) TimeSim {
 
 pub fn tracer(gpa: std.mem.Allocator, t: Time, options: struct {
     cluster: u128 = 0,
-    replcia: u8 = 0,
+    replica: u8 = 0,
 }) !Tracer {
-    const process_id = .{ .cluster = options.cluster, .replcia = options.replica };
-    return Tracer.init(gpa, t, process_id, .{});
+    return Tracer.init(
+        gpa,
+        t,
+        .{ .replica = .{ .cluster = options.cluster, .replica = options.replica } },
+        .{},
+    );
 }
 
 pub fn storage(
@@ -36,6 +40,8 @@ pub fn storage(
     options: struct {
         // Default to small size to make sure that tests that can be fast are fast.
         size: u32 = 4096,
+
+        seed: u64 = 0,
 
         read_latency_min: u64 = 0,
         read_latency_mean: u64 = 0,
@@ -46,15 +52,16 @@ pub fn storage(
         write_misdirect_probability: Ratio = Ratio.zero(),
         crash_fault_probability: Ratio = Ratio.zero(),
 
-        foramt: ?struct {
+        format: ?struct {
             cluster: u128 = 0,
             replica: u8 = 0,
             replica_count: u8 = constants.replicas_max,
-            release: vsr.Release = vsr.Release.min,
+            release: vsr.Release = vsr.Release.minimum,
         } = null,
     },
 ) !Storage {
     var result = try Storage.init(gpa, options.size, .{
+        .seed = options.seed,
         .read_latency_min = options.read_latency_min,
         .read_latency_mean = options.read_latency_mean,
         .write_latency_min = options.write_latency_min,
@@ -66,7 +73,7 @@ pub fn storage(
     });
 
     if (options.format) |format_options| {
-        var formatter = superblock(gpa, result, .{});
+        var formatter = try superblock(gpa, &result, .{});
         defer formatter.deinit(gpa);
 
         var format_context: struct {
@@ -79,10 +86,11 @@ pub fn storage(
             }
         } = .{};
 
-        formatter.format(@TypeOf(format_context).callback, &format_context, .{
+        formatter.format(@TypeOf(format_context).callback, &format_context.superblock_context, .{
             .cluster = format_options.cluster,
             .replica = format_options.replica,
             .replica_count = format_options.replica_count,
+            .release = format_options.release,
             .view = null,
         });
         for (0..10_000) |_| {
@@ -98,7 +106,7 @@ pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {
     storage_size_limit: ?u64 = null,
 }) !SuperBlock {
     return try SuperBlock.init(gpa, .{
-        .storaeg = s,
+        .storage = s,
         .storage_size_limit = options.storage_size_limit orelse s.size,
     });
 }
@@ -107,7 +115,7 @@ pub fn grid(gpa: std.mem.Allocator, trace: *Tracer, s: *SuperBlock, options: str
     missing_blocks_max: u64 = 0,
     missing_tables_max: u64 = 0,
     blocks_released_prior_checkpoint_durability_max: u64 = 0,
-}) Grid {
+}) !Grid {
     return try Grid.init(gpa, .{
         .superblock = s,
         .trace = trace,
