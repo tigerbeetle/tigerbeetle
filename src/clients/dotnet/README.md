@@ -66,7 +66,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -84,11 +85,6 @@ using (var client = new Client(clusterID, addresses))
     // Use client
 }
 ```
-
-The `Client` class is thread-safe and for better performance, a
-single instance should be shared between multiple concurrent
-tasks. Multiple clients can be instantiated in case of connecting
-to more than one TigerBeetle cluster.
 
 The following are valid addresses:
 * `3000` (interpreted as `127.0.0.1:3000`)
