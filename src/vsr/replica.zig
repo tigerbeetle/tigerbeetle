@@ -480,10 +480,8 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: DVCQuorumMessages = dvc_quorum_messages_null,
 
-        repair_messages_budget_grid: vsr.Budget,
-
-        repair_messages_budget_journal: vsr.Budget,
-        repair_prepares_requested: PreparesRequested,
+        repair_messages_budget_grid: vsr.RepairBudgetGrid,
+        repair_messages_budget_journal: vsr.RepairBudgetJournal,
 
         // The op number which should be set as op_min for the next request_headers call.
         // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
@@ -1079,7 +1077,8 @@ pub fn ReplicaType(
                 2 * (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_journal_refill =
                 @divFloor(repair_messages_budget_journal_max, 2);
-            self.repair_messages_budget_journal = vsr.Budget.init(
+            self.repair_messages_budget_journal = try vsr.RepairBudgetJournal.init(
+                allocator,
                 .{
                     .capacity = repair_messages_budget_journal_max,
                     .refill_max = repair_messages_budget_journal_refill,
@@ -1087,13 +1086,6 @@ pub fn ReplicaType(
             );
             assert(self.repair_messages_budget_journal.available ==
                 self.repair_messages_budget_journal.capacity);
-
-            self.repair_prepares_requested = try PreparesRequested.init(
-                allocator,
-                repair_messages_budget_journal_max,
-            );
-
-            errdefer self.repair_prepares_requested.deinit(allocator);
 
             // Ensure each replica can have a maximum of two inflight grid repair messages
             // (`request_blocks`) per remote replica, at any point of time.
@@ -1105,7 +1097,7 @@ pub fn ReplicaType(
                 (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_grid_refill =
                 @divFloor(repair_messages_budget_grid_max, 2);
-            self.repair_messages_budget_grid = vsr.Budget.init(
+            self.repair_messages_budget_grid = vsr.RepairBudgetGrid.init(
                 .{
                     .capacity = repair_messages_budget_grid_max,
                     .refill_max = repair_messages_budget_grid_refill,
@@ -1281,7 +1273,6 @@ pub fn ReplicaType(
                     stdx.PRNG.ratio(2, 5),
                 .repair_messages_budget_grid = self.repair_messages_budget_grid,
                 .repair_messages_budget_journal = self.repair_messages_budget_journal,
-                .repair_prepares_requested = self.repair_prepares_requested,
                 .nonce = options.nonce,
                 .clock = self.clock,
                 .journal = self.journal,
@@ -1443,7 +1434,7 @@ pub fn ReplicaType(
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
             self.grid.deinit(allocator);
-            self.repair_prepares_requested.deinit(allocator);
+            self.repair_messages_budget_journal.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
             switch (self.pipeline) {
@@ -2359,10 +2350,8 @@ pub fn ReplicaType(
                 const write_initiated = self.write_prepare(message, .repair);
 
                 if (write_initiated) {
-                    // Increment budget iff we had requested this prepare.
-                    if (self.repair_prepares_requested.remove(message.header.*) == .removed) {
-                        self.repair_messages_budget_journal.refill(1);
-                    }
+                    self.repair_messages_budget_journal.increment(.{ .prepare = message.header });
+
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
                     if (self.status == .normal and self.backup()) {
@@ -3130,7 +3119,7 @@ pub fn ReplicaType(
             // one header. This guards us against double incrementing the budget in case of
             // duplicate headers messages.
             if (header_repaired) {
-                self.repair_messages_budget_journal.refill(1);
+                self.repair_messages_budget_journal.increment(.headers);
             }
 
             self.repair();
@@ -3644,7 +3633,6 @@ pub fn ReplicaType(
 
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
-            self.repair_prepares_requested.reset();
 
             self.repair();
         }
@@ -7206,7 +7194,7 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-                if (self.repair_messages_budget_journal.spend(1)) {
+                if (self.repair_messages_budget_journal.decrement(.start_view)) {
                     self.send_header_to_replica(
                         self.primary_index(self.view),
                         @bitCast(Header.RequestStartView{
@@ -7257,7 +7245,7 @@ pub fn ReplicaType(
                     },
                 );
 
-                if (self.repair_messages_budget_journal.spend(1)) {
+                if (self.repair_messages_budget_journal.decrement(.headers)) {
                     self.send_header_to_replica(
                         self.choose_any_other_replica(),
                         @bitCast(Header.RequestHeaders{
@@ -8000,38 +7988,36 @@ pub fn ReplicaType(
                 .prepare_checksum = checksum,
             };
 
-            if (self.repair_prepares_requested.add(header.*) == .already_present) {
+            if (self.repair_messages_budget_journal.decrement(.{ .prepare = header })) {
+                const nature = if (op > self.commit_max) "uncommitted" else "committed";
+                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
+                log.debug(
+                    "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
+                    .{
+                        self.replica,
+                        op,
+                        checksum,
+                        nature,
+                        reason,
+                        @tagName(self.status),
+                    },
+                );
+
+                if (self.status == .view_change) {
+                    // Only the primary is allowed to do repairs in a view change.
+                    assert(self.primary_index(self.view) == self.replica);
+                    self.send_header_to_other_replicas(@bitCast(request_prepare));
+                } else {
+                    self.send_header_to_replica(
+                        self.choose_any_other_replica(),
+                        @bitCast(request_prepare),
+                    );
+                }
+
+                return true;
+            } else {
                 return false;
             }
-
-            assert(self.repair_messages_budget_journal.spend(1));
-
-            const nature = if (op > self.commit_max) "uncommitted" else "committed";
-            const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
-            log.debug(
-                "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
-                .{
-                    self.replica,
-                    op,
-                    checksum,
-                    nature,
-                    reason,
-                    @tagName(self.status),
-                },
-            );
-
-            if (self.status == .view_change) {
-                // Only the primary is allowed to do repairs in a view change.
-                assert(self.primary_index(self.view) == self.replica);
-                self.send_header_to_other_replicas(@bitCast(request_prepare));
-            } else {
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(request_prepare),
-                );
-            }
-
-            return true;
         }
 
         fn repairs_allowed(self: *const Replica) bool {
@@ -10081,7 +10067,6 @@ pub fn ReplicaType(
             // committing again.
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
-            self.repair_prepares_requested.reset();
 
             if (self.repair_timeout.ticking) self.repair_timeout.reset();
 
@@ -11414,42 +11399,6 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
     }
     return headers;
 }
-
-const PreparesRequested = struct {
-    set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
-
-    pub fn init(gpa: Allocator, capacity: u32) !PreparesRequested {
-        var prepares_requested_set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
-        try prepares_requested_set.ensureTotalCapacity(gpa, capacity);
-        errdefer prepares_requested_set.deinit();
-
-        return .{ .set = prepares_requested_set };
-    }
-
-    pub fn deinit(prepares_requested: *PreparesRequested, gpa: Allocator) void {
-        prepares_requested.set.deinit(gpa);
-    }
-
-    pub fn add(
-        prepares_requested: *PreparesRequested,
-        header: Header.Prepare,
-    ) enum { added, already_present } {
-        const header_added = prepares_requested.set.getOrPutAssumeCapacity(header);
-        return if (!header_added.found_existing) .added else .already_present;
-    }
-
-    pub fn remove(
-        prepares_requested: *PreparesRequested,
-        header: Header.Prepare,
-    ) enum { removed, not_present } {
-        const header_removed = prepares_requested.set.swapRemove(header);
-        return if (header_removed) .removed else .not_present;
-    }
-
-    pub fn reset(prepares_requested: *PreparesRequested) void {
-        prepares_requested.set.clearRetainingCapacity();
-    }
-};
 
 /// The PipelineQueue belongs to a normal-status primary. It consists of two queues:
 /// - A prepare queue, containing all messages currently being prepared.
