@@ -1800,7 +1800,15 @@ pub const RepairBudgetJournal = struct {
                 }
             },
         }
-        budget.available = @min((budget.available + 1), budget.capacity);
+
+        // Artificially cap budget availability, as its tricky to precisely track which headers
+        // we requested for repair and which ones we received, leading to spurious budget updates.
+        const requested_start_views: u32 = if (budget.requested_start_view != null) 1 else 0;
+        const requested_prepares: u32 = budget.requested_prepares.count();
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
+        budget.available = @min((budget.available + 1), budget.capacity - budget_spent_total);
     }
 
     pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
