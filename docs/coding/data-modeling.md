@@ -95,6 +95,8 @@ to avoid loss of precision due to floating-point approximations.
 When the multiplier is a power of 10 (e.g. `10 ^ n`), then the exponent `n` is referred to as an
 _asset scale_. For example, representing USD in cents uses an asset scale of `2`.
 
+The 128-bit representation defines the precision, but not the scale.
+
 #### Examples
 
 - In USD, `$1` = `100` cents. So for example,
@@ -102,12 +104,20 @@ _asset scale_. For example, representing USD in cents uses an asset scale of `2`
   - The fractional amount `$123.00` is represented as the integer `12300`.
   - The fractional amount `$123.45` is represented as the integer `12345`.
 
-### Oversized Amounts
+- In JPY, `¥‎1` = `1` yen. So for example,
+  - The fractional amount `¥‎123.00` is represented as the integer `123`.
+  - The fractional amount `¥‎123.45` is represented as the integer `123`.
 
-The other direction works as well. If the smallest useful unit of a currency is `10,000,000` units,
-then it can be scaled down to the integer `1`.
+- In IQD, `1 د.ع` = `1000` fils. So for example,
+  - The fractional amount `0.45 د.ع` is represented as the integer `450`.
+  - The fractional amount `123.00 د.ع` is represented as the integer `123000`.
+  - The fractional amount `123.45 د.ع` is represented as the integer `123450`.
 
-The 128-bit representation defines the precision, but not the scale.
+The other direction works as well. If the smallest useful unit of an asset is `10,000,000` units,
+then it can be scaled down to the integer `1` using an asset scale of `-7`.
+
+Asset scale cannot be used to represent non-decimal denominations such as Malagasy ariary (MGA) or
+Mauritanian ouguiya (MRU).
 
 ### ⚠️ Asset Scales Cannot Be Easily Changed
 
