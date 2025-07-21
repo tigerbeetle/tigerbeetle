@@ -86,9 +86,6 @@ const value_count_max = constants.lsm_compaction_ops * commit_entries_max;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const table_count_max = @import("tree.zig").table_count_max;
 
-const cluster = 32;
-const replica = 4;
-const replica_count = 6;
 const node_count = 1024;
 const scan_results_max = 4096;
 const events_max = 10_000_000;
@@ -410,7 +407,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const checkpoint_op = op - constants.lsm_compaction_ops;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(cluster);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = checkpoint_op;
                     header.set_checksum();
                     break :header header;

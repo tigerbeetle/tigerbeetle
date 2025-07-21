@@ -38,6 +38,7 @@ const TimeSim = @import("./time.zig").TimeSim;
 
 pub const cluster: u128 = 0;
 pub const replica: u8 = 0;
+pub const replica_count: u8 = 6;
 
 pub fn time(options: struct {
     resolution: u64 = constants.tick_ms * std.time.ns_per_ms,
@@ -106,7 +107,7 @@ pub fn storage_format(
     format_options: struct {
         cluster: u128 = cluster,
         replica: u8 = replica,
-        replica_count: u8 = constants.replicas_max,
+        replica_count: u8 = replica_count,
         release: vsr.Release = vsr.Release.minimum,
     },
 ) !void {

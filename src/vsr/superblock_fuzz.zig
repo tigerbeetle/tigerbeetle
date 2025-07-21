@@ -29,9 +29,9 @@ const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const ratio = stdx.PRNG.ratio;
 
-const cluster = 0;
-const replica = 0;
-const replica_count = 6;
+const cluster = fixtures.cluster;
+const replica = fixtures.replica;
+const replica_count = fixtures.replica_count;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // Total calls to checkpoint() + view_change().
