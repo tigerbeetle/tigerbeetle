@@ -219,15 +219,14 @@ pub fn GridType(comptime Storage: type) type {
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
-            const blocks_count = vsr.block_count_max(options.superblock.storage_size_limit);
             var free_set = try FreeSet.init(allocator, .{
-                .blocks_count = blocks_count,
+                .blocks_count = vsr.block_count_max(options.superblock.storage_size_limit),
                 .blocks_released_prior_checkpoint_durability_max = options
                     .blocks_released_prior_checkpoint_durability_max,
             });
             errdefer free_set.deinit(allocator);
 
-            const free_set_encoded_size_max = FreeSet.encode_size_max(blocks_count);
+            const free_set_encoded_size_max = free_set.encode_size_max();
             var free_set_checkpoint_blocks_acquired =
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_acquired.deinit(allocator);
@@ -1329,8 +1328,12 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn free_set_checkpoints_blocks_max(storage_size_limit: u64) usize {
-            const block_count = vsr.block_count_max(storage_size_limit);
-            const free_set_encoded_size = FreeSet.encode_size_max(block_count);
+            const ewah = @import("../ewah.zig").ewah(FreeSet.Word);
+
+            const blocks_count_storage_limit = vsr.block_count_max(storage_size_limit);
+            const blocks_count_free_set = FreeSet.block_count_max(blocks_count_storage_limit);
+
+            const free_set_encoded_size = ewah.encode_size_max(blocks_count_free_set);
             return 2 * CheckpointTrailer.block_count_for_trailer_size(free_set_encoded_size);
         }
 

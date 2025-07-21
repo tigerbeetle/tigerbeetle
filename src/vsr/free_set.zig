@@ -63,6 +63,9 @@ pub const FreeSet = struct {
     /// If a shard has no free blocks, the corresponding index bit is one.
     index: DynamicBitSetUnmanaged,
 
+    /// The maximum number of blocks the free set is allowed to reserve (driven by --limit-storage).
+    blocks_count: u64,
+
     /// Set bits indicate acquired blocks; unset bits indicate free blocks.
     blocks_acquired: DynamicBitSetUnmanaged,
 
@@ -76,8 +79,8 @@ pub const FreeSet = struct {
     blocks_released_prior_checkpoint_durability: BlocksReleasedPriorCheckpointDurability,
 
     /// The number of blocks that are reserved, counting both acquired and free blocks
-    /// from the start of `blocks`.
-    /// Alternatively, the index of the first non-reserved block in `blocks`.
+    /// from the start of `blocks_acquired`.
+    /// Alternatively, the index of the first non-reserved block in `blocks_acquired`.
     reservation_blocks: usize = 0,
 
     /// The number of active reservations.
@@ -112,18 +115,19 @@ pub const FreeSet = struct {
         blocks_count: usize,
         blocks_released_prior_checkpoint_durability_max: usize,
     }) !FreeSet {
-        assert(options.blocks_count % shard_bits == 0);
-        assert(options.blocks_count % @bitSizeOf(Word) == 0);
+        const blocks_count = FreeSet.block_count_max(options.blocks_count);
+        assert(blocks_count % shard_bits == 0);
+        assert(blocks_count % @bitSizeOf(Word) == 0);
 
         // Every block bit is covered by exactly one index bit.
-        const shards_count = @divExact(options.blocks_count, shard_bits);
+        const shards_count = @divExact(blocks_count, shard_bits);
         var index = try DynamicBitSetUnmanaged.initEmpty(allocator, shards_count);
         errdefer index.deinit(allocator);
 
-        var blocks_acquired = try DynamicBitSetUnmanaged.initEmpty(allocator, options.blocks_count);
+        var blocks_acquired = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer blocks_acquired.deinit(allocator);
 
-        var blocks_released = try DynamicBitSetUnmanaged.initEmpty(allocator, options.blocks_count);
+        var blocks_released = try DynamicBitSetUnmanaged.initEmpty(allocator, blocks_count);
         errdefer blocks_released.deinit(allocator);
 
         var released_prior_checkpoint_durability: BlocksReleasedPriorCheckpointDurability = .{};
@@ -140,6 +144,7 @@ pub const FreeSet = struct {
 
         return FreeSet{
             .index = index,
+            .blocks_count = options.blocks_count,
             .blocks_acquired = blocks_acquired,
             .blocks_released = blocks_released,
             .blocks_released_prior_checkpoint_durability = released_prior_checkpoint_durability,
@@ -166,6 +171,7 @@ pub const FreeSet = struct {
 
         set.* = .{
             .index = set.index,
+            .blocks_count = set.blocks_count,
             .blocks_acquired = set.blocks_acquired,
             .blocks_released = set.blocks_released,
             .blocks_released_prior_checkpoint_durability = set
@@ -354,8 +360,11 @@ pub const FreeSet = struct {
                 set.blocks_acquired.bit_length,
                 .unset,
             ) orelse return null);
-        }
 
+            // The free block from the `blocks_acquired` bit set may be past the total number of
+            // blocks that this free set is allowed to acquire (see `block_count_max`).
+            if (block > set.blocks_count) return null;
+        }
         const block_base = set.reservation_blocks;
         const block_count = block - set.reservation_blocks;
         set.reservation_blocks += block_count;
@@ -661,12 +670,22 @@ pub const FreeSet = struct {
         set.verify_index();
     }
 
-    /// Returns the maximum number of bytes that `blocks_count` blocks need to be encoded.
-    pub fn encode_size_max(blocks_count: usize) usize {
+    /// Returns the number of blocks that the free set can physically reference via the acquired
+    /// and released bitsets. Logically, the limit on the number of blocks that can be acquired by
+    /// the free set is imposed by --limit-storage.
+    pub fn block_count_max(blocks_count: usize) usize {
+        return stdx.div_ceil(blocks_count, shard_bits) * shard_bits;
+    }
+
+    /// Returns the maximum number of bytes needed for encoding the acquired/released bitset.
+    pub fn encode_size_max(set: *const FreeSet) usize {
+        assert(set.blocks_acquired.bit_length == set.blocks_released.bit_length);
+
+        const blocks_count = set.blocks_acquired.bit_length;
         assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
-        return ewah.encode_size_max(@divExact(blocks_count, @bitSizeOf(Word)));
+        return ewah.encode_size_max(blocks_count);
     }
 
     fn encode(
@@ -946,12 +965,12 @@ test "FreeSet checkpoint" {
     const set_encoded_blocks_acquired = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(FreeSet.Word),
-        FreeSet.encode_size_max(set.blocks_acquired.bit_length),
+        set.encode_size_max(),
     );
     const set_encoded_blocks_released = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(FreeSet.Word),
-        FreeSet.encode_size_max(set.blocks_released.bit_length),
+        set.encode_size_max(),
     );
 
     defer std.testing.allocator.free(set_encoded_blocks_acquired);
@@ -1072,7 +1091,7 @@ fn test_encode(patterns: []const TestPattern) !void {
     var encoded = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(FreeSet.Word),
-        FreeSet.encode_size_max(decoded_expect.blocks_acquired.bit_length),
+        decoded_expect.encode_size_max(),
     );
     defer std.testing.allocator.free(encoded);
 
@@ -1122,7 +1141,7 @@ test "FreeSet decode small bitset into large bitset" {
     var small_buffer = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        FreeSet.encode_size_max(small_set.blocks_acquired.bit_length),
+        small_set.encode_size_max(),
     );
     defer std.testing.allocator.free(small_buffer);
 
@@ -1184,7 +1203,7 @@ test "FreeSet encode/decode manual" {
     const encoded_actual = try std.testing.allocator.alignedAlloc(
         u8,
         @alignOf(usize),
-        FreeSet.encode_size_max(decoded_actual.blocks_acquired.bit_length),
+        decoded_actual.encode_size_max(),
     );
     defer std.testing.allocator.free(encoded_actual);
 

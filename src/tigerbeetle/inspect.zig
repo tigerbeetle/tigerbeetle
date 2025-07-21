@@ -234,11 +234,13 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
                 CheckpointTrailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size)),
             std.hash_map.default_max_load_percentage,
         );
+
+        const blocks_count_storage_limit = vsr.block_count_max(datafile_size);
+        const blocks_count_free_set = vsr.FreeSet.block_count_max(blocks_count_storage_limit);
+
         try output.print("{:.2}\n", .{std.fmt.fmtIntSizeBin(
-            // HashMap of block addresses.
-            hashmap_entries * @sizeOf(u64) +
-                // Two bitsets with bit per block.
-                2 * stdx.div_ceil(vsr.block_count_max(datafile_size), 8),
+            // HashMap of block addresses plus two bitsets with bit per block.
+            hashmap_entries * @sizeOf(u64) + 2 * stdx.div_ceil(blocks_count_free_set, 8),
         )});
     }
 }
