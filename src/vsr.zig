@@ -1717,11 +1717,12 @@ pub const RepairBudgetJournal = struct {
     available: u32,
     refill_max: u32,
 
-    requested: struct {
-        prepares: PreparesRequested,
-        headers: u32,
-        start_view: u32,
-    },
+    // Tracks the headers for prepares requested by inflight RequestPrepare messages.
+    requested_prepares: PreparesRequested,
+    // Tracks the number of inflight RequestHeaders messages.
+    requested_headers: u32,
+    // Tracks the view for an inflight RequestStartView message.
+    requested_start_view: ?u32,
 
     pub fn init(gpa: std.mem.Allocator, options: struct {
         capacity: u32,
@@ -1738,18 +1739,16 @@ pub const RepairBudgetJournal = struct {
             .capacity = options.capacity,
             .available = options.capacity,
             .refill_max = options.refill_max,
-            .requested = .{
-                .prepares = prepares_requested,
-                .headers = 0,
-                .start_view = 0,
-            },
+            .requested_prepares = prepares_requested,
+            .requested_headers = 0,
+            .requested_start_view = null,
         };
     }
 
     pub fn decrement(budget: *RepairBudgetJournal, repair_type: union(enum) {
         prepare: *const Header.Prepare,
         headers,
-        start_view,
+        start_view: u32,
     }) bool {
         assert(budget.capacity > 0);
         assert(budget.consistent());
@@ -1758,10 +1757,16 @@ pub const RepairBudgetJournal = struct {
         if (budget.available < 1) return false;
 
         switch (repair_type) {
-            .headers => budget.requested.headers += 1,
-            .start_view => budget.requested.start_view += 1,
+            .headers => budget.requested_headers += 1,
+            .start_view => |view| {
+                // Decrement budget if there is no other inflight RSV, or if the new view is greater
+                // than the view for the inflight RSV.
+                if (budget.requested_start_view == null or view > budget.requested_start_view.?) {
+                    budget.requested_start_view = view;
+                } else return false;
+            },
             .prepare => |header| {
-                if (budget.requested.prepares.add(header.*) == .already_present) {
+                if (budget.requested_prepares.add(header.*) == .already_present) {
                     return false;
                 }
             },
@@ -1775,17 +1780,22 @@ pub const RepairBudgetJournal = struct {
     pub fn increment(budget: *RepairBudgetJournal, repair_type: union(enum) {
         prepare: *const Header.Prepare,
         headers,
-        start_view,
+        start_view: u32,
     }) void {
         assert(budget.consistent());
         defer assert(budget.consistent());
 
         switch (repair_type) {
-            .headers => budget.requested.headers -|= 1,
-            .start_view => budget.requested.start_view -|= 1,
+            .headers => budget.requested_headers -|= 1,
+            .start_view => |view| {
+                // Increment budget if the SV received is for the same view as the inflight RSV.
+                if (budget.requested_start_view != null and budget.requested_start_view.? == view) {
+                    budget.requested_start_view = null;
+                } else return;
+            },
             .prepare => |header| {
                 // Increment budget iff we had requested this prepare.
-                if (budget.requested.prepares.remove(header.*) == .not_present) {
+                if (budget.requested_prepares.remove(header.*) == .not_present) {
                     return;
                 }
             },
@@ -1800,19 +1810,21 @@ pub const RepairBudgetJournal = struct {
 
         budget.available = @min((budget.available + amount), budget.capacity);
 
-        budget.requested.prepares.reset();
-        budget.requested.headers = 0;
-        budget.requested.start_view = 0;
+        budget.requested_prepares.reset();
+        budget.requested_headers = 0;
+        budget.requested_start_view = null;
     }
 
     pub fn deinit(budget: *RepairBudgetJournal, gpa: std.mem.Allocator) void {
-        budget.requested.prepares.deinit(gpa);
+        budget.requested_prepares.deinit(gpa);
     }
 
     fn consistent(budget: *RepairBudgetJournal) bool {
-        const budget_spent_total = budget.requested.prepares.set.count() +
-            budget.requested.headers +
-            budget.requested.start_view;
+        const requested_start_views: u32 = if (budget.requested_start_view != null) 1 else 0;
+        const requested_prepares: u32 = budget.requested_prepares.count();
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
         return budget.available <= budget.capacity and
             (budget.capacity - budget.available >= budget_spent_total);
     }
@@ -1850,6 +1862,10 @@ pub const RepairBudgetJournal = struct {
 
         pub fn reset(prepares_requested: *PreparesRequested) void {
             prepares_requested.set.clearRetainingCapacity();
+        }
+
+        pub fn count(prepares_requested: *PreparesRequested) u32 {
+            return @as(u32, @intCast(prepares_requested.set.count()));
         }
     };
 };

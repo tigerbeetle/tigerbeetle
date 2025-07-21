@@ -2645,6 +2645,7 @@ pub fn ReplicaType(
                 }
             }
             assert(self.view == message.header.view);
+            self.repair_messages_budget_journal.increment(.{ .start_view = self.view });
 
             // Logically, SV atomically updates both the checkpoint state and the log suffix.
             // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
@@ -7194,7 +7195,9 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-                if (self.repair_messages_budget_journal.decrement(.start_view)) {
+                if (self.repair_messages_budget_journal.decrement(.{
+                    .start_view = self.view,
+                })) {
                     self.send_header_to_replica(
                         self.primary_index(self.view),
                         @bitCast(Header.RequestStartView{
@@ -10522,19 +10525,21 @@ pub fn ReplicaType(
                         });
                     }
 
-                    // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
-                    // (Using request_start_view_message_timeout).
-                    log.debug("{}: jump_view: requesting start_view message", .{self.replica});
-                    self.send_header_to_replica(
-                        self.primary_index(header.view),
-                        @bitCast(Header.RequestStartView{
-                            .command = .request_start_view,
-                            .cluster = self.cluster,
-                            .replica = self.replica,
-                            .view = header.view,
-                            .nonce = self.nonce,
-                        }),
-                    );
+                    if (self.repair_messages_budget_journal.decrement(.{
+                        .start_view = header.view,
+                    })) {
+                        log.debug("{}: jump_view: requesting start_view message", .{self.replica});
+                        self.send_header_to_replica(
+                            self.primary_index(header.view),
+                            @bitCast(Header.RequestStartView{
+                                .command = .request_start_view,
+                                .cluster = self.cluster,
+                                .replica = self.replica,
+                                .view = header.view,
+                                .nonce = self.nonce,
+                            }),
+                        );
+                    }
                 },
                 .view_change => {
                     assert(self.status == .normal or self.status == .view_change);
