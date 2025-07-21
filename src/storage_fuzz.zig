@@ -10,7 +10,7 @@ const Storage = @import("storage.zig").StorageType(IO);
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 
-pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
+pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const zones: []const vsr.Zone = &.{
         .superblock,
         .wal_headers,
@@ -22,6 +22,9 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const sector_count = 64;
     const storage_size = sector_count * sector_size;
     const iterations = args.events_max orelse 10_000;
+
+    var time_os: vsr.time.TimeOS = .{};
+    const time = time_os.time();
 
     var prng = stdx.PRNG.from_seed(args.seed);
     for (0..iterations) |_| {
@@ -75,7 +78,10 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });
 
-        var storage = try Storage.init(&io, 0);
+        var tracer = try Tracer.init(allocator, time, .replica_test, .{});
+        defer tracer.deinit(allocator);
+
+        var storage = try Storage.init(&io, &tracer, 0);
 
         var write_completion: Storage.Write = undefined;
 

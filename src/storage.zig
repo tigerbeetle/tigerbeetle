@@ -95,8 +95,8 @@ pub fn StorageType(comptime IO: type) type {
         pub const NextTickSource = enum { lsm, vsr };
 
         io: *IO,
+        tracer: *Tracer,
         fd: IO.fd_t,
-        tracer: ?*Tracer = null,
 
         next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
             .name = "storage_next_tick",
@@ -104,9 +104,10 @@ pub fn StorageType(comptime IO: type) type {
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, fd: IO.fd_t) !Storage {
+        pub fn init(io: *IO, tracer: *Tracer, fd: IO.fd_t) !Storage {
             return .{
                 .io = io,
+                .tracer = tracer,
                 .fd = fd,
             };
         }
@@ -115,11 +116,6 @@ pub fn StorageType(comptime IO: type) type {
             assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
             storage.fd = IO.INVALID_FILE;
-        }
-
-        pub fn set_tracer(storage: *Storage, tracer: *Tracer) void {
-            assert(storage.tracer == null);
-            storage.tracer = tracer;
         }
 
         pub fn run(storage: *Storage) void {
@@ -205,7 +201,7 @@ pub fn StorageType(comptime IO: type) type {
                 .offset = offset_in_storage,
                 .target_max = buffer.len,
                 .zone = zone,
-                .start = if (self.tracer) |tracer| tracer.time.monotonic_instant() else null,
+                .start = self.tracer.time.monotonic_instant(),
             };
 
             self.start_read(read, null);
@@ -229,12 +225,10 @@ pub fn StorageType(comptime IO: type) type {
                 // be reported.
                 assert(bytes_read != null);
 
-                if (self.tracer) |tracer| {
-                    tracer.timing(
-                        .{ .storage_read = .{ .zone = read.zone } },
-                        tracer.time.monotonic_instant().duration_since(read.start.?),
-                    );
-                }
+                self.tracer.timing(
+                    .{ .storage_read = .{ .zone = read.zone } },
+                    self.tracer.time.monotonic_instant().duration_since(read.start.?),
+                );
 
                 read.callback(read);
                 return;
@@ -377,7 +371,7 @@ pub fn StorageType(comptime IO: type) type {
                 .buffer = buffer,
                 .offset = offset_in_storage,
                 .zone = zone,
-                .start = if (self.tracer) |tracer| tracer.time.monotonic_instant() else null,
+                .start = self.tracer.time.monotonic_instant(),
             };
 
             self.start_write(write);
@@ -440,12 +434,10 @@ pub fn StorageType(comptime IO: type) type {
             write.buffer = write.buffer[bytes_written..];
 
             if (write.buffer.len == 0) {
-                if (self.tracer) |tracer| {
-                    tracer.timing(
-                        .{ .storage_write = .{ .zone = write.zone } },
-                        tracer.time.monotonic_instant().duration_since(write.start.?),
-                    );
-                }
+                self.tracer.timing(
+                    .{ .storage_write = .{ .zone = write.zone } },
+                    self.tracer.time.monotonic_instant().duration_since(write.start.?),
+                );
 
                 write.callback(write);
                 return;

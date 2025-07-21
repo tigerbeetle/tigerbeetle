@@ -1412,7 +1412,6 @@ pub fn ReplicaType(
                 .aof = options.aof,
                 .replicate_options = options.replicate_options,
             };
-            options.storage.set_tracer(self.trace);
             self.routing.view_change(self.view);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
