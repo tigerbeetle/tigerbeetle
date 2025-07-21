@@ -66,7 +66,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var time_os = TimeOS{};
+    var time_os: TimeOS = .{};
     const time = time_os.time();
 
     var arg_iterator = try std.process.argsWithAllocator(allocator);

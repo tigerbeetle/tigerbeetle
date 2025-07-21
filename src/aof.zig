@@ -880,7 +880,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var time_os = vsr.time.TimeOS{};
+    var time_os: vsr.time.TimeOS = .{};
     const time = time_os.time();
 
     var args = try std.process.argsWithAllocator(allocator);
