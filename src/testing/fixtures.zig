@@ -32,6 +32,7 @@ const Tracer = @import("../trace.zig").Tracer;
 const Storage = @import("./storage.zig").Storage;
 const ClusterFaultAtlas = @import("./storage.zig").ClusterFaultAtlas;
 const SuperBlock = vsr.SuperBlockType(Storage);
+const Grid = vsr.GridType(Storage);
 
 const TimeSim = @import("./time.zig").TimeSim;
 
@@ -147,5 +148,20 @@ pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {
     return try SuperBlock.init(gpa, .{
         .storage = s,
         .storage_size_limit = options.storage_size_limit orelse s.size,
+    });
+}
+
+pub fn grid(gpa: std.mem.Allocator, trace: *Tracer, sb: *SuperBlock, options: struct {
+    missing_blocks_max: u64 = 0,
+    missing_tables_max: u64 = 0,
+    blocks_released_prior_checkpoint_durability_max: u64 = 0,
+}) !Grid {
+    return try Grid.init(gpa, .{
+        .superblock = sb,
+        .trace = trace,
+        .missing_blocks_max = options.missing_blocks_max,
+        .missing_tables_max = options.missing_tables_max,
+        .blocks_released_prior_checkpoint_durability_max = //
+        options.blocks_released_prior_checkpoint_durability_max,
     });
 }

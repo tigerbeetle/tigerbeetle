@@ -169,11 +169,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.superblock = try fixtures.superblock(gpa, env.storage, .{});
             defer env.superblock.deinit(gpa);
 
-            env.grid = try Grid.init(gpa, .{
-                .superblock = &env.superblock,
-                .trace = &env.trace,
-                .missing_blocks_max = 0,
-                .missing_tables_max = 0,
+            env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = Grid

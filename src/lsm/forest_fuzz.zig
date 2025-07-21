@@ -126,11 +126,7 @@ const Environment = struct {
 
         env.superblock = try fixtures.superblock(gpa, env.storage, .{});
 
-        env.grid = try Grid.init(gpa, .{
-            .superblock = &env.superblock,
-            .trace = &env.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
+        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = Forest
                 .compaction_blocks_released_per_pipeline_max() +
                 Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),

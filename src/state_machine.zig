@@ -5109,13 +5109,7 @@ pub const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
 
-        ctx.grid = try Grid.init(allocator, .{
-            .superblock = &ctx.superblock,
-            .trace = &ctx.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
-            .blocks_released_prior_checkpoint_durability_max = 0,
-        });
+        ctx.grid = try fixtures.grid(allocator, &ctx.trace, &ctx.superblock, .{});
         errdefer ctx.grid.deinit(allocator);
 
         try ctx.state_machine.init(allocator, &ctx.grid, .{
