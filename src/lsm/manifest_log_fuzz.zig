@@ -73,8 +73,7 @@ fn run_fuzz(
     defer env.deinit();
 
     {
-        env.open_superblock();
-        env.wait(&env.manifest_log);
+        fixtures.superblock_open(&env.superblock);
 
         env.open_grid();
         env.wait(&env.manifest_log);
@@ -372,17 +371,6 @@ const Environment = struct {
         }
     }
 
-    fn open_superblock(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.manifest_log.superblock.open(open_superblock_callback, &env.superblock_context);
-    }
-
-    fn open_superblock_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", context);
-        env.pending -= 1;
-    }
-
     fn open_grid(env: *Environment) void {
         assert(env.pending == 0);
         env.pending += 1;
@@ -548,9 +536,7 @@ const Environment = struct {
             try test_manifest_log.init(env.gpa, test_grid, &manifest_log_compaction_pace);
         }
 
-        env.pending += 1;
-        test_superblock.open(verify_superblock_open_callback, &env.superblock_context);
-        env.wait(test_manifest_log);
+        fixtures.superblock_open(test_superblock);
 
         assert(env.manifest_log_opening == null);
         env.manifest_log_opening = try env.manifest_log_model.tables.clone();
@@ -570,11 +556,6 @@ const Environment = struct {
             &env.manifest_log.table_extents,
             &test_manifest_log.table_extents,
         ));
-    }
-
-    fn verify_superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.pending -= 1;
     }
 
     fn verify_manifest_open_event(

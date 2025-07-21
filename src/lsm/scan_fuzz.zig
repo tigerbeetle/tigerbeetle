@@ -471,7 +471,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_open,
         free_set_open,
         forest_init,
         forest_open,
@@ -564,7 +563,7 @@ const Environment = struct {
         try env.init(gpa, storage, prng);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .superblock_open);
+        env.change_state(.init, .free_set_open);
 
         try env.open(gpa);
         defer env.close(gpa);
@@ -781,8 +780,7 @@ const Environment = struct {
     }
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
-        env.superblock.open(superblock_open_callback, &env.superblock_context);
-        try env.tick_until_state_change(.superblock_open, .free_set_open);
+        fixtures.superblock_open(&env.superblock);
 
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
@@ -865,11 +863,6 @@ const Environment = struct {
 
             env.checkpoint_op = null;
         }
-    }
-
-    fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_open, .free_set_open);
     }
 
     fn grid_open_callback(grid: *Grid) void {

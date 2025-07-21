@@ -117,7 +117,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         const State = enum {
             init,
-            superblock_open,
             free_set_open,
             tree_init,
             manifest_log_open,
@@ -236,10 +235,9 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             gpa: std.mem.Allocator,
             fuzz_ops: []const FuzzOp,
         ) !void {
-            env.change_state(.init, .superblock_open);
-            env.superblock.open(superblock_open_callback, &env.superblock_context);
+            env.change_state(.init, .free_set_open);
+            fixtures.superblock_open(&env.superblock);
 
-            env.tick_until_state_change(.superblock_open, .free_set_open);
             env.grid.open(grid_open_callback);
 
             env.tick_until_state_change(.free_set_open, .tree_init);
@@ -264,11 +262,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree.open_complete();
 
             try env.apply(gpa, fuzz_ops);
-        }
-
-        fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-            env.change_state(.superblock_open, .free_set_open);
         }
 
         fn grid_open_callback(grid: *Grid) void {

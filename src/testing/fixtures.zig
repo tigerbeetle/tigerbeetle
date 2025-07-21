@@ -151,6 +151,31 @@ pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {
     });
 }
 
+pub fn superblock_open(sb: *SuperBlock) void {
+    assert(sb.storage.reads.count() == 0);
+    assert(sb.storage.writes.count() == 0);
+    const Context = struct {
+        superblock_context: SuperBlock.Context = undefined,
+        done: bool = false,
+
+        fn callback(superblock_context: *SuperBlock.Context) void {
+            const self: *@This() = @fieldParentPtr("superblock_context", superblock_context);
+            assert(!self.done);
+            self.done = true;
+        }
+    };
+    var context: Context = .{};
+
+    sb.open(Context.callback, &context.superblock_context);
+    for (0..10_000) |_| {
+        if (context.done) break;
+        sb.storage.run();
+    } else @panic("superblock open loop stuck");
+
+    assert(sb.storage.reads.count() == 0);
+    assert(sb.storage.writes.count() == 0);
+}
+
 pub fn grid(gpa: std.mem.Allocator, trace: *Tracer, sb: *SuperBlock, options: struct {
     missing_blocks_max: u64 = 0,
     missing_tables_max: u64 = 0,

@@ -144,7 +144,6 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     while (env.pending.count() > 0) env.superblock.storage.run();
 
     env.open();
-    while (env.pending.count() > 0) env.superblock.storage.run();
 
     try env.verify();
     assert(env.pending.count() == 0);
@@ -320,15 +319,7 @@ const Environment = struct {
 
     fn open(env: *Environment) void {
         assert(env.pending.count() == 0);
-        env.pending.insert(.open);
-        env.superblock.open(open_callback, &env.context_open);
-    }
-
-    fn open_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("context_open", context);
-        assert(env.pending.contains(.open));
-        env.pending.remove(.open);
-
+        fixtures.superblock_open(env.superblock);
         assert(env.superblock.working.sequence == 1);
         assert(env.superblock.working.vsr_state.replica_id == env.members[replica]);
         assert(env.superblock.working.vsr_state.replica_count == replica_count);
