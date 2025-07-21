@@ -19,7 +19,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const TimeOS = vsr.time.TimeOS;
 const Tracer = vsr.trace.Tracer;
-pub const Storage = vsr.storage.StorageType(IO, Tracer);
+pub const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOFType(IO);
 
 const MessageBus = vsr.message_bus.MessageBusReplica;

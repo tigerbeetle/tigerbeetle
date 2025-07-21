@@ -690,8 +690,7 @@ const AmqpContext = struct {
 const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
-    const Tracer = vsr.trace.Tracer;
-    const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
+    const Storage = vsr.storage.StorageType(vsr.io.IO);
     const StateMachine = vsr.state_machine.StateMachineType(
         Storage,
         vsr.constants.state_machine_config,

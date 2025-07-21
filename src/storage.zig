@@ -7,8 +7,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const QueueType = vsr.queue.QueueType;
 const constants = vsr.constants;
+const Tracer = vsr.trace.Tracer;
 
-pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
+pub fn StorageType(comptime IO: type) type {
     return struct {
         const Storage = @This();
 
@@ -92,8 +93,6 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         };
 
         pub const NextTickSource = enum { lsm, vsr };
-
-        pub const Tracer = _Tracer;
 
         io: *IO,
         fd: IO.fd_t,

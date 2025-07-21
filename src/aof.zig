@@ -10,7 +10,6 @@ const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
-const Tracer = vsr.trace.Tracer;
 
 const log = std.log.scoped(.aof);
 
@@ -295,7 +294,7 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub const ReplayClient = struct {
-            const Storage = vsr.storage.StorageType(IO, Tracer);
+            const Storage = vsr.storage.StorageType(IO);
             const StateMachine = vsr.state_machine.StateMachineType(
                 Storage,
                 constants.state_machine_config,

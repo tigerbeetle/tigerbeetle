@@ -20,6 +20,7 @@ const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableInfo = schema.ManifestNode.TableInfo;
+const Tracer = vsr.trace.Tracer;
 
 pub fn TreeTableInfoType(comptime Table: type) type {
     const Key = Table.Key;
@@ -191,14 +192,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        tracer: *Storage.Tracer,
+        tracer: *Tracer,
 
         pub fn init(
             manifest: *Manifest,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             config: TreeConfig,
-            tracer: *Storage.Tracer,
+            tracer: *Tracer,
         ) !void {
             manifest.* = .{
                 .node_pool = node_pool,
