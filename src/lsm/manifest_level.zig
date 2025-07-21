@@ -537,19 +537,30 @@ pub fn ManifestLevelType(
             return adjusted;
         }
 
-        /// The function is only used for verification; it is not performance-critical.
-        pub fn contains(level: ManifestLevel, table: *const TableInfo) bool {
-            comptime assert(constants.verify);
-            var level_tables = level.iterator(.visible, &.{
-                table.snapshot_min,
-            }, .ascending, KeyRange{
-                .key_min = table.key_min,
-                .key_max = table.key_max,
-            });
-            while (level_tables.next()) |level_table| {
-                if (level_table.equal(table)) return true;
+        /// Returns a table which matches the given table *except possibly the snapshot_max*.
+        fn find(level: ManifestLevel, table: *const TableInfo) ?TableInfoReference {
+            const table_key =
+                KeyMaxSnapshotMin{ .key_max = table.key_max, .snapshot_min = table.snapshot_min };
+            const table_cursor = level.tables.search(table_key.key_from_value());
+            var level_tables = level.tables.iterator_from_cursor(table_cursor, .ascending);
+            const level_table = level_tables.next() orelse return null;
+            if (level_table.address == table.address and
+                level_table.checksum == table.checksum)
+            {
+                maybe(level_table.snapshot_max != table.snapshot_max);
+                return .{ .table_info = level_table, .generation = level.generation };
+            } else {
+                return null;
             }
-            return false;
+        }
+
+        /// Returns whether the ManifestLevel contains the *exact* table.
+        pub fn contains(level: ManifestLevel, table: *const TableInfo) bool {
+            assert(constants.verify); // Currently only used for testing.
+            const table_found = level.find(table) orelse return false;
+            const table_exact = table.snapshot_max == table_found.table_info.snapshot_max;
+            assert(table_exact == table.equal(table_found.table_info));
+            return table_exact;
         }
 
         /// Given two levels (where A is the level on which this function
