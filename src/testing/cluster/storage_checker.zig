@@ -74,7 +74,7 @@ pub const StorageChecker = struct {
         var free_set = try vsr.FreeSet.init(
             allocator,
             .{
-                .blocks_count = Storage.grid_blocks_max,
+                .grid_size_limit = Storage.grid_blocks_max * constants.block_size,
                 .blocks_released_prior_checkpoint_durability_max = 0,
             },
         );

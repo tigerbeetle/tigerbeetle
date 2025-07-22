@@ -328,8 +328,7 @@ const Environment = struct {
             .missing_tables_max = 0,
             // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
             // FreeSet.blocks_released_prior_checkpoint_durability.
-            .blocks_released_prior_checkpoint_durability_max = Grid
-                .free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
+            .blocks_released_prior_checkpoint_durability_max = 0,
         });
         errdefer env.grid.deinit(gpa);
 

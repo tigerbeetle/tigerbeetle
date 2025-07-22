@@ -140,8 +140,7 @@ const Environment = struct {
             .missing_blocks_max = 0,
             .missing_tables_max = 0,
             .blocks_released_prior_checkpoint_durability_max = Forest
-                .compaction_blocks_released_per_pipeline_max() +
-                Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
+                .compaction_blocks_released_per_pipeline_max(),
         });
 
         env.scan_lookup_buffer = try gpa.alloc(

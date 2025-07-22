@@ -5,10 +5,10 @@ const mem = std.mem;
 const DynamicBitSetUnmanaged = std.bit_set.DynamicBitSetUnmanaged;
 const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 
-const constants = @import("../constants.zig");
-
-const ewah = @import("../ewah.zig").ewah(FreeSet.Word);
-const stdx = @import("../stdx.zig");
+const vsr = @import("../vsr.zig");
+const stdx = vsr.stdx;
+const ewah = vsr.ewah(FreeSet.Word);
+const constants = vsr.constants;
 
 const div_ceil = stdx.div_ceil;
 const maybe = stdx.maybe;
@@ -64,7 +64,7 @@ pub const FreeSet = struct {
     index: DynamicBitSetUnmanaged,
 
     /// The maximum number of blocks the free set is allowed to reserve (driven by --limit-storage).
-    blocks_count: u64,
+    blocks_count_limit: u64,
 
     /// Set bits indicate acquired blocks; unset bits indicate free blocks.
     blocks_acquired: DynamicBitSetUnmanaged,
@@ -112,10 +112,10 @@ pub const FreeSet = struct {
     }
 
     pub fn init(allocator: mem.Allocator, options: struct {
-        blocks_count: usize,
+        grid_size_limit: usize,
         blocks_released_prior_checkpoint_durability_max: usize,
     }) !FreeSet {
-        const blocks_count = FreeSet.block_count_max(options.blocks_count);
+        const blocks_count = block_count_max(options.grid_size_limit);
         assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(Word) == 0);
 
@@ -133,7 +133,12 @@ pub const FreeSet = struct {
         var released_prior_checkpoint_durability: BlocksReleasedPriorCheckpointDurability = .{};
         try released_prior_checkpoint_durability.ensureTotalCapacity(
             allocator,
-            options.blocks_released_prior_checkpoint_durability_max,
+            options.blocks_released_prior_checkpoint_durability_max +
+                // `blocks_released` and `blocks_acquired` encoded in the CheckpointTrailer are
+                // released at checkpoint (see `mark_checkpoint_not_durable` in grid.zig).
+                2 * vsr.checkpoint_trailer.block_count_for_trailer_size(
+                    ewah.encode_size_max(blocks_count),
+                ),
         );
         errdefer released_prior_checkpoint_durability.deinit();
 
@@ -144,7 +149,7 @@ pub const FreeSet = struct {
 
         return FreeSet{
             .index = index,
-            .blocks_count = options.blocks_count,
+            .blocks_count_limit = @divFloor(options.grid_size_limit, constants.block_size),
             .blocks_acquired = blocks_acquired,
             .blocks_released = blocks_released,
             .blocks_released_prior_checkpoint_durability = released_prior_checkpoint_durability,
@@ -171,7 +176,7 @@ pub const FreeSet = struct {
 
         set.* = .{
             .index = set.index,
-            .blocks_count = set.blocks_count,
+            .blocks_count_limit = set.blocks_count_limit,
             .blocks_acquired = set.blocks_acquired,
             .blocks_released = set.blocks_released,
             .blocks_released_prior_checkpoint_durability = set
@@ -222,7 +227,7 @@ pub const FreeSet = struct {
     pub fn init_empty(allocator: mem.Allocator, blocks_count: usize) !FreeSet {
         comptime assert(constants.verify);
         var set = try init(allocator, .{
-            .blocks_count = blocks_count,
+            .grid_size_limit = blocks_count * constants.block_size,
             .blocks_released_prior_checkpoint_durability_max = 0,
         });
         errdefer set.deinit(allocator);
@@ -236,7 +241,7 @@ pub const FreeSet = struct {
     pub fn open_empty(allocator: mem.Allocator, blocks_count: usize) !FreeSet {
         comptime assert(constants.verify);
         var set = try init(allocator, .{
-            .blocks_count = blocks_count,
+            .grid_size_limit = blocks_count * constants.block_size,
             .blocks_released_prior_checkpoint_durability_max = 0,
         });
         errdefer set.deinit(allocator);
@@ -363,7 +368,7 @@ pub const FreeSet = struct {
 
             // The free block from the `blocks_acquired` bit set may be past the total number of
             // blocks that this free set is allowed to acquire (see `block_count_max`).
-            if (block > set.blocks_count) return null;
+            if (block > set.blocks_count_limit) return null;
         }
         const block_base = set.reservation_blocks;
         const block_count = block - set.reservation_blocks;
@@ -617,7 +622,11 @@ pub const FreeSet = struct {
     }
 
     /// Decodes the compressed bitset chunks in `source_chunks` into `target_bitset`.
+<<<<<<< HEAD
     /// Panics if the `source_chunks` encoding is invalid.
+=======
+    /// Panic if the `source_chunks` encoding is invalid.
+>>>>>>> f6d5ccc7f (free_set: refactor overloaded usage of blocks_count_max)
     fn decode(
         set: *FreeSet,
         target_bitset: FreeSet.BitsetKind,
@@ -673,8 +682,9 @@ pub const FreeSet = struct {
     /// Returns the number of blocks that the free set can physically reference via the acquired
     /// and released bitsets. Logically, the limit on the number of blocks that can be acquired by
     /// the free set is imposed by --limit-storage.
-    pub fn block_count_max(blocks_count: usize) usize {
-        return stdx.div_ceil(blocks_count, shard_bits) * shard_bits;
+    pub fn block_count_max(grid_size_limit: usize) usize {
+        const block_count_limit = @divFloor(grid_size_limit, constants.block_size);
+        return stdx.div_ceil(block_count_limit, shard_bits) * shard_bits;
     }
 
     /// Returns the maximum number of bytes needed for encoding the acquired/released bitset.

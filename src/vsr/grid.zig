@@ -220,7 +220,7 @@ pub fn GridType(comptime Storage: type) type {
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
             var free_set = try FreeSet.init(allocator, .{
-                .blocks_count = vsr.block_count_max(options.superblock.storage_size_limit),
+                .grid_size_limit = options.superblock.grid_size_limit(),
                 .blocks_released_prior_checkpoint_durability_max = options
                     .blocks_released_prior_checkpoint_durability_max,
             });
@@ -1325,16 +1325,6 @@ pub fn GridType(comptime Storage: type) type {
                 );
                 return request_faults_count + request_repairs_count;
             }
-        }
-
-        pub fn free_set_checkpoints_blocks_max(storage_size_limit: u64) usize {
-            const ewah = @import("../ewah.zig").ewah(FreeSet.Word);
-
-            const blocks_count_storage_limit = vsr.block_count_max(storage_size_limit);
-            const blocks_count_free_set = FreeSet.block_count_max(blocks_count_storage_limit);
-
-            const free_set_encoded_size = ewah.encode_size_max(blocks_count_free_set);
-            return 2 * CheckpointTrailer.block_count_for_trailer_size(free_set_encoded_size);
         }
 
         fn block_offset(address: u64) u64 {

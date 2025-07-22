@@ -1214,8 +1214,7 @@ pub fn ReplicaType(
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest
                     .compaction_blocks_released_per_pipeline_max() +
-                    Grid.free_set_checkpoints_blocks_max(self.superblock.storage_size_limit) +
-                    CheckpointTrailer.block_count_for_trailer_size(ClientSessions.encode_size),
+                    vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size),
             });
             errdefer self.grid.deinit(allocator);
 

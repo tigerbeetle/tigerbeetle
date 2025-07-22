@@ -1150,6 +1150,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.acquire(context);
         }
 
+        pub fn grid_size_limit(superblock: *const SuperBlock) usize {
+            return superblock.storage_size_limit - data_file_size_min;
+        }
+
         pub fn updating(superblock: *const SuperBlock, caller: Caller) bool {
             assert(superblock.opened);
 
