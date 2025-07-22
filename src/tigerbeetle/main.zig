@@ -185,6 +185,7 @@ const Command = struct {
     data_file_path: []const u8,
     tracer: Tracer,
     trace_file: ?std.fs.File,
+    trace_writer: ?std.fs.File.Writer,
 
     fn init(
         command: *Command,
@@ -211,10 +212,10 @@ const Command = struct {
             null;
         errdefer if (command.trace_file) |file| file.close();
 
-        const trace_writer = if (command.trace_file) |file| file.writer() else null;
+        command.trace_writer = if (command.trace_file) |file| file.writer() else null;
 
         command.tracer = try Tracer.init(allocator, time, .unknown, .{
-            .writer = if (trace_writer) |writer| writer.any() else null,
+            .writer = if (command.trace_writer != null) command.trace_writer.?.any() else null,
             .statsd_options = if (options.statsd_address) |statsd_address| .{ .udp = .{
                 .io = &command.io,
                 .address = statsd_address,
