@@ -1084,6 +1084,8 @@ pub fn ReplicaType(
                     .refill_max = repair_messages_budget_journal_refill,
                 },
             );
+            errdefer self.repair_messages_budget_journal.deinit(allocator);
+
             assert(self.repair_messages_budget_journal.available ==
                 self.repair_messages_budget_journal.capacity);
 

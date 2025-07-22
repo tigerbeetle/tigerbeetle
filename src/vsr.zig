@@ -1718,7 +1718,7 @@ pub const RepairBudgetJournal = struct {
     refill_max: u32,
 
     // Tracks the headers for prepares requested by inflight RequestPrepare messages.
-    requested_prepares: PreparesRequested,
+    requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
     // Tracks the number of inflight RequestHeaders messages.
     requested_headers: u32,
     // Tracks the view for an inflight RequestStartView message.
@@ -1729,20 +1729,23 @@ pub const RepairBudgetJournal = struct {
         refill_max: u32,
     }) !RepairBudgetJournal {
         assert(options.refill_max <= options.capacity);
-        const prepares_requested = try PreparesRequested.init(
-            gpa,
-            options.capacity,
-        );
-        errdefer prepares_requested.deinit(gpa);
+
+        var requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
+        try requested_prepares.ensureTotalCapacity(gpa, options.capacity);
+        errdefer requested_prepares.deinit();
 
         return RepairBudgetJournal{
             .capacity = options.capacity,
             .available = options.capacity,
             .refill_max = options.refill_max,
-            .requested_prepares = prepares_requested,
+            .requested_prepares = requested_prepares,
             .requested_headers = 0,
             .requested_start_view = null,
         };
+    }
+
+    pub fn deinit(budget: *RepairBudgetJournal, gpa: std.mem.Allocator) void {
+        budget.requested_prepares.deinit(gpa);
     }
 
     pub fn decrement(budget: *RepairBudgetJournal, repair_type: union(enum) {
@@ -1751,10 +1754,10 @@ pub const RepairBudgetJournal = struct {
         start_view: u32,
     }) bool {
         assert(budget.capacity > 0);
-        assert(budget.consistent());
-        defer assert(budget.consistent());
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
 
-        if (budget.available < 1) return false;
+        if (budget.available == 0) return false;
 
         switch (repair_type) {
             .headers => budget.requested_headers += 1,
@@ -1766,7 +1769,8 @@ pub const RepairBudgetJournal = struct {
                 } else return false;
             },
             .prepare => |header| {
-                if (budget.requested_prepares.add(header.*) == .already_present) {
+                const gop = budget.requested_prepares.getOrPutAssumeCapacity(header.*);
+                if (gop.found_existing) {
                     return false;
                 }
             },
@@ -1782,8 +1786,8 @@ pub const RepairBudgetJournal = struct {
         headers,
         start_view: u32,
     }) void {
-        assert(budget.consistent());
-        defer assert(budget.consistent());
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
 
         switch (repair_type) {
             .headers => budget.requested_headers -|= 1,
@@ -1795,7 +1799,7 @@ pub const RepairBudgetJournal = struct {
             },
             .prepare => |header| {
                 // Increment budget iff we had requested this prepare.
-                if (budget.requested_prepares.remove(header.*) == .not_present) {
+                if (!budget.requested_prepares.swapRemove(header.*)) {
                     return;
                 }
             },
@@ -1803,8 +1807,8 @@ pub const RepairBudgetJournal = struct {
 
         // Artificially cap budget availability, as its tricky to precisely track which headers
         // we requested for repair and which ones we received, leading to spurious budget updates.
-        const requested_start_views: u32 = if (budget.requested_start_view != null) 1 else 0;
-        const requested_prepares: u32 = budget.requested_prepares.count();
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
         const requested_headers: u32 = budget.requested_headers;
         const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
 
@@ -1813,69 +1817,25 @@ pub const RepairBudgetJournal = struct {
 
     pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
         assert(amount <= budget.refill_max);
-        assert(budget.consistent());
-        defer assert(budget.consistent());
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
 
         budget.available = @min((budget.available + amount), budget.capacity);
 
-        budget.requested_prepares.reset();
+        budget.requested_prepares.clearRetainingCapacity();
         budget.requested_headers = 0;
         budget.requested_start_view = null;
     }
 
-    pub fn deinit(budget: *RepairBudgetJournal, gpa: std.mem.Allocator) void {
-        budget.requested_prepares.deinit(gpa);
-    }
-
-    fn consistent(budget: *RepairBudgetJournal) bool {
-        const requested_start_views: u32 = if (budget.requested_start_view != null) 1 else 0;
-        const requested_prepares: u32 = budget.requested_prepares.count();
+    fn assert_internally_consistent(budget: *const RepairBudgetJournal) void {
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
         const requested_headers: u32 = budget.requested_headers;
         const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
 
-        return budget.available <= budget.capacity and
-            (budget.capacity - budget.available >= budget_spent_total);
+        assert(budget.available <= budget.capacity);
+        assert(budget.capacity - budget.available >= budget_spent_total);
     }
-
-    const PreparesRequested = struct {
-        set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
-
-        pub fn init(gpa: std.mem.Allocator, capacity: u32) !PreparesRequested {
-            var prepares_requested_set: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
-            try prepares_requested_set.ensureTotalCapacity(gpa, capacity);
-            errdefer prepares_requested_set.deinit();
-
-            return .{ .set = prepares_requested_set };
-        }
-
-        pub fn deinit(prepares_requested: *PreparesRequested, gpa: std.mem.Allocator) void {
-            prepares_requested.set.deinit(gpa);
-        }
-
-        pub fn add(
-            prepares_requested: *PreparesRequested,
-            header: Header.Prepare,
-        ) enum { added, already_present } {
-            const header_added = prepares_requested.set.getOrPutAssumeCapacity(header);
-            return if (header_added.found_existing) .already_present else .added;
-        }
-
-        pub fn remove(
-            prepares_requested: *PreparesRequested,
-            header: Header.Prepare,
-        ) enum { removed, not_present } {
-            const header_removed = prepares_requested.set.swapRemove(header);
-            return if (header_removed) .removed else .not_present;
-        }
-
-        pub fn reset(prepares_requested: *PreparesRequested) void {
-            prepares_requested.set.clearRetainingCapacity();
-        }
-
-        pub fn count(prepares_requested: *PreparesRequested) u32 {
-            return @as(u32, @intCast(prepares_requested.set.count()));
-        }
-    };
 };
 
 pub const RepairBudgetGrid = struct {
