@@ -135,7 +135,7 @@ pub fn storage_format(
         .release = format_options.release,
         .view = null,
     });
-    for (0..10_000) |_| {
+    for (0..1_000) |_| {
         if (context.done) break;
         storage.run();
     } else @panic("superblock format loop stuck");
@@ -168,26 +168,53 @@ pub fn init_grid(gpa: std.mem.Allocator, trace: *Tracer, superblock: *SuperBlock
 }
 
 pub fn open_superblock(superblock: *SuperBlock) void {
-    assert(superblock.storage.reads.count() == 0);
-    assert(superblock.storage.writes.count() == 0);
+    const storage: *Storage = superblock.storage;
+    assert(storage.reads.count() == 0);
+    assert(storage.writes.count() == 0);
+    defer assert(storage.reads.count() == 0);
+    defer assert(storage.writes.count() == 0);
+
     const Context = struct {
         superblock_context: SuperBlock.Context = undefined,
-        done: bool = false,
+        pending: bool = false,
 
         fn callback(superblock_context: *SuperBlock.Context) void {
             const self: *@This() = @fieldParentPtr("superblock_context", superblock_context);
-            assert(!self.done);
-            self.done = true;
+            assert(!self.pending);
+            self.pending = true;
         }
     };
     var context: Context = .{};
 
+    context.pending = true;
     superblock.open(Context.callback, &context.superblock_context);
-    for (0..10_000) |_| {
-        if (context.done) break;
-        superblock.storage.run();
-    } else @panic("superblock open loop stuck");
+    for (0..1_000) |_| {
+        storage.run();
+        if (!context.pending) break;
+    } else @panic("open superblock stuck");
+}
 
-    assert(superblock.storage.reads.count() == 0);
-    assert(superblock.storage.writes.count() == 0);
+pub fn open_grid(grid: *Grid) void {
+    const storage: *Storage = grid.superblock.storage;
+    assert(storage.reads.count() == 0);
+    assert(storage.writes.count() == 0);
+    defer assert(storage.reads.count() == 0);
+    defer assert(storage.writes.count() == 0);
+
+    const Context = struct {
+        pending: bool = false,
+        var global: @This() = .{};
+        fn callback(_: *Grid) void {
+            assert(@This().global.pending);
+            @This().global.pending = false;
+        }
+    };
+
+    assert(!Context.global.pending);
+    Context.global.pending = true;
+    grid.open(Context.callback);
+    for (0..1_000) |_| {
+        storage.run();
+        if (!Context.global.pending) break;
+    } else @panic("open grid stuck");
 }

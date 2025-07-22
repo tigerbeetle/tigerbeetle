@@ -471,7 +471,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        free_set_open,
         forest_init,
         forest_open,
         fuzzing,
@@ -562,8 +561,6 @@ const Environment = struct {
         var env: Environment = undefined;
         try env.init(gpa, storage, prng);
         defer env.deinit(gpa);
-
-        env.change_state(.init, .free_set_open);
 
         try env.open(gpa);
         defer env.close(gpa);
@@ -781,13 +778,12 @@ const Environment = struct {
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
         fixtures.open_superblock(&env.superblock);
-
-        env.grid.open(grid_open_callback);
-        try env.tick_until_state_change(.free_set_open, .forest_init);
+        fixtures.open_grid(&env.grid);
 
         // The first checkpoint is trivially durable.
         env.grid.free_set.mark_checkpoint_durable();
 
+        env.change_state(.init, .forest_init);
         try env.forest.init(gpa, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,

@@ -74,9 +74,7 @@ fn run_fuzz(
 
     {
         fixtures.open_superblock(&env.superblock);
-
-        env.open_grid();
-        env.wait(&env.manifest_log);
+        fixtures.open_grid(&env.grid);
 
         // The first checkpoint is trivially durable.
         env.grid.free_set.mark_checkpoint_durable();
@@ -369,17 +367,6 @@ const Environment = struct {
         while (env.pending > 0) {
             manifest_log.superblock.storage.run();
         }
-    }
-
-    fn open_grid(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.grid.open(open_grid_callback);
-    }
-
-    fn open_grid_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.pending -= 1;
     }
 
     fn open(env: *Environment) void {

@@ -114,7 +114,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         const State = enum {
             init,
-            free_set_open,
             tree_init,
             manifest_log_open,
             fuzzing,
@@ -232,13 +231,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             gpa: std.mem.Allocator,
             fuzz_ops: []const FuzzOp,
         ) !void {
-            env.change_state(.init, .free_set_open);
             fixtures.open_superblock(&env.superblock);
+            fixtures.open_grid(&env.grid);
 
-            env.grid.open(grid_open_callback);
-
-            env.tick_until_state_change(.free_set_open, .tree_init);
-
+            env.change_state(.init, .tree_init);
             // The first checkpoint is trivially durable.
             env.grid.free_set.mark_checkpoint_durable();
 

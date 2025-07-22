@@ -95,7 +95,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        free_set_open,
         forest_init,
         forest_open,
         fuzzing,
@@ -154,7 +153,6 @@ const Environment = struct {
         try env.init(gpa, storage);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .free_set_open);
         try env.open(gpa);
         defer env.close(gpa);
 
@@ -179,10 +177,9 @@ const Environment = struct {
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
         fixtures.open_superblock(&env.superblock);
+        fixtures.open_grid(&env.grid);
 
-        env.grid.open(grid_open_callback);
-        try env.tick_until_state_change(.free_set_open, .forest_init);
-
+        env.change_state(.init, .forest_init);
         try env.forest.init(gpa, &env.grid, .{
             // TODO Test that the same sequence of events applied to forests with different
             // compaction_blocks result in identical grids.
@@ -221,11 +218,6 @@ const Environment = struct {
 
     fn close(env: *Environment, gpa: std.mem.Allocator) void {
         env.forest.deinit(gpa);
-    }
-
-    fn grid_open_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.change_state(.free_set_open, .forest_init);
     }
 
     fn forest_open_callback(forest: *Forest) void {
@@ -653,7 +645,6 @@ const Environment = struct {
                 env.state = .init;
                 try env.init(gpa, env.storage);
 
-                env.change_state(.init, .free_set_open);
                 try env.open(gpa);
 
                 // TODO: currently this checks that everything added to the LSM after checkpoint
