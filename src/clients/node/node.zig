@@ -13,8 +13,7 @@ const AccountBalance = tb.AccountBalance;
 const QueryFilter = tb.QueryFilter;
 
 const vsr = @import("vsr");
-const Tracer = vsr.trace.Tracer;
-const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
+const Storage = vsr.storage.StorageType(vsr.io.IO);
 const StateMachine = vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 const Operation = StateMachine.Operation;
 const constants = vsr.constants;

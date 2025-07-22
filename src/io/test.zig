@@ -289,7 +289,7 @@ test "timeout" {
         stop_time: u64 = 0,
 
         fn run_test() !void {
-            var time_os = TimeOS{};
+            var time_os: TimeOS = .{};
             const timer = time_os.time();
             const start_time = timer.monotonic();
             var self: Context = .{
@@ -357,7 +357,7 @@ test "event" {
             self.event = try self.io.open_event();
             defer self.io.close_event(self.event);
 
-            var time_os = TimeOS{};
+            var time_os: TimeOS = .{};
             const timer = time_os.time();
             const start = timer.monotonic();
 

@@ -31,6 +31,7 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const SyncStage = vsr.SyncStage;
 const ClientSessions = vsr.ClientSessions;
+const Tracer = vsr.trace.Tracer;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));
 
@@ -157,7 +158,6 @@ pub fn ReplicaType(
         const ClientReplies = vsr.ClientRepliesType(Storage);
         const Clock = vsr.Clock;
         const ForestTableIterator = ForestTableIteratorType(Forest);
-        const Tracer = Storage.Tracer;
 
         pub const ReplicateOptions = struct {
             closed_loop: bool = false,
@@ -1412,7 +1412,6 @@ pub fn ReplicaType(
                 .aof = options.aof,
                 .replicate_options = options.replicate_options,
             };
-            options.storage.set_tracer(self.trace);
             self.routing.view_change(self.view);
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++

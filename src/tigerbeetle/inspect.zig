@@ -17,6 +17,8 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
+const Time = vsr.time.Time;
+const Tracer = vsr.trace.Tracer;
 const Storage = @import("main.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlockVersion = vsr.superblock.SuperBlockVersion;
@@ -34,11 +36,11 @@ const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
 
-pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
+pub fn main(allocator: std.mem.Allocator, time: Time, cli_args: *const cli.Command.Inspect) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
 
-    const inspect_result = main_inspect(allocator, cli_args, stdout_writer.any());
+    const inspect_result = main_inspect(allocator, time, cli_args, stdout_writer.any());
     const flush_result = stdout_buffer.flush();
     try inspect_result;
     try flush_result;
@@ -46,6 +48,7 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
 
 fn main_inspect(
     allocator: std.mem.Allocator,
+    time: Time,
     cli_args: *const cli.Command.Inspect,
     stdout: std.io.AnyWriter,
 ) !void {
@@ -56,7 +59,7 @@ fn main_inspect(
         .data_file => |data_file| data_file,
     };
 
-    var inspector = try Inspector.create(allocator, data_file.path);
+    const inspector = try Inspector.create(allocator, time, data_file.path);
     defer inspector.destroy();
 
     switch (data_file.query) {
@@ -402,6 +405,7 @@ const Inspector = struct {
     dir_fd: std.posix.fd_t,
     fd: std.posix.fd_t,
     io: vsr.io.IO,
+    tracer: Tracer,
     storage: Storage,
 
     superblock_buffer: []align(constants.sector_size) u8,
@@ -410,7 +414,7 @@ const Inspector = struct {
     busy: bool = false,
     read: Storage.Read = undefined,
 
-    fn create(allocator: std.mem.Allocator, path: []const u8) !*Inspector {
+    fn create(allocator: std.mem.Allocator, time: Time, path: []const u8) !*Inspector {
         var inspector = try allocator.create(Inspector);
         errdefer allocator.destroy(inspector);
 
@@ -419,6 +423,7 @@ const Inspector = struct {
             .dir_fd = undefined,
             .fd = undefined,
             .io = undefined,
+            .tracer = undefined,
             .storage = undefined,
             .superblock_buffer = undefined,
             .superblock_headers = undefined,
@@ -441,7 +446,10 @@ const Inspector = struct {
         );
         errdefer std.posix.close(inspector.fd);
 
-        inspector.storage = try Storage.init(&inspector.io, inspector.fd);
+        inspector.tracer = try Tracer.init(allocator, time, .unknown, .{});
+        errdefer inspector.tracer.deinit(allocator);
+
+        inspector.storage = try Storage.init(&inspector.io, &inspector.tracer, inspector.fd);
         errdefer inspector.storage.deinit();
 
         inspector.superblock_buffer = try allocator.alignedAlloc(
@@ -479,6 +487,7 @@ const Inspector = struct {
     fn destroy(inspector: *Inspector) void {
         inspector.allocator.free(inspector.superblock_buffer);
         inspector.storage.deinit();
+        inspector.tracer.deinit(inspector.allocator);
         inspector.io.deinit();
         std.posix.close(inspector.fd);
         std.posix.close(inspector.dir_fd);
@@ -495,7 +504,7 @@ const Inspector = struct {
     }
 
     fn inspector_read_callback(read: *Storage.Read) void {
-        const inspector: *Inspector = @fieldParentPtr("read", read);
+        const inspector: *Inspector = @alignCast(@fieldParentPtr("read", read));
         assert(inspector.busy);
 
         inspector.busy = false;

@@ -372,11 +372,6 @@ pub const Storage = struct {
         storage.tick();
     }
 
-    pub fn set_tracer(storage: *Storage, tracer: *Tracer) void {
-        _ = storage;
-        _ = tracer;
-    }
-
     pub fn tick(storage: *Storage) void {
         storage.ticks += 1;
     }

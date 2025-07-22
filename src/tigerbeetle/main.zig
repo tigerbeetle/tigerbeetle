@@ -19,7 +19,7 @@ const IO = vsr.io.IO;
 const Time = vsr.time.Time;
 const TimeOS = vsr.time.TimeOS;
 const Tracer = vsr.trace.Tracer;
-pub const Storage = vsr.storage.StorageType(IO, Tracer);
+pub const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOFType(IO);
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
@@ -66,7 +66,7 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var time_os = TimeOS{};
+    var time_os: TimeOS = .{};
     const time = time_os.time();
 
     var arg_iterator = try std.process.argsWithAllocator(allocator);
@@ -84,7 +84,7 @@ pub fn main() !void {
     }
 
     switch (command) {
-        .format => |*args| try Command.format(allocator, args, .{
+        .format => |*args| try Command.format(allocator, time, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
@@ -96,7 +96,7 @@ pub fn main() !void {
         .version => |*args| try Command.version(allocator, args.verbose),
         .repl => |*args| try Command.repl(allocator, time, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, time, args),
-        .inspect => |*args| inspect.main(allocator, args) catch |err| {
+        .inspect => |*args| inspect.main(allocator, time, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
         },
@@ -183,20 +183,45 @@ const Command = struct {
     storage: Storage,
     self_exe_path: [:0]const u8,
     data_file_path: []const u8,
+    tracer: Tracer,
+    trace_file: ?std.fs.File,
+    trace_writer: ?std.fs.File.Writer,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
+        time: Time,
         path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
+            trace_path: ?[]const u8,
+            statsd_address: ?std.net.Address,
         },
     ) !void {
         // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
         // is not available) there won't be a dangling file.
         command.io = try IO.init(128, 0);
         errdefer command.io.deinit();
+
+        command.trace_file = if (options.trace_path) |trace_path|
+            std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
+                std.debug.panic("error creating trace file: {}", .{err});
+            }
+        else
+            null;
+        errdefer if (command.trace_file) |file| file.close();
+
+        command.trace_writer = if (command.trace_file) |file| file.writer() else null;
+
+        command.tracer = try Tracer.init(allocator, time, .unknown, .{
+            .writer = if (command.trace_writer != null) command.trace_writer.?.any() else null,
+            .statsd_options = if (options.statsd_address) |statsd_address| .{ .udp = .{
+                .io = &command.io,
+                .address = statsd_address,
+            } } else .log,
+        });
+        errdefer command.tracer.deinit(allocator);
 
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
@@ -221,7 +246,7 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.storage = try Storage.init(&command.io, command.fd);
+        command.storage = try Storage.init(&command.io, &command.tracer, command.fd);
         errdefer command.storage.deinit();
 
         command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
@@ -235,18 +260,23 @@ const Command = struct {
         command.storage.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
+        if (command.trace_file) |file| file.close();
+        command.tracer.deinit(allocator);
         command.io.deinit();
     }
 
     pub fn format(
         allocator: mem.Allocator,
+        time: Time,
         args: *const cli.Command.Format,
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, time, args.path, .{
             .must_create = true,
             .development = args.development,
+            .trace_path = null,
+            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -267,9 +297,11 @@ const Command = struct {
 
     pub fn reformat(allocator: mem.Allocator, time: Time, args: *const cli.Command.Recover) !void {
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, time, args.path, .{
             .must_create = true,
             .development = args.development,
+            .trace_path = null,
+            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -337,9 +369,11 @@ const Command = struct {
         // (Here or in Replica.open()?).
 
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, time, args.path, .{
             .must_create = false,
             .development = args.development,
+            .trace_path = args.trace,
+            .statsd_address = args.statsd,
         });
         defer command.deinit(allocator);
 
@@ -432,25 +466,6 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
-        const trace_file = if (args.trace) |trace_path|
-            std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
-                std.debug.panic("error creating trace file: {}", .{err});
-            }
-        else
-            null;
-        defer if (trace_file) |file| file.close();
-
-        const trace_writer = if (trace_file) |file| file.writer() else null;
-
-        var tracer = try Tracer.init(allocator, time, .unknown, .{
-            .writer = if (trace_writer) |writer| writer.any() else null,
-            .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
-                .io = &command.io,
-                .address = statsd_address,
-            } } else .log,
-        });
-        defer tracer.deinit(allocator);
-
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -483,7 +498,7 @@ const Command = struct {
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer = &tracer,
+            .tracer = &command.tracer,
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
                 .star = args.replicate_star,
