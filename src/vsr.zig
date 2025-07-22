@@ -1712,7 +1712,133 @@ pub const Snapshot = struct {
     }
 };
 
-pub const Budget = struct {
+pub const RepairBudgetJournal = struct {
+    capacity: u32,
+    available: u32,
+    refill_max: u32,
+
+    // Tracks the headers for prepares requested by inflight RequestPrepare messages.
+    requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
+    // Tracks the number of inflight RequestHeaders messages.
+    requested_headers: u32,
+    // Tracks the view for an inflight RequestStartView message.
+    requested_start_view: ?u32,
+
+    pub fn init(gpa: std.mem.Allocator, options: struct {
+        capacity: u32,
+        refill_max: u32,
+    }) !RepairBudgetJournal {
+        assert(options.refill_max <= options.capacity);
+
+        var requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
+        try requested_prepares.ensureTotalCapacity(gpa, options.capacity);
+        errdefer requested_prepares.deinit();
+
+        return RepairBudgetJournal{
+            .capacity = options.capacity,
+            .available = options.capacity,
+            .refill_max = options.refill_max,
+            .requested_prepares = requested_prepares,
+            .requested_headers = 0,
+            .requested_start_view = null,
+        };
+    }
+
+    pub fn deinit(budget: *RepairBudgetJournal, gpa: std.mem.Allocator) void {
+        budget.requested_prepares.deinit(gpa);
+    }
+
+    pub fn decrement(budget: *RepairBudgetJournal, repair_type: union(enum) {
+        prepare: *const Header.Prepare,
+        headers,
+        start_view: u32,
+    }) bool {
+        assert(budget.capacity > 0);
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        if (budget.available == 0) return false;
+
+        switch (repair_type) {
+            .headers => budget.requested_headers += 1,
+            .start_view => |view| {
+                // Decrement budget if there is no other inflight RSV, or if the new view is greater
+                // than the view for the inflight RSV.
+                if (budget.requested_start_view == null or view > budget.requested_start_view.?) {
+                    budget.requested_start_view = view;
+                } else return false;
+            },
+            .prepare => |header| {
+                const gop = budget.requested_prepares.getOrPutAssumeCapacity(header.*);
+                if (gop.found_existing) {
+                    return false;
+                }
+            },
+        }
+
+        budget.available -= 1;
+
+        return true;
+    }
+
+    pub fn increment(budget: *RepairBudgetJournal, repair_type: union(enum) {
+        prepare: *const Header.Prepare,
+        headers,
+        start_view: u32,
+    }) void {
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        switch (repair_type) {
+            .headers => budget.requested_headers -|= 1,
+            .start_view => |view| {
+                // Increment budget if the SV received is for the same view as the inflight RSV.
+                if (budget.requested_start_view != null and budget.requested_start_view.? == view) {
+                    budget.requested_start_view = null;
+                } else return;
+            },
+            .prepare => |header| {
+                // Increment budget iff we had requested this prepare.
+                if (!budget.requested_prepares.swapRemove(header.*)) {
+                    return;
+                }
+            },
+        }
+
+        // Artificially cap budget availability, as its tricky to precisely track which headers
+        // we requested for repair and which ones we received, leading to spurious budget updates.
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
+        budget.available = @min((budget.available + 1), budget.capacity - budget_spent_total);
+    }
+
+    pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
+        assert(amount <= budget.refill_max);
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        budget.available = @min((budget.available + amount), budget.capacity);
+
+        budget.requested_prepares.clearRetainingCapacity();
+        budget.requested_headers = 0;
+        budget.requested_start_view = null;
+    }
+
+    fn assert_internally_consistent(budget: *const RepairBudgetJournal) void {
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
+        assert(budget.available <= budget.capacity);
+        assert(budget.capacity - budget.available >= budget_spent_total);
+    }
+};
+
+pub const RepairBudgetGrid = struct {
     capacity: u32,
     available: u32,
     refill_max: u32,
@@ -1720,16 +1846,16 @@ pub const Budget = struct {
     pub fn init(options: struct {
         capacity: u32,
         refill_max: u32,
-    }) Budget {
+    }) RepairBudgetGrid {
         assert(options.refill_max <= options.capacity);
-        return Budget{
+        return RepairBudgetGrid{
             .capacity = options.capacity,
             .available = options.capacity,
             .refill_max = options.refill_max,
         };
     }
 
-    pub fn spend(budget: *Budget, amount: u32) bool {
+    pub fn spend(budget: *RepairBudgetGrid, amount: u32) bool {
         assert(budget.capacity > 0);
         assert(budget.available <= budget.capacity);
         assert(amount > 0);
@@ -1739,7 +1865,7 @@ pub const Budget = struct {
         return true;
     }
 
-    pub fn refill(budget: *Budget, amount: u32) void {
+    pub fn refill(budget: *RepairBudgetGrid, amount: u32) void {
         assert(amount <= budget.refill_max);
         assert(budget.available <= budget.capacity);
 
