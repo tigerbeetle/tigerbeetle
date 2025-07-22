@@ -10525,21 +10525,19 @@ pub fn ReplicaType(
                         });
                     }
 
-                    if (self.repair_messages_budget_journal.decrement(.{
-                        .start_view = header.view,
-                    })) {
-                        log.debug("{}: jump_view: requesting start_view message", .{self.replica});
-                        self.send_header_to_replica(
-                            self.primary_index(header.view),
-                            @bitCast(Header.RequestStartView{
-                                .command = .request_start_view,
-                                .cluster = self.cluster,
-                                .replica = self.replica,
-                                .view = header.view,
-                                .nonce = self.nonce,
-                            }),
-                        );
-                    }
+                    // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
+                    // (Using request_start_view_message_timeout).
+                    log.debug("{}: jump_view: requesting start_view message", .{self.replica});
+                    self.send_header_to_replica(
+                        self.primary_index(header.view),
+                        @bitCast(Header.RequestStartView{
+                            .command = .request_start_view,
+                            .cluster = self.cluster,
+                            .replica = self.replica,
+                            .view = header.view,
+                            .nonce = self.nonce,
+                        }),
+                    );
                 },
                 .view_change => {
                     assert(self.status == .normal or self.status == .view_change);
