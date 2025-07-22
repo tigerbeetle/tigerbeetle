@@ -77,18 +77,18 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
         .fault_atlas = &storage_fault_atlas,
     };
 
-    var storage = try fixtures.storage(gpa, storage_options);
+    var storage = try fixtures.init_storage(gpa, storage_options);
     defer storage.deinit(gpa);
 
-    var storage_verify = try fixtures.storage(gpa, storage_options);
+    var storage_verify = try fixtures.init_storage(gpa, storage_options);
     defer storage_verify.deinit(gpa);
 
-    var superblock = try fixtures.superblock(gpa, &storage, .{
+    var superblock = try fixtures.init_superblock(gpa, &storage, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock.deinit(gpa);
 
-    var superblock_verify = try fixtures.superblock(gpa, &storage_verify, .{
+    var superblock_verify = try fixtures.init_superblock(gpa, &storage_verify, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock_verify.deinit(gpa);
@@ -319,7 +319,7 @@ const Environment = struct {
 
     fn open(env: *Environment) void {
         assert(env.pending.count() == 0);
-        fixtures.superblock_open(env.superblock);
+        fixtures.open_superblock(env.superblock);
         assert(env.superblock.working.sequence == 1);
         assert(env.superblock.working.vsr_state.replica_id == env.members[replica]);
         assert(env.superblock.working.vsr_state.replica_count == replica_count);

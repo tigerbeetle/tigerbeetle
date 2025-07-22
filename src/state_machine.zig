@@ -5092,15 +5092,15 @@ pub const TestContext = struct {
     busy: bool,
 
     pub fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
-        ctx.storage = try fixtures.storage(allocator, .{ .size = 4096 });
+        ctx.storage = try fixtures.init_storage(allocator, .{ .size = 4096 });
         errdefer ctx.storage.deinit(allocator);
 
-        ctx.time_sim = fixtures.time(.{});
+        ctx.time_sim = fixtures.init_time(.{});
 
-        ctx.trace = try fixtures.tracer(allocator, ctx.time_sim.time(), .{});
+        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
-        ctx.superblock = try fixtures.superblock(allocator, &ctx.storage, .{
+        ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
             .storage_size_limit = data_file_size_min,
         });
         errdefer ctx.superblock.deinit(allocator);
@@ -5109,7 +5109,7 @@ pub const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
 
-        ctx.grid = try fixtures.grid(allocator, &ctx.trace, &ctx.superblock, .{});
+        ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
         errdefer ctx.grid.deinit(allocator);
 
         try ctx.state_machine.init(allocator, &ctx.grid, .{

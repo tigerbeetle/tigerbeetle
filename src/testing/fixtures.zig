@@ -40,7 +40,7 @@ pub const cluster: u128 = 0;
 pub const replica: u8 = 0;
 pub const replica_count: u8 = 6;
 
-pub fn time(options: struct {
+pub fn init_time(options: struct {
     resolution: u64 = constants.tick_ms * std.time.ns_per_ms,
     offset_type: OffsetType = .linear,
     offset_coefficient_A: i64 = 0,
@@ -57,11 +57,11 @@ pub fn time(options: struct {
     return result;
 }
 
-pub fn tracer(gpa: std.mem.Allocator, t: Time, options: struct {
+pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {
     writer: ?std.io.AnyWriter = null,
     process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = cluster, .replica = replica } },
 }) !Tracer {
-    return Tracer.init(gpa, t, options.process_id, .{ .writer = options.writer });
+    return Tracer.init(gpa, init, options.process_id, .{ .writer = options.writer });
 }
 
 pub const StorageOptions = struct {
@@ -83,7 +83,7 @@ pub const StorageOptions = struct {
     fault_atlas: ?*const ClusterFaultAtlas = null,
 };
 
-pub fn storage(
+pub fn init_storage(
     gpa: std.mem.Allocator,
     options: StorageOptions,
 ) !Storage {
@@ -103,7 +103,7 @@ pub fn storage(
 
 pub fn storage_format(
     gpa: std.mem.Allocator,
-    s: *Storage,
+    storage: *Storage,
     format_options: struct {
         cluster: u128 = cluster,
         replica: u8 = replica,
@@ -111,11 +111,11 @@ pub fn storage_format(
         release: vsr.Release = vsr.Release.minimum,
     },
 ) !void {
-    assert(s.reads.count() == 0);
-    assert(s.writes.count() == 0);
+    assert(storage.reads.count() == 0);
+    assert(storage.writes.count() == 0);
 
-    var format_superblock = try superblock(gpa, s, .{});
-    defer format_superblock.deinit(gpa);
+    var superblock = try init_superblock(gpa, storage, .{});
+    defer superblock.deinit(gpa);
 
     const Context = struct {
         superblock_context: SuperBlock.Context = undefined,
@@ -128,7 +128,7 @@ pub fn storage_format(
     };
     var context: Context = .{};
 
-    format_superblock.format(Context.callback, &context.superblock_context, .{
+    superblock.format(Context.callback, &context.superblock_context, .{
         .cluster = format_options.cluster,
         .replica = format_options.replica,
         .replica_count = format_options.replica_count,
@@ -137,24 +137,39 @@ pub fn storage_format(
     });
     for (0..10_000) |_| {
         if (context.done) break;
-        s.run();
+        storage.run();
     } else @panic("superblock format loop stuck");
-    assert(s.reads.count() == 0);
-    assert(s.writes.count() == 0);
+    assert(storage.reads.count() == 0);
+    assert(storage.writes.count() == 0);
 }
 
-pub fn superblock(gpa: std.mem.Allocator, s: *Storage, options: struct {
+pub fn init_superblock(gpa: std.mem.Allocator, storage: *Storage, options: struct {
     storage_size_limit: ?u64 = null,
 }) !SuperBlock {
     return try SuperBlock.init(gpa, .{
-        .storage = s,
-        .storage_size_limit = options.storage_size_limit orelse s.size,
+        .storage = storage,
+        .storage_size_limit = options.storage_size_limit orelse storage.size,
     });
 }
 
-pub fn superblock_open(sb: *SuperBlock) void {
-    assert(sb.storage.reads.count() == 0);
-    assert(sb.storage.writes.count() == 0);
+pub fn init_grid(gpa: std.mem.Allocator, trace: *Tracer, superblock: *SuperBlock, options: struct {
+    missing_blocks_max: u64 = 0,
+    missing_tables_max: u64 = 0,
+    blocks_released_prior_checkpoint_durability_max: u64 = 0,
+}) !Grid {
+    return try Grid.init(gpa, .{
+        .superblock = superblock,
+        .trace = trace,
+        .missing_blocks_max = options.missing_blocks_max,
+        .missing_tables_max = options.missing_tables_max,
+        .blocks_released_prior_checkpoint_durability_max = //
+        options.blocks_released_prior_checkpoint_durability_max,
+    });
+}
+
+pub fn open_superblock(superblock: *SuperBlock) void {
+    assert(superblock.storage.reads.count() == 0);
+    assert(superblock.storage.writes.count() == 0);
     const Context = struct {
         superblock_context: SuperBlock.Context = undefined,
         done: bool = false,
@@ -167,27 +182,12 @@ pub fn superblock_open(sb: *SuperBlock) void {
     };
     var context: Context = .{};
 
-    sb.open(Context.callback, &context.superblock_context);
+    superblock.open(Context.callback, &context.superblock_context);
     for (0..10_000) |_| {
         if (context.done) break;
-        sb.storage.run();
+        superblock.storage.run();
     } else @panic("superblock open loop stuck");
 
-    assert(sb.storage.reads.count() == 0);
-    assert(sb.storage.writes.count() == 0);
-}
-
-pub fn grid(gpa: std.mem.Allocator, trace: *Tracer, sb: *SuperBlock, options: struct {
-    missing_blocks_max: u64 = 0,
-    missing_tables_max: u64 = 0,
-    blocks_released_prior_checkpoint_durability_max: u64 = 0,
-}) !Grid {
-    return try Grid.init(gpa, .{
-        .superblock = sb,
-        .trace = trace,
-        .missing_blocks_max = options.missing_blocks_max,
-        .missing_tables_max = options.missing_tables_max,
-        .blocks_released_prior_checkpoint_durability_max = //
-        options.blocks_released_prior_checkpoint_durability_max,
-    });
+    assert(superblock.storage.reads.count() == 0);
+    assert(superblock.storage.writes.count() == 0);
 }

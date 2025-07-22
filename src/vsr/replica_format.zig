@@ -224,7 +224,7 @@ test "format" {
     const replica = 1;
     const replica_count = 1;
 
-    var storage = try fixtures.storage(allocator, .{ .size = data_file_size_min });
+    var storage = try fixtures.init_storage(allocator, .{ .size = data_file_size_min });
     defer storage.deinit(allocator);
 
     try format(Storage, allocator, .{

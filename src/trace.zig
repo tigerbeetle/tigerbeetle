@@ -445,9 +445,9 @@ test "trace json" {
     var trace_buffer: std.ArrayListUnmanaged(u8) = .empty;
     defer trace_buffer.deinit(gpa);
 
-    var time_sim = fixtures.time(.{});
+    var time_sim = fixtures.init_time(.{});
 
-    var trace = try fixtures.tracer(gpa, time_sim.time(), .{
+    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{
         .writer = trace_buffer.writer(gpa).any(),
         .process_id = .unknown,
     });
@@ -483,8 +483,8 @@ test "trace json" {
 test "timing overflow" {
     const gpa = std.testing.allocator;
 
-    var time_sim = fixtures.time(.{});
-    var trace = try fixtures.tracer(gpa, time_sim.time(), .{});
+    var time_sim = fixtures.init_time(.{});
+    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{});
     defer trace.deinit(gpa);
 
     trace.set_replica(.{ .cluster = 0, .replica = 0 });

@@ -158,14 +158,14 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.time_sim = fixtures.time(.{});
-            env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
+            env.time_sim = fixtures.init_time(.{});
+            env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
             defer env.trace.deinit(gpa);
 
-            env.superblock = try fixtures.superblock(gpa, env.storage, .{});
+            env.superblock = try fixtures.init_superblock(gpa, env.storage, .{});
             defer env.superblock.deinit(gpa);
 
-            env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
+            env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = Grid
@@ -233,7 +233,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             fuzz_ops: []const FuzzOp,
         ) !void {
             env.change_state(.init, .free_set_open);
-            fixtures.superblock_open(&env.superblock);
+            fixtures.open_superblock(&env.superblock);
 
             env.grid.open(grid_open_callback);
 
@@ -906,7 +906,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    var storage = try fixtures.storage(gpa, .{
+    var storage = try fixtures.init_storage(gpa, .{
         .size = constants.storage_size_limit_default,
         .seed = prng.int(u64),
         .read_latency_min = .{ .ns = 0 },

@@ -511,8 +511,8 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.time_sim = fixtures.time(.{});
-        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
+        env.time_sim = fixtures.init_time(.{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
@@ -522,9 +522,9 @@ const Environment = struct {
             .time_sim = env.time_sim,
             .trace = env.trace,
 
-            .superblock = try fixtures.superblock(gpa, env.storage, .{}),
+            .superblock = try fixtures.init_superblock(gpa, env.storage, .{}),
 
-            .grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
+            .grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = Grid
@@ -780,7 +780,7 @@ const Environment = struct {
     }
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
-        fixtures.superblock_open(&env.superblock);
+        fixtures.open_superblock(&env.superblock);
 
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
@@ -908,7 +908,7 @@ const Environment = struct {
 pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
-    var storage = try fixtures.storage(gpa, .{
+    var storage = try fixtures.init_storage(gpa, .{
         .seed = prng.int(u64),
         .size = constants.storage_size_limit_default,
     });

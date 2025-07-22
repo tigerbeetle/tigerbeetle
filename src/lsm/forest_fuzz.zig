@@ -120,12 +120,12 @@ const Environment = struct {
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.time_sim = fixtures.time(.{});
-        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
+        env.time_sim = fixtures.init_time(.{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
 
-        env.superblock = try fixtures.superblock(gpa, env.storage, .{});
+        env.superblock = try fixtures.init_superblock(gpa, env.storage, .{});
 
-        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
+        env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = Forest
                 .compaction_blocks_released_per_pipeline_max() +
                 Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
@@ -178,7 +178,7 @@ const Environment = struct {
     }
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
-        fixtures.superblock_open(&env.superblock);
+        fixtures.open_superblock(&env.superblock);
 
         env.grid.open(grid_open_callback);
         try env.tick_until_state_change(.free_set_open, .forest_init);
@@ -1072,7 +1072,7 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     defer gpa.free(fuzz_ops);
 
     // Init mocked storage.
-    var storage = try fixtures.storage(gpa, .{
+    var storage = try fixtures.init_storage(gpa, .{
         .seed = prng.int(u64),
         .size = constants.storage_size_limit_default,
         .read_latency_min = .{ .ns = 0 },

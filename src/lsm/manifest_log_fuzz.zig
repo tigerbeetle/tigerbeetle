@@ -73,7 +73,7 @@ fn run_fuzz(
     defer env.deinit();
 
     {
-        fixtures.superblock_open(&env.superblock);
+        fixtures.open_superblock(&env.superblock);
 
         env.open_grid();
         env.wait(&env.manifest_log);
@@ -281,39 +281,39 @@ const Environment = struct {
         env.gpa = gpa;
 
         fields_initialized += 1;
-        env.storage = try fixtures.storage(gpa, storage_options);
+        env.storage = try fixtures.init_storage(gpa, storage_options);
         errdefer env.storage.deinit(gpa);
 
         try fixtures.storage_format(gpa, &env.storage, .{});
 
         fields_initialized += 1;
-        env.storage_verify = try fixtures.storage(gpa, storage_options);
+        env.storage_verify = try fixtures.init_storage(gpa, storage_options);
         errdefer env.storage_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.time_sim = fixtures.time(.{});
+        env.time_sim = fixtures.init_time(.{});
 
         fields_initialized += 1;
-        env.trace = try fixtures.tracer(gpa, env.time_sim.time(), .{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try fixtures.tracer(gpa, env.time_sim.time(), .{});
+        env.trace_verify = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock = try fixtures.superblock(gpa, &env.storage, .{});
+        env.superblock = try fixtures.init_superblock(gpa, &env.storage, .{});
         errdefer env.superblock.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock_verify = try fixtures.superblock(gpa, &env.storage_verify, .{});
+        env.superblock_verify = try fixtures.init_superblock(gpa, &env.storage_verify, .{});
         errdefer env.superblock_verify.deinit(gpa);
 
         fields_initialized += 1;
         env.superblock_context = undefined;
 
         fields_initialized += 1;
-        env.grid = try fixtures.grid(gpa, &env.trace, &env.superblock, .{
+        env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
             // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
             // FreeSet.blocks_released_prior_checkpoint_durability.
             .blocks_released_prior_checkpoint_durability_max = Grid
@@ -322,7 +322,7 @@ const Environment = struct {
         errdefer env.grid.deinit(gpa);
 
         fields_initialized += 1;
-        env.grid_verify = try fixtures.grid(gpa, &env.trace_verify, &env.superblock_verify, .{});
+        env.grid_verify = try fixtures.init_grid(gpa, &env.trace_verify, &env.superblock_verify, .{});
         errdefer env.grid_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -516,12 +516,12 @@ const Environment = struct {
             test_storage.reset();
 
             test_trace.deinit(env.gpa);
-            test_trace.* = try fixtures.tracer(env.gpa, env.time_sim.time(), .{});
+            test_trace.* = try fixtures.init_tracer(env.gpa, env.time_sim.time(), .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
             test_superblock.deinit(env.gpa);
-            test_superblock.* = try fixtures.superblock(env.gpa, &env.storage, .{});
+            test_superblock.* = try fixtures.init_superblock(env.gpa, &env.storage, .{});
 
             test_grid.deinit(env.gpa);
             test_grid.* = try Grid.init(env.gpa, .{
@@ -536,7 +536,7 @@ const Environment = struct {
             try test_manifest_log.init(env.gpa, test_grid, &manifest_log_compaction_pace);
         }
 
-        fixtures.superblock_open(test_superblock);
+        fixtures.open_superblock(test_superblock);
 
         assert(env.manifest_log_opening == null);
         env.manifest_log_opening = try env.manifest_log_model.tables.clone();
