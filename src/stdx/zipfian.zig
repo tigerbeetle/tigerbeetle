@@ -41,13 +41,14 @@
 //! The `ZipfianShuffled` generator instead spreads the distribution out
 //! across the key space as if it were a shuffled deck.
 //!
-//! Both generators allow for the key space to grow (but not shrink),
-//! dynamically recomputing the distribution. When the `ZipfianShuffled`
-//! generator grows it acts as if each new key was inserted into the shuffled
-//! deck randomly, preserving the relative probability of existing keys.
+//! The `ZipfianGenerator` allows the key space to grow,
+//! but the `ZipfianShuffled` does not - maintaining the illusion of a shuffled
+//! deck while growing the keyspace involves tradeoffs in the quality
+//! of the distribution. A previous revision of `ZipfianShuffled` _was_ growable,
+//! at the cost of not preserving a true Zipfian distribution for the long tail
+//! of unlikely items. Dig that out of commit history if it's ever needed.
 //!
-//! The non-shuffled generator should pass a 2-sample Kolmogorov–Smirnov test;
-//! the shuffled generator does not because the tail distribution is fudged.
+//! Both should pass a 2-sample Kolmogorov–Smirnov test.
 
 const std = @import("std");
 const stdx = @import("stdx.zig");
@@ -182,10 +183,6 @@ fn zeta_incremental(
 ///     f(i) = (a * i) mod N
 /// with gcd(a, N) = 1, so every original (Zipfian) index i
 /// maps to a unique “shuffled” index without collisions.
-///
-/// This technique is described offhandedly in the paper in
-/// a single sentence, and YCSB does not use it, so we are
-/// inventing the details here in a way that seems efficient.
 pub const ZipfianShuffled = struct {
     gen: ZipfianGenerator,
     a: u64,
@@ -200,7 +197,7 @@ pub const ZipfianShuffled = struct {
             .a = 0, // Correct a is determined in grow.
         };
 
-        zipf.grow(items, prng);
+        zipf.choose_shuffle_function(items, prng);
 
         return zipf;
     }
@@ -215,8 +212,7 @@ pub const ZipfianShuffled = struct {
         return zipf_shuffled;
     }
 
-    /// Grow the size of the random set.
-    pub fn grow(self: *ZipfianShuffled, new_items: u64, prng: *stdx.PRNG) void {
+    fn choose_shuffle_function(self: *ZipfianShuffled, new_items: u64, prng: *stdx.PRNG) void {
         if (new_items == 0) {
             return;
         }
