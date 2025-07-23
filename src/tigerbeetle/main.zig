@@ -71,18 +71,16 @@ pub fn main() !void {
 
     var command = cli.parse_args(&arg_iterator);
 
-    switch (command) {
-        .inspect => {},
-        .version => |*args| {
-            try Command.version(allocator, args.verbose);
-            return; // Exit early before initializing IO.
-        },
-        inline else => |*args| {
-            if (args.log_debug) {
-                log_level_runtime = .debug;
-            }
-        },
+    if (command == .version) {
+        try Command.version(allocator, command.version.verbose);
+        return; // Exit early before initializing IO.
     }
+
+    log_level_runtime = switch (command) {
+        .version => unreachable,
+        .inspect => .info,
+        inline else => |*args| if (args.log_debug) .debug else .info,
+    };
 
     // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
     // is not available) there won't be a dangling file.
