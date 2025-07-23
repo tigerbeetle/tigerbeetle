@@ -99,7 +99,8 @@ pub fn main() !void {
         .start => |*args| {
             if (args.trace) |path| {
                 trace_file = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |err| {
-                    std.debug.panic("error creating trace file: {}", .{err});
+                    log.err("error creating trace file '{s}': {}", .{ path, err });
+                    return err;
                 };
             }
             if (args.statsd) |address| statsd_address = address;
