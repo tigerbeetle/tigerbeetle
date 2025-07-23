@@ -622,11 +622,7 @@ pub const FreeSet = struct {
     }
 
     /// Decodes the compressed bitset chunks in `source_chunks` into `target_bitset`.
-<<<<<<< HEAD
     /// Panics if the `source_chunks` encoding is invalid.
-=======
-    /// Panic if the `source_chunks` encoding is invalid.
->>>>>>> f6d5ccc7f (free_set: refactor overloaded usage of blocks_count_max)
     fn decode(
         set: *FreeSet,
         target_bitset: FreeSet.BitsetKind,
@@ -1119,10 +1115,18 @@ fn expect_free_set_equal(a: FreeSet, b: FreeSet) !void {
     try expect_bit_set_equal(a.blocks_acquired, b.blocks_acquired);
     try expect_bit_set_equal(a.blocks_released, b.blocks_released);
     try expect_bit_set_equal(a.index, b.index);
+
     try std.testing.expectEqual(
+        a.blocks_released_prior_checkpoint_durability.count(),
+        b.blocks_released_prior_checkpoint_durability.count(),
+    );
+
+    for (
         a.blocks_released_prior_checkpoint_durability.keys(),
         b.blocks_released_prior_checkpoint_durability.keys(),
-    );
+    ) |address_a, address_b| {
+        assert(address_a == address_b);
+    }
 }
 
 fn expect_bit_set_equal(a: DynamicBitSetUnmanaged, b: DynamicBitSetUnmanaged) !void {

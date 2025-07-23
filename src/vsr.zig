@@ -1748,14 +1748,3 @@ pub const Budget = struct {
         budget.available = @min((budget.available + amount), budget.capacity);
     }
 };
-<<<<<<< HEAD
-
-pub fn block_count_max(storage_size_limit: u64) usize {
-    const shard_count_limit: usize = @intCast(@divFloor(
-        storage_size_limit - superblock.data_file_size_min,
-        constants.block_size * FreeSet.shard_bits,
-    ));
-    return shard_count_limit * FreeSet.shard_bits;
-}
-=======
->>>>>>> f6d5ccc7f (free_set: refactor overloaded usage of blocks_count_max)
