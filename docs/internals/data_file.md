@@ -109,18 +109,18 @@ Each LSM tree stores a set of values. Values are:
 To start from the middle, values are arranged in tables on disk. Each table represents a sorted
 array of values and is physically stored in multiple blocks. Specifically:
 
-* A table's data blocks each store a sorted array of values.
-* A table's index block stores pointers to the data blocks, as well as boundary keys.
+* A table's value blocks each store a sorted array of values.
+* A table's index block stores pointers to the value blocks, as well as boundary keys.
 
 ```zig
-const TableDataBlock = struct {
+const TableValueBlock = struct {
     values_sorted: [value_count_max]Value,
 };
 
 const TableIndexBlock = struct {
-    data_block_checksums: [data_block_count_max]u128,
-    data_block_indexes:   [data_block_count_max]u64,
-    data_block_key_max:   [data_block_count_max]Key,
+    value_block_checksums: [value_block_count_max]u128,
+    value_block_indexes:   [value_block_count_max]u64,
+    value_block_key_max:   [value_block_count_max]Key,
 };
 
 const TableInfo = struct {
@@ -132,11 +132,11 @@ const TableInfo = struct {
 };
 ```
 
-To lookup a value in a table, binary search the index block to locate the data block which should
-hold the value, then binary search inside the data block.
+To lookup a value in a table, binary search the index block to locate the value block which should
+hold the value, then binary search inside the value block.
 
 Table size is physically limited by a single index block which can hold only so many references to
-data blocks. However, tables are further artificially limited to hold only a certain (compile-time
+value blocks. However, tables are further artificially limited to hold only a certain (compile-time
 constant) number of entries. Tables are arranged in levels. Each subsequent level contains
 exponentially more tables.
 
@@ -199,5 +199,5 @@ State is represented as a collection of LSM trees. Superblock is the root of all
 tree, superblock contains the pointers to the blocks constituting each tree's manifest log -- a sequence
 of individual tables additions and deletions. By replaying this manifest log, it is possible to
 reconstruct the manifest in memory. `Manifest` describes levels and tables of a single LSM tree. A
-table is a pointer to its index block. The index block is a sorted array of pointers to data blocks.
-Data blocks are sorted arrays of values.
+table is a pointer to its index block. The index block is a sorted array of pointers to value
+blocks. Value blocks are sorted arrays of values.

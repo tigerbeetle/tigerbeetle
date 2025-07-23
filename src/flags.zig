@@ -539,8 +539,6 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
 }
 
 pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
-    // TODO(Zig): Cleanup when this is fixed after Zig 0.11.
-    // Without comptime blk, the compiler thinks the result is a runtime slice returning a UAF.
     return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 

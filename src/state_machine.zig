@@ -238,7 +238,7 @@ pub fn StateMachineType(
         pub const TransferPending = extern struct {
             timestamp: u64,
             status: TransferPendingStatus,
-            padding: [7]u8 = [_]u8{0} ** 7,
+            padding: [7]u8 = @splat(0),
 
             comptime {
                 // Assert that there is no implicit padding.
@@ -401,7 +401,7 @@ pub fn StateMachineType(
             /// See `transfer_pending_id` for tracking the pending transfer.
             /// It will be `zero` for `none` and `pending`.
             transfer_pending_status: TransferPendingStatus,
-            reserved: [11]u8 = [_]u8{0} ** 11,
+            reserved: [11]u8 = @splat(0),
 
             /// Previous schema before the changes introduced by PR #2507.
             const Former = extern struct {
@@ -416,7 +416,7 @@ pub fn StateMachineType(
                 cr_credits_pending: u128,
                 cr_credits_posted: u128,
                 timestamp: u64,
-                reserved: [88]u8 = [_]u8{0} ** 88,
+                reserved: [88]u8 = @splat(0),
 
                 comptime {
                     assert(stdx.no_padding(Former));
@@ -1932,7 +1932,7 @@ pub fn StateMachineType(
 
             // Adding the condition for `debit_account_id = $account_id`.
             if (filter.flags.debits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                scan_conditions.push(scan_builder.scan_prefix(
                     .debit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
                     snapshot_latest,
@@ -1944,7 +1944,7 @@ pub fn StateMachineType(
 
             // Adding the condition for `credit_account_id = $account_id`.
             if (filter.flags.credits) {
-                scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                scan_conditions.push(scan_builder.scan_prefix(
                     .credit_account_id,
                     self.forest.scan_buffer_pool.acquire_assume_capacity(),
                     snapshot_latest,
@@ -1960,7 +1960,7 @@ pub fn StateMachineType(
                     // Creating an union `OR` with the `debit_account_id` and `credit_account_id`.
                     const accounts_merge = scan_builder.merge_union(scan_conditions.const_slice());
                     scan_conditions.clear();
-                    scan_conditions.append_assume_capacity(accounts_merge);
+                    scan_conditions.push(accounts_merge);
                 },
                 else => unreachable,
             }
@@ -1971,7 +1971,7 @@ pub fn StateMachineType(
             }) |filter_field| {
                 const filter_value = @field(filter, @tagName(filter_field));
                 if (filter_value != 0) {
-                    scan_conditions.append_assume_capacity(scan_builder.scan_prefix(
+                    scan_conditions.push(scan_builder.scan_prefix(
                         filter_field,
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         snapshot_latest,
@@ -2251,7 +2251,7 @@ pub fn StateMachineType(
             var scan_conditions: stdx.BoundedArrayType(*Groove.ScanBuilder.Scan, indexes.len) = .{};
             inline for (indexes) |index| {
                 if (@field(filter, @tagName(index)) != 0) {
-                    scan_conditions.append_assume_capacity(groove.scan_builder.scan_prefix(
+                    scan_conditions.push(groove.scan_builder.scan_prefix(
                         std.enums.nameCast(std.meta.FieldEnum(Groove.IndexTrees), index),
                         self.forest.scan_buffer_pool.acquire_assume_capacity(),
                         snapshot_latest,
@@ -5065,7 +5065,7 @@ test "sum_overflows" {
 }
 
 pub const TestContext = struct {
-    const Time = @import("testing/time.zig").Time;
+    const TimeSim = @import("testing/time.zig").TimeSim;
     const Storage = @import("testing/storage.zig").Storage;
     const Tracer = Storage.Tracer;
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
@@ -5081,7 +5081,7 @@ pub const TestContext = struct {
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
     storage: Storage,
-    time: Time,
+    time_sim: TimeSim,
     trace: Tracer,
     superblock: SuperBlock,
     grid: Grid,
@@ -5094,16 +5094,16 @@ pub const TestContext = struct {
             allocator,
             4096,
             .{
-                .read_latency_min = 0,
-                .read_latency_mean = 0,
-                .write_latency_min = 0,
-                .write_latency_mean = 0,
+                .read_latency_min = .{ .ns = 0 },
+                .read_latency_mean = .{ .ns = 0 },
+                .write_latency_min = .{ .ns = 0 },
+                .write_latency_mean = .{ .ns = 0 },
             },
         );
         errdefer ctx.storage.deinit(allocator);
-        ctx.time = Time.init_simple();
+        ctx.time_sim = TimeSim.init_simple();
 
-        ctx.trace = try Tracer.init(allocator, &ctx.time, 0, 0, .{});
+        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), .replica_test, .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try SuperBlock.init(allocator, .{

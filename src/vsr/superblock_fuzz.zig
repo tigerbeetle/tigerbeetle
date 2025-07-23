@@ -55,10 +55,10 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
         .replica_index = 0,
         .seed = prng.int(u64),
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
-        .read_latency_min = 0,
-        .read_latency_mean = 0,
-        .write_latency_min = 0,
-        .write_latency_mean = 0,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = .{ .ns = 0 },
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = .{ .ns = 0 },
         // Storage will never inject more faults than the superblock is able to recover from,
         // so a 100% fault probability is allowed.
         .read_fault_probability = ratio(
@@ -296,7 +296,7 @@ const Environment = struct {
         });
 
         var vsr_headers = vsr.Headers.Array{};
-        vsr_headers.append_assume_capacity(vsr.Header.Prepare.root(cluster));
+        vsr_headers.push(vsr.Header.Prepare.root(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -364,7 +364,7 @@ const Environment = struct {
         });
         vsr_head.set_checksum_body(&.{});
         vsr_head.set_checksum();
-        vsr_headers.append_assume_capacity(vsr_head);
+        vsr_headers.push(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{

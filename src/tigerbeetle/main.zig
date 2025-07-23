@@ -17,8 +17,9 @@ const inspect = @import("inspect.zig");
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const Tracer = vsr.trace.TracerType(Time);
-pub const Storage = vsr.storage.StorageType(IO, Tracer);
+const TimeOS = vsr.time.TimeOS;
+const Tracer = vsr.trace.Tracer;
+pub const Storage = vsr.storage.StorageType(IO);
 const AOF = vsr.aof.AOFType(IO);
 
 const MessageBus = vsr.message_bus.MessageBusReplica;
@@ -27,10 +28,10 @@ pub const StateMachine =
     vsr.state_machine.StateMachineType(Storage, constants.state_machine_config);
 pub const Grid = vsr.GridType(Storage);
 
-const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient, Time);
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, Time, AOF);
+const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient);
+const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
-    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage, Time);
+    vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
@@ -60,39 +61,77 @@ pub const std_options: std.Options = .{
 pub fn main() !void {
     try SigIllHandler.register();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_instance.deinit();
 
-    const allocator = arena.allocator();
+    // Arena is an implementation detail, all memory must be freed.
+    const gpa = arena_instance.allocator();
 
-    var arg_iterator = try std.process.argsWithAllocator(allocator);
+    var arg_iterator = try std.process.argsWithAllocator(gpa);
     defer arg_iterator.deinit();
 
     var command = cli.parse_args(&arg_iterator);
 
-    switch (command) {
-        .inspect, .version => {},
-        inline else => |*args| {
-            if (args.log_debug) {
-                log_level_runtime = .debug;
-            }
-        },
+    if (command == .version) {
+        try Command.version(gpa, command.version.verbose);
+        return; // Exit early before initializing IO.
     }
 
+    log_level_runtime = switch (command) {
+        .version => unreachable,
+        .inspect => .info,
+        inline else => |*args| if (args.log_debug) .debug else .info,
+    };
+
+    // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
+    // is not available) there won't be a dangling file.
+    var io = try IO.init(128, 0);
+    defer io.deinit();
+
+    var time_os: TimeOS = .{};
+    const time = time_os.time();
+
+    var trace_file: ?std.fs.File = null;
+    defer if (trace_file) |file| file.close();
+
+    var statsd_address: ?std.net.Address = null;
+
     switch (command) {
-        .format => |*args| try Command.format(allocator, args, .{
+        .start => |*args| {
+            if (args.trace) |path| {
+                trace_file = std.fs.cwd().createFile(path, .{ .exclusive = true }) catch |err| {
+                    log.err("error creating trace file '{s}': {}", .{ path, err });
+                    return err;
+                };
+            }
+            if (args.statsd) |address| statsd_address = address;
+        },
+        else => {},
+    }
+
+    var tracer = try Tracer.init(gpa, time, .unknown, .{
+        .writer = if (trace_file) |file| file.writer().any() else null,
+        .statsd_options = if (statsd_address) |address| .{ .udp = .{
+            .io = &io,
+            .address = address,
+        } } else .log,
+    });
+    defer tracer.deinit(gpa);
+
+    switch (command) {
+        .version => unreachable, // Handled earlier.
+        .format => |*args| try Command.format(gpa, &io, &tracer, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
             .view = null,
         }),
-        .recover => |*args| try Command.reformat(allocator, args),
-        .start => |*args| try Command.start(arena.allocator(), args),
-        .version => |*args| try Command.version(allocator, args.verbose),
-        .repl => |*args| try Command.repl(arena.allocator(), args),
-        .benchmark => |*args| try benchmark_driver.main(allocator, args),
-        .inspect => |*args| inspect.main(allocator, args) catch |err| {
+        .recover => |*args| try Command.reformat(gpa, &io, &tracer, args),
+        .start => |*args| try Command.start(gpa, &io, &tracer, args),
+        .repl => |*args| try Command.repl(gpa, &io, time, args),
+        .benchmark => |*args| try benchmark_driver.main(gpa, &io, time, args),
+        .inspect => |*args| inspect.main(gpa, &io, &tracer, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
         },
@@ -101,10 +140,10 @@ pub fn main() !void {
             var stdout_writer = stdout_buffer.writer();
             const stdout = stdout_writer.any();
 
-            try vsr.multiversioning.print_information(allocator, args.path, stdout);
+            try vsr.multiversioning.print_information(gpa, args.path, stdout);
             try stdout_buffer.flush();
         },
-        .amqp => |*args| try Command.amqp(allocator, args),
+        .amqp => |*args| try Command.amqp(gpa, time, args),
     }
 }
 
@@ -175,25 +214,23 @@ const SigIllHandler = struct {
 const Command = struct {
     dir_fd: std.posix.fd_t,
     fd: std.posix.fd_t,
-    io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
-    data_file_path: [:0]const u8,
+    data_file_path: []const u8,
 
     fn init(
         command: *Command,
         allocator: mem.Allocator,
-        path: [:0]const u8,
+        io: *IO,
+        tracer: *Tracer,
+        path: []const u8,
         options: struct {
             must_create: bool,
             development: bool,
+            trace_path: ?[]const u8,
+            statsd_address: ?std.net.Address,
         },
     ) !void {
-        // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
-        // is not available) there won't be a dangling file.
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
         // TODO Handle physical volumes where there is no directory to fsync.
         const dirname = std.fs.path.dirname(path) orelse ".";
@@ -208,7 +245,7 @@ const Command = struct {
             .direct_io_required;
 
         const basename = std.fs.path.basename(path);
-        command.fd = try command.io.open_data_file(
+        command.fd = try io.open_data_file(
             command.dir_fd,
             basename,
             data_file_size_min,
@@ -217,7 +254,7 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.storage = try Storage.init(&command.io, command.fd);
+        command.storage = try Storage.init(io, tracer, command.fd);
         errdefer command.storage.deinit();
 
         command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
@@ -231,18 +268,21 @@ const Command = struct {
         command.storage.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
-        command.io.deinit();
     }
 
     pub fn format(
         allocator: mem.Allocator,
+        io: *IO,
+        tracer: *Tracer,
         args: *const cli.Command.Format,
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
+            .trace_path = null,
+            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -261,11 +301,18 @@ const Command = struct {
         });
     }
 
-    pub fn reformat(allocator: mem.Allocator, args: *const cli.Command.Recover) !void {
+    pub fn reformat(
+        allocator: mem.Allocator,
+        io: *IO,
+        tracer: *Tracer,
+        args: *const cli.Command.Recover,
+    ) !void {
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
+            .trace_path = null,
+            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -276,11 +323,11 @@ const Command = struct {
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
-            .time = .{},
+            .time = tracer.time,
             .message_pool = &message_pool,
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
-                .io = &command.io,
+                .io = io,
                 .clients_limit = null,
             },
             .eviction_callback = &reformat_client_eviction_callback,
@@ -305,7 +352,7 @@ const Command = struct {
         reformatter.start();
         while (reformatter.done() == null) {
             client.tick();
-            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
         switch (reformatter.done().?) {
             .failed => |err| {
@@ -325,7 +372,12 @@ const Command = struct {
         std.debug.panic("error: client evicted: {s}", .{@tagName(eviction.header.reason)});
     }
 
-    pub fn start(base_allocator: std.mem.Allocator, args: *const cli.Command.Start) !void {
+    pub fn start(
+        base_allocator: mem.Allocator,
+        io: *IO,
+        tracer: *Tracer,
+        args: *const cli.Command.Start,
+    ) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
         const allocator = counting_allocator.allocator();
 
@@ -333,9 +385,11 @@ const Command = struct {
         // (Here or in Replica.open()?).
 
         var command: Command = undefined;
-        try command.init(allocator, args.path, .{
+        try command.init(allocator, io, tracer, args.path, .{
             .must_create = false,
             .development = args.development,
+            .trace_path = args.trace,
+            .statsd_address = args.statsd,
         });
         defer command.deinit(allocator);
 
@@ -345,18 +399,14 @@ const Command = struct {
         } });
         defer message_pool.deinit(allocator);
 
-        var aof: ?AOF = if (args.aof) blk: {
-            const aof_path = try std.fmt.allocPrint(
-                allocator,
-                "{s}.aof",
-                .{std.fs.path.basename(args.path)},
-            );
-            defer allocator.free(aof_path);
-            std.log.info("{s}", .{aof_path});
+        var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
+            const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
+            const aof_dir_fd = try IO.open_dir(aof_dir);
+            defer std.posix.close(aof_dir_fd);
 
-            break :blk try AOF.init(&command.io, .{
-                .dir_fd = command.dir_fd,
-                .relative_path = aof_path,
+            break :blk try AOF.init(io, .{
+                .dir_fd = aof_dir_fd,
+                .relative_path = std.fs.path.basename(aof_file.const_slice()),
             });
         } else null;
         defer if (aof != null) aof.?.close();
@@ -405,7 +455,7 @@ const Command = struct {
 
             break :blk try vsr.multiversioning.Multiversion.init(
                 allocator,
-                &command.io,
+                io,
                 command.self_exe_path,
                 .native,
             );
@@ -418,7 +468,7 @@ const Command = struct {
         if (multiversion != null) multiversion.?.open_sync() catch {};
 
         var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
-        releases_bundled_baseline.append_assume_capacity(constants.config.process.release);
+        releases_bundled_baseline.push(constants.config.process.release);
 
         const releases_bundled = if (multiversion != null)
             &multiversion.?.releases_bundled
@@ -432,17 +482,6 @@ const Command = struct {
 
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
-        const trace_file = if (args.trace) |trace_path|
-            std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
-                std.debug.panic("error creating trace file: {}", .{err});
-            }
-        else
-            null;
-        defer if (trace_file) |file| file.close();
-
-        const trace_writer = if (trace_file) |file| file.writer() else null;
-
-        var time: Time = .{};
         var replica: Replica = undefined;
         replica.open(allocator, .{
             .node_count = args.addresses.count_as(u8),
@@ -457,9 +496,10 @@ const Command = struct {
             .aof = if (aof != null) &aof.? else null,
             .message_pool = &message_pool,
             .nonce = nonce,
-            .time = &time,
+            .time = tracer.time,
             .timeout_prepare_ticks = args.timeout_prepare_ticks,
             .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
+            .commit_stall_probability = args.commit_stall_probability,
             .state_machine_options = .{
                 .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
                 .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
@@ -470,17 +510,11 @@ const Command = struct {
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
-                .io = &command.io,
+                .io = io,
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
-            .tracer_options = .{
-                .writer = if (trace_writer) |writer| writer.any() else null,
-                .statsd_options = if (args.statsd) |statsd_address| .{ .udp = .{
-                    .io = &command.io,
-                    .address = statsd_address,
-                } } else .log,
-            },
+            .tracer = tracer,
             .replicate_options = .{
                 .closed_loop = args.replicate_closed_loop,
                 .star = args.replicate_star,
@@ -593,7 +627,7 @@ const Command = struct {
         while (true) {
             replica.tick();
             if (multiversion != null) multiversion.?.tick();
-            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
 
@@ -637,27 +671,29 @@ const Command = struct {
         try stdout_buffer.flush();
     }
 
-    pub fn repl(allocator: mem.Allocator, args: *const cli.Command.Repl) !void {
-        const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient, Time);
+    pub fn repl(
+        allocator: mem.Allocator,
+        io: *IO,
+        time: Time,
+        args: *const cli.Command.Repl,
+    ) !void {
+        const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
 
-        var repl_instance = try Repl.init(
-            allocator,
-            .{},
-            .{
-                .cluster_id = args.cluster,
-                .addresses = args.addresses.const_slice(),
-                .verbose = args.verbose,
-            },
-        );
+        var repl_instance = try Repl.init(allocator, io, time, .{
+            .cluster_id = args.cluster,
+            .addresses = args.addresses.const_slice(),
+            .verbose = args.verbose,
+        });
         defer repl_instance.deinit(allocator);
 
         try repl_instance.run(args.statements);
     }
 
-    pub fn amqp(allocator: mem.Allocator, args: *const cli.Command.AMQP) !void {
+    pub fn amqp(allocator: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
         var runner: vsr.cdc.Runner = undefined;
         try runner.init(
             allocator,
+            time,
             .{
                 .cluster_id = args.cluster,
                 .addresses = args.addresses.const_slice(),

@@ -8,14 +8,12 @@ const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 const ratio = stdx.PRNG.ratio;
-const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
 const Direction = @import("../direction.zig").Direction;
-const Time = @import("../testing/time.zig").Time;
+const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
-const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
@@ -24,13 +22,13 @@ const ManifestLog = @import("manifest_log.zig").ManifestLogType(Storage);
 const ManifestLogPace = @import("manifest_log.zig").Pace;
 const snapshot_min_for_table_output = @import("compaction.zig").snapshot_min_for_table_output;
 const compaction_op_min = @import("compaction.zig").compaction_op_min;
-const compaction_block_count_bar_max = @import("compaction.zig").compaction_block_count_bar_max;
 const compaction_block_count_beat_min = @import("compaction.zig").compaction_block_count_beat_min;
 const ResourcePool = @import("compaction.zig").ResourcePoolType(Grid);
 
 const Grid = @import("../vsr/grid.zig").GridType(Storage);
 const SuperBlock = vsr.SuperBlockType(Storage);
 const ScanBuffer = @import("scan_buffer.zig").ScanBuffer;
+const TreeType = @import("tree.zig").TreeType;
 const ScanTreeType = @import("scan_tree.zig").ScanTreeType;
 const SortedSegmentedArrayType = @import("./segmented_array.zig").SortedSegmentedArrayType;
 
@@ -103,7 +101,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
     return struct {
         const Environment = @This();
 
-        const Tree = @import("tree.zig").TreeType(Table, Storage);
         const Table = TableType(
             u64,
             Value,
@@ -114,6 +111,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             value_count_max,
             table_usage,
         );
+        const Tree = TreeType(Table, Storage);
         const ScanTree = ScanTreeType(*Environment, Tree, Storage);
 
         const State = enum {
@@ -135,7 +133,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         state: State,
         storage: *Storage,
-        time: Time,
+        time_sim: TimeSim,
         trace: Storage.Tracer,
         superblock: SuperBlock,
         superblock_context: SuperBlock.Context,
@@ -164,8 +162,13 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.time = Time.init_simple();
-            env.trace = try Storage.Tracer.init(gpa, &env.time, 0, replica, .{});
+            env.time_sim = TimeSim.init_simple();
+            env.trace = try Storage.Tracer.init(
+                gpa,
+                env.time_sim.time(),
+                .{ .replica = .{ .cluster = 0, .replica = replica } },
+                .{},
+            );
             defer env.trace.deinit(gpa);
 
             env.superblock = try SuperBlock.init(gpa, .{
@@ -344,21 +347,53 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             assert(compactions_active_count <= stdx.div_ceil(constants.lsm_levels, 2));
             const compactions_slice = compactions_active[0..compactions_active_count];
 
+            // 1 since we may have partially finished index/value blocks from the previous beat.
+            var beat_value_blocks_max: u64 = 1;
+            var beat_index_blocks_max: u64 = 1;
+
             for (compactions_slice) |compaction| {
-                if (first_beat or half_beat) compaction.bar_commence(op);
+                if (first_beat or half_beat) _ = compaction.bar_commence(op);
+
+                const input_values_remaining_bar =
+                    compaction.quotas.bar - compaction.quotas.bar_done;
+                const input_values_remaining_beat =
+                    stdx.div_ceil(input_values_remaining_bar, beats_remaining);
+
+                compaction.beat_commence(input_values_remaining_beat);
+
+                // The +1 is for imperfections in pacing our immutable table, which
+                // might cause us to overshoot by a single block (limited to 1 due
+                // to how the immutable table values are consumed.)
+                beat_value_blocks_max += stdx.div_ceil(
+                    compaction.quotas.beat,
+                    Table.layout.block_value_count_max,
+                ) + 1;
+
+                beat_index_blocks_max += stdx.div_ceil(
+                    beat_value_blocks_max,
+                    Table.value_block_count_max,
+                );
             }
-            for (compactions_slice) |compaction| {
-                compaction.beat_commence(beats_remaining);
-            }
+
+            env.pool.grid_reservation = env.grid.reserve(
+                beat_value_blocks_max + beat_index_blocks_max,
+            );
+
             for (compactions_slice) |compaction| {
                 assert(env.pool.idle());
                 env.change_state(.fuzzing, .tree_compact);
-                switch (compaction.compaction_dispatch_enter(&env.pool, compact_callback)) {
-                    .active => env.tick_until_state_change(.tree_compact, .fuzzing),
-                    .beat_finished => env.change_state(.tree_compact, .fuzzing),
+
+                switch (compaction.compaction_dispatch_enter(.{
+                    .pool = &env.pool,
+                    .callback = compact_callback,
+                })) {
+                    .pending => env.tick_until_state_change(.tree_compact, .fuzzing),
+                    .ready => env.change_state(.tree_compact, .fuzzing),
                 }
                 assert(env.pool.idle());
             }
+
+            env.grid.forfeit(env.pool.grid_reservation.?);
 
             if (last_beat or last_half_beat) {
                 assert(env.pool.blocks_acquired() == 0);
@@ -388,7 +423,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }
         }
 
-        fn compact_callback(pool: *ResourcePool) void {
+        fn compact_callback(pool: *ResourcePool, _: u16, _: u64) void {
             const env: *Environment = @fieldParentPtr("pool", pool);
             env.change_state(.tree_compact, .fuzzing);
         }
@@ -891,34 +926,22 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const table_usage = prng.enum_uniform(TableUsage);
     log.info("table_usage={}", .{table_usage});
 
-    var storage_fault_atlas = try ClusterFaultAtlas.init(gpa, 3, &prng, .{
-        .faulty_superblock = false,
-        .faulty_wal_headers = false,
-        .faulty_wal_prepares = false,
-        .faulty_client_replies = false,
-        .faulty_grid = true,
-    });
-    defer storage_fault_atlas.deinit(gpa);
-
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .replica_index = 0,
-        .read_latency_min = 0,
-        .read_latency_mean = prng.range_inclusive(u64, 0, 20),
-        .write_latency_min = 0,
-        .write_latency_mean = prng.range_inclusive(u64, 0, 20),
-        .read_fault_probability = Ratio.zero(),
-        .write_fault_probability = Ratio.zero(),
-        .fault_atlas = &storage_fault_atlas,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
     };
 
     const block_count_min =
-        stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_bar_max +
-        (compaction_block_count_beat_min - compaction_block_count_bar_max);
+        stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_beat_min;
+
     const block_count = if (prng.chance(ratio(1, 5)))
         block_count_min
     else
-        prng.range_inclusive(u32, block_count_min, block_count_min * 64);
+        prng.range_inclusive(u32, block_count_min, block_count_min * 16);
 
     const fuzz_op_count = @min(
         fuzz_args.events_max orelse events_max,

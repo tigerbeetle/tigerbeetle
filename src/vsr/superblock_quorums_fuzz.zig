@@ -112,7 +112,7 @@ fn test_quorums_working(
     var checksums: [6]u128 = undefined;
     for (&checksums) |*c| c.* = prng.int(u128);
 
-    var members = [_]u128{0} ** constants.members_max;
+    var members: [constants.members_max]u128 = @splat(0);
     for (members[0..6]) |*member| {
         member.* = prng.int(u128);
     }
@@ -271,7 +271,7 @@ pub fn fuzz_quorum_repairs(
     var q1: Quorums = undefined;
     var q2: Quorums = undefined;
 
-    var members = [_]u128{0} ** constants.members_max;
+    var members: [constants.members_max]u128 = @splat(0);
     for (members[0..6]) |*member| {
         member.* = prng.int(u128);
     }

@@ -60,14 +60,14 @@ pub const Completion = struct {
         }
 
         self.prefix.clear();
-        self.prefix.append_slice_assume_capacity(buffer[0..query_start_index]);
+        self.prefix.push_slice(buffer[0..query_start_index]);
 
         self.suffix.clear();
-        self.suffix.append_slice_assume_capacity(buffer[buffer_index..]);
+        self.suffix.push_slice(buffer[buffer_index..]);
 
         if (self.matches.count == 0) {
             self.query.clear();
-            self.query.append_slice_assume_capacity(buffer[query_start_index..buffer_index]);
+            self.query.push_slice(buffer[query_start_index..buffer_index]);
 
             try self.get_completions(self.query.const_slice());
         }

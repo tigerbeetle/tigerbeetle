@@ -486,7 +486,6 @@ var transferErrors = client.CreateTransfers(new[] { transfer0 });
 var transfer1 = new Transfer
 {
     Id = 9,
-    // Post the entire pending amount.
     Amount = 0,
     PendingId = 8,
     Flags = TransferFlags.VoidPendingTransfer,

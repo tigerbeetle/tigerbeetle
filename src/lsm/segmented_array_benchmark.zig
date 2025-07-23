@@ -108,7 +108,7 @@ test "benchmark: segmented array" {
         while (i < options.value_count) : (i += 1) {
             _ = array.insert_element(&node_pool, .{
                 .key = prng.int_inclusive(u64, options.value_count - 1),
-                .padding = [_]u8{0} ** (options.value_size - @sizeOf(Key)),
+                .padding = @splat(0),
             });
         }
 

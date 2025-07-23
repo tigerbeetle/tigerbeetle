@@ -690,7 +690,7 @@ const TestRunner = struct {
             @memset(std.mem.bytesAsSlice(u16, slice[0..bytes_written]), @intCast(index));
             encoder.add(bytes_written);
 
-            expected.append_assume_capacity(elements_count);
+            expected.push(elements_count);
         }
         const bytes_written = encoder.finish();
         try testing.expect(encoder.batch_count == options.batch_count);

@@ -62,7 +62,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         ) !void {
             assert(!self.formatting);
 
-            const header_zeroes = [_]u8{0} ** @sizeOf(Header);
+            const header_zeroes: [@sizeOf(Header)]u8 = @splat(0);
             const wal_write_size_max = 4 * 1024 * 1024;
             assert(wal_write_size_max % constants.sector_size == 0);
 
@@ -227,10 +227,10 @@ test "format" {
         allocator,
         data_file_size_min,
         .{
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = .{ .ns = 0 },
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = .{ .ns = 0 },
         },
     );
     defer storage.deinit(allocator);

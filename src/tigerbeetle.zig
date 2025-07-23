@@ -71,7 +71,7 @@ pub const AccountBalance = extern struct {
     credits_pending: u128,
     credits_posted: u128,
     timestamp: u64,
-    reserved: [56]u8 = [_]u8{0} ** 56,
+    reserved: [56]u8 = @splat(0),
 
     comptime {
         assert(stdx.no_padding(AccountBalance));
@@ -481,7 +481,7 @@ pub const QueryFilter = extern struct {
     /// Query by the `code` index.
     /// Use zero for no filter.
     code: u16,
-    reserved: [6]u8 = [_]u8{0} ** 6,
+    reserved: [6]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -528,7 +528,7 @@ pub const AccountFilter = extern struct {
     /// Use zero for no filter.
     code: u16,
 
-    reserved: [58]u8 = [_]u8{0} ** 58,
+    reserved: [58]u8 = @splat(0),
     /// The initial timestamp (inclusive).
     /// Use zero for no filter.
     timestamp_min: u64,
@@ -583,7 +583,7 @@ pub const ChangeEvent = extern struct {
 
     ledger: u32,
     type: ChangeEventType,
-    reserved: [39]u8 = [_]u8{0} ** 39,
+    reserved: [39]u8 = @splat(0),
 
     debit_account_id: u128,
     debit_account_debits_pending: u128,
@@ -624,7 +624,7 @@ pub const ChangeEventsFilter = extern struct {
     timestamp_min: u64,
     timestamp_max: u64,
     limit: u32,
-    reserved: [44]u8 = [_]u8{0} ** 44,
+    reserved: [44]u8 = @splat(0),
 
     comptime {
         assert(stdx.no_padding(ChangeEventsFilter));

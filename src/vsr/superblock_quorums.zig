@@ -25,7 +25,7 @@ pub fn QuorumsType(comptime options: Options) type {
             /// An integer value indicates the copy index found in the corresponding slot.
             /// A `null` value indicates that the copy is invalid or not a member of the working
             /// quorum. All copies belong to the same (valid, working) quorum.
-            slots: [options.superblock_copies]?u8 = [_]?u8{null} ** options.superblock_copies,
+            slots: [options.superblock_copies]?u8 = @splat(null),
 
             pub fn repairs(quorum: Quorum) RepairIterator {
                 assert(quorum.valid);

@@ -12,7 +12,7 @@ const ratio = stdx.PRNG.ratio;
 const log = std.log.scoped(.lsm_scan_fuzz);
 const lsm = @import("tree.zig");
 
-const Time = @import("../testing/time.zig").Time;
+const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
 const GridType = @import("../vsr/grid.zig").GridType;
 const GrooveType = @import("groove.zig").GrooveType;
@@ -200,7 +200,7 @@ const QuerySpec = struct {
                 .merge => |merge| {
                     print_operator = false;
                     try writer.print("(", .{});
-                    stack.append_assume_capacity(merge);
+                    stack.push(merge);
                 },
             }
 
@@ -241,7 +241,7 @@ const QuerySpec = struct {
                     },
                 },
             };
-            matches.append_assume_capacity(match);
+            matches.push(match);
         }
         return matches.get(matches.count() - 1);
     }
@@ -310,22 +310,19 @@ const QuerySpecFuzzer = struct {
         var query: Query = .{};
         if (field_max == 1) {
             // Single field queries must have just one part.
-            query.append_assume_capacity(.{
-                .field = self.generate_query_field(),
-            });
-
+            query.push(.{ .field = self.generate_query_field() });
             return query;
         }
 
         // Multi field queries must start with a merge.
         var stack: stdx.BoundedArrayType(MergeStack, query_scans_max - 1) = .{};
-        stack.append_assume_capacity(.{
+        stack.push(.{
             .index = 0,
             .operand_count = 0,
             .fields_remain = field_max,
         });
 
-        query.append_assume_capacity(.{
+        query.push(.{
             .merge = .{
                 .operator = self.prng.enum_uniform(QueryOperator),
                 .operand_count = 0,
@@ -396,7 +393,7 @@ const QuerySpecFuzzer = struct {
                         stack.truncate(stack.count() - 1);
                     }
 
-                    stack.append_assume_capacity(.{
+                    stack.push(.{
                         .index = query.count(),
                         .operand_count = 0,
                         .fields_remain = merge_field_remain,
@@ -411,7 +408,7 @@ const QuerySpecFuzzer = struct {
                 },
             };
 
-            query.append_assume_capacity(query_part);
+            query.push(query_part);
         }
 
         assert(stack.count() == 0);
@@ -495,7 +492,7 @@ const Environment = struct {
     state: State,
 
     storage: *Storage,
-    time: Time,
+    time_sim: TimeSim,
     trace: Storage.Tracer,
     superblock: SuperBlock,
     superblock_context: SuperBlock.Context = undefined,
@@ -518,15 +515,15 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.time = Time.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, &env.time, 0, 0, .{});
+        env.time_sim = TimeSim.init_simple();
+        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
             .storage = storage,
             .prng = prng,
             .state = .init,
-            .time = env.time,
+            .time_sim = env.time_sim,
             .trace = env.trace,
 
             .superblock = try SuperBlock.init(gpa, .{
@@ -546,7 +543,7 @@ const Environment = struct {
             }),
             .forest = undefined,
             .model = .{},
-            .model_matches = [_]std.DynamicBitSetUnmanaged{.{}} ** query_spec_max,
+            .model_matches = @splat(.{}),
 
             .scan_lookup_buffer = try gpa.alloc(Thing, batch_objects_max),
             .checkpoint_op = null,
@@ -763,7 +760,7 @@ const Environment = struct {
                             query_spec.direction,
                         ),
                     };
-                    stack.append_assume_capacity(scan);
+                    stack.push(scan);
                 },
                 .merge => |merge| {
                     assert(merge.operand_count > 1);
@@ -776,7 +773,7 @@ const Environment = struct {
                     };
 
                     stack.truncate(stack.count() - merge.operand_count);
-                    stack.append_assume_capacity(scan);
+                    stack.push(scan);
                 },
             }
         }
@@ -947,10 +944,10 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
         constants.storage_size_limit_default,
         Storage.Options{
             .seed = prng.int(u64),
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
+            .read_latency_min = .{ .ns = 0 },
+            .read_latency_mean = .{ .ns = 0 },
+            .write_latency_min = .{ .ns = 0 },
+            .write_latency_mean = .{ .ns = 0 },
             .crash_fault_probability = Ratio.zero(),
         },
     );

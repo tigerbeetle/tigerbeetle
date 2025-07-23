@@ -17,6 +17,8 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
+const IO = vsr.io.IO;
+const Tracer = vsr.trace.Tracer;
 const Storage = @import("main.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
 const SuperBlockVersion = vsr.superblock.SuperBlockVersion;
@@ -34,11 +36,16 @@ const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
 
-pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) !void {
+pub fn main(
+    allocator: std.mem.Allocator,
+    io: *IO,
+    tracer: *Tracer,
+    cli_args: *const cli.Command.Inspect,
+) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
 
-    const inspect_result = main_inspect(allocator, cli_args, stdout_writer.any());
+    const inspect_result = main_inspect(allocator, io, tracer, cli_args, stdout_writer.any());
     const flush_result = stdout_buffer.flush();
     try inspect_result;
     try flush_result;
@@ -46,6 +53,8 @@ pub fn main(allocator: std.mem.Allocator, cli_args: *const cli.Command.Inspect) 
 
 fn main_inspect(
     allocator: std.mem.Allocator,
+    io: *IO,
+    tracer: *Tracer,
     cli_args: *const cli.Command.Inspect,
     stdout: std.io.AnyWriter,
 ) !void {
@@ -56,7 +65,7 @@ fn main_inspect(
         .data_file => |data_file| data_file,
     };
 
-    var inspector = try Inspector.create(allocator, data_file.path);
+    const inspector = try Inspector.create(allocator, io, tracer, data_file.path);
     defer inspector.destroy();
 
     switch (data_file.query) {
@@ -401,7 +410,7 @@ const Inspector = struct {
     allocator: std.mem.Allocator,
     dir_fd: std.posix.fd_t,
     fd: std.posix.fd_t,
-    io: vsr.io.IO,
+    io: *IO,
     storage: Storage,
 
     superblock_buffer: []align(constants.sector_size) u8,
@@ -410,7 +419,12 @@ const Inspector = struct {
     busy: bool = false,
     read: Storage.Read = undefined,
 
-    fn create(allocator: std.mem.Allocator, path: []const u8) !*Inspector {
+    fn create(
+        allocator: std.mem.Allocator,
+        io: *IO,
+        tracer: *Tracer,
+        path: []const u8,
+    ) !*Inspector {
         var inspector = try allocator.create(Inspector);
         errdefer allocator.destroy(inspector);
 
@@ -418,21 +432,18 @@ const Inspector = struct {
             .allocator = allocator,
             .dir_fd = undefined,
             .fd = undefined,
-            .io = undefined,
+            .io = io,
             .storage = undefined,
             .superblock_buffer = undefined,
             .superblock_headers = undefined,
         };
-
-        inspector.io = try vsr.io.IO.init(128, 0);
-        errdefer inspector.io.deinit();
 
         const dirname = std.fs.path.dirname(path) orelse ".";
         inspector.dir_fd = try vsr.io.IO.open_dir(dirname);
         errdefer std.posix.close(inspector.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        inspector.fd = try inspector.io.open_data_file(
+        inspector.fd = try io.open_data_file(
             inspector.dir_fd,
             basename,
             vsr.superblock.data_file_size_min,
@@ -441,7 +452,7 @@ const Inspector = struct {
         );
         errdefer std.posix.close(inspector.fd);
 
-        inspector.storage = try Storage.init(&inspector.io, inspector.fd);
+        inspector.storage = try Storage.init(io, tracer, inspector.fd);
         errdefer inspector.storage.deinit();
 
         inspector.superblock_buffer = try allocator.alignedAlloc(
@@ -479,7 +490,6 @@ const Inspector = struct {
     fn destroy(inspector: *Inspector) void {
         inspector.allocator.free(inspector.superblock_buffer);
         inspector.storage.deinit();
-        inspector.io.deinit();
         std.posix.close(inspector.fd);
         std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
@@ -495,7 +505,7 @@ const Inspector = struct {
     }
 
     fn inspector_read_callback(read: *Storage.Read) void {
-        const inspector: *Inspector = @fieldParentPtr("read", read);
+        const inspector: *Inspector = @alignCast(@fieldParentPtr("read", read));
         assert(inspector.busy);
 
         inspector.busy = false;
@@ -1336,7 +1346,7 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .{ .block_type = .client_sessions, .Schema = schema.TrailerNode },
         .{ .block_type = .manifest, .Schema = schema.ManifestNode },
         .{ .block_type = .index, .Schema = schema.TableIndex },
-        .{ .block_type = .data, .Schema = schema.TableData },
+        .{ .block_type = .value, .Schema = schema.TableValue },
     }) |pair| {
         if (header.block_type == pair.block_type) {
             try print_struct(writer, "header.metadata", pair.Schema.metadata(block));
@@ -1372,26 +1382,26 @@ fn print_block(writer: std.io.AnyWriter, block: BlockPtrConst) !void {
         .index => {
             const index = schema.TableIndex.from(block);
             for (
-                index.data_addresses_used(block),
-                index.data_checksums_used(block),
+                index.value_addresses_used(block),
+                index.value_checksums_used(block),
                 0..,
-            ) |data_address, data_checksum, i| {
+            ) |value_address, value_checksum, i| {
                 try writer.print(
-                    "data_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
-                    .{ i, data_address, data_checksum.value },
+                    "value_blocks[{:_>3}]: address={} checksum={x:0>32}\n",
+                    .{ i, value_address, value_checksum.value },
                 );
             }
         },
-        .data => {
-            const data = schema.TableData.from(block);
-            const metadata = data.block_metadata(block);
-            const data_bytes = data.block_values_used_bytes(block);
+        .value => {
+            const value_block = schema.TableValue.from(block);
+            const metadata = value_block.block_metadata(block);
+            const value_bytes = value_block.block_values_used_bytes(block);
 
             var label_buffer: [256]u8 = undefined;
             inline for (StateMachine.Forest.tree_infos) |tree_info| {
                 if (metadata.tree_id == tree_info.tree_id) {
                     for (
-                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, data_bytes),
+                        std.mem.bytesAsSlice(tree_info.Tree.Table.Value, value_bytes),
                         0..,
                     ) |*value, i| {
                         var label_stream = std.io.fixedBufferStream(&label_buffer);
@@ -1606,7 +1616,7 @@ fn GroupByType(comptime count_max: usize) type {
         const BitSet = stdx.BitSetType(count_max);
 
         count: usize = 0,
-        checksums: [count_max]?u128 = [_]?u128{null} ** count_max,
+        checksums: [count_max]?u128 = @splat(null),
         matches: [count_max]BitSet = undefined,
 
         pub fn compare(group_by: *GroupBy, bytes: []const u8) void {

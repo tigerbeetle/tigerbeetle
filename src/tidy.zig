@@ -382,7 +382,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 413; // fn check in state_machine.zig
+const function_line_count_max = 411; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -477,7 +477,7 @@ fn tidy_long_functions(
             last_function.is_innermost = false;
         }
 
-        function_stack.append_assume_capacity(innermost_function);
+        function_stack.push(innermost_function);
     }
 
     if (function_stack.count() > 0) {
@@ -632,7 +632,7 @@ const DeadFilesDetector = struct {
     fn path_to_name(path: []const u8) FileName {
         assert(std.mem.endsWith(u8, path, ".zig"));
         const basename = std.fs.path.basename(path);
-        var file_name: FileName = .{0} ** 64;
+        var file_name: FileName = @splat(0);
         assert(basename.len <= file_name.len);
         stdx.copy_disjoint(.inexact, u8, &file_name, basename);
         return file_name;

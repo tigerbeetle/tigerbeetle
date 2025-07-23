@@ -13,6 +13,7 @@ const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
 const stdx = @import("../stdx.zig");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
+const Tracer = vsr.trace.Tracer;
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 
@@ -168,7 +169,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
-        trace: *Storage.Tracer,
+        trace: *Tracer,
         free_set: FreeSet,
         free_set_checkpoint_blocks_acquired: CheckpointTrailer,
         free_set_checkpoint_blocks_released: CheckpointTrailer,
@@ -213,7 +214,7 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
-            trace: *Storage.Tracer,
+            trace: *Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             missing_blocks_max: usize,
             missing_tables_max: usize,

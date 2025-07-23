@@ -8,7 +8,7 @@ const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
-const Time = @import("../time.zig").Time;
+const TimeOS = @import("../time.zig").TimeOS;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
@@ -17,7 +17,7 @@ pub const IO = struct {
 
     kq: fd_t,
     event_id: Event = 0,
-    time: Time = .{},
+    time_os: TimeOS = .{},
     io_inflight: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
@@ -163,7 +163,7 @@ pub const IO = struct {
         while (timeouts_iterator.next()) |completion| {
 
             // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
-            const now = self.time.monotonic();
+            const now = self.time_os.time().monotonic();
             const expires = completion.operation.timeout.expires;
 
             // NOTE: remove() could be O(1) here with a doubly-linked-list
@@ -662,7 +662,7 @@ pub const IO = struct {
             completion,
             .timeout,
             .{
-                .expires = self.time.monotonic() + nanoseconds,
+                .expires = self.time_os.time().monotonic() + nanoseconds,
             },
             struct {
                 fn do_operation(_: anytype) TimeoutError!void {
