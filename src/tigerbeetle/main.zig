@@ -61,18 +61,18 @@ pub const std_options: std.Options = .{
 pub fn main() !void {
     try SigIllHandler.register();
 
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var arena_allocator = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena_allocator.deinit();
 
-    const allocator = arena.allocator();
+    const arena = arena_allocator.allocator();
 
-    var arg_iterator = try std.process.argsWithAllocator(allocator);
+    var arg_iterator = try std.process.argsWithAllocator(arena);
     defer arg_iterator.deinit();
 
     var command = cli.parse_args(&arg_iterator);
 
     if (command == .version) {
-        try Command.version(allocator, command.version.verbose);
+        try Command.version(arena, command.version.verbose);
         return; // Exit early before initializing IO.
     }
 
@@ -108,29 +108,29 @@ pub fn main() !void {
         else => {},
     }
 
-    var tracer = try Tracer.init(allocator, time, .unknown, .{
+    var tracer = try Tracer.init(arena, time, .unknown, .{
         .writer = if (trace_file) |file| file.writer().any() else null,
         .statsd_options = if (statsd_address) |address| .{ .udp = .{
             .io = &io,
             .address = address,
         } } else .log,
     });
-    defer tracer.deinit(allocator);
+    defer tracer.deinit(arena);
 
     switch (command) {
-        .format => |*args| try Command.format(allocator, &io, &tracer, args, .{
+        .version => unreachable, // Handled earlier.
+        .format => |*args| try Command.format(arena, &io, &tracer, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
             .view = null,
         }),
-        .recover => |*args| try Command.reformat(allocator, &io, &tracer, args),
-        .start => |*args| try Command.start(allocator, &io, &tracer, args),
-        .version => unreachable, // Handled earlier.
-        .repl => |*args| try Command.repl(allocator, &io, time, args),
-        .benchmark => |*args| try benchmark_driver.main(allocator, &io, time, args),
-        .inspect => |*args| inspect.main(allocator, &io, &tracer, args) catch |err| {
+        .recover => |*args| try Command.reformat(arena, &io, &tracer, args),
+        .start => |*args| try Command.start(arena, &io, &tracer, args),
+        .repl => |*args| try Command.repl(arena, &io, time, args),
+        .benchmark => |*args| try benchmark_driver.main(arena, &io, time, args),
+        .inspect => |*args| inspect.main(arena, &io, &tracer, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
         },
@@ -139,10 +139,10 @@ pub fn main() !void {
             var stdout_writer = stdout_buffer.writer();
             const stdout = stdout_writer.any();
 
-            try vsr.multiversioning.print_information(allocator, args.path, stdout);
+            try vsr.multiversioning.print_information(arena, args.path, stdout);
             try stdout_buffer.flush();
         },
-        .amqp => |*args| try Command.amqp(allocator, time, args),
+        .amqp => |*args| try Command.amqp(arena, time, args),
     }
 }
 
