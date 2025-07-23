@@ -99,15 +99,15 @@ The 128-bit representation defines the precision, but not the scale.
 
 #### Examples
 
-- In USD, `$1` = `100` cents. So for example,
+- In USD, `$1` = `100` cents. Using an asset scale of `2`;
   - The fractional amount `$0.45` is represented as the integer `45`.
   - The fractional amount `$123.00` is represented as the integer `12300`.
   - The fractional amount `$123.45` is represented as the integer `12345`.
 
-- In JPY, `¥‎1` = `1` yen. So for example,
+- In JPY, `¥‎1` = `1` yen. Using an asset scale of `0`;
   - The fractional amount `¥‎123` is represented as the integer `123`.
 
-- In IQD, `1 د.ع` = `1000` fils. So for example,
+- In IQD, `1 د.ع` = `1000` fils. Using an asset scale of `3`;
   - The fractional amount `0.450 د.ع` is represented as the integer `450`.
   - The fractional amount `123.000 د.ع` is represented as the integer `123000`.
   - The fractional amount `123.450 د.ع` is represented as the integer `123450`.
