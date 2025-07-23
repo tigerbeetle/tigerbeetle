@@ -77,6 +77,7 @@ const CLIArgs = struct {
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
     replica_missing: ?u8 = null,
+    requests_max: ?u32 = null,
 
     positional: struct {
         seed: ?[]const u8 = null,
@@ -147,6 +148,9 @@ pub fn main() !void {
     options.replica_missing = cli_args.replica_missing;
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
+    }
+    if (cli_args.requests_max) |requests_max| {
+        options.requests_max = requests_max;
     }
 
     log.info(
