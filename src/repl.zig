@@ -653,6 +653,7 @@ pub fn ReplType(comptime MessageBus: type) type {
 
         pub fn init(
             parent_allocator: std.mem.Allocator,
+            io: *IO,
             time: Time,
             options: struct {
                 addresses: []const std.net.Address,
@@ -674,12 +675,6 @@ pub fn ReplType(comptime MessageBus: type) type {
 
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
-
-            var io = try allocator.create(IO);
-            errdefer allocator.destroy(io);
-
-            io.* = try IO.init(32, 0);
-            errdefer io.deinit();
 
             const client_id = stdx.unique_u128();
             const client = try Client.init(
@@ -723,7 +718,6 @@ pub fn ReplType(comptime MessageBus: type) type {
             repl.static_allocator.transition_from_static_to_deinit();
 
             repl.client.deinit(allocator);
-            repl.io.deinit();
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);
             repl.arguments.deinit(allocator);
