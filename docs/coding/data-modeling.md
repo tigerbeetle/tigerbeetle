@@ -107,7 +107,7 @@ The 128-bit representation defines the precision, but not the scale.
 - In JPY, `¥‎1` = `1` yen. Using an asset scale of `0`;
   - The fractional amount `¥‎123` is represented as the integer `123`.
 
-- In IQD, `1 د.ع` = `1000` fils. Using an asset scale of `3`;
+- In IQD, `1 IQD` = `1000` fils. Using an asset scale of `3`;
   - The fractional amount `0.450 د.ع` is represented as the integer `450`.
   - The fractional amount `123.000 د.ع` is represented as the integer `123000`.
   - The fractional amount `123.450 د.ع` is represented as the integer `123450`.
