@@ -66,16 +66,17 @@ pub fn main() !void {
 
     const allocator = arena.allocator();
 
-    var time_os: TimeOS = .{};
-    const time = time_os.time();
-
     var arg_iterator = try std.process.argsWithAllocator(allocator);
     defer arg_iterator.deinit();
 
     var command = cli.parse_args(&arg_iterator);
 
     switch (command) {
-        .inspect, .version => {},
+        .inspect => {},
+        .version => |*args| {
+            try Command.version(allocator, args.verbose);
+            return; // Exit early before initializing IO.
+        },
         inline else => |*args| {
             if (args.log_debug) {
                 log_level_runtime = .debug;
@@ -83,17 +84,25 @@ pub fn main() !void {
         },
     }
 
+    // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
+    // is not available) there won't be a dangling file.
+    var io = try IO.init(128, 0);
+    defer io.deinit();
+
+    var time_os: TimeOS = .{};
+    const time = time_os.time();
+
     switch (command) {
-        .format => |*args| try Command.format(allocator, time, args, .{
+        .format => |*args| try Command.format(allocator, &io, time, args, .{
             .cluster = args.cluster,
             .replica = args.replica,
             .replica_count = args.replica_count,
             .release = config.process.release,
             .view = null,
         }),
-        .recover => |*args| try Command.reformat(allocator, time, args),
-        .start => |*args| try Command.start(allocator, time, args),
-        .version => |*args| try Command.version(allocator, args.verbose),
+        .recover => |*args| try Command.reformat(allocator, &io, time, args),
+        .start => |*args| try Command.start(allocator, &io, time, args),
+        .version => unreachable, // Handled earlier.
         .repl => |*args| try Command.repl(allocator, time, args),
         .benchmark => |*args| try benchmark_driver.main(allocator, time, args),
         .inspect => |*args| inspect.main(allocator, time, args) catch |err| {
@@ -179,7 +188,6 @@ const SigIllHandler = struct {
 const Command = struct {
     dir_fd: std.posix.fd_t,
     fd: std.posix.fd_t,
-    io: IO,
     storage: Storage,
     self_exe_path: [:0]const u8,
     data_file_path: []const u8,
@@ -190,6 +198,7 @@ const Command = struct {
     fn init(
         command: *Command,
         allocator: mem.Allocator,
+        io: *IO,
         time: Time,
         path: []const u8,
         options: struct {
@@ -199,11 +208,6 @@ const Command = struct {
             statsd_address: ?std.net.Address,
         },
     ) !void {
-        // Try and init IO early, before a file has even been created, so if it fails (eg, io_uring
-        // is not available) there won't be a dangling file.
-        command.io = try IO.init(128, 0);
-        errdefer command.io.deinit();
-
         command.trace_file = if (options.trace_path) |trace_path|
             std.fs.cwd().createFile(trace_path, .{ .exclusive = true }) catch |err| {
                 std.debug.panic("error creating trace file: {}", .{err});
@@ -217,7 +221,7 @@ const Command = struct {
         command.tracer = try Tracer.init(allocator, time, .unknown, .{
             .writer = if (command.trace_writer != null) command.trace_writer.?.any() else null,
             .statsd_options = if (options.statsd_address) |statsd_address| .{ .udp = .{
-                .io = &command.io,
+                .io = io,
                 .address = statsd_address,
             } } else .log,
         });
@@ -237,7 +241,7 @@ const Command = struct {
             .direct_io_required;
 
         const basename = std.fs.path.basename(path);
-        command.fd = try command.io.open_data_file(
+        command.fd = try io.open_data_file(
             command.dir_fd,
             basename,
             data_file_size_min,
@@ -246,7 +250,7 @@ const Command = struct {
         );
         errdefer std.posix.close(command.fd);
 
-        command.storage = try Storage.init(&command.io, &command.tracer, command.fd);
+        command.storage = try Storage.init(io, &command.tracer, command.fd);
         errdefer command.storage.deinit();
 
         command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
@@ -262,17 +266,17 @@ const Command = struct {
         std.posix.close(command.dir_fd);
         if (command.trace_file) |file| file.close();
         command.tracer.deinit(allocator);
-        command.io.deinit();
     }
 
     pub fn format(
         allocator: mem.Allocator,
+        io: *IO,
         time: Time,
         args: *const cli.Command.Format,
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, time, args.path, .{
+        try command.init(allocator, io, time, args.path, .{
             .must_create = true,
             .development = args.development,
             .trace_path = null,
@@ -295,9 +299,14 @@ const Command = struct {
         });
     }
 
-    pub fn reformat(allocator: mem.Allocator, time: Time, args: *const cli.Command.Recover) !void {
+    pub fn reformat(
+        allocator: mem.Allocator,
+        io: *IO,
+        time: Time,
+        args: *const cli.Command.Recover,
+    ) !void {
         var command: Command = undefined;
-        try command.init(allocator, time, args.path, .{
+        try command.init(allocator, io, time, args.path, .{
             .must_create = true,
             .development = args.development,
             .trace_path = null,
@@ -316,7 +325,7 @@ const Command = struct {
             .message_pool = &message_pool,
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
-                .io = &command.io,
+                .io = io,
                 .clients_limit = null,
             },
             .eviction_callback = &reformat_client_eviction_callback,
@@ -341,7 +350,7 @@ const Command = struct {
         reformatter.start();
         while (reformatter.done() == null) {
             client.tick();
-            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
         switch (reformatter.done().?) {
             .failed => |err| {
@@ -361,7 +370,12 @@ const Command = struct {
         std.debug.panic("error: client evicted: {s}", .{@tagName(eviction.header.reason)});
     }
 
-    pub fn start(base_allocator: mem.Allocator, time: Time, args: *const cli.Command.Start) !void {
+    pub fn start(
+        base_allocator: mem.Allocator,
+        io: *IO,
+        time: Time,
+        args: *const cli.Command.Start,
+    ) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
         const allocator = counting_allocator.allocator();
 
@@ -369,7 +383,7 @@ const Command = struct {
         // (Here or in Replica.open()?).
 
         var command: Command = undefined;
-        try command.init(allocator, time, args.path, .{
+        try command.init(allocator, io, time, args.path, .{
             .must_create = false,
             .development = args.development,
             .trace_path = args.trace,
@@ -388,7 +402,7 @@ const Command = struct {
             const aof_dir_fd = try IO.open_dir(aof_dir);
             defer std.posix.close(aof_dir_fd);
 
-            break :blk try AOF.init(&command.io, .{
+            break :blk try AOF.init(io, .{
                 .dir_fd = aof_dir_fd,
                 .relative_path = std.fs.path.basename(aof_file.const_slice()),
             });
@@ -439,7 +453,7 @@ const Command = struct {
 
             break :blk try vsr.multiversioning.Multiversion.init(
                 allocator,
-                &command.io,
+                io,
                 command.self_exe_path,
                 .native,
             );
@@ -494,7 +508,7 @@ const Command = struct {
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),
-                .io = &command.io,
+                .io = io,
                 .clients_limit = clients_limit,
             },
             .grid_cache_blocks_count = args.cache_grid_blocks,
@@ -611,7 +625,7 @@ const Command = struct {
         while (true) {
             replica.tick();
             if (multiversion != null) multiversion.?.tick();
-            try command.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
         }
     }
 
