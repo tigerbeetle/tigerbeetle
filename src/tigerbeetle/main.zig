@@ -129,9 +129,9 @@ pub fn main() !void {
         .recover => |*args| try Command.reformat(allocator, &io, &tracer, args),
         .start => |*args| try Command.start(allocator, &io, &tracer, args),
         .version => unreachable, // Handled earlier.
-        .repl => |*args| try Command.repl(allocator, time, args),
-        .benchmark => |*args| try benchmark_driver.main(allocator, time, args),
-        .inspect => |*args| inspect.main(allocator, time, args) catch |err| {
+        .repl => |*args| try Command.repl(allocator, &io, time, args),
+        .benchmark => |*args| try benchmark_driver.main(allocator, &io, time, args),
+        .inspect => |*args| inspect.main(allocator, &io, &tracer, args) catch |err| {
             // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
             if (err != error.BrokenPipe) return err;
         },
@@ -671,18 +671,19 @@ const Command = struct {
         try stdout_buffer.flush();
     }
 
-    pub fn repl(allocator: mem.Allocator, time: Time, args: *const cli.Command.Repl) !void {
+    pub fn repl(
+        allocator: mem.Allocator,
+        io: *IO,
+        time: Time,
+        args: *const cli.Command.Repl,
+    ) !void {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
 
-        var repl_instance = try Repl.init(
-            allocator,
-            time,
-            .{
-                .cluster_id = args.cluster,
-                .addresses = args.addresses.const_slice(),
-                .verbose = args.verbose,
-            },
-        );
+        var repl_instance = try Repl.init(allocator, io, time, .{
+            .cluster_id = args.cluster,
+            .addresses = args.addresses.const_slice(),
+            .verbose = args.verbose,
+        });
         defer repl_instance.deinit(allocator);
 
         try repl_instance.run(args.statements);

@@ -36,6 +36,7 @@ const cli = @import("./cli.zig");
 
 pub fn main(
     allocator: std.mem.Allocator,
+    io: *IO,
     time: Time,
     addresses: []const std.net.Address,
     cli_args: *const cli.Command.Benchmark,
@@ -78,9 +79,6 @@ pub fn main(
 
     const cluster_id: u128 = 0;
 
-    var io = try IO.init(32, 0);
-    defer io.deinit();
-
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
     defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
     for (0..cli_args.clients) |_| {
@@ -99,7 +97,7 @@ pub fn main(
             .replica_count = @intCast(addresses.len),
             .time = time,
             .message_pool = &message_pools.slice()[i],
-            .message_bus_options = .{ .configuration = addresses, .io = &io },
+            .message_bus_options = .{ .configuration = addresses, .io = io },
         }));
     }
 
@@ -157,7 +155,7 @@ pub fn main(
     });
 
     var benchmark = Benchmark{
-        .io = &io,
+        .io = io,
         .prng = &prng,
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),

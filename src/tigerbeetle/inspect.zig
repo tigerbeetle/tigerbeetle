@@ -17,7 +17,7 @@ const vsr = @import("vsr");
 const stdx = vsr.stdx;
 const schema = vsr.lsm.schema;
 const constants = vsr.constants;
-const Time = vsr.time.Time;
+const IO = vsr.io.IO;
 const Tracer = vsr.trace.Tracer;
 const Storage = @import("main.zig").Storage;
 const SuperBlockHeader = vsr.superblock.SuperBlockHeader;
@@ -36,11 +36,16 @@ const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
 
-pub fn main(allocator: std.mem.Allocator, time: Time, cli_args: *const cli.Command.Inspect) !void {
+pub fn main(
+    allocator: std.mem.Allocator,
+    io: *IO,
+    tracer: *Tracer,
+    cli_args: *const cli.Command.Inspect,
+) !void {
     var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
     var stdout_writer = stdout_buffer.writer();
 
-    const inspect_result = main_inspect(allocator, time, cli_args, stdout_writer.any());
+    const inspect_result = main_inspect(allocator, io, tracer, cli_args, stdout_writer.any());
     const flush_result = stdout_buffer.flush();
     try inspect_result;
     try flush_result;
@@ -48,7 +53,8 @@ pub fn main(allocator: std.mem.Allocator, time: Time, cli_args: *const cli.Comma
 
 fn main_inspect(
     allocator: std.mem.Allocator,
-    time: Time,
+    io: *IO,
+    tracer: *Tracer,
     cli_args: *const cli.Command.Inspect,
     stdout: std.io.AnyWriter,
 ) !void {
@@ -59,7 +65,7 @@ fn main_inspect(
         .data_file => |data_file| data_file,
     };
 
-    const inspector = try Inspector.create(allocator, time, data_file.path);
+    const inspector = try Inspector.create(allocator, io, tracer, data_file.path);
     defer inspector.destroy();
 
     switch (data_file.query) {
@@ -404,8 +410,7 @@ const Inspector = struct {
     allocator: std.mem.Allocator,
     dir_fd: std.posix.fd_t,
     fd: std.posix.fd_t,
-    io: vsr.io.IO,
-    tracer: Tracer,
+    io: *IO,
     storage: Storage,
 
     superblock_buffer: []align(constants.sector_size) u8,
@@ -414,7 +419,12 @@ const Inspector = struct {
     busy: bool = false,
     read: Storage.Read = undefined,
 
-    fn create(allocator: std.mem.Allocator, time: Time, path: []const u8) !*Inspector {
+    fn create(
+        allocator: std.mem.Allocator,
+        io: *IO,
+        tracer: *Tracer,
+        path: []const u8,
+    ) !*Inspector {
         var inspector = try allocator.create(Inspector);
         errdefer allocator.destroy(inspector);
 
@@ -422,22 +432,18 @@ const Inspector = struct {
             .allocator = allocator,
             .dir_fd = undefined,
             .fd = undefined,
-            .io = undefined,
-            .tracer = undefined,
+            .io = io,
             .storage = undefined,
             .superblock_buffer = undefined,
             .superblock_headers = undefined,
         };
-
-        inspector.io = try vsr.io.IO.init(128, 0);
-        errdefer inspector.io.deinit();
 
         const dirname = std.fs.path.dirname(path) orelse ".";
         inspector.dir_fd = try vsr.io.IO.open_dir(dirname);
         errdefer std.posix.close(inspector.dir_fd);
 
         const basename = std.fs.path.basename(path);
-        inspector.fd = try inspector.io.open_data_file(
+        inspector.fd = try io.open_data_file(
             inspector.dir_fd,
             basename,
             vsr.superblock.data_file_size_min,
@@ -446,10 +452,7 @@ const Inspector = struct {
         );
         errdefer std.posix.close(inspector.fd);
 
-        inspector.tracer = try Tracer.init(allocator, time, .unknown, .{});
-        errdefer inspector.tracer.deinit(allocator);
-
-        inspector.storage = try Storage.init(&inspector.io, &inspector.tracer, inspector.fd);
+        inspector.storage = try Storage.init(io, tracer, inspector.fd);
         errdefer inspector.storage.deinit();
 
         inspector.superblock_buffer = try allocator.alignedAlloc(
@@ -487,8 +490,6 @@ const Inspector = struct {
     fn destroy(inspector: *Inspector) void {
         inspector.allocator.free(inspector.superblock_buffer);
         inspector.storage.deinit();
-        inspector.tracer.deinit(inspector.allocator);
-        inspector.io.deinit();
         std.posix.close(inspector.fd);
         std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
