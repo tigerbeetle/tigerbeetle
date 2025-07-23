@@ -10430,8 +10430,9 @@ pub fn ReplicaType(
         fn sync_reclaim_tables(self: *Replica) void {
             while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
-                    "sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
+                    "{}: sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
                     .{
+                        self.log_prefix(),
                         table.index_address,
                         table.index_checksum,
                         table.table_blocks_written,
