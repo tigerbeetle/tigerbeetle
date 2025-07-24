@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
@@ -439,9 +440,6 @@ const QuerySpecFuzzer = struct {
 };
 
 const Environment = struct {
-    const cluster = 0;
-    const replica = 0;
-    const replica_count = 1;
     const node_count = 1024;
 
     // This is the smallest size that set_associative_cache will allow us.
@@ -473,9 +471,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_format,
-        superblock_open,
-        free_set_open,
         forest_init,
         forest_open,
         fuzzing,
@@ -515,8 +510,8 @@ const Environment = struct {
         storage: *Storage,
         prng: *stdx.PRNG,
     ) !void {
-        env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.time_sim = fixtures.init_time(.{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         env.* = .{
@@ -526,16 +521,9 @@ const Environment = struct {
             .time_sim = env.time_sim,
             .trace = env.trace,
 
-            .superblock = try SuperBlock.init(gpa, .{
-                .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_default,
-            }),
+            .superblock = try fixtures.init_superblock(gpa, env.storage, .{}),
 
-            .grid = try Grid.init(gpa, .{
-                .superblock = &env.superblock,
-                .trace = &env.trace,
-                .missing_blocks_max = 0,
-                .missing_tables_max = 0,
+            .grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
                 .blocks_released_prior_checkpoint_durability_max = Grid
@@ -573,16 +561,6 @@ const Environment = struct {
         var env: Environment = undefined;
         try env.init(gpa, storage, prng);
         defer env.deinit(gpa);
-
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .release = vsr.Release.minimum,
-            .replica = replica,
-            .replica_count = replica_count,
-            .view = null,
-        });
-        try env.tick_until_state_change(.superblock_format, .superblock_open);
 
         try env.open(gpa);
         defer env.close(gpa);
@@ -799,15 +777,13 @@ const Environment = struct {
     }
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
-        env.superblock.open(superblock_open_callback, &env.superblock_context);
-        try env.tick_until_state_change(.superblock_open, .free_set_open);
-
-        env.grid.open(grid_open_callback);
-        try env.tick_until_state_change(.free_set_open, .forest_init);
+        fixtures.open_superblock(&env.superblock);
+        fixtures.open_grid(&env.grid);
 
         // The first checkpoint is trivially durable.
         env.grid.free_set.mark_checkpoint_durable();
 
+        env.change_state(.init, .forest_init);
         try env.forest.init(gpa, &env.grid, .{
             .compaction_block_count = Forest.Options.compaction_block_count_min,
             .node_count = node_count,
@@ -847,7 +823,7 @@ const Environment = struct {
 
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(cluster);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = env.checkpoint_op.?;
                     header.set_checksum();
                     break :header header;
@@ -883,21 +859,6 @@ const Environment = struct {
 
             env.checkpoint_op = null;
         }
-    }
-
-    fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_format, .superblock_open);
-    }
-
-    fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_open, .free_set_open);
-    }
-
-    fn grid_open_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.change_state(.free_set_open, .forest_init);
     }
 
     fn forest_open_callback(forest: *Forest) void {
@@ -938,20 +899,13 @@ const Environment = struct {
 pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(fuzz_args.seed);
 
-    // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        Storage.Options{
-            .seed = prng.int(u64),
-            .read_latency_min = .{ .ns = 0 },
-            .read_latency_mean = .{ .ns = 0 },
-            .write_latency_min = .{ .ns = 0 },
-            .write_latency_mean = .{ .ns = 0 },
-            .crash_fault_probability = Ratio.zero(),
-        },
-    );
+    var storage = try fixtures.init_storage(gpa, .{
+        .seed = prng.int(u64),
+        .size = constants.storage_size_limit_default,
+    });
     defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
 
     const commits_max: u32 = @intCast(
         fuzz_args.events_max orelse prng.range_inclusive(u32, 1, 1024),

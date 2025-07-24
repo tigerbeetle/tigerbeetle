@@ -226,11 +226,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 storage_options.replica_index = @intCast(replica_index);
                 storage_options.fault_atlas = storage_fault_atlas;
                 storage_options.grid_checker = grid_checker;
-                storage.* = try Storage.init(
-                    allocator,
-                    options.cluster.storage_size_limit,
-                    storage_options,
-                );
+                storage.* = try Storage.init(allocator, storage_options);
                 // Disable most faults at startup,
                 // so that the replicas don't get stuck recovering_head.
                 storage.faulty =
@@ -854,11 +850,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const storage = &cluster.storages[replica_index];
             const storage_options = storage.options;
             storage.deinit(cluster.allocator);
-            storage.* = try Storage.init(
-                cluster.allocator,
-                cluster.options.storage_size_limit,
-                storage_options,
-            );
+            storage.* = try Storage.init(cluster.allocator, storage_options);
 
             const client_index = cluster.options.client_count + cluster.reformat_count;
             cluster.reformat_count += 1;

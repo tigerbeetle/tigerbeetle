@@ -5071,6 +5071,8 @@ pub const TestContext = struct {
     const data_file_size_min = @import("vsr/superblock.zig").data_file_size_min;
     const SuperBlock = @import("vsr/superblock.zig").SuperBlockType(Storage);
     const Grid = @import("vsr/grid.zig").GridType(Storage);
+    const fixtures = @import("testing/fixtures.zig");
+
     pub const StateMachine = StateMachineType(Storage, .{
         .release = vsr.Release.minimum,
         // Overestimate the batch size because the test never compacts.
@@ -5090,24 +5092,15 @@ pub const TestContext = struct {
     busy: bool,
 
     pub fn init(ctx: *TestContext, allocator: mem.Allocator) !void {
-        ctx.storage = try Storage.init(
-            allocator,
-            4096,
-            .{
-                .read_latency_min = .{ .ns = 0 },
-                .read_latency_mean = .{ .ns = 0 },
-                .write_latency_min = .{ .ns = 0 },
-                .write_latency_mean = .{ .ns = 0 },
-            },
-        );
+        ctx.storage = try fixtures.init_storage(allocator, .{ .size = 4096 });
         errdefer ctx.storage.deinit(allocator);
-        ctx.time_sim = TimeSim.init_simple();
 
-        ctx.trace = try Tracer.init(allocator, ctx.time_sim.time(), .replica_test, .{});
+        ctx.time_sim = fixtures.init_time(.{});
+
+        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
-        ctx.superblock = try SuperBlock.init(allocator, .{
-            .storage = &ctx.storage,
+        ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{
             .storage_size_limit = data_file_size_min,
         });
         errdefer ctx.superblock.deinit(allocator);
@@ -5116,13 +5109,7 @@ pub const TestContext = struct {
         ctx.superblock.opened = true;
         ctx.superblock.working.vsr_state.checkpoint.header.op = 0;
 
-        ctx.grid = try Grid.init(allocator, .{
-            .superblock = &ctx.superblock,
-            .trace = &ctx.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
-            .blocks_released_prior_checkpoint_durability_max = 0,
-        });
+        ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
         errdefer ctx.grid.deinit(allocator);
 
         try ctx.state_machine.init(allocator, &ctx.grid, .{

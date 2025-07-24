@@ -218,21 +218,13 @@ fn ReplicaFormatType(comptime Storage: type) type {
 test "format" {
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const Storage = @import("../testing/storage.zig").Storage;
+    const fixtures = @import("../testing/fixtures.zig");
     const allocator = std.testing.allocator;
     const cluster = 0;
     const replica = 1;
     const replica_count = 1;
 
-    var storage = try Storage.init(
-        allocator,
-        data_file_size_min,
-        .{
-            .read_latency_min = .{ .ns = 0 },
-            .read_latency_mean = .{ .ns = 0 },
-            .write_latency_min = .{ .ns = 0 },
-            .write_latency_mean = .{ .ns = 0 },
-        },
-    );
+    var storage = try fixtures.init_storage(allocator, .{ .size = data_file_size_min });
     defer storage.deinit(allocator);
 
     try format(Storage, allocator, .{
