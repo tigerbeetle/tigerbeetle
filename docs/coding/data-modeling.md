@@ -99,7 +99,7 @@ The 128-bit representation defines the precision, but not the scale.
 
 #### Examples
 
-- In USD, `$1` = `100` cents. Using an asset scale of `2`;
+- In USD, `$1` = `100` cents. Using an asset scale of `2`,
   - The fractional amount `$0.45` is represented as the integer `45`.
   - The fractional amount `$123.00` is represented as the integer `12300`.
   - The fractional amount `$123.45` is represented as the integer `12345`.
