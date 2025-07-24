@@ -2,7 +2,7 @@
 //!
 //! In the Zipfian distribution a small percentage of candidate
 //! items have a high probability of being selected, while most items
-//! have very low probability of being selected.
+//! have a very low probability of being selected.
 //! It is commonly understood to model the "80-20" Pareto principle,
 //! and to be a discreet version of the Pareto distribution,
 //! and terminology related to both are often used interchangeably.
@@ -55,6 +55,8 @@ const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const Random = std.Random;
 const math = std.math;
+const Snap = @import("../testing/snaptest.zig").Snap;
+const snap = Snap.snap;
 
 /// The default "skew" of the distribution.
 const theta_default = 0.99; // per YCSB
@@ -183,6 +185,7 @@ fn zeta_incremental(
 ///     f(i) = (a * i) mod N
 /// with gcd(a, N) = 1, so every original (Zipfian) index i
 /// maps to a unique “shuffled” index without collisions.
+/// Refer to PR #3070 for further details: https://github.com/tigerbeetle/tigerbeetle/pull/3070
 pub const ZipfianShuffled = struct {
     gen: ZipfianGenerator,
     a: u64,
@@ -227,16 +230,20 @@ pub const ZipfianShuffled = struct {
         // We try to find an `a` so that it satisifies gcd(a,N) == 1.
         // This allows us to generate a permutation with (a*zipf_standard) mod N.
         // This permutation maps one index to another without holes, i.e. is bijective.
+        self.a = random_coprime(prng, self.gen.n);
+    }
+
+    fn random_coprime(prng: *stdx.PRNG, n: u64) u64 {
         // The bound is arbitrary but should be large enough to find a number that satisifies
         // the requirement (see https://en.wikipedia.org/wiki/Euler%27s_totient_function).
-        self.a = for (0..100_000) |_| {
-            const a = prng.range_inclusive(u64, 1, self.gen.n);
-            if (std.math.gcd(a, self.gen.n) == 1) {
-                break a;
+        for (0..100_000) |_| {
+            const a = prng.range_inclusive(u64, 1, n);
+            if (std.math.gcd(a, n) == 1) {
+                return a;
             }
         } else {
-            @panic("Did not find number that satisfies gcd requirement (probabilistic)");
-        };
+            @panic("Did not find a random coprime (probabilistic)");
+        }
     }
 };
 
@@ -335,6 +342,42 @@ test "zipfian-ctors" {
     }
 }
 
+test "zipfian-distribution" {
+    const max_number = 10;
+
+    var prng = stdx.PRNG.from_seed(42);
+    const zipf = ZipfianGenerator.init(max_number);
+
+    var distribution: [max_number]u32 = @splat(0);
+
+    for (0..1000) |_| {
+        const n = zipf.next(&prng);
+        distribution[n] += 1;
+    }
+
+    try snap(@src(),
+        \\{ 333, 170, 125, 90, 59, 61, 43, 47, 38, 34 }
+    ).diff_fmt("{d}", .{distribution});
+}
+
+test "shuffled-zipfian-distribution" {
+    const max_number = 10;
+
+    var prng = stdx.PRNG.from_seed(42);
+    const zipf_shuffled = ZipfianShuffled.init(max_number, &prng);
+
+    var distribution: [max_number]u32 = @splat(0);
+
+    for (0..1000) |_| {
+        const n = zipf_shuffled.next(&prng);
+        distribution[n] += 1;
+    }
+
+    try snap(@src(),
+        \\{ 333, 34, 38, 47, 43, 61, 60, 89, 125, 170 }
+    ).diff_fmt("{d}", .{distribution});
+}
+
 // Non-statistical smoke tests related to the shuffled hot items optimization.
 // These could fail if that optimization is tweaked or if the prng changes.
 // The standard zipf generator is tested, here we test the mapping of the shuffled one.
@@ -344,6 +387,7 @@ test "zipfian-shuffled" {
     const allocator = std.testing.allocator;
     var found = try allocator.alloc(bool, max);
     defer allocator.free(found);
+
     for (1..max) |items| {
         @memset(found, false);
         var zipf = ZipfianShuffled.init(items, &prng);
