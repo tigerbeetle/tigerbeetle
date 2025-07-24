@@ -59,7 +59,7 @@ fn run_fuzz(
     prng: *stdx.PRNG,
     events: []const ManifestEvent,
 ) !void {
-    const storage_options: fixtures.StorageOptions = .{
+    const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .size = constants.storage_size_limit_default,
         .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
@@ -271,7 +271,7 @@ const Environment = struct {
     fn init(
         env: *Environment, // In-place construction for stable addresses.
         gpa: std.mem.Allocator,
-        storage_options: fixtures.StorageOptions,
+        storage_options: Storage.Options,
     ) !void {
         comptime var fields_initialized = 0;
 

@@ -52,7 +52,7 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     });
     defer storage_fault_atlas.deinit(gpa);
 
-    const storage_options: fixtures.StorageOptions = .{
+    const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .size = superblock_zone_size,
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
@@ -74,6 +74,7 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
             prng.range_inclusive(u64, 50, 100),
             100,
         ),
+        .replica_index = fixtures.replica,
         .fault_atlas = &storage_fault_atlas,
     };
 

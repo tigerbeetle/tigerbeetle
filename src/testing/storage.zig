@@ -50,6 +50,7 @@ const log = std.log.scoped(.storage);
 pub const Storage = struct {
     /// Options for fault injection during fuzz testing
     pub const Options = struct {
+        size: u64,
         /// Seed for the storage PRNG.
         seed: u64 = 0,
 
@@ -57,13 +58,13 @@ pub const Storage = struct {
         replica_index: ?u8 = null,
 
         /// Minimum number of ticks it may take to read data.
-        read_latency_min: Duration,
+        read_latency_min: Duration = .{ .ns = 0 },
         /// Average number of ticks it may take to read data. Must be >= read_latency_min.
-        read_latency_mean: Duration,
+        read_latency_mean: Duration = .{ .ns = 0 },
         /// Minimum number of ticks it may take to write data.
-        write_latency_min: Duration,
+        write_latency_min: Duration = .{ .ns = 0 },
         /// Average number of ticks it may take to write data. Must be >= write_latency_min.
-        write_latency_mean: Duration,
+        write_latency_mean: Duration = .{ .ns = 0 },
 
         /// Chance out of 100 that a read will corrupt a sector, if the target memory is within
         /// a faulty area of this replica.
@@ -192,15 +193,15 @@ pub const Storage = struct {
         .name = "storage_next_tick",
     }),
 
-    pub fn init(allocator: mem.Allocator, size: u64, options: Storage.Options) !Storage {
-        assert(size <= constants.storage_size_limit_max);
+    pub fn init(allocator: mem.Allocator, options: Storage.Options) !Storage {
+        assert(options.size <= constants.storage_size_limit_max);
         assert(options.write_latency_mean.ns >= options.write_latency_min.ns);
         assert(options.read_latency_mean.ns >= options.read_latency_min.ns);
-        assert(options.fault_atlas == null or options.replica_index != null);
+        if (options.fault_atlas != null) assert(options.replica_index != null);
 
         const prng = stdx.PRNG.from_seed(options.seed);
-        const sector_count = @divExact(size, constants.sector_size);
-        const memory = try allocator.alignedAlloc(u8, constants.sector_size, size);
+        const sector_count = @divExact(options.size, constants.sector_size);
+        const memory = try allocator.alignedAlloc(u8, constants.sector_size, options.size);
         errdefer allocator.free(memory);
 
         var memory_written = try std.DynamicBitSetUnmanaged.initEmpty(allocator, sector_count);
@@ -228,7 +229,7 @@ pub const Storage = struct {
 
         return Storage{
             .allocator = allocator,
-            .size = size,
+            .size = options.size,
             .options = options,
             .prng = prng,
             .memory = memory,

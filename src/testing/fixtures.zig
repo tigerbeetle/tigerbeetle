@@ -1,16 +1,14 @@
-//! Convenient constors for TigerBeetle components, for fuzzing and testing.
+//! Convenient constructs for TigerBeetle components, for fuzzing and testing.
 //!
-//! Consider Storage. In the actual database, there is only single call to Storage.init.
-//! However, Storage is needed for most of our tests and fuzzers. If the init call is repeated
+//! Consider the Grid. In the actual database, there is only single call to Grid.init.
+//! However, Grid is needed for most of our tests and fuzzers. If the init call is repeated
 //! in every fuzzer, changing Storage creation flow becomes hard. To solve this, all fuzzers create
-//! Storage through this file, such that we have one production and one test call to Storage.init.
+//! Grid through this file, such that we have one production and one test call to Grid.init.
 //!
 //! Design:
 //!
-//! - All fuctions take struct options as a last argument, even if it starts out as empty.
+//! - All functions take struct options as a last argument, even if it starts out as empty.
 //!   All call-sites pass at least .{}, which makes adding new options cheap.
-//! - Options should be spelled-out in this file, rather re-using StorageOptions and the like, to
-//!   help the reader see the full API at a glance.
 //! - Most options should have defaults. This is intentional deviation from TigerStyle, as, for
 //!   tests, we gain a useful property: all options that are set are meaningful for a particular
 //!   test.
@@ -64,41 +62,8 @@ pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {
     return Tracer.init(gpa, init, options.process_id, .{ .writer = options.writer });
 }
 
-pub const StorageOptions = struct {
-    size: u32,
-
-    seed: u64 = 0,
-
-    read_latency_min: Duration = .{ .ns = 0 },
-    read_latency_mean: Duration = .{ .ns = 0 },
-
-    write_latency_min: Duration = .{ .ns = 0 },
-    write_latency_mean: Duration = .{ .ns = 0 },
-
-    read_fault_probability: Ratio = .zero(),
-    write_fault_probability: Ratio = .zero(),
-    write_misdirect_probability: Ratio = .zero(),
-    crash_fault_probability: Ratio = .zero(),
-
-    fault_atlas: ?*const ClusterFaultAtlas = null,
-};
-
-pub fn init_storage(
-    gpa: std.mem.Allocator,
-    options: StorageOptions,
-) !Storage {
-    return try Storage.init(gpa, options.size, .{
-        .seed = options.seed,
-        .read_latency_min = options.read_latency_min,
-        .read_latency_mean = options.read_latency_mean,
-        .write_latency_min = options.write_latency_min,
-        .write_latency_mean = options.write_latency_mean,
-        // Faults makes sense only in the cluster.
-        .read_fault_probability = .zero(),
-        .write_fault_probability = .zero(),
-        .write_misdirect_probability = .zero(),
-        .crash_fault_probability = .zero(),
-    });
+pub fn init_storage(gpa: std.mem.Allocator, options: Storage.Options) !Storage {
+    return try Storage.init(gpa, options);
 }
 
 pub fn storage_format(

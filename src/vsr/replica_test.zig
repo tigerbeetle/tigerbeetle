@@ -1983,6 +1983,7 @@ const TestContext = struct {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
         var prng = stdx.PRNG.from_seed(options.seed);
+        const storage_size_limit = vsr.sector_floor(128 * 1024 * 1024);
 
         const cluster = try Cluster.init(allocator, .{
             .cluster = .{
@@ -1990,7 +1991,7 @@ const TestContext = struct {
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .client_count = options.client_count,
-                .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
+                .storage_size_limit = storage_size_limit,
                 .seed = prng.int(u64),
                 .releases = &releases,
                 .client_release = options.client_release,
@@ -2013,6 +2014,7 @@ const TestContext = struct {
                 .recorded_count_max = 16,
             },
             .storage = .{
+                .size = storage_size_limit,
                 .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
                 .read_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
                 .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },

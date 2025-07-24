@@ -442,6 +442,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
     const read_latency_min = range_inclusive_ms(prng, 0, 30);
     const write_latency_min = range_inclusive_ms(prng, 0, 30);
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
         .read_latency_min = read_latency_min,
         .read_latency_mean = range_inclusive_ms(prng, read_latency_min, 100),
@@ -561,6 +562,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
     };
 
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
         .read_latency_min = .{ .ns = 0 },
         .read_latency_mean = .{ .ns = 0 },
