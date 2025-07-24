@@ -31,9 +31,10 @@
 body {
     background-color: var(--gray-1);
     color: var(--gray-12);
-    font-family: Helvetica, Arial, sans-serif;
+    font-family: system-ui;
     -webkit-font-smoothing: antialiased;
     font-size: 14px;
+    font-size-adjust: 0.53;
 }
 
 a {
