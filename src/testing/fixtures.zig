@@ -145,8 +145,8 @@ pub fn open_superblock(superblock: *SuperBlock) void {
 
         fn callback(superblock_context: *SuperBlock.Context) void {
             const self: *@This() = @fieldParentPtr("superblock_context", superblock_context);
-            assert(!self.pending);
-            self.pending = true;
+            assert(self.pending);
+            self.pending = false;
         }
     };
     var context: Context = .{};
@@ -168,6 +168,7 @@ pub fn open_grid(grid: *Grid) void {
 
     const Context = struct {
         pending: bool = false,
+        // NB: This lacks in elegance and robustness, but is good enough for testing.
         var global: @This() = .{};
         fn callback(_: *Grid) void {
             assert(@This().global.pending);
