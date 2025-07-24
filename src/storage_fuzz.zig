@@ -7,6 +7,7 @@ const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
 const Tracer = vsr.trace.Tracer;
 const Storage = @import("storage.zig").StorageType(IO);
+const fixtures = @import("testing/fixtures.zig");
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 
@@ -78,7 +79,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });
 
-        var tracer = try Tracer.init(gpa, time, .replica_test, .{});
+        var tracer = try fixtures.init_tracer(gpa, time, .{});
         defer tracer.deinit(gpa);
 
         var storage = try Storage.init(&io, &tracer, 0);
