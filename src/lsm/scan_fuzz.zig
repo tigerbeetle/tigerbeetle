@@ -861,11 +861,6 @@ const Environment = struct {
         }
     }
 
-    fn grid_open_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.change_state(.free_set_open, .forest_init);
-    }
-
     fn forest_open_callback(forest: *Forest) void {
         const env: *Environment = @fieldParentPtr("forest", forest);
         env.change_state(.forest_open, .fuzzing);

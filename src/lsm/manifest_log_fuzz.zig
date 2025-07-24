@@ -320,7 +320,8 @@ const Environment = struct {
         errdefer env.grid.deinit(gpa);
 
         fields_initialized += 1;
-        env.grid_verify = try fixtures.init_grid(gpa, &env.trace_verify, &env.superblock_verify, .{});
+        env.grid_verify =
+            try fixtures.init_grid(gpa, &env.trace_verify, &env.superblock_verify, .{});
         errdefer env.grid_verify.deinit(gpa);
 
         fields_initialized += 1;

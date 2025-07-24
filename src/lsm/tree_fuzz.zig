@@ -257,11 +257,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             try env.apply(gpa, fuzz_ops);
         }
 
-        fn grid_open_callback(grid: *Grid) void {
-            const env: *Environment = @fieldParentPtr("grid", grid);
-            env.change_state(.free_set_open, .tree_init);
-        }
-
         fn manifest_log_open_event(
             manifest_log: *ManifestLog,
             table: *const schema.ManifestNode.TableInfo,

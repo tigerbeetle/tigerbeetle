@@ -17,18 +17,14 @@
 //! - It could be convenient to export types themselves, in addition to constructors, but we avoid
 //!   introducing two ways to import something.
 const std = @import("std");
-const stdx = @import("../stdx.zig");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const assert = std.debug.assert;
-const Ratio = stdx.PRNG.Ratio;
-const Duration = stdx.Duration;
 
 const Time = @import("../time.zig").Time;
 const OffsetType = @import("./time.zig").OffsetType;
 const Tracer = @import("../trace.zig").Tracer;
 const Storage = @import("./storage.zig").Storage;
-const ClusterFaultAtlas = @import("./storage.zig").ClusterFaultAtlas;
 const SuperBlock = vsr.SuperBlockType(Storage);
 const Grid = vsr.GridType(Storage);
 

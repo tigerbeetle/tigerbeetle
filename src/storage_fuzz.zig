@@ -5,7 +5,6 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
-const Tracer = vsr.trace.Tracer;
 const Storage = @import("storage.zig").StorageType(IO);
 const fixtures = @import("testing/fixtures.zig");
 const fuzz = @import("testing/fuzz.zig");
