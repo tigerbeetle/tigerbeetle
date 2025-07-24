@@ -493,38 +493,36 @@ const Environment = struct {
     /// Verify that the state of a ManifestLog restored from checkpoint matches the state
     /// immediately after the checkpoint was created.
     fn verify(env: *Environment) !void {
-        const test_trace = &env.trace;
-        const test_superblock = env.manifest_log_verify.superblock;
-        const test_storage = test_superblock.storage;
-        const test_grid = env.manifest_log_verify.grid;
-        const test_manifest_log = &env.manifest_log_verify;
-
         {
-            test_storage.copy(env.manifest_log.superblock.storage);
-            test_storage.reset();
+            env.storage_verify.copy(env.manifest_log.superblock.storage);
+            env.storage_verify.reset();
 
-            test_trace.deinit(env.gpa);
-            test_trace.* = try fixtures.init_tracer(env.gpa, env.time_sim.time(), .{});
+            env.trace_verify.deinit(env.gpa);
+            env.trace_verify = try fixtures.init_tracer(env.gpa, env.time_sim.time(), .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
-            test_superblock.deinit(env.gpa);
-            test_superblock.* = try fixtures.init_superblock(env.gpa, &env.storage, .{});
+            env.superblock_verify.deinit(env.gpa);
+            env.superblock_verify = try fixtures.init_superblock(env.gpa, &env.storage, .{});
 
-            test_grid.deinit(env.gpa);
-            test_grid.* = try Grid.init(env.gpa, .{
-                .superblock = test_superblock,
-                .trace = test_trace,
+            env.grid_verify.deinit(env.gpa);
+            env.grid_verify = try Grid.init(env.gpa, .{
+                .superblock = &env.superblock_verify,
+                .trace = &env.trace_verify,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
                 .blocks_released_prior_checkpoint_durability_max = 0,
             });
 
-            test_manifest_log.deinit(env.gpa);
-            try test_manifest_log.init(env.gpa, test_grid, &manifest_log_compaction_pace);
+            env.manifest_log_verify.deinit(env.gpa);
+            try env.manifest_log_verify.init(
+                env.gpa,
+                &env.grid_verify,
+                &manifest_log_compaction_pace,
+            );
         }
 
-        fixtures.open_superblock(test_superblock);
+        fixtures.open_superblock(&env.superblock_verify);
 
         assert(env.manifest_log_opening == null);
         env.manifest_log_opening = try env.manifest_log_model.tables.clone();
@@ -535,14 +533,14 @@ const Environment = struct {
         }
 
         env.pending += 1;
-        test_manifest_log.open(verify_manifest_open_event, verify_manifest_open_callback);
-        env.wait(test_manifest_log);
+        env.manifest_log_verify.open(verify_manifest_open_event, verify_manifest_open_callback);
+        env.wait(&env.manifest_log_verify);
 
         try std.testing.expect(hash_map_equals(
             u64,
             ManifestLog.TableExtent,
             &env.manifest_log.table_extents,
-            &test_manifest_log.table_extents,
+            &env.manifest_log_verify.table_extents,
         ));
     }
 
