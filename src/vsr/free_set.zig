@@ -719,7 +719,9 @@ pub const FreeSet = struct {
             if (encoder.done()) break;
         } else unreachable;
 
-        return bytes_encoded_total;
+        const bytes_trailing_zero_runs = encoder.trailing_zero_runs_count * @sizeOf(ewah.Marker);
+
+        return bytes_encoded_total - bytes_trailing_zero_runs;
     }
 
     pub fn encode_chunks(
@@ -1325,4 +1327,43 @@ test "FreeSet.acquire part-way through a shard" {
         set.verify_index();
     }
     try std.testing.expectEqual(set.acquire(reservation_b), null);
+}
+
+test "FreeSet decode big bitset into small bitset" {
+    const shard_bits = FreeSet.shard_bits;
+
+    var big_set = try FreeSet.open_empty(std.testing.allocator, 2 * shard_bits);
+    defer big_set.deinit(std.testing.allocator);
+
+    {
+        // Set up a big bitset (with blocks_count==2*shard_bits) with half the blocks free.
+        const acquired_block_count = @divFloor(big_set.blocks_acquired.bit_length, 2);
+        const reservation = big_set.reserve(acquired_block_count).?;
+        defer big_set.forfeit(reservation);
+
+        var i: usize = 0;
+        while (i < acquired_block_count) : (i += 1) {
+            _ = big_set.acquire(reservation);
+        }
+    }
+
+    var big_buffer = try std.testing.allocator.alignedAlloc(
+        u8,
+        @alignOf(usize),
+        big_set.encode_size_max(),
+    );
+    defer std.testing.allocator.free(big_buffer);
+
+    const big_buffer_written = big_set.encode(.blocks_acquired, &.{big_buffer});
+
+    // Decode the serialized big bitset into a smaller bitset (with blocks_count==shard_bits).
+    var small_set = try FreeSet.init_empty(std.testing.allocator, shard_bits);
+    defer small_set.deinit(std.testing.allocator);
+
+    small_set.decode(.blocks_acquired, &.{big_buffer[0..big_buffer_written]});
+    var block: usize = 0;
+    while (block < shard_bits) : (block += 1) {
+        const address = block + 1;
+        try std.testing.expectEqual(big_set.is_free(address), false);
+    }
 }

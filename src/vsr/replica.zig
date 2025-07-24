@@ -4968,7 +4968,7 @@ pub fn ReplicaType(
                 if (self.grid.free_set.highest_address_acquired()) |address| {
                     assert(address > 0);
                     assert(self.grid.free_set_checkpoint_blocks_acquired.size > 0);
-                    assert(self.grid.free_set_checkpoint_blocks_released.size > 0);
+                    maybe(self.grid.free_set_checkpoint_blocks_released.size == 0);
 
                     storage_size += address * constants.block_size;
                 } else {
