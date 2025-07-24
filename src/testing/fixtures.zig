@@ -65,7 +65,7 @@ pub fn init_storage(gpa: std.mem.Allocator, options: Storage.Options) !Storage {
 pub fn storage_format(
     gpa: std.mem.Allocator,
     storage: *Storage,
-    format_options: struct {
+    options: struct {
         cluster: u128 = cluster,
         replica: u8 = replica,
         replica_count: u8 = replica_count,
@@ -90,10 +90,10 @@ pub fn storage_format(
     var context: Context = .{};
 
     superblock.format(Context.callback, &context.superblock_context, .{
-        .cluster = format_options.cluster,
-        .replica = format_options.replica,
-        .replica_count = format_options.replica_count,
-        .release = format_options.release,
+        .cluster = options.cluster,
+        .replica = options.replica,
+        .replica_count = options.replica_count,
+        .release = options.release,
         .view = null,
     });
     for (0..1_000) |_| {
