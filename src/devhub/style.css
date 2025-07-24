@@ -34,6 +34,7 @@ body {
     font-family: Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
     font-size: 14px;
+    font-size-adjust: 0.53;
 }
 
 a {
