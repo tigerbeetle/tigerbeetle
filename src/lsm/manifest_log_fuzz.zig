@@ -503,7 +503,7 @@ const Environment = struct {
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
             env.superblock_verify.deinit(env.gpa);
-            env.superblock_verify = try fixtures.init_superblock(env.gpa, &env.storage, .{});
+            env.superblock_verify = try fixtures.init_superblock(env.gpa, &env.storage_verify, .{});
 
             env.grid_verify.deinit(env.gpa);
             env.grid_verify = try Grid.init(env.gpa, .{
