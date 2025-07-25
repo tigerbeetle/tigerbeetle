@@ -97,17 +97,21 @@ _asset scale_. For example, representing USD in cents uses an asset scale of `2`
 
 #### Examples
 
-- In USD, `$1` = `100` cents. So for example,
+- In USD, `$1` = `100` cents. Using an asset scale of `2`,
   - The fractional amount `$0.45` is represented as the integer `45`.
   - The fractional amount `$123.00` is represented as the integer `12300`.
   - The fractional amount `$123.45` is represented as the integer `12345`.
 
-### Oversized Amounts
+- In JPY, `¥1` = `1` yen. Using an asset scale of `0`,
+  - The fractional amount `¥123` is represented as the integer `123`.
 
-The other direction works as well. If the smallest useful unit of a currency is `10,000,000` units,
-then it can be scaled down to the integer `1`.
+- In KWD, `د.ك 1` = `1000` fils. Using an asset scale of `3`,
+  - The fractional amount `0.450 د.ك` is represented as the integer `450`.
+  - The fractional amount `123.000 د.ك` is represented as the integer `123000`.
+  - The fractional amount `123.450 د.ك` is represented as the integer `123450`.
 
-The 128-bit representation defines the precision, but not the scale.
+The other direction works as well. If the smallest useful unit of an asset is `10,000,000` units,
+then it can be scaled down to the integer `1` using an asset scale of `-7`.
 
 ### ⚠️ Asset Scales Cannot Be Easily Changed
 
