@@ -357,8 +357,7 @@ pub const FreeSet = struct {
 
         // The reservation may cover (and ignore) already-acquired blocks due to fragmentation.
         var block = @max(shard_start * shard_bits, set.reservation_blocks);
-        var reserved: usize = 0;
-        while (reserved < reserve_count) : (reserved += 1) {
+        for (0..reserve_count) |_| {
             block = 1 + (find_bit(
                 set.blocks_acquired,
                 block,
@@ -836,8 +835,7 @@ fn test_acquire_release(blocks_count: usize) !void {
         const reservation = set.reserve(blocks_count).?;
         defer set.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < blocks_count) : (i += 1) {
+        for (0..blocks_count) |i| {
             try expectEqual(@as(?u64, i + 1), set.acquire(reservation));
         }
         try expectEqual(@as(?u64, null), set.acquire(reservation));
@@ -847,8 +845,7 @@ fn test_acquire_release(blocks_count: usize) !void {
     try expectEqual(@as(u64, 0), set.count_free());
 
     {
-        var i: usize = 0;
-        while (i < blocks_count) : (i += 1) {
+        for (0..blocks_count) |i| {
             set.release(@as(u64, i + 1));
             set.free(@as(u64, i + 1));
         }
@@ -862,8 +859,7 @@ fn test_acquire_release(blocks_count: usize) !void {
         const reservation = set.reserve(blocks_count).?;
         defer set.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < blocks_count) : (i += 1) {
+        for (0..blocks_count) |i| {
             try expectEqual(@as(?u64, i + 1), set.acquire(reservation));
         }
         try expectEqual(@as(?u64, null), set.acquire(reservation));
@@ -928,8 +924,7 @@ test "FreeSet checkpoint" {
         const reservation = full.reserve(blocks_count).?;
         defer full.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < full.blocks_acquired.bit_length) : (i += 1) {
+        for (0..full.blocks_acquired.bit_length) |i| {
             try expectEqual(@as(?u64, i + 1), full.acquire(reservation));
         }
     }
@@ -939,8 +934,7 @@ test "FreeSet checkpoint" {
         const reservation = set.reserve(blocks_count).?;
         defer set.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < set.blocks_acquired.bit_length) : (i += 1) {
+        for (0..set.blocks_acquired.bit_length) |i| {
             try expectEqual(@as(?u64, i + 1), set.acquire(reservation));
             set.release(i + 1);
 
@@ -963,8 +957,8 @@ test "FreeSet checkpoint" {
         // Allocate & stage-release all blocks again.
         const reservation = set.reserve(blocks_count).?;
         defer set.forfeit(reservation);
-        var i: usize = 0;
-        while (i < set.blocks_acquired.bit_length) : (i += 1) {
+
+        for (0..set.blocks_acquired.bit_length) |i| {
             try expectEqual(@as(?u64, i + 1), set.acquire(reservation));
             set.release(i + 1);
         }
@@ -1037,13 +1031,11 @@ test "FreeSet encode, decode, encode" {
     var prng = stdx.PRNG.from_seed(seed);
 
     const fills = [_]TestPatternFill{ .uniform_ones, .uniform_zeros, .literal };
-    var t: usize = 0;
-    while (t < 10) : (t += 1) {
+    for (0..10) |_| {
         var patterns = std.ArrayList(TestPattern).init(std.testing.allocator);
         defer patterns.deinit();
 
-        var i: usize = 0;
-        while (i < shard_bits) : (i += 1) {
+        for (0..shard_bits) |_| {
             try patterns.append(.{
                 .fill = fills[prng.index(fills)],
                 .words = 1,
@@ -1081,8 +1073,7 @@ fn test_encode(patterns: []const TestPattern) !void {
         var blocks = bit_set_masks(decoded_expect.blocks_acquired);
         var blocks_offset: usize = 0;
         for (patterns) |pattern| {
-            var i: usize = 0;
-            while (i < pattern.words) : (i += 1) {
+            for (0..pattern.words) |_| {
                 blocks[blocks_offset] = switch (pattern.fill) {
                     .uniform_ones => ~@as(usize, 0),
                     .uniform_zeros => 0,
@@ -1148,8 +1139,7 @@ test "FreeSet decode small bitset into large bitset" {
         const reservation = small_set.reserve(small_set.blocks_acquired.bit_length).?;
         defer small_set.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < small_set.blocks_acquired.bit_length) : (i += 1) {
+        for (0..small_set.blocks_acquired.bit_length) |_| {
             _ = small_set.acquire(reservation);
         }
     }
@@ -1170,8 +1160,7 @@ test "FreeSet decode small bitset into large bitset" {
     big_set.decode(.blocks_acquired, &.{small_buffer[0..small_buffer_written]});
     big_set.opened = true;
 
-    var block: usize = 0;
-    while (block < 2 * shard_bits) : (block += 1) {
+    for (0..2 * shard_bits) |block| {
         const address = block + 1;
         try std.testing.expectEqual(shard_bits <= block, big_set.is_free(address));
     }
@@ -1266,18 +1255,16 @@ fn find_bit(
 test "find_bit" {
     var prng = stdx.PRNG.from_seed(123);
 
-    var bit_length: usize = 1;
-    while (bit_length <= @bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt) * 4) : (bit_length += 1) {
+    for (1..(@bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt) * 4) + 1) |bit_length| {
         var bit_set = try std.DynamicBitSetUnmanaged.initEmpty(std.testing.allocator, bit_length);
         defer bit_set.deinit(std.testing.allocator);
 
         const p = prng.int_inclusive(usize, 100);
-        var b: usize = 0;
-        while (b < bit_length) : (b += 1) bit_set.setValue(b, p < prng.int_inclusive(usize, 100));
 
-        var i: usize = 0;
-        while (i < 20) : (i += 1) try test_find_bit(&prng, bit_set, .set);
-        while (i < 40) : (i += 1) try test_find_bit(&prng, bit_set, .unset);
+        for (0..bit_length) |b| bit_set.setValue(b, p < prng.int_inclusive(usize, 100));
+
+        for (0..20) |_| try test_find_bit(&prng, bit_set, .set);
+        for (20..40) |_| try test_find_bit(&prng, bit_set, .unset);
     }
 }
 
@@ -1341,8 +1328,7 @@ test "FreeSet decode big bitset into small bitset" {
         const reservation = big_set.reserve(acquired_block_count).?;
         defer big_set.forfeit(reservation);
 
-        var i: usize = 0;
-        while (i < acquired_block_count) : (i += 1) {
+        for (0..acquired_block_count) |_| {
             _ = big_set.acquire(reservation);
         }
     }
@@ -1361,8 +1347,7 @@ test "FreeSet decode big bitset into small bitset" {
     defer small_set.deinit(std.testing.allocator);
 
     small_set.decode(.blocks_acquired, &.{big_buffer[0..big_buffer_written]});
-    var block: usize = 0;
-    while (block < shard_bits) : (block += 1) {
+    for (0..shard_bits) |block| {
         const address = block + 1;
         try std.testing.expectEqual(big_set.is_free(address), false);
     }
