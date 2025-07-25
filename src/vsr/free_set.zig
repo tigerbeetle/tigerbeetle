@@ -634,10 +634,21 @@ pub const FreeSet = struct {
 
         for (source_chunks) |source_chunk| source_size += source_chunk.len;
 
-        var decoder = ewah.decode_chunks(switch (target_bitset) {
-            .blocks_acquired => bit_set_masks(set.blocks_acquired),
-            .blocks_released => bit_set_masks(set.blocks_released),
-        }, source_size);
+        const target_bitset_words = blk: {
+            switch (target_bitset) {
+                .blocks_acquired => {
+                    const blocks_acquired = bit_set_masks(set.blocks_acquired);
+                    assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_acquired)));
+                    break :blk blocks_acquired;
+                },
+                .blocks_released => {
+                    const blocks_released = bit_set_masks(set.blocks_released);
+                    assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_released)));
+                    break :blk blocks_released;
+                },
+            }
+        };
+        var decoder = ewah.decode_chunks(target_bitset_words, source_size);
 
         var words_decoded: usize = 0;
         for (source_chunks) |source_chunk| {

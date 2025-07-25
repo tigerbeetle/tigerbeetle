@@ -354,6 +354,26 @@ pub fn GridType(comptime Storage: type) type {
                 });
                 assert((grid.free_set.count_acquired() > 0) ==
                     (grid.free_set_checkpoint_blocks_acquired.size > 0));
+
+                // Assert that the highest acquired address is compatible with storage_size.
+                const storage_size: u64 = storage_size: {
+                    var storage_size = vsr.superblock.data_file_size_min;
+                    if (grid.free_set.highest_address_acquired()) |address| {
+                        assert(address > 0);
+                        assert(grid.free_set_checkpoint_blocks_acquired.size > 0);
+                        maybe(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        storage_size += address * constants.block_size;
+                    } else {
+                        assert(grid.free_set_checkpoint_blocks_acquired.size == 0);
+                        assert(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        assert(grid.free_set.count_released() == 0);
+                    }
+                    break :storage_size storage_size;
+                };
+                assert(storage_size == grid.superblock.working.vsr_state.checkpoint.storage_size);
+
                 assert(grid.free_set.count_released() >=
                     (grid.free_set_checkpoint_blocks_acquired.block_count() +
                         grid.free_set_checkpoint_blocks_released.block_count()));
