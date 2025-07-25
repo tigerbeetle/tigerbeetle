@@ -3,6 +3,55 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.52
+
+Released: 2025-07-25
+
+### Safety And Performance
+
+- [#2956](https://github.com/tigerbeetle/tigerbeetle/pull/2956)
+
+  Tickless VOPR part 3:
+   * simulate IO that completes faster than a tick
+   * randomly shuffle events using nanosecond timestamps
+
+- [#3093](https://github.com/tigerbeetle/tigerbeetle/pull/3093)
+
+  Improve repair performance by tracking requested prepares so each is repaired exactly once per
+  timeout.
+
+- [#3105](https://github.com/tigerbeetle/tigerbeetle/pull/3105)
+
+  Add `--requests-max` CLI flag to VOPR.
+
+- [#3108](https://github.com/tigerbeetle/tigerbeetle/pull/3108)
+
+  Introduce a fixtures module for fuzzing and testing to avoid code duplication.
+
+### Internals
+
+- [#3088](https://github.com/tigerbeetle/tigerbeetle/pull/3088)
+  [#3100](https://github.com/tigerbeetle/tigerbeetle/pull/3100)
+  [#3102](https://github.com/tigerbeetle/tigerbeetle/pull/3102)
+
+  Initialize `IO` and `Tracer` early. Avoid comptime type specialization.
+
+- [#3098](https://github.com/tigerbeetle/tigerbeetle/pull/3098)
+
+  Remove unused storage fault atlas for fuzzing.
+
+- [#3101](https://github.com/tigerbeetle/tigerbeetle/pull/3101)
+
+  Update TigerStyle with additional conventions for naming things and ordering struct fields.
+
+- [#3107](https://github.com/tigerbeetle/tigerbeetle/pull/3107)
+
+  In DevHub, use `font-size-adjust` to better match sizes of sans and monospace text.
+
+### TigerTracks 🎧
+
+- [Changes](https://open.spotify.com/track/2wNEcJHnFxoKZIrxjxF5jL)
+
 ## TigerBeetle 0.16.51
 
 Released: 2025-07-18
