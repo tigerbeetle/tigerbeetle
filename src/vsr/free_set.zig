@@ -634,20 +634,11 @@ pub const FreeSet = struct {
 
         for (source_chunks) |source_chunk| source_size += source_chunk.len;
 
-        const target_bitset_words = blk: {
-            switch (target_bitset) {
-                .blocks_acquired => {
-                    const blocks_acquired = bit_set_masks(set.blocks_acquired);
-                    assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_acquired)));
-                    break :blk blocks_acquired;
-                },
-                .blocks_released => {
-                    const blocks_released = bit_set_masks(set.blocks_released);
-                    assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_released)));
-                    break :blk blocks_released;
-                },
-            }
+        const target_bitset_words = switch (target_bitset) {
+            .blocks_acquired => bit_set_masks(set.blocks_acquired),
+            .blocks_released => bit_set_masks(set.blocks_released),
         };
+
         var decoder = ewah.decode_chunks(target_bitset_words, source_size);
 
         var words_decoded: usize = 0;
@@ -660,16 +651,9 @@ pub const FreeSet = struct {
         assert(words_decoded * @bitSizeOf(Word) <= set.blocks_acquired.bit_length);
 
         // The encoder does not encode trailing 0s, so everything past words_decoded must be zeroed.
-        switch (target_bitset) {
-            .blocks_acquired => {
-                const blocks_acquired_zeroed = bit_set_masks(set.blocks_acquired)[words_decoded..];
-                assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_acquired_zeroed)));
-            },
-            .blocks_released => {
-                const blocks_released_zeroed = bit_set_masks(set.blocks_released)[words_decoded..];
-                assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_released_zeroed)));
-            },
-        }
+        assert(stdx.zeroed(std.mem.sliceAsBytes(target_bitset_words[words_decoded..])));
+        // TODO: uncomment on the next release:
+        // if (words_decoded > 0) assert(target_bitset_words[words_decoded - 1] != 0);
     }
 
     pub fn decode_chunks(
