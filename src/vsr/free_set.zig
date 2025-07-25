@@ -643,8 +643,22 @@ pub const FreeSet = struct {
         for (source_chunks) |source_chunk| {
             words_decoded += decoder.decode_chunk(source_chunk);
         }
-        assert(words_decoded * @bitSizeOf(MaskInt) <= set.blocks_acquired.bit_length);
         assert(decoder.done());
+
+        assert(@bitSizeOf(Word) == @bitSizeOf(MaskInt));
+        assert(words_decoded * @bitSizeOf(Word) <= set.blocks_acquired.bit_length);
+
+        // The encoder does not encode trailing 0s, so everything past words_decoded must be zeroed.
+        switch (target_bitset) {
+            .blocks_acquired => {
+                const blocks_acquired_zeroed = bit_set_masks(set.blocks_acquired)[words_decoded..];
+                assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_acquired_zeroed)));
+            },
+            .blocks_released => {
+                const blocks_released_zeroed = bit_set_masks(set.blocks_released)[words_decoded..];
+                assert(stdx.zeroed(std.mem.sliceAsBytes(blocks_released_zeroed)));
+            },
+        }
     }
 
     pub fn decode_chunks(
@@ -718,6 +732,8 @@ pub const FreeSet = struct {
             if (encoder.done()) break;
         } else unreachable;
 
+        // Don't explicitly encode trailing zeros to ensure that the encoding is the same regardless
+        // of the runtime-configurable capacity of the bit set (driven by --limit-storage).
         const bytes_trailing_zero_runs = encoder.trailing_zero_runs_count * @sizeOf(ewah.Marker);
 
         return bytes_encoded_total - bytes_trailing_zero_runs;
