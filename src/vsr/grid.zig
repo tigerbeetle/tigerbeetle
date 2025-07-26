@@ -220,15 +220,14 @@ pub fn GridType(comptime Storage: type) type {
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
-            const blocks_count = vsr.block_count_max(options.superblock.storage_size_limit);
             var free_set = try FreeSet.init(allocator, .{
-                .blocks_count = blocks_count,
+                .grid_size_limit = options.superblock.grid_size_limit(),
                 .blocks_released_prior_checkpoint_durability_max = options
                     .blocks_released_prior_checkpoint_durability_max,
             });
             errdefer free_set.deinit(allocator);
 
-            const free_set_encoded_size_max = FreeSet.encode_size_max(blocks_count);
+            const free_set_encoded_size_max = free_set.encode_size_max();
             var free_set_checkpoint_blocks_acquired =
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_acquired.deinit(allocator);
@@ -356,6 +355,26 @@ pub fn GridType(comptime Storage: type) type {
                 });
                 assert((grid.free_set.count_acquired() > 0) ==
                     (grid.free_set_checkpoint_blocks_acquired.size > 0));
+
+                // Assert that the highest acquired address is compatible with storage_size.
+                const storage_size: u64 = storage_size: {
+                    var storage_size = vsr.superblock.data_file_size_min;
+                    if (grid.free_set.highest_address_acquired()) |address| {
+                        assert(address > 0);
+                        assert(grid.free_set_checkpoint_blocks_acquired.size > 0);
+                        maybe(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        storage_size += address * constants.block_size;
+                    } else {
+                        assert(grid.free_set_checkpoint_blocks_acquired.size == 0);
+                        assert(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        assert(grid.free_set.count_released() == 0);
+                    }
+                    break :storage_size storage_size;
+                };
+                assert(storage_size == grid.superblock.working.vsr_state.checkpoint.storage_size);
+
                 assert(grid.free_set.count_released() >=
                     (grid.free_set_checkpoint_blocks_acquired.block_count() +
                         grid.free_set_checkpoint_blocks_released.block_count()));
@@ -1327,12 +1346,6 @@ pub fn GridType(comptime Storage: type) type {
                 );
                 return request_faults_count + request_repairs_count;
             }
-        }
-
-        pub fn free_set_checkpoints_blocks_max(storage_size_limit: u64) usize {
-            const block_count = vsr.block_count_max(storage_size_limit);
-            const free_set_encoded_size = FreeSet.encode_size_max(block_count);
-            return 2 * CheckpointTrailer.block_count_for_trailer_size(free_set_encoded_size);
         }
 
         fn block_offset(address: u64) u64 {

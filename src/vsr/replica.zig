@@ -1203,8 +1203,7 @@ pub fn ReplicaType(
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest
                     .compaction_blocks_released_per_pipeline_max() +
-                    Grid.free_set_checkpoints_blocks_max(self.superblock.storage_size_limit) +
-                    CheckpointTrailer.block_count_for_trailer_size(ClientSessions.encode_size),
+                    vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size),
             });
             errdefer self.grid.deinit(allocator);
 
@@ -4955,7 +4954,7 @@ pub fn ReplicaType(
                 if (self.grid.free_set.highest_address_acquired()) |address| {
                     assert(address > 0);
                     assert(self.grid.free_set_checkpoint_blocks_acquired.size > 0);
-                    assert(self.grid.free_set_checkpoint_blocks_released.size > 0);
+                    maybe(self.grid.free_set_checkpoint_blocks_released.size == 0);
 
                     storage_size += address * constants.block_size;
                 } else {

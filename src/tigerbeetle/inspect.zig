@@ -26,8 +26,6 @@ const SuperBlockQuorums = vsr.superblock.Quorums;
 const StateMachine = @import("main.zig").StateMachine;
 const BlockPtr = vsr.grid.BlockPtr;
 const BlockPtrConst = vsr.grid.BlockPtrConst;
-const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
-const Grid = vsr.GridType(Storage);
 const allocate_block = vsr.grid.allocate_block;
 const is_composite_key = vsr.lsm.composite_key.is_composite_key;
 
@@ -236,18 +234,27 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
     });
 
     {
+        const grid_size_limit = datafile_size - vsr.superblock.data_file_size_min;
+        const blocks_count = vsr.FreeSet.block_count_max(grid_size_limit);
+        const ewah = vsr.ewah(vsr.FreeSet.Word);
+
+        // 2x since both `blocks_acquired` and `blocks_released` are encoded.
+        const free_set_encoded_blocks_max = 2 *
+            vsr.checkpoint_trailer.block_count_for_trailer_size(ewah.encode_size_max(blocks_count));
+
+        const client_sessions_encoded_blocks_max =
+            vsr.checkpoint_trailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size);
+
         try print_header(output, 0, "free_set");
         const hashmap_entries = stdx.div_ceil(
             100 * (StateMachine.Forest.compaction_blocks_released_per_pipeline_max() +
-                Grid.free_set_checkpoints_blocks_max(datafile_size) +
-                CheckpointTrailer.block_count_for_trailer_size(vsr.ClientSessions.encode_size)),
+                free_set_encoded_blocks_max + client_sessions_encoded_blocks_max),
             std.hash_map.default_max_load_percentage,
         );
+
         try output.print("{:.2}\n", .{std.fmt.fmtIntSizeBin(
-            // HashMap of block addresses.
-            hashmap_entries * @sizeOf(u64) +
-                // Two bitsets with bit per block.
-                2 * stdx.div_ceil(vsr.block_count_max(datafile_size), 8),
+            // HashMap of block addresses plus two bitsets with bit per block.
+            hashmap_entries * @sizeOf(u64) + 2 * stdx.div_ceil(blocks_count, 8),
         )});
     }
 }
@@ -826,13 +833,12 @@ const Inspector = struct {
         // This is not exact, but is an overestimate:
         const grid_blocks_max =
             @divFloor(constants.storage_size_limit_max, constants.block_size);
-        const free_set_block_addresses_count = free_set_blocks_acquired_addresses.items.len +
-            free_set_blocks_released_addresses.items.len;
+
         var free_set = try vsr.FreeSet.init(
             inspector.allocator,
             .{
-                .blocks_count = grid_blocks_max,
-                .blocks_released_prior_checkpoint_durability_max = free_set_block_addresses_count,
+                .grid_size_limit = grid_blocks_max * constants.block_size,
+                .blocks_released_prior_checkpoint_durability_max = 0,
             },
         );
         defer free_set.deinit(inspector.allocator);

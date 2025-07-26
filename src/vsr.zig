@@ -41,6 +41,8 @@ pub const testing = .{
     .IdPermutation = @import("testing/id.zig").IdPermutation,
     .parse_seed = @import("testing/fuzz.zig").parse_seed,
 };
+pub const ewah = @import("ewah.zig").ewah;
+pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
 
 pub const multi_batch = @import("vsr/multi_batch.zig");
 
@@ -1872,11 +1874,3 @@ pub const RepairBudgetGrid = struct {
         budget.available = @min((budget.available + amount), budget.capacity);
     }
 };
-
-pub fn block_count_max(storage_size_limit: u64) usize {
-    const shard_count_limit: usize = @intCast(@divFloor(
-        storage_size_limit - superblock.data_file_size_min,
-        constants.block_size * FreeSet.shard_bits,
-    ));
-    return shard_count_limit * FreeSet.shard_bits;
-}
