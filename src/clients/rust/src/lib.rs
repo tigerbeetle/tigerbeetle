@@ -112,6 +112,29 @@ impl Client {
         }
     }
 
+    pub fn create_and_return_transfers<'s>(
+        &'s self,
+        events: &[Transfer],
+    ) -> impl Future<Output = Result<Vec<CreateAndReturnTransferResult>, PacketStatus>> + use<'s>
+    {
+        let (packet, rx) = create_packet::<Transfer>(
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_AND_RETURN_TRANSFERS,
+            events,
+        );
+
+        unsafe {
+            let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
+            assert_eq!(status, tbc::TB_CLIENT_STATUS_TB_CLIENT_OK);
+        }
+
+        async {
+            let msg = rx.await.expect("channel");
+            let result: &[CreateAndReturnTransferResult] = handle_message(&msg)?;
+
+            Ok(result.to_vec())
+        }
+    }
+
     pub fn lookup_accounts<'s>(
         &'s self,
         events: &[u128],
@@ -327,6 +350,22 @@ fn assert_abi_compatibility() {
         std::mem::align_of::<tbc::TB_TRANSFER_FLAGS>()
     );
     assert_eq!(
+        std::mem::size_of::<CreateAndReturnTransferResult>(),
+        std::mem::size_of::<tbc::tb_create_and_return_transfers_result_t>()
+    );
+    assert_eq!(
+        std::mem::align_of::<CreateAndReturnTransferResult>(),
+        std::mem::align_of::<tbc::tb_create_and_return_transfers_result_t>()
+    );
+    assert_eq!(
+        std::mem::size_of::<CreateAndReturnTransferResultFlags>(),
+        std::mem::size_of::<tbc::TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS>()
+    );
+    assert_eq!(
+        std::mem::align_of::<CreateAndReturnTransferResultFlags>(),
+        std::mem::align_of::<tbc::TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS>()
+    );
+    assert_eq!(
         std::mem::size_of::<AccountFilter>(),
         std::mem::size_of::<tbc::tb_account_filter_t>()
     );
@@ -388,7 +427,7 @@ pub struct Account {
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
     pub struct AccountFlags: u16 {
         const None = 0;
         const Linked = tbc::TB_ACCOUNT_FLAGS_TB_ACCOUNT_LINKED;
@@ -420,8 +459,9 @@ pub struct Transfer {
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
     pub struct TransferFlags: u16 {
+        const None = 0;
         const Linked = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_LINKED;
         const Pending = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_PENDING;
         const PostPendingTransfer = tbc::TB_TRANSFER_FLAGS_TB_TRANSFER_POST_PENDING_TRANSFER;
@@ -451,8 +491,9 @@ pub struct AccountFilter {
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
     pub struct AccountFilterFlags: u32 {
+        const None = 0;
         const Debits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_DEBITS;
         const Credits = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_CREDITS;
         const Reversed = tbc::TB_ACCOUNT_FILTER_FLAGS_TB_ACCOUNT_FILTER_REVERSED;
@@ -472,6 +513,33 @@ pub struct AccountBalance {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct CreateAndReturnTransferResult {
+    pub result: CreateTransferResult,
+    pub flags: CreateAndReturnTransferResultFlags,
+    pub timestamp: u64,
+    pub amount: u128,
+    pub debit_account_debits_pending: u128,
+    pub debit_account_debits_posted: u128,
+    pub debit_account_credits_pending: u128,
+    pub debit_account_credits_posted: u128,
+    pub credit_account_debits_pending: u128,
+    pub credit_account_debits_posted: u128,
+    pub credit_account_credits_pending: u128,
+    pub credit_account_credits_posted: u128,
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
+    pub struct CreateAndReturnTransferResultFlags: u32 {
+        const None = 0;
+        const TransferSet = tbc::TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS_TB_CREATE_AND_RETURN_TRANSFERS_RESULT_TRANSFER_SET;
+        const AccountBalanceSet = tbc::TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS_TB_CREATE_AND_RETURN_TRANSFERS_RESULT_ACCOUNT_BALANCES_SET;
+    }
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct QueryFilter {
     pub user_data_128: u128,
     pub user_data_64: u64,
@@ -487,14 +555,15 @@ pub struct QueryFilter {
 
 bitflags! {
     #[repr(transparent)]
-    #[derive(Copy, Clone, Debug, Default)]
+    #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
     pub struct QueryFilterFlags: u32 {
+        const None = 0;
         const Reversed = tbc::TB_QUERY_FILTER_FLAGS_TB_QUERY_FILTER_REVERSED;
     }
 }
 
+#[repr(u32)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-#[non_exhaustive]
 pub enum CreateAccountResult {
     Ok,
     LinkedEventFailed,
@@ -523,7 +592,6 @@ pub enum CreateAccountResult {
     LedgerMustNotBeZero,
     CodeMustNotBeZero,
     ImportedEventTimestampMustNotRegress,
-    Unknown(u32),
 }
 
 impl core::fmt::Display for CreateAccountResult {
@@ -568,15 +636,14 @@ impl core::fmt::Display for CreateAccountResult {
             Self::ImportedEventTimestampMustNotRegress => {
                 f.write_str("imported event timestamp must not regress")
             }
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
         }
     }
 }
 
+#[repr(u32)]
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-#[non_exhaustive]
 pub enum CreateTransferResult {
-    Ok,
+    Ok = 0,
     LinkedEventFailed,
     LinkedEventChainOpen,
     ImportedEventExpected,
@@ -644,7 +711,6 @@ pub enum CreateTransferResult {
     OverflowsTimeout,
     ExceedsCredits,
     ExceedsDebits,
-    Unknown(u32),
 }
 
 impl core::fmt::Display for CreateTransferResult {
@@ -760,7 +826,6 @@ impl core::fmt::Display for CreateTransferResult {
             Self::OverflowsTimeout => f.write_str("overflows timeout"),
             Self::ExceedsCredits => f.write_str("exceeds credits"),
             Self::ExceedsDebits => f.write_str("exceeds debits"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {0}", code)),
         }
     }
 }

@@ -52,6 +52,10 @@ fn main() {
     // // todo
     // endsection:transfer-flags-void
 
+    // section:create-and-return-transfers
+    // // todo
+    // endsection:create-and-return-transfers
+
     // section:lookup-transfers
     // // todo
     // endsection:lookup-transfers

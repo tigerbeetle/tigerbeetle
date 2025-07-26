@@ -167,6 +167,7 @@
               <exclude>com/tigerbeetle/TransferFlags.class</exclude>
               <exclude>com/tigerbeetle/AccountFilterFlags.class</exclude>
               <exclude>com/tigerbeetle/QueryFilterFlags.class</exclude>
+              <exclude>com/tigerbeetle/CreateAndReturnTransferResultFlags.class</exclude>
             </excludes>
           </configuration>
         </plugin>
@@ -185,6 +186,8 @@
               <exclude>com/tigerbeetle/CreateAccountResultBatch.java</exclude>
               <exclude>com/tigerbeetle/CreateTransferResult.java</exclude>
               <exclude>com/tigerbeetle/CreateTransferResultBatch.java</exclude>
+              <exclude>com/tigerbeetle/CreateAndReturnTransferResultBatch.java</exclude>
+              <exclude>com/tigerbeetle/CreateAndReturnTransferResultFlags.java</exclude>
               <exclude>com/tigerbeetle/InitializationStatus.java</exclude>
               <exclude>com/tigerbeetle/ClientStatus.java</exclude>
               <exclude>com/tigerbeetle/PacketStatus.java</exclude>

@@ -352,6 +352,17 @@ fn readme_root(ctx: *Context) !void {
     }
 
     {
+        ctx.header(2, "Create And Return Transfers");
+        ctx.paragraph(
+            \\Additionally, you can create transfers and retrieve information
+            \\about the outcome, such as the transfer timestamp and the accounts' balances.
+            \\
+            \\See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+        );
+        ctx.code_section("create-and-return-transfers");
+    }
+
+    {
         ctx.header(2, "Transfer Lookup");
         ctx.paragraph(
             \\NOTE: While transfer lookup exists, it is not a flexible query API. We

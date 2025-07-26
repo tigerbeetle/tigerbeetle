@@ -23,6 +23,7 @@ class Operation(enum.IntEnum):
     GET_ACCOUNT_BALANCES = 143
     QUERY_ACCOUNTS = 144
     QUERY_TRANSFERS = 145
+    CREATE_AND_RETURN_TRANSFERS = 146
 
 
 class PacketStatus(enum.IntEnum):
@@ -200,6 +201,12 @@ class CreateTransferResult(enum.IntEnum):
     EXCEEDS_DEBITS = 55
 
 
+class CreateAndReturnTransfersResultFlags(enum.IntFlag):
+    NONE = 0
+    TRANSFER_SET = 1 << 0
+    ACCOUNT_BALANCES_SET = 1 << 1
+
+
 @dataclass
 class Account:
     id: int = 0
@@ -243,6 +250,22 @@ class CreateAccountsResult:
 class CreateTransfersResult:
     index: int = 0
     result: CreateTransferResult = 0
+
+
+@dataclass
+class CreateAndReturnTransfersResult:
+    result: CreateTransferResult = 0
+    flags: CreateAndReturnTransfersResultFlags = CreateAndReturnTransfersResultFlags.NONE
+    timestamp: int = 0
+    amount: int = 0
+    debit_account_debits_pending: int = 0
+    debit_account_debits_posted: int = 0
+    debit_account_credits_pending: int = 0
+    debit_account_credits_posted: int = 0
+    credit_account_debits_pending: int = 0
+    credit_account_debits_posted: int = 0
+    credit_account_credits_pending: int = 0
+    credit_account_credits_posted: int = 0
 
 
 @dataclass
@@ -492,6 +515,67 @@ CCreateTransfersResult._fields_ = [ # noqa: SLF001
 ]
 
 
+class CCreateAndReturnTransfersResult(ctypes.Structure):
+    @classmethod
+    def from_param(cls, obj):
+        validate_uint(bits=64, name="timestamp", number=obj.timestamp)
+        validate_uint(bits=128, name="amount", number=obj.amount)
+        validate_uint(bits=128, name="debit_account_debits_pending", number=obj.debit_account_debits_pending)
+        validate_uint(bits=128, name="debit_account_debits_posted", number=obj.debit_account_debits_posted)
+        validate_uint(bits=128, name="debit_account_credits_pending", number=obj.debit_account_credits_pending)
+        validate_uint(bits=128, name="debit_account_credits_posted", number=obj.debit_account_credits_posted)
+        validate_uint(bits=128, name="credit_account_debits_pending", number=obj.credit_account_debits_pending)
+        validate_uint(bits=128, name="credit_account_debits_posted", number=obj.credit_account_debits_posted)
+        validate_uint(bits=128, name="credit_account_credits_pending", number=obj.credit_account_credits_pending)
+        validate_uint(bits=128, name="credit_account_credits_posted", number=obj.credit_account_credits_posted)
+        return cls(
+            result=obj.result,
+            flags=obj.flags,
+            timestamp=obj.timestamp,
+            amount=c_uint128.from_param(obj.amount),
+            debit_account_debits_pending=c_uint128.from_param(obj.debit_account_debits_pending),
+            debit_account_debits_posted=c_uint128.from_param(obj.debit_account_debits_posted),
+            debit_account_credits_pending=c_uint128.from_param(obj.debit_account_credits_pending),
+            debit_account_credits_posted=c_uint128.from_param(obj.debit_account_credits_posted),
+            credit_account_debits_pending=c_uint128.from_param(obj.credit_account_debits_pending),
+            credit_account_debits_posted=c_uint128.from_param(obj.credit_account_debits_posted),
+            credit_account_credits_pending=c_uint128.from_param(obj.credit_account_credits_pending),
+            credit_account_credits_posted=c_uint128.from_param(obj.credit_account_credits_posted),
+        )
+
+
+    def to_python(self):
+        return CreateAndReturnTransfersResult(
+            result=CreateTransferResult(self.result),
+            flags=CreateAndReturnTransfersResultFlags(self.flags),
+            timestamp=self.timestamp,
+            amount=self.amount.to_python(),
+            debit_account_debits_pending=self.debit_account_debits_pending.to_python(),
+            debit_account_debits_posted=self.debit_account_debits_posted.to_python(),
+            debit_account_credits_pending=self.debit_account_credits_pending.to_python(),
+            debit_account_credits_posted=self.debit_account_credits_posted.to_python(),
+            credit_account_debits_pending=self.credit_account_debits_pending.to_python(),
+            credit_account_debits_posted=self.credit_account_debits_posted.to_python(),
+            credit_account_credits_pending=self.credit_account_credits_pending.to_python(),
+            credit_account_credits_posted=self.credit_account_credits_posted.to_python(),
+        )
+
+CCreateAndReturnTransfersResult._fields_ = [ # noqa: SLF001
+    ("result", ctypes.c_uint32),
+    ("flags", ctypes.c_uint32),
+    ("timestamp", ctypes.c_uint64),
+    ("amount", c_uint128),
+    ("debit_account_debits_pending", c_uint128),
+    ("debit_account_debits_posted", c_uint128),
+    ("debit_account_credits_pending", c_uint128),
+    ("debit_account_credits_posted", c_uint128),
+    ("credit_account_debits_pending", c_uint128),
+    ("credit_account_debits_posted", c_uint128),
+    ("credit_account_credits_pending", c_uint128),
+    ("credit_account_credits_posted", c_uint128),
+]
+
+
 class CAccountFilter(ctypes.Structure):
     @classmethod
     def from_param(cls, obj):
@@ -699,6 +783,14 @@ class AsyncStateMachineMixin:
             CCreateTransfersResult,
         )
 
+    async def create_and_return_transfers(self, transfers: list[Transfer]) -> list[CreateAndReturnTransfersResult]:
+        return await self._submit(
+            Operation.CREATE_AND_RETURN_TRANSFERS,
+            transfers,
+            CTransfer,
+            CCreateAndReturnTransfersResult,
+        )
+
     async def lookup_accounts(self, accounts: list[int]) -> list[Account]:
         return await self._submit(
             Operation.LOOKUP_ACCOUNTS,
@@ -765,6 +857,14 @@ class StateMachineMixin:
             transfers,
             CTransfer,
             CCreateTransfersResult,
+        )
+
+    def create_and_return_transfers(self, transfers: list[Transfer]) -> list[CreateAndReturnTransfersResult]:
+        return self._submit(
+            Operation.CREATE_AND_RETURN_TRANSFERS,
+            transfers,
+            CTransfer,
+            CCreateAndReturnTransfersResult,
         )
 
     def lookup_accounts(self, accounts: list[int]) -> list[Account]:

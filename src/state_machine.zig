@@ -35,6 +35,7 @@ const TransferPendingStatus = tb.TransferPendingStatus;
 
 const CreateAccountsResult = tb.CreateAccountsResult;
 const CreateTransfersResult = tb.CreateTransfersResult;
+const CreateAndReturnTransfersResult = tb.CreateAndReturnTransfersResult;
 
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
@@ -92,6 +93,137 @@ pub const tree_ids = struct {
     };
 };
 
+/// Object value of the `AccountEvents` groove.
+pub const AccountEvent = extern struct {
+    dr_account_id: u128,
+    dr_debits_pending: u128,
+    dr_debits_posted: u128,
+    dr_credits_pending: u128,
+    dr_credits_posted: u128,
+    cr_account_id: u128,
+    cr_debits_pending: u128,
+    cr_debits_posted: u128,
+    cr_credits_pending: u128,
+    cr_credits_posted: u128,
+    timestamp: u64,
+    dr_account_timestamp: u64,
+    cr_account_timestamp: u64,
+    dr_account_flags: AccountFlags,
+    cr_account_flags: AccountFlags,
+    transfer_flags: TransferFlags,
+    transfer_pending_flags: TransferFlags,
+    transfer_pending_id: u128,
+    amount_requested: u128,
+    amount: u128,
+    ledger: u32,
+
+    /// Although similar to `TransferPending.status`, this index tracks the event,
+    /// not the original pending transfer.
+    /// Examples: (No such index exists in `Transfers.flags`)
+    ///   "All voided or expired events today."
+    ///   "All single-phase or posted events today."
+    ///
+    ///  Value   | Description
+    /// ---------|-----------------------------------------------------
+    /// `none`   | This event is a regular transfer.
+    /// `pending`| This event is a pending transfer.
+    /// `posted` | This event posted a pending transfer.
+    /// `voided` | This event voided a pending transfer.
+    /// `expired`| This event expired a pending transfer,
+    ///            the `timestamp` does not relate to a transfer.
+    ///
+    /// See `transfer_pending_id` for tracking the pending transfer.
+    /// It will be `zero` for `none` and `pending`.
+    transfer_pending_status: TransferPendingStatus,
+    reserved: [11]u8 = @splat(0),
+
+    /// Previous schema before the changes introduced by PR #2507.
+    pub const Former = extern struct {
+        dr_account_id: u128,
+        dr_debits_pending: u128,
+        dr_debits_posted: u128,
+        dr_credits_pending: u128,
+        dr_credits_posted: u128,
+        cr_account_id: u128,
+        cr_debits_pending: u128,
+        cr_debits_posted: u128,
+        cr_credits_pending: u128,
+        cr_credits_posted: u128,
+        timestamp: u64,
+        reserved: [88]u8 = @splat(0),
+
+        comptime {
+            assert(stdx.no_padding(Former));
+            assert(@sizeOf(Former) == @sizeOf(AccountEvent));
+            assert(@alignOf(Former) == @alignOf(AccountEvent));
+
+            // Asserting the fields are identical.
+            for (std.meta.fields(Former)) |field_former| {
+                if (std.mem.eql(u8, field_former.name, "reserved")) continue;
+                const field = std.meta.fields(AccountEvent)[
+                    std.meta.fieldIndex(
+                        AccountEvent,
+                        field_former.name,
+                    ).?
+                ];
+                assert(field_former.type == field.type);
+                assert(field_former.alignment == field.alignment);
+                assert(@offsetOf(AccountEvent, field_former.name) ==
+                    @offsetOf(Former, field_former.name));
+            }
+        }
+    };
+
+    /// Checks the object and returns whether it was created
+    /// using the current or the former schema.
+    pub fn schema(self: *const AccountEvent) union(enum) {
+        current,
+        former: *const AccountEvent.Former,
+    } {
+        assert(self.timestamp != 0);
+
+        const former: *const AccountEvent.Former = @ptrCast(self);
+        if (stdx.zeroed(&former.reserved)) {
+            // In the former schema:
+            // Balances for accounts without the `history` flag weren’t stored.
+            // If neither side had the `history` flag, the entire object wasn’t stored.
+            assert(former.dr_account_id != 0 or former.cr_account_id != 0);
+
+            return .{ .former = former };
+        }
+
+        assert(self.dr_account_timestamp != 0);
+        assert(self.dr_account_id != 0);
+        assert(self.cr_account_timestamp != 0);
+        assert(self.cr_account_id != 0);
+        assert(self.ledger != 0);
+        switch (self.transfer_pending_status) {
+            .none, .pending => assert(self.transfer_pending_id == 0),
+            .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
+        }
+        assert(stdx.zeroed(&self.reserved));
+        return .current;
+    }
+
+    comptime {
+        assert(stdx.no_padding(AccountEvent));
+        assert(@sizeOf(AccountEvent) == 256);
+        assert(@alignOf(AccountEvent) == 16);
+    }
+};
+
+/// Object value of the `TransferPending` groove.
+pub const TransferPending = extern struct {
+    timestamp: u64,
+    status: TransferPendingStatus,
+    padding: [7]u8 = @splat(0),
+
+    comptime {
+        assert(stdx.no_padding(TransferPending));
+        assert(@sizeOf(TransferPending) == 16);
+    }
+};
+
 pub fn StateMachineType(
     comptime Storage: type,
     comptime config: constants.StateMachineConfig,
@@ -116,6 +248,10 @@ pub fn StateMachineType(
                 pub const create_transfers: u32 = @max(
                     operation_event_max(.create_transfers, message_body_size_max),
                     operation_event_max(.deprecated_create_transfers, message_body_size_max),
+                );
+                pub const create_and_return_transfers: u32 = operation_event_max(
+                    .create_and_return_transfers,
+                    message_body_size_max,
                 );
                 pub const lookup_accounts: u32 = @max(
                     operation_event_max(.lookup_accounts, message_body_size_max),
@@ -235,18 +371,6 @@ pub fn StateMachineType(
             },
         );
 
-        pub const TransferPending = extern struct {
-            timestamp: u64,
-            status: TransferPendingStatus,
-            padding: [7]u8 = @splat(0),
-
-            comptime {
-                // Assert that there is no implicit padding.
-                assert(@sizeOf(TransferPending) == 16);
-                assert(stdx.no_padding(TransferPending));
-            }
-        };
-
         const AccountEventsGroove = GrooveType(
             Storage,
             AccountEvent,
@@ -356,127 +480,9 @@ pub fn StateMachineType(
                     }.prunable,
                 },
                 .orphaned_ids = false,
-                .objects_cache = false,
+                .objects_cache = true,
             },
         );
-
-        pub const AccountEvent = extern struct {
-            dr_account_id: u128,
-            dr_debits_pending: u128,
-            dr_debits_posted: u128,
-            dr_credits_pending: u128,
-            dr_credits_posted: u128,
-            cr_account_id: u128,
-            cr_debits_pending: u128,
-            cr_debits_posted: u128,
-            cr_credits_pending: u128,
-            cr_credits_posted: u128,
-            timestamp: u64,
-            dr_account_timestamp: u64,
-            cr_account_timestamp: u64,
-            dr_account_flags: AccountFlags,
-            cr_account_flags: AccountFlags,
-            transfer_flags: TransferFlags,
-            transfer_pending_flags: TransferFlags,
-            transfer_pending_id: u128,
-            amount_requested: u128,
-            amount: u128,
-            ledger: u32,
-
-            /// Although similar to `TransferPending.status`, this index tracks the event,
-            /// not the original pending transfer.
-            /// Examples: (No such index exists in `Transfers.flags`)
-            ///   "All voided or expired events today."
-            ///   "All single-phase or posted events today."
-            ///
-            ///  Value   | Description
-            /// ---------|-----------------------------------------------------
-            /// `none`   | This event is a regular transfer.
-            /// `pending`| This event is a pending transfer.
-            /// `posted` | This event posted a pending transfer.
-            /// `voided` | This event voided a pending transfer.
-            /// `expired`| This event expired a pending transfer,
-            ///            the `timestamp` does not relate to a transfer.
-            ///
-            /// See `transfer_pending_id` for tracking the pending transfer.
-            /// It will be `zero` for `none` and `pending`.
-            transfer_pending_status: TransferPendingStatus,
-            reserved: [11]u8 = @splat(0),
-
-            /// Previous schema before the changes introduced by PR #2507.
-            const Former = extern struct {
-                dr_account_id: u128,
-                dr_debits_pending: u128,
-                dr_debits_posted: u128,
-                dr_credits_pending: u128,
-                dr_credits_posted: u128,
-                cr_account_id: u128,
-                cr_debits_pending: u128,
-                cr_debits_posted: u128,
-                cr_credits_pending: u128,
-                cr_credits_posted: u128,
-                timestamp: u64,
-                reserved: [88]u8 = @splat(0),
-
-                comptime {
-                    assert(stdx.no_padding(Former));
-                    assert(@sizeOf(Former) == @sizeOf(AccountEvent));
-                    assert(@alignOf(Former) == @alignOf(AccountEvent));
-
-                    // Asserting the fields are identical.
-                    for (std.meta.fields(Former)) |field_former| {
-                        if (std.mem.eql(u8, field_former.name, "reserved")) continue;
-                        const field = std.meta.fields(AccountEvent)[
-                            std.meta.fieldIndex(
-                                AccountEvent,
-                                field_former.name,
-                            ).?
-                        ];
-                        assert(field_former.type == field.type);
-                        assert(field_former.alignment == field.alignment);
-                        assert(@offsetOf(AccountEvent, field_former.name) ==
-                            @offsetOf(Former, field_former.name));
-                    }
-                }
-            };
-
-            /// Checks the object and returns whether it was created
-            /// using the current or the former schema.
-            fn schema(self: *const AccountEvent) union(enum) {
-                current,
-                former: *const AccountEvent.Former,
-            } {
-                assert(self.timestamp != 0);
-
-                const former: *const AccountEvent.Former = @ptrCast(self);
-                if (stdx.zeroed(&former.reserved)) {
-                    // In the former schema:
-                    // Balances for accounts without the `history` flag weren’t stored.
-                    // If neither side had the `history` flag, the entire object wasn’t stored.
-                    assert(former.dr_account_id != 0 or former.cr_account_id != 0);
-
-                    return .{ .former = former };
-                }
-
-                assert(self.dr_account_timestamp != 0);
-                assert(self.dr_account_id != 0);
-                assert(self.cr_account_timestamp != 0);
-                assert(self.cr_account_id != 0);
-                assert(self.ledger != 0);
-                switch (self.transfer_pending_status) {
-                    .none, .pending => assert(self.transfer_pending_id == 0),
-                    .posted, .voided, .expired => assert(self.transfer_pending_id != 0),
-                }
-                assert(stdx.zeroed(&self.reserved));
-                return .current;
-            }
-
-            comptime {
-                assert(stdx.no_padding(AccountEvent));
-                assert(@sizeOf(AccountEvent) == 256);
-                assert(@alignOf(AccountEvent) == 16);
-            }
-        };
 
         pub const Workload = WorkloadType(StateMachine);
 
@@ -520,6 +526,7 @@ pub fn StateMachineType(
                 .pulse => void,
                 .create_accounts => Account,
                 .create_transfers => Transfer,
+                .create_and_return_transfers => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
@@ -544,6 +551,7 @@ pub fn StateMachineType(
                 .pulse => void,
                 .create_accounts => CreateAccountsResult,
                 .create_transfers => CreateTransfersResult,
+                .create_and_return_transfers => CreateAndReturnTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
@@ -586,6 +594,7 @@ pub fn StateMachineType(
                 // Operations that take multiple events as input:
                 .create_accounts => true,
                 .create_transfers => true,
+                .create_and_return_transfers => true,
                 .lookup_accounts => true,
                 .lookup_transfers => true,
                 // Operations that take a single event as input:
@@ -614,6 +623,7 @@ pub fn StateMachineType(
 
                 .create_accounts,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 .get_account_transfers,
@@ -732,6 +742,7 @@ pub fn StateMachineType(
                 .pulse => 0,
                 inline .create_accounts,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 .deprecated_create_accounts,
@@ -800,6 +811,7 @@ pub fn StateMachineType(
             accounts: AccountsGroove.PrefetchContext,
             transfers: TransfersGroove.PrefetchContext,
             transfers_pending: TransfersPendingGroove.PrefetchContext,
+            account_events: AccountEventsGroove.PrefetchContext,
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
@@ -879,6 +891,7 @@ pub fn StateMachineType(
 
             create_accounts: TimingSummary = .{},
             create_transfers: TimingSummary = .{},
+            create_and_return_transfers: TimingSummary = .{},
             lookup_accounts: TimingSummary = .{},
             lookup_transfers: TimingSummary = .{},
             get_account_transfers: TimingSummary = .{},
@@ -949,6 +962,8 @@ pub fn StateMachineType(
                     .create_transfers,
                     .deprecated_create_transfers,
                     => .create_transfers,
+
+                    .create_and_return_transfers => .create_and_return_transfers,
 
                     .lookup_accounts,
                     .deprecated_lookup_accounts,
@@ -1290,6 +1305,7 @@ pub fn StateMachineType(
                 .pulse => machine_constants.batch_max.create_transfers, // Max transfers to expire.
                 .create_accounts => @divExact(batch.len, @sizeOf(Account)),
                 .create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
+                .create_and_return_transfers => @divExact(batch.len, @sizeOf(Transfer)),
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
@@ -1362,6 +1378,7 @@ pub fn StateMachineType(
             self.forest.grooves.accounts.prefetch_setup(null);
             self.forest.grooves.transfers.prefetch_setup(null);
             self.forest.grooves.transfers_pending.prefetch_setup(null);
+            self.forest.grooves.account_events.prefetch_setup(null);
 
             // Prefetch starts timing for an operation.
             self.metrics.timer.reset();
@@ -1370,6 +1387,7 @@ pub fn StateMachineType(
                 .pulse => self.prefetch_expire_pending_transfers(),
                 .create_accounts => self.prefetch_create_accounts(),
                 .create_transfers => self.prefetch_create_transfers(),
+                .create_and_return_transfers => self.prefetch_create_transfers(),
                 .lookup_accounts => self.prefetch_lookup_accounts(),
                 .lookup_transfers => self.prefetch_lookup_transfers(),
                 .get_account_transfers => self.prefetch_get_account_transfers(),
@@ -1469,6 +1487,7 @@ pub fn StateMachineType(
         fn prefetch_create_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
+                self.prefetch_operation == .create_and_return_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
 
             const transfers = stdx.bytes_as_slice(
@@ -1496,6 +1515,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
+                self.prefetch_operation == .create_and_return_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
 
             self.prefetch_context = .null;
@@ -1517,6 +1537,17 @@ pub fn StateMachineType(
                 } else {
                     self.forest.grooves.accounts.prefetch_enqueue(t.debit_account_id);
                     self.forest.grooves.accounts.prefetch_enqueue(t.credit_account_id);
+                }
+            }
+
+            if (self.prefetch_operation == .create_and_return_transfers) {
+                // Looking up account events for the existing transfers.
+                // When processing `create_and_return_transfers`, we need to return the
+                // balance as part of the `exists` idempotency validation.
+                for (transfers) |*t| {
+                    if (self.get_transfer(t.id)) |exists| {
+                        self.forest.grooves.account_events.prefetch_enqueue(exists.timestamp);
+                    }
                 }
             }
 
@@ -1543,6 +1574,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
+                self.prefetch_operation == .create_and_return_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
 
             self.prefetch_context = .null;
@@ -1558,7 +1590,27 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
+                self.prefetch_operation == .create_and_return_transfers or
                 self.prefetch_operation == .deprecated_create_transfers);
+
+            self.prefetch_context = .null;
+
+            if (self.prefetch_operation == .create_and_return_transfers) {
+                self.forest.grooves.account_events.prefetch(
+                    prefetch_create_transfers_callback_account_events,
+                    self.prefetch_context.get(.account_events),
+                );
+            } else {
+                self.prefetch_finish();
+            }
+        }
+
+        fn prefetch_create_transfers_callback_account_events(
+            completion: *AccountEventsGroove.PrefetchContext,
+        ) void {
+            const self: *StateMachine = PrefetchContext.parent(.account_events, completion);
+            assert(self.prefetch_input != null);
+            assert(self.prefetch_operation == .create_and_return_transfers);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -2574,6 +2626,7 @@ pub fn StateMachineType(
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
+                operation_event_max(.create_and_return_transfers, self.batch_size_limit),
                 operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
             ) * @sizeOf(Transfer);
 
@@ -2636,6 +2689,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
+                operation_event_max(.create_and_return_transfers, self.batch_size_limit),
                 operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
             );
             assert(result_count <= result_max);
@@ -2716,6 +2770,7 @@ pub fn StateMachineType(
                 .pulse => self.execute_expire_pending_transfers(timestamp),
                 inline .create_accounts,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
                 => |operation_comptime| self.execute_multi_batch(
@@ -2859,6 +2914,7 @@ pub fn StateMachineType(
                 const bytes_written: usize = switch (operation) {
                     .create_accounts,
                     .create_transfers,
+                    .create_and_return_transfers,
                     => self.execute_create(
                         operation,
                         execute_timestamp,
@@ -3086,6 +3142,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_open();
                 },
                 .create_transfers,
+                .create_and_return_transfers,
                 .deprecated_create_transfers,
                 => {
                     self.forest.grooves.accounts.scope_open();
@@ -3105,6 +3162,7 @@ pub fn StateMachineType(
                     self.forest.grooves.accounts.scope_close(mode);
                 },
                 .create_transfers,
+                .create_and_return_transfers,
                 .deprecated_create_transfers,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
@@ -3125,23 +3183,66 @@ pub fn StateMachineType(
         ) usize {
             comptime assert(operation == .create_accounts or
                 operation == .create_transfers or
+                operation == .create_and_return_transfers or
                 operation == .deprecated_create_accounts or
                 operation == .deprecated_create_transfers);
 
             const Event = EventType(operation);
             const Result = ResultType(operation);
+            const ResultEnum = switch (operation) {
+                .create_accounts,
+                .deprecated_create_accounts,
+                => CreateAccountResult,
+                .create_transfers,
+                .deprecated_create_transfers,
+                .create_and_return_transfers,
+                => CreateTransferResult,
+                else => unreachable,
+            };
+
+            // Depending on the operation, the create function may return either an enum
+            // indicating the status code or a result type containing additional information,
+            // e.g., `create_and_return_transfers`.
+            //
+            // For operations that return the enum, only status codes other than `.ok` are
+            // replied to the client, along with the corresponding index of the failed event.
+            // Successfully created events are suppressed from the results.
+            //
+            // For operations that return result types carrying additional information, all
+            // processed events, both successful and failed, are replied to the client.
+            const CreateResult = switch (operation) {
+                .create_accounts,
+                .deprecated_create_accounts,
+                .create_transfers,
+                .deprecated_create_transfers,
+                => ResultEnum,
+                .create_and_return_transfers,
+                => Result,
+                else => unreachable,
+            };
+            const unwrap = struct {
+                inline fn unwrap(create_result: CreateResult) ResultEnum {
+                    return switch (operation) {
+                        .create_accounts, .deprecated_create_accounts => create_result,
+                        .create_transfers, .deprecated_create_transfers => create_result,
+                        .create_and_return_transfers => create_result.result,
+                        else => comptime unreachable,
+                    };
+                }
+            }.unwrap;
+
             const events = stdx.bytes_as_slice(.exact, Event, batch);
             const results = stdx.bytes_as_slice(.inexact, Result, output_buffer);
             assert(events.len <= results.len);
 
-            var count: usize = 0;
+            var result_count: usize = 0;
             var chain: ?usize = null;
             var chain_broken = false;
 
             for (events, 0..) |*event_, index| {
                 var event = event_.*;
 
-                const result = blk: {
+                const result: CreateResult = blk: {
                     if (event.flags.linked) {
                         if (chain == null) {
                             chain = index;
@@ -3184,7 +3285,8 @@ pub fn StateMachineType(
                         => self.create_account(&event),
                         .deprecated_create_transfers,
                         .create_transfers,
-                        => self.create_transfer(&event),
+                        .create_and_return_transfers,
+                        => self.create_transfer(operation, &event),
                         else => comptime unreachable,
                     };
                 };
@@ -3196,7 +3298,8 @@ pub fn StateMachineType(
                     result,
                     event,
                 });
-                if (result != .ok) {
+
+                if (unwrap(result) != .ok) {
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {
                             chain_broken = true;
@@ -3206,26 +3309,72 @@ pub fn StateMachineType(
                             // Add errors for rolled back events in FIFO order:
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
-                                results[count] = .{
-                                    .index = @intCast(chain_index),
-                                    .result = .linked_event_failed,
-                                };
-                                count += 1;
+                                switch (operation) {
+                                    .create_accounts,
+                                    .deprecated_create_accounts,
+                                    .create_transfers,
+                                    .deprecated_create_transfers,
+                                    => {
+                                        results[result_count] = .{
+                                            .index = @intCast(chain_index),
+                                            .result = .linked_event_failed,
+                                        };
+                                        result_count += 1;
+                                    },
+                                    .create_and_return_transfers => {
+                                        results[chain_index] = .linked_event_failed;
+                                    },
+                                    else => comptime unreachable,
+                                }
                             }
                         } else {
-                            assert(result == .linked_event_failed or
-                                result == .linked_event_chain_open);
+                            assert(unwrap(result) == .linked_event_failed or
+                                unwrap(result) == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @intCast(index), .result = result };
-                    count += 1;
+
+                    switch (operation) {
+                        .create_accounts,
+                        .deprecated_create_accounts,
+                        .create_transfers,
+                        .deprecated_create_transfers,
+                        => {
+                            results[result_count] = .{ .index = @intCast(index), .result = result };
+                            result_count += 1;
+                        },
+                        .create_and_return_transfers => {
+                            // The result is always added to the results buffer,
+                            // it will be handled below.
+                        },
+                        else => comptime unreachable,
+                    }
 
                     self.transient_error(operation, event.id, result);
                 }
-                if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
+
+                switch (operation) {
+                    .create_accounts,
+                    .deprecated_create_accounts,
+                    .create_transfers,
+                    .deprecated_create_transfers,
+                    => {
+                        // The result is only added to the results buffer in case of error,
+                        // it was already handled above.
+                    },
+                    .create_and_return_transfers => {
+                        results[result_count] = result;
+                        result_count += 1;
+                    },
+                    else => comptime unreachable,
+                }
+
+                if (chain != null and
+                    (!event.flags.linked or unwrap(result) == .linked_event_chain_open))
+                {
                     if (!chain_broken) {
                         // We've finished this linked chain, and all events have applied
                         // successfully.
+                        assert(unwrap(result) == .ok);
                         self.scope_close(operation, .persist);
                     }
 
@@ -3236,7 +3385,7 @@ pub fn StateMachineType(
             assert(chain == null);
             assert(chain_broken == false);
 
-            return @sizeOf(ResultType(operation)) * count;
+            return result_count * @sizeOf(Result);
         }
 
         fn transient_error(
@@ -3245,26 +3394,32 @@ pub fn StateMachineType(
             id: u128,
             result: anytype,
         ) void {
-            assert(result != .ok);
-
             switch (operation) {
                 .create_accounts,
                 .deprecated_create_accounts,
                 => {
                     comptime assert(@TypeOf(result) == CreateAccountResult);
+                    assert(result != .ok);
                     // The `create_accounts` error codes do not depend on transient system status.
                     return;
                 },
+                // Transfers that fail with transient codes cannot reuse the same `id`,
+                // ensuring strong idempotency guarantees.
+                // Once a transfer fails with a transient error, it must be retried
+                // with a different `id`.
                 .create_transfers,
                 .deprecated_create_transfers,
                 => {
                     comptime assert(@TypeOf(result) == CreateTransferResult);
-
-                    // Transfers that fail with transient codes cannot reuse the same `id`,
-                    // ensuring strong idempotency guarantees.
-                    // Once a transfer fails with a transient error, it must be retried
-                    // with a different `id`.
+                    assert(result != .ok);
                     if (result.transient()) {
+                        self.forest.grooves.transfers.insert_orphaned_id(id);
+                    }
+                },
+                .create_and_return_transfers => {
+                    comptime assert(@TypeOf(result) == CreateAndReturnTransfersResult);
+                    assert(result.result != .ok);
+                    if (result.result.transient()) {
                         self.forest.grooves.transfers.insert_orphaned_id(id);
                     }
                 },
@@ -3683,8 +3838,14 @@ pub fn StateMachineType(
 
         fn create_transfer(
             self: *StateMachine,
+            comptime operation: Operation,
             t: *const Transfer,
-        ) CreateTransferResult {
+        ) switch (operation) {
+            .create_transfers, .deprecated_create_transfers => CreateTransferResult,
+            .create_and_return_transfers => CreateAndReturnTransfersResult,
+            else => unreachable,
+        } {
+            //const Result = ResultType(operation);
             assert(t.timestamp > self.commit_timestamp or
                 t.flags.imported or
                 constants.aof_recovery);
@@ -3695,13 +3856,13 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(t, &e),
+                .found_object => |e| return self.create_transfer_exists(operation, t, &e),
                 .found_orphaned_id => return .id_already_failed,
                 .not_found => {},
             }
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(t);
+                return self.post_or_void_pending_transfer(operation, t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -3835,8 +3996,26 @@ pub fn StateMachineType(
                 return .overflows_timeout;
             }
 
-            if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
-            if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
+            if (dr_account.debits_exceed_credits(amount)) {
+                return switch (operation) {
+                    .create_transfers, .deprecated_create_transfers => .exceeds_credits,
+                    .create_and_return_transfers => .exceeds_credits(.{
+                        .dr_account = &dr_account,
+                        .cr_account = &cr_account,
+                    }),
+                    else => comptime unreachable,
+                };
+            }
+            if (cr_account.credits_exceed_debits(amount)) {
+                return switch (operation) {
+                    .create_transfers, .deprecated_create_transfers => .exceeds_debits,
+                    .create_and_return_transfers => .exceeds_debits(.{
+                        .dr_account = &dr_account,
+                        .cr_account = &cr_account,
+                    }),
+                    else => comptime unreachable,
+                };
+            }
 
             // After this point, the transfer must succeed.
             defer assert(self.commit_timestamp == t.timestamp);
@@ -3905,14 +4084,27 @@ pub fn StateMachineType(
             }
 
             self.commit_timestamp = t2.timestamp;
-            return .ok;
+            return switch (operation) {
+                .create_transfers, .deprecated_create_transfers => .ok,
+                .create_and_return_transfers => .ok(.{
+                    .transfer = &t2,
+                    .dr_account = &dr_account_new,
+                    .cr_account = &cr_account_new,
+                }),
+                else => comptime unreachable,
+            };
         }
 
         fn create_transfer_exists(
             self: *const StateMachine,
+            comptime operation: Operation,
             t: *const Transfer,
             e: *const Transfer,
-        ) CreateTransferResult {
+        ) switch (operation) {
+            .create_transfers, .deprecated_create_transfers => CreateTransferResult,
+            .create_and_return_transfers => CreateAndReturnTransfersResult,
+            else => unreachable,
+        } {
             assert(t.id == e.id);
             // The flags change the behavior of the remaining comparisons,
             // so compare the flags first.
@@ -3927,7 +4119,7 @@ pub fn StateMachineType(
                 // Since both `t` and `e` have the same `pending_id`,
                 // it must be a valid transfer.
                 const p = self.get_transfer(t.pending_id).?;
-                return post_or_void_pending_transfer_exists(t, e, &p);
+                return self.post_or_void_pending_transfer_exists(operation, t, e, &p);
             } else {
                 if (t.debit_account_id != e.debit_account_id) {
                     return .exists_with_different_debit_account_id;
@@ -3969,14 +4161,26 @@ pub fn StateMachineType(
                     return .exists_with_different_code;
                 }
 
-                return .exists;
+                return switch (operation) {
+                    .create_transfers, .deprecated_create_transfers => .exists,
+                    .create_and_return_transfers => .exists(
+                        e,
+                        if (self.get_account_event(e.timestamp)) |*event| event else null,
+                    ),
+                    else => comptime unreachable,
+                };
             }
         }
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
+            comptime operation: Operation,
             t: *const Transfer,
-        ) CreateTransferResult {
+        ) switch (operation) {
+            .create_transfers, .deprecated_create_transfers => CreateTransferResult,
+            .create_and_return_transfers => CreateAndReturnTransfersResult,
+            else => unreachable,
+        } {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
             assert(self.forest.grooves.transfers.get(t.id) == .not_found);
@@ -4192,14 +4396,28 @@ pub fn StateMachineType(
 
             self.commit_timestamp = t2.timestamp;
 
-            return .ok;
+            return switch (operation) {
+                .create_transfers, .deprecated_create_transfers => .ok,
+                .create_and_return_transfers => .ok(.{
+                    .transfer = &t2,
+                    .dr_account = &dr_account_new,
+                    .cr_account = &cr_account_new,
+                }),
+                else => comptime unreachable,
+            };
         }
 
         fn post_or_void_pending_transfer_exists(
+            self: *const StateMachine,
+            comptime operation: Operation,
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
-        ) CreateTransferResult {
+        ) switch (operation) {
+            .create_transfers, .deprecated_create_transfers => CreateTransferResult,
+            .create_and_return_transfers => CreateAndReturnTransfersResult,
+            else => unreachable,
+        } {
             assert(t.id == e.id);
             assert(t.id != p.id);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
@@ -4275,7 +4493,14 @@ pub fn StateMachineType(
                 return .exists_with_different_code;
             }
 
-            return .exists;
+            return switch (operation) {
+                .create_transfers, .deprecated_create_transfers => .exists,
+                .create_and_return_transfers => .exists(
+                    e,
+                    if (self.get_account_event(e.timestamp)) |*event| event else null,
+                ),
+                else => comptime unreachable,
+            };
         }
 
         fn account_event(
@@ -4389,6 +4614,14 @@ pub fn StateMachineType(
             };
         }
 
+        fn get_account_event(self: *const StateMachine, timestamp: u64) ?AccountEvent {
+            return switch (self.forest.grooves.account_events.get(timestamp)) {
+                .found_object => |e| e,
+                .found_orphaned_id => unreachable,
+                .not_found => null,
+            };
+        }
+
         fn transfer_update_pending_status(
             self: *StateMachine,
             transfer_pending: *const TransferPending,
@@ -4421,6 +4654,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
+                operation_event_max(.create_and_return_transfers, self.batch_size_limit),
                 operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
             );
             assert(result_count <= result_max);
@@ -4539,10 +4773,14 @@ pub fn StateMachineType(
 
             const prefetch_create_transfers_limit: u32 = @max(
                 operation_event_max(.create_transfers, options.batch_size_limit),
+                operation_event_max(.create_and_return_transfers, options.batch_size_limit),
                 operation_event_max(.deprecated_create_transfers, options.batch_size_limit),
             );
             assert(prefetch_create_transfers_limit > 0);
-            assert(prefetch_create_transfers_limit <= machine_constants.batch_max.create_transfers);
+            assert(prefetch_create_transfers_limit <= @max(
+                machine_constants.batch_max.create_transfers,
+                machine_constants.batch_max.create_and_return_transfers,
+            ));
 
             const prefetch_lookup_transfers_limit: u32 = @max(
                 operation_event_max(.lookup_transfers, options.batch_size_limit),
@@ -4623,7 +4861,10 @@ pub fn StateMachineType(
                     ),
                 },
                 .account_events = .{
-                    .prefetch_entries_for_read_max = 0,
+                    // We look up account events for transfers that failed with `exists`,
+                    // so we can return the same result as would have been returned during `ok`.
+                    .prefetch_entries_for_read_max = machine_constants.batch_max
+                        .create_and_return_transfers,
                     // We don't need to update the history, it's append only.
                     .prefetch_entries_for_update_max = 0,
                     .cache_entries_max = 0,
@@ -4705,10 +4946,14 @@ pub fn StateMachineType(
 
             const batch_create_transfers: u32 = @max(
                 operation_event_max(.create_transfers, batch_size_limit),
+                operation_event_max(.create_and_return_transfers, batch_size_limit),
                 operation_event_max(.deprecated_create_transfers, batch_size_limit),
             );
             assert(batch_create_transfers > 0);
-            assert(batch_create_transfers <= machine_constants.batch_max.create_transfers);
+            assert(batch_create_transfers <= @max(
+                machine_constants.batch_max.create_transfers,
+                machine_constants.batch_max.create_and_return_transfers,
+            ));
 
             return .{
                 .accounts = .{
@@ -4942,7 +5187,6 @@ fn ChangeEventsScanLookupType(
 
     return struct {
         const AccountEventsLookup = @This();
-        const AccountEvent = AccountEventsGroove.ObjectTree.Table.Value;
         const ScanTree = ScanTreeType(
             void,
             AccountEventsGroove.ObjectTree,
@@ -5283,6 +5527,7 @@ const TestAction = union(enum) {
     commit: TestContext.StateMachine.Operation,
     account: TestCreateAccount,
     transfer: TestCreateTransfer,
+    transfer_and_return: TestCreateAndReturnTransfer,
 
     lookup_account: struct {
         id: u128,
@@ -5409,6 +5654,76 @@ const TestCreateTransfer = struct {
     result: CreateTransferResult,
 
     fn event(t: TestCreateTransfer) Transfer {
+        return .{
+            .id = t.id,
+            .debit_account_id = t.debit_account_id,
+            .credit_account_id = t.credit_account_id,
+            .amount = t.amount,
+            .pending_id = t.pending_id,
+            .user_data_128 = t.user_data_128,
+            .user_data_64 = t.user_data_64,
+            .user_data_32 = t.user_data_32,
+            .timeout = t.timeout,
+            .ledger = t.ledger,
+            .code = t.code,
+            .flags = .{
+                .linked = t.flags_linked != null,
+                .pending = t.flags_pending != null,
+                .post_pending_transfer = t.flags_post_pending_transfer != null,
+                .void_pending_transfer = t.flags_void_pending_transfer != null,
+                .balancing_debit = t.flags_balancing_debit != null,
+                .balancing_credit = t.flags_balancing_credit != null,
+                .imported = t.flags_imported != null,
+                .closing_debit = t.flags_closing_debit != null,
+                .closing_credit = t.flags_closing_credit != null,
+                .padding = t.flags_padding,
+            },
+            .timestamp = t.timestamp,
+        };
+    }
+};
+
+const TestCreateAndReturnTransfer = struct {
+    const Balance = struct {
+        debits_pending: u128,
+        debits_posted: u128,
+        credits_pending: u128,
+        credits_posted: u128,
+    };
+
+    id: u128,
+    debit_account_id: u128,
+    credit_account_id: u128,
+    amount: u128 = 0,
+    pending_id: u128 = 0,
+    user_data_128: u128 = 0,
+    user_data_64: u64 = 0,
+    user_data_32: u32 = 0,
+    timeout: u32 = 0,
+    ledger: u32,
+    code: u16,
+    flags_linked: ?enum { LNK } = null,
+    flags_pending: ?enum { PEN } = null,
+    flags_post_pending_transfer: ?enum { POS } = null,
+    flags_void_pending_transfer: ?enum { VOI } = null,
+    flags_balancing_debit: ?enum { BDR } = null,
+    flags_balancing_credit: ?enum { BCR } = null,
+    flags_imported: ?enum { IMP } = null,
+    flags_closing_debit: ?enum { CDR } = null,
+    flags_closing_credit: ?enum { CCR } = null,
+    flags_padding: u5 = 0,
+    timestamp: u64 = 0,
+    result: CreateTransferResult,
+    transfer_set: ?struct {
+        transfer_timestamp: u128,
+        amount: u128,
+    } = null,
+    account_balances_set: ?struct {
+        dr_account: Balance,
+        cr_account: Balance,
+    } = null,
+
+    fn event(t: TestCreateAndReturnTransfer) Transfer {
         return .{
             .id = t.id,
             .debit_account_id = t.debit_account_id,
@@ -5581,6 +5896,37 @@ fn check(test_table: []const u8) !void {
     const parse_table = @import("testing/table.zig").parse;
     const allocator = std.testing.allocator;
 
+    const update_transfers = struct {
+        fn update_transfers(
+            transfers: *std.AutoHashMap(u128, Transfer),
+            t: anytype,
+            event: *Transfer,
+        ) !void {
+            if (event.pending_id != 0) {
+                // Fill in default values.
+                const t_pending = transfers.get(event.pending_id).?;
+                inline for (.{
+                    "debit_account_id",
+                    "credit_account_id",
+                    "ledger",
+                    "code",
+                    "user_data_128",
+                    "user_data_64",
+                    "user_data_32",
+                }) |field| {
+                    if (@field(event, field) == 0) {
+                        @field(event, field) = @field(t_pending, field);
+                    }
+                }
+
+                if (event.flags.void_pending_transfer) {
+                    if (event.amount == 0) event.amount = t_pending.amount;
+                }
+            }
+            try transfers.put(t.id, event.*);
+        }
+    }.update_transfers;
+
     var context: TestContext = undefined;
     try context.init(allocator);
     defer context.deinit(allocator);
@@ -5654,7 +6000,6 @@ fn check(test_table: []const u8) !void {
                         event.timestamp = context.state_machine.prepare_timestamp + 1 +
                             @divExact(request.items.len, @sizeOf(Account));
                     }
-
                     try accounts.put(a.id, event);
                 } else {
                     const result = CreateAccountsResult{
@@ -5675,29 +6020,7 @@ fn check(test_table: []const u8) !void {
                         event.timestamp = context.state_machine.prepare_timestamp + 1 +
                             @divExact(request.items.len, @sizeOf(Transfer));
                     }
-
-                    if (event.pending_id != 0) {
-                        // Fill in default values.
-                        const t_pending = transfers.get(event.pending_id).?;
-                        inline for (.{
-                            "debit_account_id",
-                            "credit_account_id",
-                            "ledger",
-                            "code",
-                            "user_data_128",
-                            "user_data_64",
-                            "user_data_32",
-                        }) |field| {
-                            if (@field(event, field) == 0) {
-                                @field(event, field) = @field(t_pending, field);
-                            }
-                        }
-
-                        if (event.flags.void_pending_transfer) {
-                            if (event.amount == 0) event.amount = t_pending.amount;
-                        }
-                    }
-                    try transfers.put(t.id, event);
+                    try update_transfers(&transfers, &t, &event);
                 } else {
                     const result = CreateTransfersResult{
                         .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
@@ -5705,6 +6028,58 @@ fn check(test_table: []const u8) !void {
                     };
                     try reply.appendSlice(std.mem.asBytes(&result));
                 }
+            },
+            .transfer_and_return => |t| {
+                assert(operation == null or operation.? == .create_and_return_transfers);
+                operation = .create_and_return_transfers;
+
+                var event = t.event();
+                try request.appendSlice(std.mem.asBytes(&event));
+                if (t.result == .ok) {
+                    if (t.timestamp == 0) {
+                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
+                            @divExact(request.items.len, @sizeOf(Transfer));
+                    }
+                    try update_transfers(&transfers, &t, &event);
+                }
+
+                var result = CreateAndReturnTransfersResult{
+                    .result = t.result,
+                    .flags = .{
+                        .transfer_set = false,
+                        .account_balances_set = false,
+                    },
+                    .timestamp = 0,
+                    .amount = 0,
+                    .debit_account_debits_pending = 0,
+                    .debit_account_debits_posted = 0,
+                    .debit_account_credits_pending = 0,
+                    .debit_account_credits_posted = 0,
+                    .credit_account_debits_pending = 0,
+                    .credit_account_debits_posted = 0,
+                    .credit_account_credits_pending = 0,
+                    .credit_account_credits_posted = 0,
+                };
+
+                if (t.transfer_set) |value| {
+                    result.flags.transfer_set = true;
+                    result.timestamp = transfers.get(value.transfer_timestamp).?.timestamp;
+                    result.amount = value.amount;
+                }
+
+                if (t.account_balances_set) |value| {
+                    result.flags.account_balances_set = true;
+                    result.debit_account_debits_pending = value.dr_account.debits_pending;
+                    result.debit_account_debits_posted = value.dr_account.debits_posted;
+                    result.debit_account_credits_pending = value.dr_account.credits_pending;
+                    result.debit_account_credits_posted = value.dr_account.credits_posted;
+                    result.credit_account_debits_pending = value.cr_account.debits_pending;
+                    result.credit_account_debits_posted = value.cr_account.debits_posted;
+                    result.credit_account_credits_pending = value.cr_account.credits_pending;
+                    result.credit_account_credits_posted = value.cr_account.credits_posted;
+                }
+
+                try reply.appendSlice(std.mem.asBytes(&result));
             },
             .lookup_account => |a| {
                 assert(operation == null or operation.? == .lookup_accounts);
@@ -6865,6 +7240,122 @@ test "create_transfers: per-transfer balance invariant" {
         \\ lookup_account A2 0  0 0 40 _
         \\ lookup_account A3 0  0 0  0 _
         \\ commit lookup_accounts
+    );
+}
+
+// The goal is to ensure that:
+// 1. all CreateTransferResult enums are covered, with the same order as `create_transfers`.
+// 2. results (transfer timestamp, amount, and balances) are returned as expected.
+test "create_and_return_transfers" {
+    try check(
+        \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A2  0  0  0  0  _  _  _ _ L2 C2   _   _   _ _ _ _ _ _ ok
+        \\ account A3  0  0  0  0  _  _  _ _ L1 C1   _   _   _ _ _ _ _ _ ok
+        \\ account A4  0  0  0  0  _  _  _ _ L1 C1   _ D<C   _ _ _ _ _ _ ok
+        \\ account A5  0  0  0  0  _  _  _ _ L1 C1   _   _ C<D _ _ _ _ _ ok
+        \\ commit create_accounts
+
+        // Set up initial balances.
+        \\ setup A1  100   200    0     0
+        \\ setup A2    0     0    0     0
+        \\ setup A3    0     0  110   210
+        \\ setup A4   20   500    0   700
+        \\ setup A5    0  1100   10  1000
+
+        // Bump the state machine time to `maxInt - 3s` for testing timeout overflow.
+        \\ tick -3 seconds
+
+        // Test errors by descending precedence.
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _  P1 1 timestamp_must_be_zero _ _
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _ _    _  P1 _ reserved_flag _ _
+        \\ transfer_and_return  T0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_zero _ _
+        \\ transfer_and_return  -0 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_zero _ _
+        \\ transfer_and_return  T1 -0 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A8 A0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_zero _ _
+        \\ transfer_and_return  T1 A8 -0    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_id_must_not_be_int_max _ _
+        \\ transfer_and_return  T1 A8 A8    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_be_different _ _
+        \\ transfer_and_return  T1 A8 A9    9  T1  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ pending_id_must_be_zero _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    1 L0 C0   _   _   _   _   _   _ _  _   _   _ _ timeout_reserved_for_pending_transfer _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  CDR _   _ _ closing_transfer_must_be_pending _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _   _   _   _   _   _ _  _   CCR _ _ closing_transfer_must_be_pending _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L0 C0   _ PEN   _   _   _   _ _  _   _   _ _ ledger_must_not_be_zero _ _
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L9 C0   _ PEN   _   _   _   _ _  _   _   _ _ code_must_not_be_zero _ _
+        // `debit_account_not_found` is a transient error, T1 cannot be reused:
+        \\ transfer_and_return  T1 A8 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ debit_account_not_found _ _
+        \\ transfer_and_return  T1 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        // `credit_account_not_found` is a transient error, T2 cannot be reused:
+        \\ transfer_and_return  T2 A1 A9    9   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ credit_account_not_found _ _
+        \\ transfer_and_return  T2 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T3 A1 A2    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ accounts_must_have_the_same_ledger _ _
+        \\ transfer_and_return  T3 A1 A3    1   _  _  _  _    _ L9 C1   _ PEN   _   _   _   _ _  _   _   _ _ transfer_must_have_the_same_ledger_as_accounts _ _
+        \\ transfer_and_return  T3 A1 A3  -99   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_pending _ _  // amount = max - A1.debits_pending + 1
+        \\ transfer_and_return  T3 A1 A3 -109   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_pending _ _ // amount = max - A3.credits_pending + 1
+        \\ transfer_and_return  T3 A1 A3 -199   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits_posted _ _   // amount = max - A1.debits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -209   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits_posted _ _  // amount = max - A3.credits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -299   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_debits _ _          // amount = max - A1.debits_pending - A1.debits_posted + 1
+        \\ transfer_and_return  T3 A1 A3 -319   _  _  _  _    _ L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_credits _ _         // amount = max - A3.credits_pending - A3.credits_posted + 1
+        \\ transfer_and_return  T3 A4 A5  199   _  _  _  _  999 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ overflows_timeout _ _
+        \\ transfer_and_return  T3 A4 A5  199   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_credits
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      _                  20  500    0  700        0 1100   10 1000
+        \\
+        // `exceeds_credits` is a transient error, T3 cannot be reused:
+        \\ transfer_and_return  T3 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T4 A4 A5   91   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _   _   _ _ exceeds_debits
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      _                  20  500   0   700        0 1100   10 1000
+        \\
+        // `exceeds_debits` is a transient error, T4 cannot be reused:
+        \\ transfer_and_return  T4 A1 A3  123   _  _  _  _    _ L1 C1   _ _     _   _   _   _ _  _   _   _ _ id_already_failed _ _
+        \\
+        \\ transfer_and_return  T5 A1 A3  123   _  _  _  _    1 L1 C1   _ PEN   _   _   _   _ _  _   _   _ _ ok
+    ++ //                       transfer_set    dr_account_balance      cr_account_balance
+        \\                      T5 123            223  200    0    0        0    0  233  210
+        \\
+        // Ensure that idempotence is checked first:
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L2 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_ledger _ _
+        \\ transfer_and_return   T5 A1 A3   -0   _ U1 U1 U1   _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ exists_with_different_flags _ _
+        \\ transfer_and_return   T5 A3 A1   -0   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_debit_account_id _ _
+        \\ transfer_and_return   T5 A1 A4   -0   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_credit_account_id _ _
+        \\ transfer_and_return   T5 A1 A3   -0   _ U1 U1 U1   1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_amount _ _
+        \\ transfer_and_return   T5 A1 A3  123   _ U1 U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_128 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _ U1 U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_64 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _ U1   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_user_data_32 _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   2 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_timeout _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L1 C2   _ PEN   _   _   _   _ _  _ _ _ _ exists_with_different_code _ _
+        \\ transfer_and_return   T5 A1 A3  123   _  _  _  _   1 L1 C1   _ PEN   _   _   _   _ _  _ _ _ _ exists
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T5 123           223  200    0    0        0   0  233  210
+        \\
+        \\ transfer_and_return   T6 A3 A1    7   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T6  7              0    7  233  210      223 200    0    7
+        \\
+        \\ transfer_and_return   T7 A1 A3    3   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T7  3            223  203    0    7        0   7  233  213
+        \\
+        \\ transfer_and_return   T8 A1 A3    0   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T8  0            223  203    0    7        0   7  233  213
+        \\
+        \\ transfer_and_return  T10 A1 A3   10   _  _  _  _ _ L1 C1   _ PEN   _   _   _   _  _ _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T10 10            233  203    0    7        0   7  243  213
+        \\
+        // Transfer with AMOUNT_MAX returns the actual amount.
+        \\ transfer_and_return  T11 A1 A3   -0 T10  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ ok
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T11 10            223  213    0    7        0   7  233  223
+        \\
+        \\ transfer_and_return  T11 A1 A3   -0 T10  _  _  _ _ L1 C1   _   _ POS   _   _   _  _ _ _ _ _ exists
+    ++ //                        transfer_set   dr_account_balance      cr_account_balance
+        \\                       T11 10            223  213    0    7        0   7  233  223
+        \\
+        \\ commit create_and_return_transfers
     );
 }
 

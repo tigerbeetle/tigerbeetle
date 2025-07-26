@@ -180,6 +180,26 @@ typedef struct tb_create_transfers_result_t {
     uint32_t result;
 } tb_create_transfers_result_t;
 
+typedef struct tb_create_and_return_transfers_result_t {
+    uint32_t result;
+    uint32_t flags;
+    uint64_t timestamp;
+    tb_uint128_t amount;
+    tb_uint128_t debit_account_debits_pending;
+    tb_uint128_t debit_account_debits_posted;
+    tb_uint128_t debit_account_credits_pending;
+    tb_uint128_t debit_account_credits_posted;
+    tb_uint128_t credit_account_debits_pending;
+    tb_uint128_t credit_account_debits_posted;
+    tb_uint128_t credit_account_credits_pending;
+    tb_uint128_t credit_account_credits_posted;
+} tb_create_and_return_transfers_result_t;
+
+typedef enum TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS {
+    TB_CREATE_AND_RETURN_TRANSFERS_RESULT_TRANSFER_SET = 1 << 0,
+    TB_CREATE_AND_RETURN_TRANSFERS_RESULT_ACCOUNT_BALANCES_SET = 1 << 1,
+} TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS;
+
 typedef struct tb_account_filter_t {
     tb_uint128_t account_id;
     tb_uint128_t user_data_128;
@@ -256,6 +276,7 @@ typedef enum TB_OPERATION {
     TB_OPERATION_GET_ACCOUNT_BALANCES = 143,
     TB_OPERATION_QUERY_ACCOUNTS = 144,
     TB_OPERATION_QUERY_TRANSFERS = 145,
+    TB_OPERATION_CREATE_AND_RETURN_TRANSFERS = 146,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {

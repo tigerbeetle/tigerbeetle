@@ -47,6 +47,7 @@ var AmountMax = types.BytesToUint128([16]byte{
 type Client interface {
 	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
 	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
+	CreateAndReturnTransfers(transfers []types.Transfer) ([]types.TransferWithOutcomeEventResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
 	GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)
@@ -124,6 +125,8 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
+	case C.TB_OPERATION_CREATE_AND_RETURN_TRANSFERS:
+		return unsafe.Sizeof(types.Transfer{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
@@ -147,6 +150,8 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.AccountEventResult{})
 	case C.TB_OPERATION_CREATE_TRANSFERS:
 		return unsafe.Sizeof(types.TransferEventResult{})
+	case C.TB_OPERATION_CREATE_AND_RETURN_TRANSFERS:
+		return unsafe.Sizeof(types.TransferWithOutcomeEventResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
@@ -323,6 +328,34 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 
 	resultsCount := len(reply) / int(unsafe.Sizeof(types.TransferEventResult{}))
 	results := unsafe.Slice((*types.TransferEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
+}
+
+func (c *c_client) CreateAndReturnTransfers(transfers []types.Transfer) ([]types.TransferWithOutcomeEventResult, error) {
+	count := len(transfers)
+	var dataPtr unsafe.Pointer
+	if count > 0 {
+		dataPtr = unsafe.Pointer(&transfers[0])
+	} else {
+		dataPtr = nil
+	}
+
+	reply, err := c.doRequest(
+		C.TB_OPERATION_CREATE_AND_RETURN_TRANSFERS,
+		count,
+		dataPtr,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if reply == nil {
+		return make([]types.TransferWithOutcomeEventResult, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.TransferWithOutcomeEventResult{}))
+	results := unsafe.Slice((*types.TransferWithOutcomeEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 

@@ -13,6 +13,14 @@ const type_mappings = .{
     .{ exports.tb_create_transfer_result, "TB_CREATE_TRANSFER_RESULT" },
     .{ exports.tb_create_accounts_result_t, "tb_create_accounts_result_t" },
     .{ exports.tb_create_transfers_result_t, "tb_create_transfers_result_t" },
+    .{
+        exports.tb_create_and_return_transfers_result_t,
+        "tb_create_and_return_transfers_result_t",
+    },
+    .{
+        exports.tb_create_and_return_transfers_result_flags,
+        "TB_CREATE_AND_RETURN_TRANSFERS_RESULT_FLAGS",
+    },
     .{ exports.tb_account_filter_t, "tb_account_filter_t" },
     .{ exports.tb_account_filter_flags, "TB_ACCOUNT_FILTER_FLAGS" },
     .{ exports.tb_account_balance_t, "tb_account_balance_t" },

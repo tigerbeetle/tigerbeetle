@@ -179,6 +179,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
     const Action = enum(u8) {
         create_accounts = @intFromEnum(Operation.create_accounts),
         create_transfers = @intFromEnum(Operation.create_transfers),
+        create_and_return_transfers = @intFromEnum(Operation.create_and_return_transfers),
         lookup_accounts = @intFromEnum(Operation.lookup_accounts),
         lookup_transfers = @intFromEnum(Operation.lookup_transfers),
         get_account_transfers = @intFromEnum(Operation.get_account_transfers),
@@ -467,6 +468,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                         ),
                         .create_transfers,
                         .deprecated_create_transfers,
+                        .create_and_return_transfers,
                         => self.build_create_transfers(
                             client_index,
                             batchable,
@@ -559,7 +561,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                             batch_size_limit,
                         ),
                         .create_accounts => @divExact(input_len, @sizeOf(tb.Account)),
-                        .create_transfers => @divExact(input_len, @sizeOf(tb.Transfer)),
+                        .create_transfers,
+                        .create_and_return_transfers,
+                        => @divExact(input_len, @sizeOf(tb.Transfer)),
                         .lookup_accounts => 0,
                         .lookup_transfers => 0,
                         .get_account_transfers => 0,
@@ -618,6 +622,13 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                     timestamp,
                     stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
                     stdx.bytes_as_slice(.exact, tb.CreateTransfersResult, reply_body),
+                ),
+                .create_and_return_transfers,
+                => self.on_create_and_return_transfers(
+                    client_index,
+                    timestamp,
+                    stdx.bytes_as_slice(.exact, tb.Transfer, request_body),
+                    stdx.bytes_as_slice(.exact, tb.CreateAndReturnTransfersResult, reply_body),
                 ),
                 .lookup_accounts,
                 .deprecated_lookup_accounts,
@@ -1283,6 +1294,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_lookup_accounts,
                 => self.options.accounts_batch_size_min,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_transfers,
                 .deprecated_create_transfers,
                 .deprecated_lookup_transfers,
@@ -1305,6 +1317,7 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 .deprecated_lookup_accounts,
                 => self.options.accounts_batch_size_span,
                 .create_transfers,
+                .create_and_return_transfers,
                 .lookup_transfers,
                 .deprecated_create_transfers,
                 .deprecated_lookup_transfers,
@@ -1390,6 +1403,49 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
                 }
             }
 
+            self.on_transfer_delivered(transfers);
+        }
+
+        fn on_create_and_return_transfers(
+            self: *Workload,
+            client_index: usize,
+            timestamp: u64,
+            transfers: []const tb.Transfer,
+            results: []const tb.CreateAndReturnTransfersResult,
+        ) void {
+            self.auditor.on_create_and_return_transfers(
+                client_index,
+                timestamp,
+                transfers,
+                results,
+            );
+
+            // Enqueue the `id`s of transient errors to be retried in the next request.
+            for (results, 0..) |*outcome, index| {
+                if (outcome.result == .ok) continue;
+
+                if (self.transient_errors.count() <
+                    self.options.transfer_transient_errors_max)
+                {
+                    if (outcome.result.transient()) {
+                        self.transient_errors.putAssumeCapacityNoClobber(
+                            transfers[index].id,
+                            {},
+                        );
+                    }
+                }
+            }
+
+            if (transfers.len > 0) {
+                self.on_transfer_delivered(transfers);
+            }
+        }
+
+        fn on_transfer_delivered(
+            self: *Workload,
+            transfers: []const tb.Transfer,
+        ) void {
+            assert(transfers.len > 0);
             const transfer_index_min = self.transfer_id_to_index(transfers[0].id);
             const transfer_index_max = self.transfer_id_to_index(transfers[transfers.len - 1].id);
             assert(transfer_index_min <= transfer_index_max);
@@ -1995,6 +2051,7 @@ fn OptionsType(comptime StateMachine: type, comptime Action: type, comptime Look
                 .operations = .{
                     .create_accounts = prng.range_inclusive(u64, 1, 10),
                     .create_transfers = prng.range_inclusive(u64, 1, 100),
+                    .create_and_return_transfers = prng.range_inclusive(u64, 1, 100),
                     .lookup_accounts = prng.range_inclusive(u64, 1, 20),
                     .lookup_transfers = prng.range_inclusive(u64, 1, 20),
                     .get_account_transfers = prng.range_inclusive(u64, 1, 20),

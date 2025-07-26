@@ -542,6 +542,64 @@ transfer_errors = client.create_transfers([transfer1])
 # Error handling omitted.
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```python
+batch = [tb.Transfer(
+    id=10,
+    debit_account_id=102,
+    credit_account_id=103,
+    amount=99,
+    pending_id=0,
+    user_data_128=0,
+    user_data_64=0,
+    user_data_32=0,
+    timeout=0,
+    ledger=1,
+    code=720,
+    flags=tb.TransferFlags.PENDING,
+    timestamp=0,
+),
+    tb.Transfer(
+    id=11,
+    debit_account_id=102,
+    credit_account_id=103,
+    amount=tb.amount_max, # The actual amount depends on the pending transfer.
+    pending_id=10,
+    user_data_128=0,
+    user_data_64=0,
+    user_data_32=0,
+    timeout=0,
+    ledger=1,
+    code=720,
+    flags=tb.TransferFlags.POST_PENDING_TRANSFER,
+    timestamp=0,
+)]
+
+transfers_outcome = client.create_and_return_transfers(transfers)
+for outcome in transfers_outcome:
+    print(f"Transfer result: {outcome.result}")
+
+    if outcome.flags & tb.CreateAndReturnTransfersResultFlags.TRANSFER_SET != 0:
+        print(f"Transfer timestamp: {outcome.timestamp} amount: {outcome.amount}.")
+
+    if outcome.flags & tb.CreateAndReturnTransfersResultFlags.ACCOUNT_BALANCES_SET != 0:
+        print(f"Debit account debits pending: {outcome.debit_account_debits_pending}.")
+        print(f"Debit account debits posted: {outcome.debit_account_debits_posted}.")
+        print(f"Debit account credits pending: {outcome.debit_account_credits_pending}.")
+        print(f"Debit account credits posted: {outcome.debit_account_credits_posted}.")
+
+        print(f"Credit account debits pending: {outcome.credit_account_debits_pending}.")
+        print(f"Credit account debits posted: {outcome.credit_account_debits_posted}.")
+        print(f"Credit account credits pending: {outcome.credit_account_credits_pending}.")
+        print(f"Credit account credits posted: {outcome.credit_account_credits_posted}.")
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We

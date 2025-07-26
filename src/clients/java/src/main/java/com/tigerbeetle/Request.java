@@ -31,6 +31,7 @@ abstract class Request<TResponse extends Batch> {
         PULSE(128),
         CREATE_ACCOUNTS(138),
         CREATE_TRANSFERS(139),
+        CREATE_AND_RETURN_TRANSFERS(146),
         LOOKUP_ACCOUNTS(140),
         LOOKUP_TRANSFERS(141),
         GET_ACCOUNT_TRANSFERS(142),
@@ -121,6 +122,13 @@ abstract class Request<TResponse extends Batch> {
 
                     case CREATE_TRANSFERS: {
                         result = new CreateTransferResultBatch(
+                                replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
+                        exception = checkResultLength(result);
+                        break;
+                    }
+
+                    case CREATE_AND_RETURN_TRANSFERS: {
+                        result = new CreateAndReturnTransferResultBatch(
                                 replyBuffer == null ? REPLY_EMPTY : ByteBuffer.wrap(replyBuffer));
                         exception = checkResultLength(result);
                         break;

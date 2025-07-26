@@ -299,6 +299,84 @@ fn smoke() -> anyhow::Result<()> {
             assert_eq!(res_transfer.id, transfer_id1);
         }
 
+        {
+            let transfer_id = 100;
+            let outcome = client
+                .create_and_return_transfers(&[tb::Transfer {
+                    id: transfer_id,
+                    debit_account_id: account_id1,
+                    credit_account_id: account_id2,
+                    amount: 10,
+                    pending_id: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: transfer_id1_user_data_32,
+                    timeout: 0,
+                    ledger,
+                    code,
+                    flags: tb::TransferFlags::default(),
+                    timestamp: 0,
+                }])
+                .await?;
+
+            assert_eq!(outcome.len(), 1);
+            assert_eq!(outcome[0].result, tb::CreateTransferResult::Ok);
+            assert_eq!(
+                outcome[0].flags,
+                tb::CreateAndReturnTransferResultFlags::TransferSet
+                    | tb::CreateAndReturnTransferResultFlags::AccountBalanceSet
+            );
+
+            let result = client.lookup_transfers(&[transfer_id]).await?;
+            assert_eq!(result.len(), 1);
+            let transfer = result[0].unwrap();
+
+            assert_eq!(transfer.timestamp, outcome[0].timestamp);
+            assert_eq!(transfer.amount, outcome[0].amount);
+
+            let result = client.lookup_accounts(&[account_id1, account_id2]).await?;
+
+            assert_eq!(result.len(), 2);
+            let res_account1 = result[0].unwrap();
+            assert_eq!(account_id1, res_account1.id);
+            let res_account2 = result[1].unwrap();
+            assert_eq!(account_id2, res_account2.id);
+
+            assert_eq!(
+                res_account1.debits_pending,
+                outcome[0].debit_account_debits_pending
+            );
+            assert_eq!(
+                res_account1.debits_posted,
+                outcome[0].debit_account_debits_posted
+            );
+            assert_eq!(
+                res_account1.credits_pending,
+                outcome[0].debit_account_credits_pending
+            );
+            assert_eq!(
+                res_account1.credits_posted,
+                outcome[0].debit_account_credits_posted
+            );
+
+            assert_eq!(
+                res_account2.debits_pending,
+                outcome[0].credit_account_debits_pending
+            );
+            assert_eq!(
+                res_account2.debits_posted,
+                outcome[0].credit_account_debits_posted
+            );
+            assert_eq!(
+                res_account2.credits_pending,
+                outcome[0].credit_account_credits_pending
+            );
+            assert_eq!(
+                res_account2.credits_posted,
+                outcome[0].credit_account_credits_posted
+            );
+        }
+
         Ok(())
     })
 }

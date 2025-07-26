@@ -103,8 +103,11 @@ pub fn trailer_total_size(options: struct {
 }) u32 {
     assert(options.batch_count > 0);
     assert(options.batch_count <= Postamble.batch_count_max);
-    // Supports zero-sized elements, or any power of two, including 2^0.
-    assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
+    // Supports zero-sized elements, single byte,
+    // or any size multiple of two.
+    assert(options.element_size == 0 or
+        options.element_size == 1 or
+        options.element_size % 2 == 0);
 
     const trailer_unpadded_size: u32 =
         (@as(u32, options.batch_count) * @sizeOf(TrailerItem)) + @sizeOf(Postamble);
@@ -138,8 +141,11 @@ pub const MultiBatchDecoder = struct {
         body: []const u8,
         options: Options,
     ) Error!MultiBatchDecoder {
-        // Supports zero-sized elements, or any power of two, including 2^0.
-        assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
+        // Supports zero-sized elements, single byte,
+        // or any size multiple of two.
+        assert(options.element_size == 0 or
+            options.element_size == 1 or
+            options.element_size % 2 == 0);
 
         const Parser = struct {
             buffer: []const u8,
@@ -291,8 +297,11 @@ pub const MultiBatchEncoder = struct {
     options: Options,
 
     pub fn init(buffer: []u8, options: Options) MultiBatchEncoder {
-        // Supports zero-sized elements, or any power of two, including 2^0.
-        assert(options.element_size == 0 or std.math.isPowerOfTwo(options.element_size));
+        // Supports zero-sized elements, single byte,
+        // or any size multiple of two.
+        assert(options.element_size == 0 or
+            options.element_size == 1 or
+            options.element_size % 2 == 0);
 
         // The buffer must be large enough for at least one batch.
         const trailer_size_min = trailer_total_size(.{

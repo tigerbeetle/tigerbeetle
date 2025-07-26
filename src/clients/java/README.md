@@ -556,6 +556,58 @@ transferErrors = client.createTransfers(transfers);
 // Error handling omitted.
 ```
 
+## Create And Return Transfers
+
+Additionally, you can create transfers and retrieve information
+about the outcome, such as the transfer timestamp and the accounts' balances.
+
+See details in [create_and_return_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_and_return_transfers).
+
+```java
+TransferBatch transfers = new TransferBatch(2);
+
+transfers.add();
+transfers.setId(10);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setAmount(99);
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.PENDING);
+
+transfers.add();
+transfers.setId(11);
+transfers.setDebitAccountId(102);
+transfers.setCreditAccountId(103);
+transfers.setPendingId(10);
+transfers.setAmount(TransferBatch.AMOUNT_MAX); // The actual amount depends on the pending transfer.
+transfers.setLedger(1);
+transfers.setCode(1);
+transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
+
+CreateAndReturnTransferResultBatch transfersOutcome = client.createAndReturnTransfers(transfers);
+while (transfersOutcome.next()) {
+    System.out.printf("Transfer result: %s\n", transfersOutcome.getResult());
+
+    if (CreateAndReturnTransferResultFlags.hasTransferSet(transfersOutcome.getFlags())) {
+        System.out.printf("Transfer timestamp: %d amount: %s\n",
+            transfersOutcome.getTimestamp(), transfersOutcome.getAmount());
+    }
+
+    if (CreateAndReturnTransferResultFlags.hasAccountBalancesSet(transfersOutcome.getFlags())) {
+        System.out.printf("Debit account debits pending: %s\n", transfersOutcome.getDebitAccountDebitsPending());
+        System.out.printf("Debit account debits posted: %s\n", transfersOutcome.getDebitAccountDebitsPosted());
+        System.out.printf("Debit account credits pending: %s\n", transfersOutcome.getDebitAccountCreditsPending());
+        System.out.printf("Debit account credits posted: %s\n", transfersOutcome.getDebitAccountCreditsPosted());
+
+        System.out.printf("Credit account debits pending: %s\n", transfersOutcome.getCreditAccountDebitsPending());
+        System.out.printf("Credit account debits posted: %s\n", transfersOutcome.getCreditAccountDebitsPosted());
+        System.out.printf("Credit account credits pending: %s\n", transfersOutcome.getCreditAccountCreditsPending());
+        System.out.printf("Credit account credits posted: %s\n", transfersOutcome.getCreditAccountCreditsPosted());
+    }
+}
+```
+
 ## Transfer Lookup
 
 NOTE: While transfer lookup exists, it is not a flexible query API. We
