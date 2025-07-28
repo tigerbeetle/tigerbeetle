@@ -48,8 +48,10 @@
 //! ];
 //!
 //! let account_results = client.create_accounts(&accounts).await?;
-//! assert_eq!(account_results[0], tb::CreateAccountResult::Ok);
-//! assert_eq!(account_results[1], tb::CreateAccountResult::Ok);
+//!
+//! // If no results are returned, then all input events were successful -
+//! // to save resources only unsuccessful inputs return results.
+//! assert_eq!(account_results.len(), 0);
 //!
 //! // Create a transfer between accounts
 //! let transfer_id = tb::id();
@@ -64,13 +66,15 @@
 //! }];
 //!
 //! let transfer_results = client.create_transfers(&transfers).await?;
-//! assert_eq!(transfer_results[0], tb::CreateTransferResult::Ok);
+//! assert_eq!(transfer_results.len(), 0);
 //!
 //! // Look up the accounts to see the transfer result
 //! let accounts = client.lookup_accounts(&[account_id1, account_id2]).await?;
-//! let account1 = accounts[0].unwrap();
-//! let account2 = accounts[1].unwrap();
+//! let account1 = accounts[0];
+//! let account2 = accounts[1];
 //!
+//! assert_eq!(account1.id, account_id1);
+//! assert_eq!(account2.id, account_id2);
 //! assert_eq!(account1.debits_posted, 100);
 //! assert_eq!(account2.credits_posted, 100);
 //! # Ok(())
@@ -387,13 +391,95 @@ impl Client {
 
     /// Create one or more accounts.
     ///
-    /// The request is queued for submission prior to return of this function;
-    /// dropping the returned future will not cancel the request.
+    /// Accounts to create are provided as a slice of input [`Account`] events.
+    /// Their fields must be initialized as described in the corresponding
+    /// [protocol reference](#protocol-reference).
     ///
-    /// Successful account creation will result in either [`CreateAccountResult::Ok`] or,
-    /// in cases of application crashes or other scenarios where requests have
-    /// been replayed, [`CreateAccountResult::Exists`]. It is often appropriate to
-    /// treat these two cases identically.
+    /// The request is queued for submission prior to return of this function;
+    /// dropping the returned [`Future`] will not cancel the request.
+    ///
+    /// # Interpreting the return value
+    ///
+    /// This function has two levels of errors: if the entire request fails then
+    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// that none of the submitted events were processed.
+    ///
+    /// The results of events are represented individually. There are two
+    /// related event result types: `CreateAccountResult` is the enum of
+    /// possible outcomes, while `CreateAccountsResult` includes the index to
+    /// map back to input events.
+    ///
+    /// _This function does not return a result for all input events_. Instead
+    /// it only returns results that would not be [`CreateAccountResult::Ok`].
+    /// In other words, this function does not return results for successful
+    /// events, only unsuccessful events (though note the case of
+    /// [`CreateAccountResult::Exists`], described below). This behavior
+    /// reflects optimizations in the underlying protocol. This client will
+    /// never return a `CreateAccountResult::Ok`; that variant is defined in
+    /// case it is useful for clients to materialize omitted request results. To
+    /// relate a `CreateAccountsResult` to its input event, the
+    /// [`CreateAccountsResult::index`] field is an index into the input event
+    /// slice. An example of efficiently materializing all results is included
+    /// below.
+    ///
+    /// Note that a result of `CreateAccountResult::Exists` should often be treated
+    /// the same as `CreateAccountResult::Ok`. This result can happen in cases of
+    /// application crashes or other scenarios where requests have been replayed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use tigerbeetle as tb;
+    ///
+    /// async fn make_create_accounts_request(
+    ///     client: &tb::Client,
+    ///     accounts: &[tb::Account],
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let create_accounts_results = client.create_accounts(accounts).await?;
+    ///     let create_accounts_results_merged = merge_create_accounts_results(accounts, create_accounts_results);
+    ///     for (account, create_account_result) in create_accounts_results_merged {
+    ///         match create_account_result {
+    ///             tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
+    ///                 handle_create_account_success(account, create_account_result).await?;
+    ///             }
+    ///             _ => {
+    ///                 handle_create_account_failure(account, create_account_result).await?;
+    ///             }
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    ///
+    /// fn merge_create_accounts_results(
+    ///     accounts: &[tb::Account],
+    ///     results: Vec<tb::CreateAccountsResult>,
+    /// ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + use<'_> {
+    ///     let mut results = results.into_iter().peekable();
+    ///     accounts.iter().enumerate().map(move |(i, account)| {
+    ///         match results.peek().copied() {
+    ///             Some(result) if result.index == i => {
+    ///                 let _ = results.next();
+    ///                 (account, result.result)
+    ///             }
+    ///             _ => (account, tb::CreateAccountResult::Ok),
+    ///         }
+    ///     })
+    /// }
+    ///
+    /// # async fn handle_create_account_success(
+    /// #     _account: &tb::Account,
+    /// #     _result: tb::CreateAccountResult,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// #
+    /// # async fn handle_create_account_failure(
+    /// #     _account: &tb::Account,
+    /// #     _result: tb::CreateAccountResult,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// ```
     ///
     /// # Maximum batch size
     ///
@@ -402,21 +488,13 @@ impl Client {
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
-    /// # Errors
-    ///
-    /// This request has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller can assume
-    /// that none of the submitted events were processed; if the request was
-    /// processed, then each event has its own [`CreateAccountResult`], which
-    /// may be an error status.
-    ///
     /// # Protocol reference
     ///
     /// [`create_accounts`](https://docs.tigerbeetle.com/reference/requests/create_accounts).
     pub fn create_accounts<'s>(
         &'s self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountResult>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> + use<'s> {
         let (packet, rx) =
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
@@ -428,31 +506,112 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results::<Account, tbc::tb_create_accounts_result_t, CreateAccountResult>(
-                msg,
-                |next_result: &tbc::tb_create_accounts_result_t,
-                 _next_event: &Account,
-                 event_index: usize|
-                 -> bool { next_result.index as usize == event_index },
-                CreateAccountResult::Ok,
-                |r: tbc::tb_create_accounts_result_t| {
-                    // The server will never actually send this as it is the "hole" value.
-                    assert!(r.result != tbc::TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK);
-                    r.result.into()
-                },
-            )
+            let responses: &[tbc::tb_create_accounts_result_t] = handle_message(&msg)?;
+
+            Ok(responses
+                .iter()
+                .map(|result| CreateAccountsResult {
+                    index: usize::try_from(result.index).expect("usize"),
+                    result: CreateAccountResult::from(result.result),
+                })
+                .collect())
         }
     }
 
     /// Create one or more transfers.
     ///
-    /// The request is queued for submission prior to return of this function;
-    /// dropping the returned future will not cancel the request.
+    /// Transfers to create are provided as a slice of input [`Transfer`] events.
+    /// Their fields must be initialized as described in the corresponding
+    /// [protocol reference](#protocol-reference).
     ///
-    /// Successful transfer creation will result in either [`CreateTransferResult::Ok`] or,
-    /// in cases of application crashes or other scenarios where requests have
-    /// been replayed, [`CreateTransferResult::Exists`]. It is often appropriate to
-    /// treat these two cases identically.
+    /// The request is queued for submission prior to return of this function;
+    /// dropping the returned [`Future`] will not cancel the request.
+    ///
+    /// # Interpreting the return value
+    ///
+    /// This function has two levels of errors: if the entire request fails then
+    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// that none of the submitted events were processed.
+    ///
+    /// The results of events are represented individually. There are two
+    /// related event result types: `CreateTransferResult` is the enum of
+    /// possible outcomes, while `CreateTransfersResult` includes the index to
+    /// map back to input events.
+    ///
+    /// _This function does not return a result for all input events_. Instead
+    /// it only returns results that would not be [`CreateTransferResult::Ok`].
+    /// In other words, this function does not return results for successful
+    /// events, only unsuccessful events (though note the case of
+    /// [`CreateTransferResult::Exists`], described below). This behavior
+    /// reflects optimizations in the underlying protocol. This client will
+    /// never return a `CreateTransferResult::Ok`; that variant is defined in
+    /// case it is useful for clients to materialize omitted request results. To
+    /// relate a `CreateTransfersResult` to its input event, the
+    /// [`CreateTransfersResult::index`] field is an index into the input event
+    /// slice. An example of efficiently materializing all results is included
+    /// below.
+    ///
+    /// To relate a `CreateTransfersResult` to its input event, the [`CreateTransfersResult::index`] field
+    /// is an index into the input event slice.
+    ///
+    /// Note that a result of `CreateTransferResult::Exists` should often be treated
+    /// the same as `CreateTransferResult::Ok`. This result can happen in cases of
+    /// application crashes or other scenarios where requests have been replayed.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use tigerbeetle as tb;
+    ///
+    /// async fn make_create_transfers_request(
+    ///     client: &tb::Client,
+    ///     transfers: &[tb::Transfer],
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let create_transfers_results = client.create_transfers(transfers).await?;
+    ///     let create_transfers_results_merged = merge_create_transfers_results(transfers, create_transfers_results);
+    ///     for (transfer, create_transfer_result) in create_transfers_results_merged {
+    ///         match create_transfer_result {
+    ///             tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
+    ///                 handle_create_transfer_success(transfer, create_transfer_result).await?;
+    ///             }
+    ///             _ => {
+    ///                 handle_create_transfer_failure(transfer, create_transfer_result).await?;
+    ///             }
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    ///
+    /// fn merge_create_transfers_results(
+    ///     transfers: &[tb::Transfer],
+    ///     results: Vec<tb::CreateTransfersResult>,
+    /// ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + use<'_> {
+    ///     let mut results = results.into_iter().peekable();
+    ///     transfers.iter().enumerate().map(move |(i, transfer)| {
+    ///         match results.peek().copied() {
+    ///             Some(result) if result.index == i => {
+    ///                 let _ = results.next();
+    ///                 (transfer, result.result)
+    ///             }
+    ///             _ => (transfer, tb::CreateTransferResult::Ok),
+    ///         }
+    ///     })
+    /// }
+    ///
+    /// # async fn handle_create_transfer_success(
+    /// #     _transfer: &tb::Transfer,
+    /// #     _result: tb::CreateTransferResult,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// #
+    /// # async fn handle_create_transfer_failure(
+    /// #     _transfer: &tb::Transfer,
+    /// #     _result: tb::CreateTransferResult,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// ```
     ///
     /// # Maximum batch size
     ///
@@ -461,20 +620,13 @@ impl Client {
     /// TigerBeetle's standard build-time configuration the maximum batch size
     /// is 8189.
     ///
-    /// # Errors
-    ///
-    /// This request has two levels of errors: if the entire request fails then
-    /// the future returns [`Err`] of [`PacketStatus`] and the caller can assume
-    /// that none of the submitted events were processed; if the request was
-    /// processed, then each event has its own [`CreateTransferResult`], which
-    /// may be an error status.
     /// # Protocol reference
     ///
     /// [`create_transfers`](https://docs.tigerbeetle.com/reference/requests/create_transfers).
     pub fn create_transfers<'s>(
         &'s self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransferResult>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> + use<'s> {
         let (packet, rx) =
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
@@ -486,19 +638,15 @@ impl Client {
         async {
             let msg = rx.await.expect("channel");
 
-            collect_results::<Transfer, tbc::tb_create_transfers_result_t, CreateTransferResult>(
-                msg,
-                |next_result: &tbc::tb_create_transfers_result_t,
-                 _next_event: &Transfer,
-                 event_index: usize|
-                 -> bool { next_result.index as usize == event_index },
-                CreateTransferResult::Ok,
-                |r: tbc::tb_create_transfers_result_t| {
-                    // The server will never actually send this as it is the "hole" value.
-                    assert!(r.result != tbc::TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK);
-                    r.result.into()
-                },
-            )
+            let responses: &[tbc::tb_create_transfers_result_t] = handle_message(&msg)?;
+
+            Ok(responses
+                .iter()
+                .map(|result| CreateTransfersResult {
+                    index: usize::try_from(result.index).expect("usize"),
+                    result: CreateTransferResult::from(result.result),
+                })
+                .collect())
         }
     }
 
@@ -506,6 +654,65 @@ impl Client {
     ///
     /// The request is queued for submission prior to return of this function;
     /// dropping the returned future will not cancel the request.
+    ///
+    /// # Interpreting the return value
+    ///
+    /// This function has two levels of errors: if the entire request fails then
+    /// the future returns [`Err`] of [`PacketStatus`] and the caller should assume
+    /// that none of the submitted events were processed.
+    ///
+    /// This request returns the found accounts, in the order requested. The
+    /// return value does not indicate which accounts were not found. Those can
+    /// be determined by comparing the output results to the input events,
+    /// example provided below.
+    ///
+    /// # Example
+    ///
+    /// ```no_run
+    /// use tigerbeetle as tb;
+    ///
+    /// async fn make_lookup_accounts_request(
+    ///     client: &tb::Client,
+    ///     accounts: &[u128],
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let lookup_accounts_results = client.lookup_accounts(accounts).await?;
+    ///     let lookup_accounts_results_merged = merge_lookup_accounts_results(accounts, lookup_accounts_results);
+    ///     for (account_id, maybe_account) in lookup_accounts_results_merged {
+    ///         match maybe_account {
+    ///             Some(account) => {
+    ///                 handle_lookup_accounts_success(account).await?;
+    ///             }
+    ///             None => {
+    ///                 handle_lookup_accounts_failure(account_id).await?;
+    ///             }
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    ///
+    /// fn merge_lookup_accounts_results(
+    ///     accounts: &[u128],
+    ///     results: Vec<tb::Account>,
+    /// ) -> impl Iterator<Item = (u128, Option<tb::Account>)> + use<'_> {
+    ///     let mut results = results.into_iter().peekable();
+    ///     accounts.iter().map(move |&id| match results.peek() {
+    ///         Some(acc) if acc.id == id => (id, results.next()),
+    ///         _ => (id, None),
+    ///     })
+    /// }
+    ///
+    /// # async fn handle_lookup_accounts_success(
+    /// #     _account: tb::Account,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// #
+    /// # async fn handle_lookup_accounts_failure(
+    /// #     _account_id: u128,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// ```
     ///
     /// # Maximum batch size
     ///
@@ -527,7 +734,7 @@ impl Client {
     pub fn lookup_accounts<'s>(
         &'s self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Result<Account, NotFound>>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
@@ -538,15 +745,8 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-
-            collect_results::<u128, Account, Result<Account, NotFound>>(
-                msg,
-                |next_result: &Account, next_event: &u128, _event_index: usize| -> bool {
-                    next_result.id == *next_event
-                },
-                Err(NotFound),
-                Ok,
-            )
+            let responses: &[Account] = handle_message(&msg)?;
+            Ok(Vec::from(responses))
         }
     }
 
@@ -569,13 +769,61 @@ impl Client {
     /// that none of the submitted events were processed; if the request was
     /// processed, then each event may possibly be [`NotFound`].
     ///
+    /// # Example
+    ///
+    /// ```
+    /// use tigerbeetle as tb;
+    ///
+    /// async fn make_lookup_transfers_request(
+    ///     client: &tb::Client,
+    ///     transfers: &[u128],
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     let lookup_transfers_results = client.lookup_transfers(transfers).await?;
+    ///     let lookup_transfers_results_merged = merge_lookup_transfers_results(transfers, lookup_transfers_results);
+    ///     for (transfer_id, maybe_transfer) in lookup_transfers_results_merged {
+    ///         match maybe_transfer {
+    ///             Some(transfer) => {
+    ///                 handle_lookup_transfers_success(transfer).await?;
+    ///             }
+    ///             None => {
+    ///                 handle_lookup_transfers_failure(transfer_id).await?;
+    ///             }
+    ///         }
+    ///     }
+    ///     Ok(())
+    /// }
+    ///
+    /// fn merge_lookup_transfers_results(
+    ///     transfers: &[u128],
+    ///     results: Vec<tb::Transfer>,
+    /// ) -> impl Iterator<Item = (u128, Option<tb::Transfer>)> + use<'_> {
+    ///     let mut results = results.into_iter().peekable();
+    ///     transfers.iter().map(move |&id| match results.peek() {
+    ///         Some(transfer) if transfer.id == id => (id, results.next()),
+    ///         _ => (id, None),
+    ///     })
+    /// }
+    ///
+    /// # async fn handle_lookup_transfers_success(
+    /// #     _transfer: tb::Transfer,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// #
+    /// # async fn handle_lookup_transfers_failure(
+    /// #     _transfer_id: u128,
+    /// # ) -> Result<(), Box<dyn std::error::Error>> {
+    /// #     Ok(())
+    /// # }
+    /// ```
+    ///
     /// # Protocol reference
     ///
     /// [`lookup_transfers`](https://docs.tigerbeetle.com/reference/requests/lookup_transfers).
     pub fn lookup_transfers<'s>(
         &'s self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Result<Transfer, NotFound>>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
@@ -586,15 +834,8 @@ impl Client {
 
         async {
             let msg = rx.await.expect("channel");
-
-            collect_results::<u128, Transfer, Result<Transfer, NotFound>>(
-                msg,
-                |next_result: &Transfer, next_event: &u128, _event_index: usize| -> bool {
-                    next_result.id == *next_event
-                },
-                Err(NotFound),
-                Ok,
-            )
+            let responses: &[Transfer] = handle_message(&msg)?;
+            Ok(Vec::from(responses))
         }
     }
 
@@ -864,7 +1105,7 @@ fn assert_abi_compatibility() {
 ///
 /// [`Account`](https://docs.tigerbeetle.com/reference/account/).
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Account {
     pub id: u128,
     pub debits_pending: u128,
@@ -909,7 +1150,7 @@ bitflags! {
 ///
 /// [`Transfer`](https://docs.tigerbeetle.com/reference/transfer).
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct Transfer {
     pub id: u128,
     pub debit_account_id: u128,
@@ -956,7 +1197,7 @@ bitflags! {
 ///
 /// [`AccountFilter`](https://docs.tigerbeetle.com/reference/account-filter).
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct AccountFilter {
     pub account_id: u128,
     pub user_data_128: u128,
@@ -994,7 +1235,7 @@ bitflags! {
 ///
 /// [`AccountBalance`](https://docs.tigerbeetle.com/reference/account-balance/).
 #[repr(C)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct AccountBalance {
     pub debits_pending: u128,
     pub debits_posted: u128,
@@ -1010,7 +1251,7 @@ pub struct AccountBalance {
 ///
 /// [`QueryFilter`](https://docs.tigerbeetle.com/reference/query-filter/).
 #[repr(C)]
-#[derive(Debug, Copy, Clone, Default)]
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct QueryFilter {
     pub user_data_128: u128,
     pub user_data_64: u64,
@@ -1043,6 +1284,10 @@ bitflags! {
 /// The result of a single [`create_accounts`] event.
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
+///
+/// See also [`CreateAccountsResult`] (note the plural), the type directly
+/// returned by `create_accunts`, and which contains an additional index for
+/// relating results with input events.
 ///
 /// [`create_accounts`]: `Client::create_accounts`
 ///
@@ -1079,6 +1324,19 @@ pub enum CreateAccountResult {
     LedgerMustNotBeZero,
     CodeMustNotBeZero,
     ImportedEventTimestampMustNotRegress,
+}
+
+/// The result of a single [`create_accounts`] event, with index.
+///
+/// [`create_accounts`]: `Client::create_accounts`
+///
+/// # Protocol reference
+///
+/// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct CreateAccountsResult {
+    pub index: usize,
+    pub result: CreateAccountResult,
 }
 
 impl core::fmt::Display for CreateAccountResult {
@@ -1130,6 +1388,10 @@ impl core::fmt::Display for CreateAccountResult {
 /// The result of a single [`create_transfers`] event.
 ///
 /// For the meaning of individual enum variants see the linked protocol reference.
+///
+/// See also [`CreateTransfersResult`] (note the plural), the type directly
+/// returned by `create_accunts`, and which contains an additional index for
+/// relating results with input events.
 ///
 /// [`create_transfers`]: `Client::create_transfers`
 ///
@@ -1207,6 +1469,19 @@ pub enum CreateTransferResult {
     OverflowsTimeout,
     ExceedsCredits,
     ExceedsDebits,
+}
+
+/// The result of a single [`create_transfers`] event, with index.
+///
+/// [`create_transfers`]: `Client::create_transfers`
+///
+/// # Protocol reference
+///
+/// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct CreateTransfersResult {
+    pub index: usize,
+    pub result: CreateTransferResult,
 }
 
 impl core::fmt::Display for CreateTransferResult {
@@ -1460,7 +1735,7 @@ where
                 packet,
                 _timestamp: timestamp,
                 result,
-                events,
+                _events: events,
             });
         },
     ));
@@ -1512,82 +1787,12 @@ fn handle_message<'stack, CEvent, CResult>(
     Ok(result)
 }
 
-/// Collect a vector of TigerBeetle query results into a vector of Rust values,
-/// one for each input event.
-///
-/// Queries like account_lookup accept a vector of events, and the server
-/// returns a vector of results.
-///
-/// These results though have "holes" in them, empty result values that need to
-/// be interpreted in a specific way. Instead of having the user interpret the
-/// holes in the results, we do it for them for every type of request.
-///
-/// This method does parallel iteration over the input events and the output
-/// results as returned by tb_client, correlates the results to the events,
-/// converts the result types to a Rust result type, and inserts new Rust
-/// result types for each "hole" returned by the server.
-///
-/// # Type parameters
-///
-/// - `Event` - the input event type in the C API, e.g. `Account`
-/// - `EventResponse` - the per-event result returned by the server, e.g.
-///   `tb_create_accounts_result_t`
-/// - `EventResult` - the final type returned by the Rust API, e.g.
-///   `CreateAccountResult`
-fn collect_results<Event, EventResponse, EventResult>(
-    msg: CompletionMessage<Event>,
-    response_is_for_event: fn(&EventResponse, &Event, usize) -> bool,
-    empty_result: EventResult,
-    nonempty_result: fn(EventResponse) -> EventResult,
-) -> Result<Vec<EventResult>, PacketStatus>
-where
-    EventResponse: Copy,
-    EventResult: Copy,
-{
-    let responses: &[EventResponse] = handle_message(&msg)?;
-    let events = &msg.events;
-
-    let mut result_accum: Vec<EventResult> = Vec::with_capacity(events.len());
-    {
-        let mut events_iter = events.iter().enumerate();
-        let mut response_iter = responses.iter();
-
-        let mut next_response = response_iter.next();
-
-        loop {
-            let next_event = events_iter.next();
-
-            let Some((event_index, next_event)) = next_event else {
-                assert!(next_response.is_none());
-                break;
-            };
-
-            if let Some(next_response_) = next_response {
-                let response_is_for_event =
-                    response_is_for_event(next_response_, next_event, event_index);
-                if response_is_for_event {
-                    result_accum.push(nonempty_result(*next_response_));
-                    next_response = response_iter.next();
-                } else {
-                    result_accum.push(empty_result);
-                }
-            } else {
-                result_accum.push(empty_result);
-            }
-        }
-    }
-
-    assert_eq!(events.len(), result_accum.len());
-
-    Ok(result_accum)
-}
-
 struct CompletionMessage<E> {
     _context: usize,
     packet: Box<tbc::tb_packet_t>,
     _timestamp: u64,
     result: Vec<u8>,
-    events: Vec<E>,
+    _events: Vec<E>,
 }
 
 type OnCompletion = Box<dyn FnOnce(usize, *mut tbc::tb_packet_t, u64, *const u8, u32)>;
