@@ -1079,11 +1079,6 @@ pub enum CreateAccountResult {
     LedgerMustNotBeZero,
     CodeMustNotBeZero,
     ImportedEventTimestampMustNotRegress,
-    /// An underlying subsystem returned an unknown status code.
-    ///
-    /// This exists for forward compatibility and other unexpected situations,
-    /// and is unlikely to occur.
-    Unknown(u32),
 }
 
 impl core::fmt::Display for CreateAccountResult {
@@ -1128,7 +1123,6 @@ impl core::fmt::Display for CreateAccountResult {
             Self::ImportedEventTimestampMustNotRegress => {
                 f.write_str("imported event timestamp must not regress")
             }
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -1213,11 +1207,6 @@ pub enum CreateTransferResult {
     OverflowsTimeout,
     ExceedsCredits,
     ExceedsDebits,
-    /// An underlying subsystem returned an unknown status code.
-    ///
-    /// This exists for forward compatibility and other unexpected situations,
-    /// and is unlikely to occur.
-    Unknown(u32),
 }
 
 impl core::fmt::Display for CreateTransferResult {
@@ -1333,7 +1322,6 @@ impl core::fmt::Display for CreateTransferResult {
             Self::OverflowsTimeout => f.write_str("overflows timeout"),
             Self::ExceedsCredits => f.write_str("exceeds credits"),
             Self::ExceedsDebits => f.write_str("exceeds debits"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -1356,11 +1344,6 @@ pub enum InitStatus {
     SystemResources,
     /// The network was unavailable or other network initialization error.
     NetworkSubsystem,
-    /// An underlying subsystem returned an unknown status code.
-    ///
-    /// This exists for forward compatibility and other unexpected situations,
-    /// and is unlikely to occur.
-    Unknown(i32),
 }
 
 impl std::error::Error for InitStatus {}
@@ -1373,7 +1356,6 @@ impl core::fmt::Display for InitStatus {
             Self::AddressLimitExceeded => f.write_str("address limit exceeded"),
             Self::SystemResources => f.write_str("system resources"),
             Self::NetworkSubsystem => f.write_str("network subsystem"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }
@@ -1405,11 +1387,6 @@ pub enum PacketStatus {
     ///
     /// This should not be possible in the Rust client.
     InvalidDataSize,
-    /// An underlying subsystem returned an unknown status code.
-    ///
-    /// This exists for forward compatibility and other unexpected situations,
-    /// and is unlikely to occur.
-    Unknown(u8),
 }
 
 impl std::error::Error for PacketStatus {}
@@ -1423,7 +1400,6 @@ impl core::fmt::Display for PacketStatus {
             Self::ClientShutdown => f.write_str("client shutdown"),
             Self::InvalidOperation => f.write_str("invalid operation"),
             Self::InvalidDataSize => f.write_str("invalid data size"),
-            Self::Unknown(code) => f.write_fmt(format_args!("unknown {code}")),
         }
     }
 }

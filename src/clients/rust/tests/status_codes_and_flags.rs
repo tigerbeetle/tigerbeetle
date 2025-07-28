@@ -120,30 +120,6 @@ fn round_trip_test<RustType, CType>(
     }
 }
 
-fn test_is_never<RustType, CType>(
-    c_enum_name: &str,
-    ignore_list: &[CType],
-    rust_from_c: impl Fn(CType) -> RustType,
-    condition: impl Fn(&RustType) -> bool,
-) where
-    RustType: std::fmt::Debug,
-    CType: std::fmt::Debug + Eq + Copy,
-    CType: TryFrom<u32>,
-    <CType as TryFrom<u32>>::Error: std::fmt::Debug,
-{
-    let c_values = parse_c_enum_values(c_enum_name);
-    assert!(!c_values.is_empty());
-    for c_value_u32 in c_values {
-        let c_value_original = CType::try_from(c_value_u32)
-            .expect(&format!("unexpected value {c_value_u32} for enum"));
-        if ignore_list.contains(&c_value_original) {
-            continue;
-        }
-        let rust_value = rust_from_c(c_value_original);
-        assert!(!condition(&rust_value));
-    }
-}
-
 #[test]
 fn round_trip_create_account_result() {
     round_trip_test::<tb::CreateAccountResult, u32>(
@@ -155,32 +131,12 @@ fn round_trip_create_account_result() {
 }
 
 #[test]
-fn create_account_result_is_never_unknown() {
-    test_is_never::<tb::CreateAccountResult, u32>(
-        "TB_CREATE_ACCOUNT_RESULT",
-        &[],
-        |c_value| tb::CreateAccountResult::from(c_value),
-        |r| matches!(r, tb::CreateAccountResult::Unknown(_)),
-    );
-}
-
-#[test]
 fn round_trip_create_transfer_result() {
     round_trip_test::<tb::CreateTransferResult, u32>(
         "TB_CREATE_TRANSFER_RESULT",
         &[],
         |c_value| tb::CreateTransferResult::from(c_value),
         |rust_value| u32::from(rust_value),
-    );
-}
-
-#[test]
-fn create_transfer_result_is_never_unknown() {
-    test_is_never::<tb::CreateTransferResult, u32>(
-        "TB_CREATE_TRANSFER_RESULT",
-        &[],
-        |c_value| tb::CreateTransferResult::from(c_value),
-        |r| matches!(r, tb::CreateTransferResult::Unknown(_)),
     );
 }
 
@@ -196,16 +152,6 @@ fn round_trip_init_status() {
 }
 
 #[test]
-fn init_status_is_never_unknown() {
-    test_is_never::<tb::InitStatus, i32>(
-        "TB_INIT_STATUS",
-        &[0],
-        |c_value| tb::InitStatus::from(c_value),
-        |r| matches!(r, tb::InitStatus::Unknown(_)),
-    );
-}
-
-#[test]
 fn round_trip_packet_status() {
     round_trip_test::<tb::PacketStatus, u8>(
         "TB_PACKET_STATUS",
@@ -217,23 +163,12 @@ fn round_trip_packet_status() {
 }
 
 #[test]
-fn packet_status_is_never_unknown() {
-    test_is_never::<tb::PacketStatus, u8>(
-        "TB_PACKET_STATUS",
-        &[0],
-        |c_value| tb::PacketStatus::from(c_value),
-        |r| matches!(r, tb::PacketStatus::Unknown(_)),
-    );
-}
-
-#[test]
 fn round_trip_account_flags() {
     round_trip_test::<tb::AccountFlags, u16>(
         "TB_ACCOUNT_FLAGS",
         &[],
         // We use from_bits_truncate here to discard unknown flags.
-        // This will fail a round-trip test and also means we don't
-        // need to do the "is_never_unknown" test for flags.
+        // This will fail a round-trip test if we see one.
         |c_value| tb::AccountFlags::from_bits_truncate(c_value),
         |rust_value| rust_value.bits(),
     );
