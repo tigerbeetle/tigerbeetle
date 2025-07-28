@@ -158,7 +158,7 @@ fn random_u128() -> u128 {
     let b = random_u64();
     let a = a as u128;
     let b = b as u128;
-    a | b << 64
+    a | (b << 64)
 }
 
 fn random_u64() -> u64 {
