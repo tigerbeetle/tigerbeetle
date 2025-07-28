@@ -817,8 +817,6 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             results: []accounting_auditor.CreateTransferResultSet,
         ) void {
             assert(results.len >= transfers.len);
-            if (self.transfers_retry_exists.items.len == 0 and
-                self.transfers_retry_failed.count() == 0) return;
 
             // Neither the first nor the last id can regress to preserve the
             // `transfers_delivered_recently` and `transfers_delivered_past` logic.
@@ -1421,8 +1419,9 @@ pub fn WorkloadType(comptime AccountingStateMachine: type) type {
             var results_iterator: CreateTransfersResultIterator = .init(results_sparse);
             for (transfers, 0..) |*transfer, i| {
                 const result: tb.CreateTransferResult = results_iterator.take(i) orelse .ok;
-                if (transfer.flags.pending and
-                    result != .exists) self.transfers_pending_in_flight -= 1;
+                if (transfer.flags.pending and result != .exists) {
+                    self.transfers_pending_in_flight -= 1;
+                }
 
                 // Add some successfully completed transfers to be retried in the next request.
                 if (result == .ok and !transfer.flags.linked and
