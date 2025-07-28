@@ -38,8 +38,8 @@ The transfer amounts vary according to the exchange rate.
 
 ### Example
 
-Consider sending `$100.00` from account `A₁` (denominated in USD) to account `A₂` (denominated in
-INR). Assuming an exchange rate of `$1.00 = ₹82.42135`, `$100.00 = ₹8242.135`:
+Consider sending `100.00 USD` from account `A₁` (denominated in USD) to account `A₂` (denominated in
+INR). Assuming an exchange rate of `1.00 USD = 82.42135 INR`, `100.00 USD = 8242.135 INR`:
 
 | Ledger | Debit Account | Credit Account |  Amount | `flags.linked` |
 | -----: | ------------: | -------------: | ------: | -------------: |
@@ -66,7 +66,7 @@ cannot be derived if the two are combined.
 
 ### Example
 
-This depicts the same scenario as the prior example, except the liquidity provider charges a `$0.10`
+This depicts the same scenario as the prior example, except the liquidity provider charges a `0.10 USD`
 fee for the transaction.
 
 | Ledger | Debit Account | Credit Account |  Amount | `flags.linked` |

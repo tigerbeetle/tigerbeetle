@@ -9,11 +9,11 @@ about your accounts as part of a type system.
 
 ## Building Intuition with Two Simple Examples
 
-If you have an outstanding loan and owe a bank $100, is your balance $100 or -$100? Conversely, if
-you have $200 in your bank account, is the balance $200 or -$200?
+If you have an outstanding loan and owe a bank `100`, is your balance `100` or `-100`? Conversely, if
+you have `200` in your bank account, is the balance `200` or `-200`?
 
 Thinking about these two examples, we can start to build an intuition that the **positive or
-negative sign of the balance depends on whose perspective we're looking from**. That $100 you owe
+negative sign of the balance depends on whose perspective we're looking from**. That `100` you owe
 the bank represents a "bad" thing for you, but a "good" thing for the bank. We might think about
 that same debt differently if we're doing your accounting or the bank's.
 
@@ -22,8 +22,8 @@ debt as having the opposite "sign" as the funds in your bank account. At the sam
 types of these accounts look different depending on whether you are considering them from the
 perspective of you or the bank.
 
-Now, back to our original questions: is the loan balance $100 or -$100 and is the bank account
-balance $200 or -$200? On some level, this feels a bit arbitrary.
+Now, back to our original questions: is the loan balance `100` or `-100` and is the bank account
+balance `200` or `-200`? On some level, this feels a bit arbitrary.
 
 Wouldn't it be nice if there were some **commonly agreed-upon standards** so we wouldn't have to
 make such an arbitrary decision? Yes! This is exactly what debits and credits and the financial
@@ -67,12 +67,12 @@ Every record in our accounting is not only recorded in one place, but in two. Th
 bookkeeping. Why would we do that?
 
 Let's think about the bank loan in our example above. When you took out the loan, two things
-actually happened at the same time. On the one hand, you now owe the bank $100. At the same time,
-the bank gave you $100. These are the two entries that comprise the loan transaction.
+actually happened at the same time. On the one hand, you now owe the bank `100`. At the same time,
+the bank gave you `100`. These are the two entries that comprise the loan transaction.
 
-From your perspective, your liability to the bank increased by $100 while your assets also increased
-by $100. From the bank's perspective, their assets (the loan to you) increased by $100 while their
-liabilities (the money in your bank account) also increased by $100.
+From your perspective, your liability to the bank increased by `100` while your assets also increased
+by `100`. From the bank's perspective, their assets (the loan to you) increased by `100` while their
+liabilities (the money in your bank account) also increased by `100`.
 
 Double-entry bookkeeping ensures that funds are always accounted for. Money never just appears.
 **Funds always go from somewhere to somewhere.**
@@ -94,12 +94,12 @@ exactly equal. Loans increase assets and liabilities equally.
 Here are some other types of transactions that would affect assets, liabilities, and equity, while
 maintaining this balance:
 
-- If you withdraw $100 in cash from your bank account, your total assets stay the same. Your bank
+- If you withdraw `100` in cash from your bank account, your total assets stay the same. Your bank
   account balance (an asset) would decrease while your physical cash (another asset) would increase.
-- From the perspective of the bank, you withdrawing $100 in cash decreases their assets in the form
+- From the perspective of the bank, you withdrawing `100` in cash decreases their assets in the form
   of the cash they give you, while also decreasing their liabilities because your bank balance
   decreases as well.
-- If a shareholder invests $1000 in the bank, that increases both the bank's assets and equity.
+- If a shareholder invests `1000` in the bank, that increases both the bank's assets and equity.
 
 Assets, liabilities, and equity represent a point in time. The other two main categories, income and
 expenses, represent flows of money in and out.
