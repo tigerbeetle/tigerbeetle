@@ -168,147 +168,147 @@ fn random_u64() -> u64 {
 }
 
 #[cfg(test)]
-use std::time::{Duration, Instant};
+mod tests {
+    use std::time::{Duration, Instant, SystemTime};
 
-#[cfg(test)]
-struct TestResult {
-    id_start: u128,
-    id_end: u128,
-}
+    use super::{id, TbidGenerator, U80_MASK};
 
-#[cfg(test)]
-fn run_test_for_a_few_ms(mut id_generator: impl FnMut() -> u128) -> TestResult {
-    // Enough time to transition between millisecond timestamps
-    let test_duration = Duration::from_millis(10);
-    let end_instant = Instant::now() + test_duration;
-
-    let mut id_prev = 0;
-    let mut id_start = None;
-    let mut id_end = None;
-
-    while Instant::now() < end_instant {
-        let id_next = id_generator();
-
-        assert!(id_prev < id_next, "ids not monotonically increasing");
-
-        // Regression test - should not reset random to 0 on overflow,
-        // but instead generate a new random number.
-        let id_next_random_part = id_next & U80_MASK;
-        assert_ne!(id_next_random_part, 0);
-
-        // Don't waste other processes' time
-        std::thread::yield_now();
-
-        id_start = id_start.or(Some(id_next));
-        id_end = Some(id_next);
-
-        id_prev = id_next
+    struct TestResult {
+        id_start: u128,
+        id_end: u128,
     }
 
-    let id_start = id_start.unwrap();
-    let id_end = id_end.unwrap();
+    fn run_test_for_a_few_ms(mut id_generator: impl FnMut() -> u128) -> TestResult {
+        // Enough time to transition between millisecond timestamps
+        let test_duration = Duration::from_millis(10);
+        let end_instant = Instant::now() + test_duration;
 
-    TestResult { id_start, id_end }
-}
+        let mut id_prev = 0;
+        let mut id_start = None;
+        let mut id_end = None;
 
-#[cfg(test)]
-fn assert_ids_monotonic_and_multiple_timestamps(id_generator: impl FnMut() -> u128) {
-    let TestResult { id_start, id_end } = run_test_for_a_few_ms(id_generator);
-    // Verify we transitioned between timestamps
-    let timestamp_start = id_start & !U80_MASK;
-    let timestamp_end = id_end & !U80_MASK;
-    assert_ne!(timestamp_start, timestamp_end);
-}
+        while Instant::now() < end_instant {
+            let id_next = id_generator();
 
-#[cfg(test)]
-fn assert_ids_monotonic_and_single_timestamp(id_generator: impl FnMut() -> u128) {
-    let TestResult { id_start, id_end } = run_test_for_a_few_ms(id_generator);
-    // Verify we transitioned between timestamps
-    let timestamp_start = id_start & !U80_MASK;
-    let timestamp_end = id_end & !U80_MASK;
-    assert_eq!(timestamp_start, timestamp_end);
-}
+            assert!(id_prev < id_next, "ids not monotonically increasing");
 
-#[test]
-fn test_ids_with_normal_clock() {
-    assert_ids_monotonic_and_multiple_timestamps(|| id());
-}
+            // Regression test - should not reset random to 0 on overflow,
+            // but instead generate a new random number.
+            let id_next_random_part = id_next & U80_MASK;
+            assert_ne!(id_next_random_part, 0);
 
-#[test]
-fn test_random_overflow_still_monotonic() {
-    // Put this test in the future so the ms don't increment
-    let future_duration_from_now = Duration::from_secs(1_000_000);
-    let future_time = SystemTime::now()
-        .checked_add(future_duration_from_now)
-        .unwrap();
-    let future_duration_since_epoch = future_time
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let mut idgen = TbidGenerator {
-        ms_since_epoch: future_duration_since_epoch,
-        random: U80_MASK - 10,
-    };
+            // Don't waste other processes' time
+            std::thread::yield_now();
 
-    assert_ids_monotonic_and_multiple_timestamps(|| idgen.next());
-}
+            id_start = id_start.or(Some(id_next));
+            id_end = Some(id_next);
 
-#[test]
-fn test_reverse_time() {
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let mut idgen = TbidGenerator {
-        ms_since_epoch: now,
-        random: 0,
-    };
+            id_prev = id_next
+        }
 
-    let mut count = 0;
+        let id_start = id_start.unwrap();
+        let id_end = id_end.unwrap();
 
-    assert_ids_monotonic_and_single_timestamp(|| {
-        let past_time_base = SystemTime::UNIX_EPOCH - Duration::from_secs(1_000_000);
-        let past_time = past_time_base + Duration::from_millis(count);
-        count += 1;
-        idgen.next_from_system_time(past_time)
-    });
-}
+        TestResult { id_start, id_end }
+    }
 
-#[test]
-fn test_reverse_time_then_catch_up() {
-    let now = SystemTime::now();
-    let now_ms = now
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    let mut idgen = TbidGenerator {
-        ms_since_epoch: now_ms,
-        random: 0,
-    };
+    fn assert_ids_monotonic_and_multiple_timestamps(id_generator: impl FnMut() -> u128) {
+        let TestResult { id_start, id_end } = run_test_for_a_few_ms(id_generator);
+        // Verify we transitioned between timestamps
+        let timestamp_start = id_start & !U80_MASK;
+        let timestamp_end = id_end & !U80_MASK;
+        assert_ne!(timestamp_start, timestamp_end);
+    }
 
-    let mut count = 0;
+    fn assert_ids_monotonic_and_single_timestamp(id_generator: impl FnMut() -> u128) {
+        let TestResult { id_start, id_end } = run_test_for_a_few_ms(id_generator);
+        // Verify we transitioned between timestamps
+        let timestamp_start = id_start & !U80_MASK;
+        let timestamp_end = id_end & !U80_MASK;
+        assert_eq!(timestamp_start, timestamp_end);
+    }
 
-    assert_ids_monotonic_and_multiple_timestamps(|| {
-        let past_time_base = now - Duration::from_millis(2);
-        let past_time = past_time_base + Duration::from_millis(count);
-        count += 1;
-        idgen.next_from_system_time(past_time)
-    });
-}
+    #[test]
+    fn test_ids_with_normal_clock() {
+        assert_ids_monotonic_and_multiple_timestamps(|| id());
+    }
 
-#[test]
-fn test_prior_to_unix_epoch() {
-    let mut idgen = TbidGenerator {
-        ms_since_epoch: 0,
-        random: 0,
-    };
+    #[test]
+    fn test_random_overflow_still_monotonic() {
+        // Put this test in the future so the ms don't increment
+        let future_duration_from_now = Duration::from_secs(1_000_000);
+        let future_time = SystemTime::now()
+            .checked_add(future_duration_from_now)
+            .unwrap();
+        let future_duration_since_epoch = future_time
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let mut idgen = TbidGenerator {
+            ms_since_epoch: future_duration_since_epoch,
+            random: U80_MASK - 10,
+        };
 
-    let mut count = 0;
+        assert_ids_monotonic_and_multiple_timestamps(|| idgen.next());
+    }
 
-    assert_ids_monotonic_and_single_timestamp(|| {
-        let past_time_base = SystemTime::UNIX_EPOCH - Duration::from_secs(1_000_000);
-        let past_time = past_time_base + Duration::from_millis(count);
-        count += 1;
-        idgen.next_from_system_time(past_time)
-    });
+    #[test]
+    fn test_reverse_time() {
+        let now = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let mut idgen = TbidGenerator {
+            ms_since_epoch: now,
+            random: 0,
+        };
+
+        let mut count = 0;
+
+        assert_ids_monotonic_and_single_timestamp(|| {
+            let past_time_base = SystemTime::UNIX_EPOCH - Duration::from_secs(1_000_000);
+            let past_time = past_time_base + Duration::from_millis(count);
+            count += 1;
+            idgen.next_from_system_time(past_time)
+        });
+    }
+
+    #[test]
+    fn test_reverse_time_then_catch_up() {
+        let now = SystemTime::now();
+        let now_ms = now
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let mut idgen = TbidGenerator {
+            ms_since_epoch: now_ms,
+            random: 0,
+        };
+
+        let mut count = 0;
+
+        assert_ids_monotonic_and_multiple_timestamps(|| {
+            let past_time_base = now - Duration::from_millis(2);
+            let past_time = past_time_base + Duration::from_millis(count);
+            count += 1;
+            idgen.next_from_system_time(past_time)
+        });
+    }
+
+    #[test]
+    fn test_prior_to_unix_epoch() {
+        let mut idgen = TbidGenerator {
+            ms_since_epoch: 0,
+            random: 0,
+        };
+
+        let mut count = 0;
+
+        assert_ids_monotonic_and_single_timestamp(|| {
+            let past_time_base = SystemTime::UNIX_EPOCH - Duration::from_secs(1_000_000);
+            let past_time = past_time_base + Duration::from_millis(count);
+            count += 1;
+            idgen.next_from_system_time(past_time)
+        });
+    }
 }
