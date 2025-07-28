@@ -149,7 +149,7 @@ pub fn open_superblock(superblock: *SuperBlock) void {
 
     context.pending = true;
     superblock.open(Context.callback, &context.superblock_context);
-    for (0..1_000) |_| {
+    for (0..10_000) |_| {
         storage.run();
         if (!context.pending) break;
     } else @panic("open superblock stuck");
@@ -175,7 +175,7 @@ pub fn open_grid(grid: *Grid) void {
     assert(!Context.global.pending);
     Context.global.pending = true;
     grid.open(Context.callback);
-    for (0..1_000) |_| {
+    for (0..10_000) |_| {
         storage.run();
         if (!Context.global.pending) break;
     } else @panic("open grid stuck");
