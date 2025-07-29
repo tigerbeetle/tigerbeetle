@@ -12,7 +12,7 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("./shell.zig");
-const Snap = stdx.testing.snaptest.Snap;
+const Snap = stdx.Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 

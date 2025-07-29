@@ -470,7 +470,7 @@ fn send_email(shell: *Shell, subject: []const u8, body: []const u8, options: Ema
     });
 }
 
-const Snap = stdx.testing.snaptest.Snap;
+const Snap = stdx.Snap;
 const snap = Snap.snap;
 
 test Review {

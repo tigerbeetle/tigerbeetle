@@ -672,7 +672,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
 };
 
 test "flags" {
-    const Snap = stdx.testing.snaptest.Snap;
+    const Snap = stdx.Snap;
     const snap = Snap.snap;
 
     const T = struct {

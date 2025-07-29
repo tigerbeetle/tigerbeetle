@@ -438,7 +438,7 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
 const fixtures = @import("testing/fixtures.zig");
 
 test "trace json" {
-    const Snap = stdx.testing.snaptest.Snap;
+    const Snap = stdx.Snap;
     const snap = Snap.snap;
     const gpa = std.testing.allocator;
 

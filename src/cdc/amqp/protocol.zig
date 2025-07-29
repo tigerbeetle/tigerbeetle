@@ -1000,7 +1000,7 @@ test "amqp: Table encode/decode" {
 }
 
 test "amqp: frame and header" {
-    const Snap = stdx.testing.snaptest.Snap;
+    const Snap = stdx.Snap;
     const snap = Snap.snap;
 
     var buffer = try testing.allocator.alloc(u8, frame_min_size);

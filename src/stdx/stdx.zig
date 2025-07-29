@@ -9,6 +9,7 @@ pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const BitSetType = @import("bit_set.zig").BitSetType;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
+pub const Snap = @import("testing/snaptest.zig").Snap;
 
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 
@@ -18,10 +19,6 @@ pub const dbg = @import("debug.zig").dbg;
 pub const aegis = @import("aegis.zig");
 
 pub const PRNG = @import("prng.zig");
-
-pub const testing = struct {
-    pub const snaptest = @import("testing/snaptest.zig");
-};
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {

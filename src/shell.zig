@@ -771,7 +771,7 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
     comptime if (args_used.count() != arg_count) @compileError("Unused argument");
 }
 
-const Snap = stdx.testing.snaptest.Snap;
+const Snap = stdx.Snap;
 const snap = Snap.snap;
 
 test "shell: expand_argv" {

@@ -1605,7 +1605,7 @@ pub const Checkpoint = struct {
 };
 
 test "Checkpoint ops diagram" {
-    const Snap = stdx.testing.snaptest.Snap;
+    const Snap = stdx.Snap;
     const snap = Snap.snap;
 
     var string = std.ArrayList(u8).init(std.testing.allocator);

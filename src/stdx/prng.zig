@@ -18,7 +18,7 @@ const std = @import("std");
 const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
-const Snap = stdx.testing.snaptest.Snap;
+const Snap = stdx.Snap;
 const snap = Snap.snap;
 
 s: [4]u64,

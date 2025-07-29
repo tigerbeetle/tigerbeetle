@@ -776,7 +776,7 @@ test "GridScrubber cycle interval" {
     // In other words, P(eventual data loss).
     const p_cluster_blocks_corrupt_per_span = 1.0 - p_cluster_blocks_healthy_per_span;
 
-    const Snap = stdx.testing.snaptest.Snap;
+    const Snap = stdx.Snap;
     const snap = Snap.snap;
 
     try snap(@src(),

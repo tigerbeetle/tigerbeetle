@@ -1115,7 +1115,7 @@ const SeedRecord = struct {
     }
 };
 
-const Snap = stdx.testing.snaptest.Snap;
+const Snap = stdx.Snap;
 const snap = Snap.snap;
 
 test "cfo: deserialization" {
