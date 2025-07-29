@@ -851,7 +851,7 @@ fn build_test(
     },
 ) void {
     const stdx_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/stdx/unit_tests.zig"),
+        .root_source_file = b.path("src/stdx/stdx.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
