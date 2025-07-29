@@ -75,7 +75,7 @@ In the default configuration, the maximum batch sizes for each request type are:
 
 ### Automatic Batching
 
-TigerBeetle clients automatically batch events. There may be instances where your application logic 
+TigerBeetle clients automatically batch operations. There may be instances where your application logic 
 makes it hard to fill up the batches that you send to TigerBeetle, for example a multi-threaded web 
 server where each HTTP request is handled on a different thread. 
 
