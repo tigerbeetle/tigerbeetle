@@ -65,7 +65,7 @@ Checkpoints:
    [free set, client sessions, and manifest blocks](./vsr.md#protocol-repair-grid), and
    [table blocks](./vsr.md#protocol-sync-forest) that were created within the `sync_op_{min,max}`
    range.
-5. Update the superblock with:
+5. As part of the [*next checkpoint*](#5-conclusion), update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`
 
@@ -101,6 +101,32 @@ checkpoint.
 If a replica isn't making progress committing because a grid block or a prepare can't be repaired
 for some time, the replica proactively sends `request_start_view` to initiate the sync (see
 `repair_sync_timeout`).
+
+### 5: Conclusion
+
+We wait until the next checkpoint to reset the `superblock.vsr_state.sync_op_{min,max}` range,
+rather than updating it immediately like a view change.
+
+That is to avoid the following scenario:
+
+1. Start sync to checkpoint `X`.
+2. Commit atop checkpoint `X`, but not far enough to reach the next checkpoint `Y`.
+3. At op `X+a`, we use table `t` as part of a commit or compaction. Suppose that table `t` will be
+  synced but has not yet. (The repair uses `grid.read_global_queue`.)
+4. At op `X+b`, we release table `t` as part of compaction. Suppose this occurs before `t` has been
+  synced.
+5. Finish sync. (Still mid-way between `X` and `Y`).
+6. Crash. Restart.
+7. Replay commits atop `X`. Despite having completed sync and having no storage corruption, we are
+  missing `t`.
+
+(Note that repairs via `read_global_queue` _usually_ write to the grid, but it is not guaranteed
+(e.g. if `GridBlocksMissing` is full).)
+
+A variant of this scenario: When we support snapshots, it will be possible to release `t` without
+ever requiring it earlier (i.e. omit step 3). In that case, at the moment of restart (before replay)
+our superblock would claim to have a clean data file (no pending state sync) but be missing blocks
+which it references.
 
 ## Concepts
 
