@@ -1117,6 +1117,7 @@ const SeedRecord = struct {
 
 const Snap = stdx.Snap;
 const snap = Snap.snap;
+const module_path = "src";
 
 test "cfo: deserialization" {
     // Smoke test that we can still deserialize&migrate old devhub data.
@@ -1144,7 +1145,7 @@ test "cfo: deserialization" {
     const new_records = try SeedRecord.merge(arena.allocator(), .{}, old_records, &.{});
     const new_json = try SeedRecord.to_json(arena.allocator(), new_records);
 
-    try snap(@src(),
+    try snap(module_path, @src(),
         \\[
         \\  {
         \\    "commit_timestamp": 1721095881,
@@ -1178,7 +1179,7 @@ test "cfo: SeedRecord.merge" {
         }
     };
 
-    try T.check(&.{}, &.{}, snap(@src(),
+    try T.check(&.{}, &.{}, snap(module_path, @src(),
         \\[]
     ));
 
@@ -1257,7 +1258,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 2,
@@ -1351,7 +1352,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 3,
@@ -1409,7 +1410,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 1,
@@ -1466,7 +1467,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 1,
@@ -1535,7 +1536,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 1,
@@ -1593,7 +1594,7 @@ test "cfo: SeedRecord.merge" {
                 .branch = "main",
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 1,
@@ -1665,7 +1666,7 @@ test "cfo: SeedRecord.merge" {
                 .count = 3,
             },
         },
-        snap(@src(),
+        snap(module_path, @src(),
             \\[
             \\  {
             \\    "commit_timestamp": 1,

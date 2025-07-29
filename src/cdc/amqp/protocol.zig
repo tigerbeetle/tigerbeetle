@@ -1002,6 +1002,7 @@ test "amqp: Table encode/decode" {
 test "amqp: frame and header" {
     const Snap = stdx.Snap;
     const snap = Snap.snap;
+    const module_path = "src";
 
     var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
@@ -1012,7 +1013,7 @@ test "amqp: frame and header" {
         encoder.begin_frame(.{ .type = .method, .channel = .global });
         encoder.write_method_header(.{ .class = 1, .method = 10 });
         encoder.finish_frame(.method);
-        try snap(@src(),
+        try snap(module_path, @src(),
             \\[1,0,0,0,0,0,4,0,1,0,10,206]
         ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
     }
@@ -1029,7 +1030,7 @@ test "amqp: frame and header" {
         encoder.finish_frame(.header);
         encoder.finish_header(0);
 
-        try snap(@src(),
+        try snap(module_path, @src(),
             \\[1,0,0,0,0,0,4,0,10,0,100,206,2,0,1,0,0,0,12,0,10,0,0,0,0,0,0,0,0,0,0,206]
         ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
     }
@@ -1050,7 +1051,7 @@ test "amqp: frame and header" {
         encoder.finish_header("body".len);
         encoder.finish_frame(.body);
 
-        try snap(@src(),
+        try snap(module_path, @src(),
             \\[1,0,0,0,0,0,4,0,100,3,232,206,2,0,1,0,0,0,12,0,100,0,0,0,0,0,0,0,0,0,4,206,3,0,1,0,0,0,4,98,111,100,121,206]
         ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
     }

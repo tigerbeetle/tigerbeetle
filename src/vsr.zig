@@ -1607,6 +1607,7 @@ pub const Checkpoint = struct {
 test "Checkpoint ops diagram" {
     const Snap = stdx.Snap;
     const snap = Snap.snap;
+    const module_path = "src";
 
     var string = std.ArrayList(u8).init(std.testing.allocator);
     defer string.deinit();
@@ -1683,7 +1684,7 @@ test "Checkpoint ops diagram" {
         checkpoint_count += @intFromBool(op == checkpoint_prev);
     }
 
-    try snap(@src(),
+    try snap(module_path, @src(),
         \\journal_slot_count=32
         \\lsm_compaction_ops=4
         \\pipeline_prepare_queue_max=4

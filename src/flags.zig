@@ -674,6 +674,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
 test "flags" {
     const Snap = stdx.Snap;
     const snap = Snap.snap;
+    const module_path = "src";
 
     const T = struct {
         const T = @This();
@@ -708,7 +709,7 @@ test "flags" {
 
             { // Compile this file as an executable!
                 const path_relative = try std.fs.path.join(gpa, &.{
-                    "src",
+                    module_path,
                     @src().file,
                 });
                 defer gpa.free(path_relative);
@@ -795,60 +796,60 @@ test "flags" {
 
     // Test-cases are roughly in the source order of the corresponding features.
 
-    try t.check(&.{"empty"}, snap(@src(),
+    try t.check(&.{"empty"}, snap(module_path, @src(),
         \\stdout:
         \\empty
         \\
     ));
 
-    try t.check(&.{}, snap(@src(),
+    try t.check(&.{}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: subcommand required, expected 'empty', 'prefix', 'pos', 'required', 'values', or 'subcommand'
         \\
     ));
 
-    try t.check(&.{"-h"}, snap(@src(),
+    try t.check(&.{"-h"}, snap(module_path, @src(),
         \\stdout:
         \\ flags-test-program [flags]
         \\
     ));
 
-    try t.check(&.{"--help"}, snap(@src(),
+    try t.check(&.{"--help"}, snap(module_path, @src(),
         \\stdout:
         \\ flags-test-program [flags]
         \\
     ));
 
-    try t.check(&.{""}, snap(@src(),
+    try t.check(&.{""}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unknown subcommand: ''
         \\
     ));
 
-    try t.check(&.{"bogus"}, snap(@src(),
+    try t.check(&.{"bogus"}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unknown subcommand: 'bogus'
         \\
     ));
 
-    try t.check(&.{"--int=92"}, snap(@src(),
+    try t.check(&.{"--int=92"}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unknown subcommand: '--int=92'
         \\
     ));
 
-    try t.check(&.{ "empty", "--help" }, snap(@src(),
+    try t.check(&.{ "empty", "--help" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--help'
         \\
     ));
 
-    try t.check(&.{ "prefix", "--foo=92" }, snap(@src(),
+    try t.check(&.{ "prefix", "--foo=92" }, snap(module_path, @src(),
         \\stdout:
         \\foo: 92
         \\foo-bar: 0
@@ -857,7 +858,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "prefix", "--foo-bar=92" }, snap(@src(),
+    try t.check(&.{ "prefix", "--foo-bar=92" }, snap(module_path, @src(),
         \\stdout:
         \\foo: 0
         \\foo-bar: 92
@@ -866,14 +867,14 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "prefix", "--foo-baz=92" }, snap(@src(),
+    try t.check(&.{ "prefix", "--foo-baz=92" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --foo: expected value separator '=', but found '-' in '--foo-baz=92'
         \\
     ));
 
-    try t.check(&.{ "prefix", "--opt" }, snap(@src(),
+    try t.check(&.{ "prefix", "--opt" }, snap(module_path, @src(),
         \\stdout:
         \\foo: 0
         \\foo-bar: 0
@@ -882,7 +883,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "prefix", "--option" }, snap(@src(),
+    try t.check(&.{ "prefix", "--option" }, snap(module_path, @src(),
         \\stdout:
         \\foo: 0
         \\foo-bar: 0
@@ -891,14 +892,14 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "prefix", "--optx" }, snap(@src(),
+    try t.check(&.{ "prefix", "--optx" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --opt: expected value separator '=', but found 'x' in '--optx'
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "y" }, snap(module_path, @src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -908,7 +909,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "y", "1" }, snap(module_path, @src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -918,7 +919,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1", "2" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "y", "1", "2" }, snap(module_path, @src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -928,56 +929,56 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{"pos"}, snap(@src(),
+    try t.check(&.{"pos"}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: <p1>: argument is required
         \\
     ));
 
-    try t.check(&.{ "pos", "x" }, snap(@src(),
+    try t.check(&.{ "pos", "x" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: <p2>: argument is required
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "z" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "y", "z" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: <p3>: expected an integer value, but found 'z' (invalid digit)
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "y", "1", "2", "3" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "y", "1", "2", "3" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '3'
         \\
     ));
 
-    try t.check(&.{ "pos", "" }, snap(@src(),
+    try t.check(&.{ "pos", "" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: <p1>: empty argument
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "--flag" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "--flag" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected trailing option: '--flag'
         \\
     ));
 
-    try t.check(&.{ "pos", "x", "--flag", "y" }, snap(@src(),
+    try t.check(&.{ "pos", "x", "--flag", "y" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected trailing option: '--flag'
         \\
     ));
 
-    try t.check(&.{ "pos", "--flag", "x", "y" }, snap(@src(),
+    try t.check(&.{ "pos", "--flag", "x", "y" }, snap(module_path, @src(),
         \\stdout:
         \\p1: x
         \\p2: y
@@ -987,35 +988,35 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "pos", "--flak", "x", "y" }, snap(@src(),
+    try t.check(&.{ "pos", "--flak", "x", "y" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--flak'
         \\
     ));
 
-    try t.check(&.{ "required", "--foo=1", "--bar=2" }, snap(@src(),
+    try t.check(&.{ "required", "--foo=1", "--bar=2" }, snap(module_path, @src(),
         \\stdout:
         \\foo: 1
         \\bar: 2
         \\
     ));
 
-    try t.check(&.{ "required", "--surprise" }, snap(@src(),
+    try t.check(&.{ "required", "--surprise" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--surprise'
         \\
     ));
 
-    try t.check(&.{ "required", "--foo=1" }, snap(@src(),
+    try t.check(&.{ "required", "--foo=1" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --bar: argument is required
         \\
     ));
 
-    try t.check(&.{ "required", "--foo=1", "--bar=2", "--foo=3" }, snap(@src(),
+    try t.check(&.{ "required", "--foo=1", "--bar=2", "--foo=3" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --foo: duplicate argument
@@ -1030,7 +1031,7 @@ test "flags" {
         "--path=/home",
         "--optional=some",
         "--choice=shakespeare",
-    }, snap(@src(),
+    }, snap(module_path, @src(),
         \\stdout:
         \\int: 92
         \\size: 1073741824
@@ -1041,7 +1042,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{"values"}, snap(@src(),
+    try t.check(&.{"values"}, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 0
@@ -1052,7 +1053,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--boolean=true" }, snap(@src(),
+    try t.check(&.{ "values", "--boolean=true" }, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 0
@@ -1063,7 +1064,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--boolean=false" }, snap(@src(),
+    try t.check(&.{ "values", "--boolean=false" }, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 0
@@ -1074,56 +1075,56 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--boolean=foo" }, snap(@src(),
+    try t.check(&.{ "values", "--boolean=foo" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --boolean: expected one of 'true' or 'false', but found 'foo'
         \\
     ));
 
-    try t.check(&.{ "values", "--int" }, snap(@src(),
+    try t.check(&.{ "values", "--int" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected value separator '='
         \\
     ));
 
-    try t.check(&.{ "values", "--int:" }, snap(@src(),
+    try t.check(&.{ "values", "--int:" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected value separator '=', but found ':' in '--int:'
         \\
     ));
 
-    try t.check(&.{ "values", "--int=" }, snap(@src(),
+    try t.check(&.{ "values", "--int=" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: argument requires a value
         \\
     ));
 
-    try t.check(&.{ "values", "--int=-92" }, snap(@src(),
+    try t.check(&.{ "values", "--int=-92" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: value exceeds 32-bit unsigned integer: '-92'
         \\
     ));
 
-    try t.check(&.{ "values", "--int=_92" }, snap(@src(),
+    try t.check(&.{ "values", "--int=_92" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected an integer value, but found '_92' (invalid digit)
         \\
     ));
 
-    try t.check(&.{ "values", "--int=92_" }, snap(@src(),
+    try t.check(&.{ "values", "--int=92_" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected an integer value, but found '92_' (invalid digit)
         \\
     ));
 
-    try t.check(&.{ "values", "--int=92" }, snap(@src(),
+    try t.check(&.{ "values", "--int=92" }, snap(module_path, @src(),
         \\stdout:
         \\int: 92
         \\size: 0
@@ -1134,7 +1135,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--int=900_200" }, snap(@src(),
+    try t.check(&.{ "values", "--int=900_200" }, snap(module_path, @src(),
         \\stdout:
         \\int: 900200
         \\size: 0
@@ -1145,35 +1146,35 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--int=XCII" }, snap(@src(),
+    try t.check(&.{ "values", "--int=XCII" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: expected an integer value, but found 'XCII' (invalid digit)
         \\
     ));
 
-    try t.check(&.{ "values", "--int=44444444444444444444" }, snap(@src(),
+    try t.check(&.{ "values", "--int=44444444444444444444" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --int: value exceeds 32-bit unsigned integer: '44444444444444444444'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=_1000KiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=_1000KiB" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: expected a size, but found: '_1000KiB'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=1000_KiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=1000_KiB" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: expected a size, but found: '1000_KiB'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=1_000KiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=1_000KiB" }, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 1024000
@@ -1184,7 +1185,7 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=3MiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=3MiB" }, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 3145728
@@ -1195,14 +1196,14 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=44444444444444444444" }, snap(@src(),
+    try t.check(&.{ "values", "--size=44444444444444444444" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: value exceeds 64-bit unsigned integer: '44444444444444444444'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=100000000000000000" }, snap(@src(),
+    try t.check(&.{ "values", "--size=100000000000000000" }, snap(module_path, @src(),
         \\stdout:
         \\int: 0
         \\size: 100000000000000000
@@ -1213,82 +1214,82 @@ test "flags" {
         \\
     ));
 
-    try t.check(&.{ "values", "--size=100000000000000000kib" }, snap(@src(),
+    try t.check(&.{ "values", "--size=100000000000000000kib" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: size in bytes exceeds 64-bit unsigned integer: '100000000000000000kib'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=3bogus" }, snap(@src(),
+    try t.check(&.{ "values", "--size=3bogus" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: invalid unit in size, needed KiB, MiB, GiB or TiB: '3bogus'
         \\
     ));
 
-    try t.check(&.{ "values", "--size=MiB" }, snap(@src(),
+    try t.check(&.{ "values", "--size=MiB" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --size: expected a size, but found: 'MiB'
         \\
     ));
 
-    try t.check(&.{ "values", "--path=" }, snap(@src(),
+    try t.check(&.{ "values", "--path=" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --path: argument requires a value
         \\
     ));
 
-    try t.check(&.{ "values", "--optional=" }, snap(@src(),
+    try t.check(&.{ "values", "--optional=" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --optional: argument requires a value
         \\
     ));
 
-    try t.check(&.{ "values", "--choice=molière" }, snap(@src(),
+    try t.check(&.{ "values", "--choice=molière" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: --choice: expected one of 'marlowe' or 'shakespeare', but found 'molière'
         \\
     ));
 
-    try t.check(&.{"subcommand"}, snap(@src(),
+    try t.check(&.{"subcommand"}, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: subcommand required, expected 'c1' or 'c2'
         \\
     ));
-    try t.check(&.{ "subcommand", "c1", "--a" }, snap(@src(),
+    try t.check(&.{ "subcommand", "c1", "--a" }, snap(module_path, @src(),
         \\stdout:
         \\c1.a: true
         \\
     ));
-    try t.check(&.{ "subcommand", "c2", "--b" }, snap(@src(),
+    try t.check(&.{ "subcommand", "c2", "--b" }, snap(module_path, @src(),
         \\stdout:
         \\c2.b: true
         \\
     ));
-    try t.check(&.{ "subcommand", "c1", "--b" }, snap(@src(),
+    try t.check(&.{ "subcommand", "c1", "--b" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--b'
         \\
     ));
-    try t.check(&.{ "subcommand", "c2", "--a" }, snap(@src(),
+    try t.check(&.{ "subcommand", "c2", "--a" }, snap(module_path, @src(),
         \\status: 1
         \\stderr:
         \\error: unexpected argument: '--a'
         \\
     ));
-    try t.check(&.{ "subcommand", "--help" }, snap(@src(),
+    try t.check(&.{ "subcommand", "--help" }, snap(module_path, @src(),
         \\stdout:
         \\subcommand help
         \\
     ));
-    try t.check(&.{ "subcommand", "-h" }, snap(@src(),
+    try t.check(&.{ "subcommand", "-h" }, snap(module_path, @src(),
         \\stdout:
         \\subcommand help
         \\

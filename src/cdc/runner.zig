@@ -1426,6 +1426,7 @@ test "amqp: ProgressTrackerMessage" {
 test "amqp: JSON message" {
     const Snap = stdx.Snap;
     const snap = Snap.snap;
+    const module_path = "src";
 
     const buffer = try testing.allocator.alloc(u8, Message.json_string_size_max);
     defer testing.allocator.free(buffer);
@@ -1435,7 +1436,7 @@ test "amqp: JSON message" {
         const size = message.body().write(buffer);
         try testing.expectEqual(@as(usize, 564), size);
 
-        try snap(@src(),
+        try snap(module_path, @src(),
             \\{"timestamp":0,"type":"single_phase","ledger":0,"transfer":{"id":0,"amount":0,"pending_id":0,"user_data_128":0,"user_data_64":0,"user_data_32":0,"timeout":0,"code":0,"flags":0,"timestamp":0},"debit_account":{"id":0,"debits_pending":0,"debits_posted":0,"credits_pending":0,"credits_posted":0,"user_data_128":0,"user_data_64":0,"user_data_32":0,"code":0,"flags":0,"timestamp":0},"credit_account":{"id":0,"debits_pending":0,"debits_posted":0,"credits_pending":0,"credits_posted":0,"user_data_128":0,"user_data_64":0,"user_data_32":0,"code":0,"flags":0,"timestamp":0}}
         ).diff(buffer[0..size]);
     }
@@ -1446,7 +1447,7 @@ test "amqp: JSON message" {
         try testing.expectEqual(@as(usize, 1425), size);
         try testing.expectEqual(size, buffer.len);
 
-        try snap(@src(),
+        try snap(module_path, @src(),
             \\{"timestamp":"18446744073709551615","type":"two_phase_pending","ledger":4294967295,"transfer":{"id":"340282366920938463463374607431768211455","amount":"340282366920938463463374607431768211455","pending_id":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"timeout":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"debit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"},"credit_account":{"id":"340282366920938463463374607431768211455","debits_pending":"340282366920938463463374607431768211455","debits_posted":"340282366920938463463374607431768211455","credits_pending":"340282366920938463463374607431768211455","credits_posted":"340282366920938463463374607431768211455","user_data_128":"340282366920938463463374607431768211455","user_data_64":"18446744073709551615","user_data_32":4294967295,"code":65535,"flags":65535,"timestamp":"18446744073709551615"}}
         ).diff(buffer);
     }

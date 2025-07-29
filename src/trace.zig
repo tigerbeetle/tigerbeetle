@@ -440,6 +440,7 @@ const fixtures = @import("testing/fixtures.zig");
 test "trace json" {
     const Snap = stdx.Snap;
     const snap = Snap.snap;
+    const module_path = "src";
     const gpa = std.testing.allocator;
 
     var trace_buffer: std.ArrayListUnmanaged(u8) = .empty;
@@ -468,7 +469,7 @@ test "trace json" {
     time_sim.ticks += 3;
     trace.stop(.{ .replica_commit = .{ .stage = .idle, .op = 456 } });
 
-    try snap(@src(),
+    try snap(module_path, @src(),
         \\[
         \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
         \\{"pid":0,"tid":208,"ph":"E","ts":10000},
