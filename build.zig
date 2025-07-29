@@ -894,6 +894,7 @@ fn build_test(
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
     steps.test_fmt.dependOn(&run_fmt.step);
 
+    steps.@"test".dependOn(&run_stdx_unit_tests.step);
     steps.@"test".dependOn(&run_unit_tests.step);
     if (b.args == null) {
         steps.@"test".dependOn(steps.test_integration);

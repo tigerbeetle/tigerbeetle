@@ -599,7 +599,7 @@ test shuffle {
 
 test "no floating point please" {
     const path = try std.fs.path.join(std.testing.allocator, &.{
-        "src",
+        "src/stdx",
         @src().file,
     });
     defer std.testing.allocator.free(path);
