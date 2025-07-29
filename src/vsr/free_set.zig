@@ -699,7 +699,7 @@ pub const FreeSet = struct {
         assert(blocks_count % shard_bits == 0);
         assert(blocks_count % @bitSizeOf(usize) == 0);
 
-        return ewah.encode_size_max(blocks_count);
+        return ewah.encode_size_max(@divExact(blocks_count, @bitSizeOf(Word)));
     }
 
     fn encode(
