@@ -163,7 +163,6 @@ pub fn build(b: *std.Build) !void {
 
     assert(build_options.git_commit.len == 40);
     const vsr_options, const vsr_module = build_vsr_module(b, .{
-        .target = target,
         .stdx_module = stdx_module,
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
@@ -359,7 +358,6 @@ pub fn build(b: *std.Build) !void {
 }
 
 fn build_vsr_module(b: *std.Build, options: struct {
-    target: std.Build.ResolvedTarget,
     stdx_module: *std.Build.Module,
     git_commit: [40]u8,
     config_verify: bool,
@@ -921,7 +919,6 @@ fn build_test_integration(
     // multiversioning.
     const vsr_options, const vsr_module = build_vsr_module(b, .{
         .stdx_module = options.stdx_module,
-        .target = options.target,
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
         .config_release = "0.16.99",
