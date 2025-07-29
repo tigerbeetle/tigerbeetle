@@ -773,6 +773,7 @@ test "tidy extensions" {
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/rust/Cargo.lock"},
+        .{"src/testing/vortex/rust_driver/Cargo.lock"},
     });
 
     const allocator = std.testing.allocator;
