@@ -743,11 +743,11 @@ test "tidy no large blobs" {
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"},     .{".c"},   .{".cs"},    .{".csproj"}, .{".css"},  .{".go"},
-        .{".h"},       .{".hcl"}, .{".html"},  .{".java"},   .{".js"},   .{".json"},
-        .{".md"},      .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},   .{".rs"},
-        .{".service"}, .{".sln"}, .{".sum"},   .{".svg"},    .{".toml"}, .{".ts"},
-        .{".txt"},     .{".xml"}, .{".yml"},   .{".zig"},    .{".zon"},
+        .{".bat"},     .{".c"},     .{".cs"},    .{".csproj"}, .{".css"},  .{".go"},
+        .{".h"},       .{".hcl"},   .{".html"},  .{".java"},   .{".js"},   .{".json"},
+        .{".md"},      .{".mod"},   .{".props"}, .{".ps1"},    .{".py"},   .{".rs"},
+        .{".service"}, .{".sln"},   .{".sum"},   .{".svg"},    .{".toml"}, .{".ts"},
+        .{".txt"},     .{".typed"}, .{".xml"},   .{".yml"},    .{".zig"},  .{".zon"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
@@ -772,6 +772,7 @@ test "tidy extensions" {
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
+        .{"src/clients/python/src/tigerbeetle/py.typed"},
         .{"src/clients/rust/Cargo.lock"},
     });
 
