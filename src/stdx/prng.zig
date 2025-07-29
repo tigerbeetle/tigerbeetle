@@ -15,10 +15,10 @@
 //! - remove dynamic-dispatch indirection (a minor bonus).
 
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
-const Snap = @import("../testing/snaptest.zig").Snap;
+const Snap = stdx.testing.snaptest.Snap;
 const snap = Snap.snap;
 
 s: [4]u64,

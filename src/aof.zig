@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;

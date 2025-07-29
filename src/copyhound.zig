@@ -30,7 +30,7 @@
 //! column) and the total size of all monorphisations (third column).
 
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const flags = @import("./flags.zig");
 
 const log = std.log;

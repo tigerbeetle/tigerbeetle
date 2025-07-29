@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 const SourceLocation = std.builtin.SourceLocation;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;

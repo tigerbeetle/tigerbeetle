@@ -4,7 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const vsr = @import("vsr.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 const tb = @import("tigerbeetle.zig");
 const TestContext = @import("state_machine.zig").TestContext;

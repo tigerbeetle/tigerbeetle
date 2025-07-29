@@ -5,7 +5,7 @@ const math = std.math;
 const mem = std.mem;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 

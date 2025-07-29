@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const schema = @import("../lsm/schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;

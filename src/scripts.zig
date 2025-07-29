@@ -11,7 +11,7 @@
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const flags = @import("flags.zig");
 const Shell = @import("shell.zig");
 

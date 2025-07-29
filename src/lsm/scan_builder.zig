@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const is_composite_key = @import("composite_key.zig").is_composite_key;
 

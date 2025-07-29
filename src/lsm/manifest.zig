@@ -4,7 +4,7 @@ const math = std.math;
 const assert = std.debug.assert;
 const log = std.log.scoped(.manifest);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const growth_factor = constants.lsm_growth_factor;
 

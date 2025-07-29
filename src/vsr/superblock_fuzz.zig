@@ -26,7 +26,7 @@ const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
 const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
 
 const cluster = fixtures.cluster;

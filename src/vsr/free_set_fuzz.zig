@@ -4,7 +4,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_vsr_free_set);
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 const Reservation = @import("./free_set.zig").Reservation;

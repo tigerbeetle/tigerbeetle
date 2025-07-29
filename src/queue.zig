@@ -255,7 +255,7 @@ test "Queue: push/pop/peek/remove/empty" {
 }
 
 test "Queue: fuzz" {
-    const stdx = @import("./stdx.zig");
+    const stdx = @import("stdx");
     const fuzz = @import("./testing/fuzz.zig");
 
     const Item = struct {

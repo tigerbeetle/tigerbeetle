@@ -38,6 +38,7 @@
 //!   caller to manage the lifetime. The caller should be skipping program name.
 
 const std = @import("std");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
@@ -671,7 +672,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
 };
 
 test "flags" {
-    const Snap = @import("./testing/snaptest.zig").Snap;
+    const Snap = stdx.testing.snaptest.Snap;
     const snap = Snap.snap;
 
     const T = struct {

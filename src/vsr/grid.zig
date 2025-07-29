@@ -11,7 +11,7 @@ const SuperBlockType = vsr.SuperBlockType;
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
 const Tracer = vsr.trace.Tracer;
 

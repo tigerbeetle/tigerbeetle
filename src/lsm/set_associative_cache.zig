@@ -9,7 +9,7 @@ const meta = std.meta;
 const constants = @import("../constants.zig");
 const verify = constants.verify;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const div_ceil = stdx.div_ceil;
 const maybe = stdx.maybe;
 

@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 /// Parse a "table" of data with the specified schema.
 /// See test cases for example usage.

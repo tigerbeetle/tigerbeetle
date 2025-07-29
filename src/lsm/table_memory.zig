@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const binary_search = @import("binary_search.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 pub fn TableMemoryType(comptime Table: type) type {

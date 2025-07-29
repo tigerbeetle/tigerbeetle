@@ -2,7 +2,7 @@ const builtin = @import("builtin");
 const std = @import("std");
 const os = std.os;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 
 const log = std.log.scoped(.mlock);
 

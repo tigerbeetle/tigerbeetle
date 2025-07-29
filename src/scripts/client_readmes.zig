@@ -9,7 +9,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 const Docs = @import("../clients/docs_types.zig").Docs;
 const Sample = @import("../clients/docs_types.zig").Sample;

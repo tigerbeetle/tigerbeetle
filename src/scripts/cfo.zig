@@ -53,7 +53,7 @@ const log = std.log;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {
@@ -1115,7 +1115,7 @@ const SeedRecord = struct {
     }
 };
 
-const Snap = @import("../testing/snaptest.zig").Snap;
+const Snap = stdx.testing.snaptest.Snap;
 const snap = Snap.snap;
 
 test "cfo: deserialization" {

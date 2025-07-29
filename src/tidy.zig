@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
 
 const UsedDeclarations = std.StringHashMapUnmanaged(struct {

@@ -12,11 +12,11 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("./shell.zig");
-const Snap = @import("./testing/snaptest.zig").Snap;
+const Snap = stdx.testing.snaptest.Snap;
 const snap = Snap.snap;
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
 
 const vortex_exe: []const u8 = @import("test_options").vortex_exe;

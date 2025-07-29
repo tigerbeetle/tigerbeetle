@@ -4,8 +4,8 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const stdx = @import("../stdx.zig");
-const div_ceil = @import("../stdx.zig").div_ceil;
+const stdx = @import("stdx");
+const div_ceil = @import("stdx").div_ceil;
 const binary_search_values_upsert_index =
     @import("binary_search.zig").binary_search_values_upsert_index;
 const binary_search_keys = @import("binary_search.zig").binary_search_keys;

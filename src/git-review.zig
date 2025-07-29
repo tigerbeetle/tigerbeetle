@@ -29,7 +29,7 @@
 //! `git reflog`, `git rebase -i` and friends to construct the review state.
 
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
 const flags = @import("./flags.zig");
 
@@ -470,7 +470,7 @@ fn send_email(shell: *Shell, subject: []const u8, body: []const u8, options: Ema
     });
 }
 
-const Snap = @import("./testing/snaptest.zig").Snap;
+const Snap = stdx.testing.snaptest.Snap;
 const snap = Snap.snap;
 
 test Review {

@@ -42,7 +42,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 

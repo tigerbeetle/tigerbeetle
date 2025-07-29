@@ -4,7 +4,7 @@ const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.cluster);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
 const constants = @import("../constants.zig");

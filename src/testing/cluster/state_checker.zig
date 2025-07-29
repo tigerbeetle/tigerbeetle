@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const message_pool = @import("../../message_pool.zig");

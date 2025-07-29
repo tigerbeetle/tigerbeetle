@@ -4,7 +4,7 @@
 //////////////////////////////////////////////////////////
 
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const protocol = @import("protocol.zig");
 const Decoder = protocol.Decoder;
 const Encoder = protocol.Encoder;

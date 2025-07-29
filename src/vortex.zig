@@ -7,7 +7,7 @@
 /// * _workload_: a separate process that, given a driver, runs commands and queries against the
 /// cluster, verifying its correctness.
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const flags = @import("flags.zig");
 

@@ -6,7 +6,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const Config = @import("config.zig").Config;
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 pub const config = @import("config.zig").configs.current;
 

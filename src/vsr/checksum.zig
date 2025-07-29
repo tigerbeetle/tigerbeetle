@@ -35,7 +35,7 @@ const mem = std.mem;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const Aegis128LMac_128 = stdx.aegis.Aegis128LMac_128;
 

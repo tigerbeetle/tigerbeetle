@@ -8,7 +8,7 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 const client_readmes = @import("./client_readmes.zig");

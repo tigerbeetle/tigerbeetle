@@ -34,7 +34,7 @@ const mem = std.mem;
 const meta = std.meta;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 

@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Time = @import("../time.zig").Time;
 
 pub const OffsetType = enum {

@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 
 const os = std.os;
 const posix = std.posix;

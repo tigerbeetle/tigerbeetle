@@ -6,7 +6,7 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 
 const log = std.log.scoped(.lsm_forest_fuzz);

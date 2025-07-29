@@ -27,7 +27,7 @@ const log = std.log.scoped(.manifest_log);
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("../vsr/grid.zig").GridType;
