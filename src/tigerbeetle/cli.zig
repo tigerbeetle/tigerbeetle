@@ -769,7 +769,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
         const required_default = if (field.type == bool) false else null;
-        assert(flags.default_value(field).? == required_default);
+        assert(field.defaultValue().? == required_default);
 
         if (@field(start, field.name) != required_default and !start.experimental) {
             vsr.fatal(

@@ -135,7 +135,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             positional_fields = std.meta.fields(field.type);
             var optional_tail = false;
             for (positional_fields) |positional_field| {
-                if (default_value(positional_field) == null) {
+                if (positional_field.defaultValue() == null) {
                     if (optional_tail) @panic("optional positional arguments must be last");
                 } else {
                     optional_tail = true;
@@ -143,8 +143,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 switch (@typeInfo(positional_field.type)) {
                     .optional => |optional| {
                         // optional flags should have a default
-                        assert(default_value(positional_field) != null);
-                        assert(default_value(positional_field).? == null);
+                        assert(positional_field.defaultValue() != null);
+                        assert(positional_field.defaultValue().? == null);
                         assert_valid_value_type(optional.child);
                     },
                     else => {
@@ -159,13 +159,13 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             switch (@typeInfo(field.type)) {
                 .bool => {
                     // boolean flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == false);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == false);
                 },
                 .optional => |optional| {
                     // optional flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == null);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == null);
 
                     assert_valid_value_type(optional.child);
                 },
@@ -256,7 +256,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     inline for (fields[0..field_count]) |field| {
         const flag = flag_name(field);
         switch (@field(counts, field.name)) {
-            0 => if (default_value(field)) |default| {
+            0 => if (field.defaultValue()) |default| {
                 @field(result, field.name) = default;
             } else {
                 fatal("{s}: argument is required", .{flag});
@@ -271,7 +271,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (positional_index >= counts.positional) {
                 const flag = comptime flag_name_positional(positional_field);
-                if (default_value(positional_field)) |default| {
+                if (positional_field.defaultValue()) |default| {
                     @field(result.positional, positional_field.name) = default;
                 } else {
                     fatal("{s}: argument is required", .{flag});
@@ -562,14 +562,6 @@ test flag_name {
 fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
     comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
     return "<" ++ field.name ++ ">";
-}
-
-/// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-pub fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
-    return if (field.default_value_ptr) |default_opaque|
-        @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
-    else
-        null;
 }
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
