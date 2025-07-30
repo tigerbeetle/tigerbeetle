@@ -102,7 +102,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = stdx.flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }

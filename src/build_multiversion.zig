@@ -64,7 +64,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = stdx.flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     const tmp_dir_path = try shell.fmt("{s}/{d}", .{
         cli_args.tmp,

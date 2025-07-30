@@ -18,7 +18,6 @@ const net = std.net;
 
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
-const flags = stdx.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -628,7 +627,7 @@ pub const Command = union(enum) {
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = flags.parse(args_iterator, CLIArgs);
+    const cli_args = stdx.flags(args_iterator, CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },

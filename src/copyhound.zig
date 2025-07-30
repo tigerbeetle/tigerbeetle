@@ -51,7 +51,7 @@ pub fn main() !void {
 
     var args = try std.process.argsWithAllocator(allocator);
 
-    const cli_args = stdx.flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     const line_buffer = try allocator.alloc(u8, 1024 * 1024);
     const func_buf = try allocator.alloc(u8, 4096);

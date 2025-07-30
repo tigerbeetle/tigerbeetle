@@ -14,7 +14,7 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 
 pub const aegis = @import("aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
-pub const flags = @import("flags.zig");
+pub const flags = @import("flags.zig").parse;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 
