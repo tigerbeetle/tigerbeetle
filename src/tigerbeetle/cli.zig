@@ -57,7 +57,7 @@ const CLIArgs = union(enum) {
     const Start = struct {
         // Stable CLI arguments.
         addresses: []const u8,
-        cache_grid: ?flags.ByteSize = null,
+        cache_grid: ?stdx.ByteSize = null,
         development: bool = false,
         positional: struct {
             path: []const u8,
@@ -69,14 +69,14 @@ const CLIArgs = union(enum) {
         // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
-        limit_storage: ?flags.ByteSize = null,
+        limit_storage: ?stdx.ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
-        limit_request: ?flags.ByteSize = null,
-        cache_accounts: ?flags.ByteSize = null,
-        cache_transfers: ?flags.ByteSize = null,
-        cache_transfers_pending: ?flags.ByteSize = null,
-        memory_lsm_manifest: ?flags.ByteSize = null,
-        memory_lsm_compaction: ?flags.ByteSize = null,
+        limit_request: ?stdx.ByteSize = null,
+        cache_accounts: ?stdx.ByteSize = null,
+        cache_transfers: ?stdx.ByteSize = null,
+        cache_transfers_pending: ?stdx.ByteSize = null,
+        memory_lsm_manifest: ?stdx.ByteSize = null,
+        memory_lsm_compaction: ?stdx.ByteSize = null,
         trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
@@ -415,12 +415,12 @@ const CLIArgs = union(enum) {
 
 const StartDefaults = struct {
     limit_pipeline_requests: u32,
-    limit_request: flags.ByteSize,
-    cache_accounts: flags.ByteSize,
-    cache_transfers: flags.ByteSize,
-    cache_transfers_pending: flags.ByteSize,
-    cache_grid: flags.ByteSize,
-    memory_lsm_compaction: flags.ByteSize,
+    limit_request: stdx.ByteSize,
+    cache_accounts: stdx.ByteSize,
+    cache_transfers: stdx.ByteSize,
+    cache_transfers_pending: stdx.ByteSize,
+    cache_grid: stdx.ByteSize,
+    memory_lsm_compaction: stdx.ByteSize,
 };
 
 const start_defaults_production = StartDefaults{
@@ -793,9 +793,9 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
-    const start_limit_storage: flags.ByteSize = start.limit_storage orelse
+    const start_limit_storage: stdx.ByteSize = start.limit_storage orelse
         .{ .value = constants.storage_size_limit_default };
-    const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
+    const start_memory_lsm_manifest: stdx.ByteSize = start.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
     const storage_size_limit = start_limit_storage.bytes();
@@ -1249,7 +1249,7 @@ fn parse_address_and_port(
 fn parse_cache_size_to_count(
     comptime T: type,
     comptime SetAssociativeCache: type,
-    size: flags.ByteSize,
+    size: stdx.ByteSize,
     cli_flag: []const u8,
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;

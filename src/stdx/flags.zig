@@ -360,125 +360,6 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     comptime unreachable;
 }
 
-pub const ByteUnit = enum(u64) {
-    bytes = 1,
-    kib = 1024,
-    mib = 1024 * 1024,
-    gib = 1024 * 1024 * 1024,
-    tib = 1024 * 1024 * 1024 * 1024,
-};
-
-pub const ByteSize = struct {
-    value: u64,
-    unit: ByteUnit = .bytes,
-
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
-        assert(value.len != 0);
-
-        const split: struct {
-            value_input: []const u8,
-            unit_input: []const u8,
-        } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
-                break :split .{
-                    .value_input = value[0..i],
-                    .unit_input = value[i..],
-                };
-            }
-        } else {
-            break :split .{
-                .value_input = value,
-                .unit_input = "",
-            };
-        };
-
-        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
-            switch (err) {
-                error.Overflow => {
-                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
-                },
-                error.InvalidCharacter => {
-                    // The only case this can happen is for the empty string
-                    return .{ .err = "expected a size, but found:" };
-                },
-            }
-        };
-
-        const unit = if (split.unit_input.len > 0)
-            unit: inline for (comptime std.enums.values(ByteUnit)) |tag| {
-                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
-                    break :unit tag;
-                }
-            } else {
-                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
-            }
-        else
-            ByteUnit.bytes;
-
-        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
-        };
-
-        return .{ .ok = .{ .value = amount, .unit = unit } };
-    }
-
-    pub fn bytes(size: *const ByteSize) u64 {
-        return std.math.mul(
-            u64,
-            size.value,
-            @intFromEnum(size.unit),
-        ) catch unreachable;
-    }
-
-    pub fn suffix(size: *const ByteSize) []const u8 {
-        return switch (size.unit) {
-            .bytes => "",
-            .kib => "KiB",
-            .mib => "MiB",
-            .gib => "GiB",
-            .tib => "TiB",
-        };
-    }
-};
-
-test "ByteSize.parse_flag_value" {
-    const kib = 1024;
-    const mib = kib * 1024;
-    const gib = mib * 1024;
-    const tib = gib * 1024;
-
-    const cases = .{
-        .{ 0, "0", 0, ByteUnit.bytes },
-        .{ 1, "1", 1, ByteUnit.bytes },
-        .{ 140737488355328, "140737488355328", 140737488355328, ByteUnit.bytes },
-        .{ 140737488355328, "128TiB", 128, ByteUnit.tib },
-        .{ 1 * tib, "1TiB", 1, ByteUnit.tib },
-        .{ 10 * tib, "10tib", 10, ByteUnit.tib },
-        .{ 1 * gib, "1GiB", 1, ByteUnit.gib },
-        .{ 10 * gib, "10gib", 10, ByteUnit.gib },
-        .{ 1 * mib, "1MiB", 1, ByteUnit.mib },
-        .{ 10 * mib, "10mib", 10, ByteUnit.mib },
-        .{ 1 * kib, "1KiB", 1, ByteUnit.kib },
-        .{ 10 * kib, "10kib", 10, ByteUnit.kib },
-        .{ 10 * kib, "1_0kib", 10, ByteUnit.kib },
-    };
-
-    inline for (cases) |case| {
-        const bytes = case[0];
-        const input = case[1];
-        const unit_val = case[2];
-        const unit = case[3];
-        const result = ByteSize.parse_flag_value(input);
-        if (result == .err) {
-            std.debug.panic("expected ok, got: '{s}'", .{result.err});
-        }
-        const got = result.ok;
-        assert(bytes == got.bytes());
-        assert(unit_val == got.value);
-        assert(unit == got.unit);
-    }
-}
-
 /// Parse string value into an integer, providing a nice error message for the user.
 fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
@@ -593,7 +474,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
         },
         values: struct {
             int: u32 = 0,
-            size: ByteSize = .{ .value = 0 },
+            size: stdx.ByteSize = .{ .value = 0 },
             boolean: bool = false,
             path: []const u8 = "not-set",
             optional: ?[]const u8 = null,
