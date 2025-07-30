@@ -13,8 +13,7 @@ const assert = std.debug.assert;
 
 const Shell = @import("./shell.zig");
 const Snap = stdx.Snap;
-const snap = Snap.snap;
-const module_path = "src";
+const snap = Snap.snap_fn("src");
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
 const stdx = @import("stdx");
@@ -76,16 +75,16 @@ test "repl integration" {
 
     try context.check(
         \\create_accounts id=1 flags=linked|history code=10 ledger=700, id=2 code=10 ledger=700
-    , snap(module_path, @src(), ""));
+    , snap(@src(), ""));
 
     try context.check(
         \\create_transfers id=1 debit_account_id=1
         \\  credit_account_id=2 amount=10 ledger=700 code=10
-    , snap(module_path, @src(), ""));
+    , snap(@src(), ""));
 
     try context.check(
         \\lookup_accounts id=1
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "1",
         \\  "debits_pending": "0",
@@ -105,7 +104,7 @@ test "repl integration" {
 
     try context.check(
         \\lookup_accounts id=2
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "2",
         \\  "debits_pending": "0",
@@ -125,7 +124,7 @@ test "repl integration" {
 
     try context.check(
         \\query_accounts code=10 ledger=700
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "1",
         \\  "debits_pending": "0",
@@ -159,7 +158,7 @@ test "repl integration" {
 
     try context.check(
         \\lookup_transfers id=1
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "1",
         \\  "debit_account_id": "1",
@@ -180,7 +179,7 @@ test "repl integration" {
 
     try context.check(
         \\query_transfers code=10 ledger=700
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "1",
         \\  "debit_account_id": "1",
@@ -201,7 +200,7 @@ test "repl integration" {
 
     try context.check(
         \\get_account_transfers account_id=2
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "id": "1",
         \\  "debit_account_id": "1",
@@ -222,7 +221,7 @@ test "repl integration" {
 
     try context.check(
         \\get_account_balances account_id=1
-    , snap(module_path, @src(),
+    , snap(@src(),
         \\{
         \\  "debits_pending": "0",
         \\  "debits_posted": "10",

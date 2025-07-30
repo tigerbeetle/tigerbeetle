@@ -81,16 +81,32 @@ pub const Snap = struct {
     text: []const u8,
     update_this: bool = false,
 
-    /// Creates a new Snap.
+    const SnapFn = fn (location: SourceLocation, text: []const u8) Snap;
+
+    /// Takes the path to the root source file of the current module and creates a snap function.
     ///
-    /// For the update logic to work, *must* be formatted as:
+    /// ```
+    /// const snap = Snap.snap_fn("src");
+    /// const snap = Snap.snap_fn("src/stdx");
+    /// ```
+    ///
+    /// For the update logic to work, usage *must* be formatted as:
     ///
     /// ```
     /// snap(@src(),
     ///     \\Text of the snapshot.
     /// )
     /// ```
-    pub fn snap(module_path: []const u8, location: SourceLocation, text: []const u8) Snap {
+    pub fn snap_fn(comptime module_path: []const u8) SnapFn {
+        return struct {
+            fn snap(location: SourceLocation, text: []const u8) Snap {
+                return init(module_path, location, text);
+            }
+        }.snap;
+    }
+
+    /// Creates a new Snap.
+    fn init(module_path: []const u8, location: SourceLocation, text: []const u8) Snap {
         return Snap{ .module_path = module_path, .location = location, .text = text };
     }
 

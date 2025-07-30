@@ -772,8 +772,7 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
 }
 
 const Snap = stdx.Snap;
-const snap = Snap.snap;
-const module_path = "src";
+const snap = Snap.snap_fn("src");
 
 test "shell: expand_argv" {
     const T = struct {
@@ -790,17 +789,17 @@ test "shell: expand_argv" {
         }
     };
 
-    try T.check("zig version", .{}, snap(module_path, @src(),
+    try T.check("zig version", .{}, snap(@src(),
         \\["zig","version"]
     ));
-    try T.check("  zig  version  ", .{}, snap(module_path, @src(),
+    try T.check("  zig  version  ", .{}, snap(@src(),
         \\["zig","version"]
     ));
 
     try T.check(
         "zig {version}",
         .{ .version = @as([]const u8, "version") },
-        snap(module_path, @src(),
+        snap(@src(),
             \\["zig","version"]
         ),
     );
@@ -808,7 +807,7 @@ test "shell: expand_argv" {
     try T.check(
         "zig {version}",
         .{ .version = @as([]const []const u8, &.{ "version", "--verbose" }) },
-        snap(module_path, @src(),
+        snap(@src(),
             \\["zig","version","--verbose"]
         ),
     );
@@ -816,14 +815,14 @@ test "shell: expand_argv" {
     try T.check(
         "git fetch origin refs/pull/{pr}/head",
         .{ .pr = 92 },
-        snap(module_path, @src(),
+        snap(@src(),
             \\["git","fetch","origin","refs/pull/92/head"]
         ),
     );
     try T.check(
         "gh pr checkout {pr}",
         .{ .pr = @as(u32, 92) },
-        snap(module_path, @src(),
+        snap(@src(),
             \\["gh","pr","checkout","92"]
         ),
     );

@@ -471,8 +471,7 @@ fn send_email(shell: *Shell, subject: []const u8, body: []const u8, options: Ema
 }
 
 const Snap = stdx.Snap;
-const snap = Snap.snap;
-const module_path = "src";
+const snap = Snap.snap_fn("src");
 
 test Review {
     const diff =
@@ -505,7 +504,7 @@ test Review {
         \\+        //? since replica_index is also what `routing.replica` is.
         \\
     ;
-    try test_review_case(diff, snap(module_path, @src(),
+    try test_review_case(diff, snap(@src(),
         \\status:
         \\src/git-review.zig:179:  (Added a trailing newline for the generated file.)
         \\src/vsr/message_header.zig:432:  dj: What do you think of referring to this as a replica_position,

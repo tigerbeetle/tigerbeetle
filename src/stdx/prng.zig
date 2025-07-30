@@ -19,8 +19,8 @@ const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
 const Snap = stdx.Snap;
-const snap = Snap.snap;
 const module_path = "src/stdx";
+const snap = Snap.snap_fn(module_path);
 
 s: [4]u64,
 
@@ -143,7 +143,7 @@ test next {
     for (0..1000) |_| {
         distribution[prng.next() % 8] += 1;
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ).diff_fmt("{d}", .{distribution});
 }
@@ -194,7 +194,7 @@ test fill {
         for (0..size) |i| assert(non_zero.is_set(i));
     }
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\{ 3120, 3084, 3089, 3103, 3092, 3120, 3074, 3086 }
     ).diff_fmt("{d}", .{distribution});
 }
@@ -254,7 +254,7 @@ test int_inclusive {
         const n = prng.int_inclusive(u128, 7);
         distribution[@intCast(n)] += 1;
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\{ 123, 127, 115, 125, 125, 139, 111, 135 }
     ).diff_fmt("{d}", .{distribution});
 
@@ -267,7 +267,7 @@ test int_inclusive {
             small += 1;
         }
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\large=506 small=494
     ).diff_fmt("large={} small={}", .{ large, small });
 }
@@ -292,7 +292,7 @@ test index {
     for (0..100) |_| {
         distribution[index(&prng, &distribution)] += 1;
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\{ 9, 13, 13, 11, 10, 16, 16, 12 }
     ).diff_fmt("{d}", .{distribution});
 }
@@ -332,13 +332,13 @@ pub fn int(prng: *PRNG, Int: type) Int {
 }
 
 test int {
-    try test_bytes_int(u8, snap(module_path, @src(),
+    try test_bytes_int(u8, snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ));
-    try test_bytes_int(u64, snap(module_path, @src(),
+    try test_bytes_int(u64, snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
     ));
-    try test_bytes_int(u128, snap(module_path, @src(),
+    try test_bytes_int(u128, snap(@src(),
         \\{ 130, 143, 107, 135, 111, 119, 132, 123 }
     ));
 }
@@ -364,7 +364,7 @@ test boolean {
     for (0..1000) |_| {
         if (prng.boolean()) heads += 1 else tails += 1;
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\heads = 501 tails = 499
     ).diff_fmt("heads = {} tails = {}", .{ heads, tails });
 }
@@ -383,7 +383,7 @@ test chance {
         if (prng.chance(ratio(2, 7))) balance += 1 else balance -= 1;
         if (prng.chance(ratio(5, 7))) balance += 1 else balance -= 1;
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\balance = 46
     ).diff_fmt("balance = {d}", .{balance});
 }
@@ -402,7 +402,7 @@ test chances {
             inline else => |tag| @field(count, @tagName(tag)) += 1,
         }
     }
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\a=166 b=475 c=359
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
 }
@@ -424,7 +424,7 @@ test enum_uniform {
         }
     }
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\a=318 b=323 c=359
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
 }
@@ -465,7 +465,7 @@ test enum_weighted {
         }
     }
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\a=0 b=318 c=682
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
 }
@@ -530,7 +530,7 @@ test Combination {
         e_taken_count += @intFromBool(std.mem.indexOfScalar(u8, &result, 'e') != null);
     }
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\e_taken_count = 432 expected_value=428
     ).diff_fmt("e_taken_count = {} expected_value={}", .{ e_taken_count, 1000 * 3 / 7 });
 }
@@ -569,7 +569,7 @@ test Reservoir {
     for (animals) |animal| total_weight += animal.len;
     const expected_value = 1000 * "kiwi".len / total_weight;
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\kiwi_count = 141 expected_value=153
     ).diff_fmt("kiwi_count = {} expected_value={}", .{ kiwi_count, expected_value });
 }
@@ -593,7 +593,7 @@ test shuffle {
         g_first_count += @intFromBool(buffer[0] == 'g');
     }
 
-    try snap(module_path, @src(),
+    try snap(@src(),
         \\g_first_count = 144 expected_value=142
     ).diff_fmt("g_first_count = {} expected_value={}", .{ g_first_count, 1000 / 7 });
 }
