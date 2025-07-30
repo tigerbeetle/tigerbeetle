@@ -1180,6 +1180,8 @@ pub fn GridType(comptime Storage: type) type {
                     const removed = grid.cache.remove(read.address);
                     assert(removed != null);
                 }
+
+                if (constants.verify) grid.verify_read_fault(read);
             }
 
             grid.read_block_resolve(read, result);
@@ -1407,6 +1409,36 @@ pub fn GridType(comptime Storage: type) type {
                 cached_block[0..cached_header.size],
                 actual_block[0..actual_header.size],
             ));
+        }
+
+        /// Called when we fail to read a block.
+        fn verify_read_fault(grid: *const Grid, read: *const Read) void {
+            comptime assert(constants.verify);
+
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            // Only check coherent reads -- i.e., when we know for certain that the read's
+            // address/checksum belongs in our current checkpoint.
+            if (!read.coherent) return;
+
+            // Check our storage (bypassing faults).
+            if (grid.superblock.storage.grid_block(read.address)) |actual_block| {
+                const actual_header = schema.header_from_block(actual_block);
+                if (actual_header.checksum == read.checksum) {
+                    // Exact block found. Since the read failed anyway, it must have been a
+                    // simulated read fault.
+                    assert(grid.superblock.storage.area_faulty(.{
+                        .grid = .{ .address = read.address },
+                    }));
+                } else {
+                    // Different block found -- since this is a coherent read, we must be syncing.
+                    assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+                }
+            } else {
+                // No block found -- since this is a coherent read, we must by syncing.
+                assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+            }
         }
     };
 }
