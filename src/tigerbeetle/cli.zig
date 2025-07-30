@@ -24,6 +24,7 @@ const data_file_size_min = vsr.superblock.data_file_size_min;
 const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
+const ByteSize = stdx.ByteSize;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -56,7 +57,7 @@ const CLIArgs = union(enum) {
     const Start = struct {
         // Stable CLI arguments.
         addresses: []const u8,
-        cache_grid: ?stdx.ByteSize = null,
+        cache_grid: ?ByteSize = null,
         development: bool = false,
         positional: struct {
             path: []const u8,
@@ -68,14 +69,14 @@ const CLIArgs = union(enum) {
         // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
-        limit_storage: ?stdx.ByteSize = null,
+        limit_storage: ?ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
-        limit_request: ?stdx.ByteSize = null,
-        cache_accounts: ?stdx.ByteSize = null,
-        cache_transfers: ?stdx.ByteSize = null,
-        cache_transfers_pending: ?stdx.ByteSize = null,
-        memory_lsm_manifest: ?stdx.ByteSize = null,
-        memory_lsm_compaction: ?stdx.ByteSize = null,
+        limit_request: ?ByteSize = null,
+        cache_accounts: ?ByteSize = null,
+        cache_transfers: ?ByteSize = null,
+        cache_transfers_pending: ?ByteSize = null,
+        memory_lsm_manifest: ?ByteSize = null,
+        memory_lsm_compaction: ?ByteSize = null,
         trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
@@ -414,12 +415,12 @@ const CLIArgs = union(enum) {
 
 const StartDefaults = struct {
     limit_pipeline_requests: u32,
-    limit_request: stdx.ByteSize,
-    cache_accounts: stdx.ByteSize,
-    cache_transfers: stdx.ByteSize,
-    cache_transfers_pending: stdx.ByteSize,
-    cache_grid: stdx.ByteSize,
-    memory_lsm_compaction: stdx.ByteSize,
+    limit_request: ByteSize,
+    cache_accounts: ByteSize,
+    cache_transfers: ByteSize,
+    cache_transfers_pending: ByteSize,
+    cache_grid: ByteSize,
+    memory_lsm_compaction: ByteSize,
 };
 
 const start_defaults_production = StartDefaults{
@@ -792,9 +793,9 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
-    const start_limit_storage: stdx.ByteSize = start.limit_storage orelse
+    const start_limit_storage: ByteSize = start.limit_storage orelse
         .{ .value = constants.storage_size_limit_default };
-    const start_memory_lsm_manifest: stdx.ByteSize = start.memory_lsm_manifest orelse
+    const start_memory_lsm_manifest: ByteSize = start.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
     const storage_size_limit = start_limit_storage.bytes();
@@ -1248,7 +1249,7 @@ fn parse_address_and_port(
 fn parse_cache_size_to_count(
     comptime T: type,
     comptime SetAssociativeCache: type,
-    size: stdx.ByteSize,
+    size: ByteSize,
     cli_flag: []const u8,
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;
