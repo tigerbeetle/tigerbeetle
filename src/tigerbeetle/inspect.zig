@@ -156,6 +156,15 @@ fn inspect_constants(output: std.io.AnyWriter) !void {
     });
     try output.print("\n", .{});
 
+    try output.print("LSM:\n", .{});
+    try print_header(output, 0, "compaction_ops");
+    try output.print("{}\n", .{constants.lsm_compaction_ops});
+    try print_header(output, 0, "checkpoint_ops");
+    try output.print("{}\n", .{constants.vsr_checkpoint_ops});
+    try print_header(output, 0, "journal_slot_count");
+    try output.print("{}\n", .{constants.journal_slot_count});
+    try output.print("\n", .{});
+
     try output.print("Data File Layout:\n", .{});
     inline for (comptime std.enums.values(vsr.Zone)) |zone| {
         try print_header(output, 0, @tagName(zone));
