@@ -1,4 +1,4 @@
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;

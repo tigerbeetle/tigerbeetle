@@ -53,7 +53,7 @@ const log = std.log;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 pub const CLIArgs = struct {
@@ -1115,8 +1115,8 @@ const SeedRecord = struct {
     }
 };
 
-const Snap = @import("../testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src");
 
 test "cfo: deserialization" {
     // Smoke test that we can still deserialize&migrate old devhub data.

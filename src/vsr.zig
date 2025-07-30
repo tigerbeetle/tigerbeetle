@@ -20,7 +20,7 @@ pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const trace = @import("trace.zig");
-pub const stdx = @import("stdx.zig");
+pub const stdx = @import("stdx");
 pub const flags = @import("flags.zig");
 pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
@@ -35,7 +35,6 @@ pub const lsm = .{
     .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
-    .snaptest = @import("testing/snaptest.zig"),
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
@@ -1606,8 +1605,8 @@ pub const Checkpoint = struct {
 };
 
 test "Checkpoint ops diagram" {
-    const Snap = @import("./testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     var string = std.ArrayList(u8).init(std.testing.allocator);
     defer string.deinit();

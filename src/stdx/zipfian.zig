@@ -50,7 +50,7 @@
 //! the shuffled generator does not because the tail distribution is fudged.
 
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const Random = std.Random;
 const math = std.math;

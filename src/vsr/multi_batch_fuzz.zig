@@ -5,7 +5,7 @@ const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const fuzz = @import("../testing/fuzz.zig");
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {

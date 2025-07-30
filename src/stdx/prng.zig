@@ -15,11 +15,12 @@
 //! - remove dynamic-dispatch indirection (a minor bonus).
 
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const math = std.math;
-const Snap = @import("../testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const module_path = "src/stdx";
+const snap = Snap.snap_fn(module_path);
 
 s: [4]u64,
 
@@ -599,7 +600,7 @@ test shuffle {
 
 test "no floating point please" {
     const path = try std.fs.path.join(std.testing.allocator, &.{
-        "src",
+        module_path,
         @src().file,
     });
     defer std.testing.allocator.free(path);

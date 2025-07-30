@@ -76,26 +76,44 @@ pub const Snap = struct {
         assert(builtin.is_test);
     }
 
+    module_path: []const u8,
     location: SourceLocation,
     text: []const u8,
     update_this: bool = false,
 
-    /// Creates a new Snap.
+    const SnapFn = fn (location: SourceLocation, text: []const u8) Snap;
+
+    /// Takes the path to the root source file of the current module and creates a snap function.
     ///
-    /// For the update logic to work, *must* be formatted as:
+    /// ```
+    /// const snap = Snap.snap_fn("src");
+    /// const snap = Snap.snap_fn("src/stdx");
+    /// ```
+    ///
+    /// For the update logic to work, usage *must* be formatted as:
     ///
     /// ```
     /// snap(@src(),
     ///     \\Text of the snapshot.
     /// )
     /// ```
-    pub fn snap(location: SourceLocation, text: []const u8) Snap {
-        return Snap{ .location = location, .text = text };
+    pub fn snap_fn(comptime module_path: []const u8) SnapFn {
+        return struct {
+            fn snap(location: SourceLocation, text: []const u8) Snap {
+                return init(module_path, location, text);
+            }
+        }.snap;
+    }
+
+    /// Creates a new Snap.
+    fn init(module_path: []const u8, location: SourceLocation, text: []const u8) Snap {
+        return Snap{ .module_path = module_path, .location = location, .text = text };
     }
 
     /// Builder-lite method to update just this particular snapshot.
     pub fn update(snapshot: *const Snap) Snap {
         return Snap{
+            .module_path = snapshot.module_path,
             .location = snapshot.location,
             .text = snapshot.text,
             .update_this = true,
@@ -162,23 +180,22 @@ pub const Snap = struct {
             return error.SnapDiff;
         }
 
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
+        var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena_instance.deinit();
 
-        const allocator = arena.allocator();
+        const arena = arena_instance.allocator();
         const file_path_relative = try std.fs.path.join(
-            allocator,
+            arena,
             // The file location is relative to the module root path.
-            // TODO: Don't hardcode `src` here.
-            &.{ "src/", snapshot.location.file },
+            &.{ snapshot.module_path, snapshot.location.file },
         );
 
         const file_text = try std.fs.cwd().readFileAlloc(
-            allocator,
+            arena,
             file_path_relative,
             1024 * 1024,
         );
-        var file_text_updated = try std.ArrayList(u8).initCapacity(allocator, file_text.len);
+        var file_text_updated = try std.ArrayList(u8).initCapacity(arena, file_text.len);
 
         const line_zero_based = snapshot.location.line - 1;
         const range = snap_range(file_text, line_zero_based);

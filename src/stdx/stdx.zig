@@ -4,20 +4,21 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayType;
-pub const RingBufferType = @import("./stdx/ring_buffer.zig").RingBufferType;
-pub const BitSetType = @import("./stdx/bit_set.zig").BitSetType;
-pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
-pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
+pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
+pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+pub const BitSetType = @import("bit_set.zig").BitSetType;
+pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
+pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
+pub const Snap = @import("testing/snaptest.zig").Snap;
 
-pub const memory_lock_allocated = @import("./stdx/mlock.zig").memory_lock_allocated;
+pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 
-pub const timeit = @import("./stdx/debug.zig").timeit;
-pub const dbg = @import("./stdx/debug.zig").dbg;
+pub const timeit = @import("debug.zig").timeit;
+pub const dbg = @import("debug.zig").dbg;
 
-pub const aegis = @import("./stdx/aegis.zig");
+pub const aegis = @import("aegis.zig");
 
-pub const PRNG = @import("./stdx/prng.zig");
+pub const PRNG = @import("prng.zig");
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
@@ -215,41 +216,40 @@ pub fn bytes_as_slice(
 }
 
 test bytes_as_slice {
-    const testing = std.testing;
     var buffer: [64]u8 = undefined;
     const T10 = extern struct { content: [10]u8 };
     const T16 = extern struct { content: [16]u8 };
 
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 4),
         bytes_as_slice(.exact, T16, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.exact, T10, buffer[0..60]).len,
     );
 
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.inexact, T10, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 4),
         bytes_as_slice(.inexact, T16, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 1]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 3),
         bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 1]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 5),
         bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 10]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 3),
         bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 10]).len,
     );
@@ -1057,4 +1057,15 @@ pub fn unique_u128() u128 {
     assert(value != std.math.maxInt(u128));
 
     return value;
+}
+
+comptime {
+    _ = @import("stdx.zig");
+    _ = @import("aegis.zig");
+    _ = @import("bit_set.zig");
+    _ = @import("bounded_array.zig");
+    _ = @import("prng.zig");
+    _ = @import("ring_buffer.zig");
+    _ = @import("sort_test.zig");
+    _ = @import("zipfian.zig");
 }

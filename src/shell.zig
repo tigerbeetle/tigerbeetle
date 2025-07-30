@@ -19,7 +19,7 @@ const log = std.log;
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const Shell = @This();
 
 const cwd_stack_max = 16;
@@ -771,8 +771,8 @@ fn expand_argv(argv: *Argv, comptime cmd: []const u8, cmd_args: anytype) !void {
     comptime if (args_used.count() != arg_count) @compileError("Unused argument");
 }
 
-const Snap = @import("./testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src");
 
 test "shell: expand_argv" {
     const T = struct {

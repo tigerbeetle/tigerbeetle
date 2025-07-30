@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const os = std.os;

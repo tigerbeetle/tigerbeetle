@@ -20,7 +20,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;

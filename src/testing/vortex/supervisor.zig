@@ -42,7 +42,7 @@
 //! * multiple drivers? could use a special multiplexer driver that delegates to others
 
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const IO = @import("../../io.zig").IO;
 const RingBufferType = stdx.RingBufferType;

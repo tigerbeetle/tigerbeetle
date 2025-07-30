@@ -83,7 +83,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const fmt = std.fmt;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const log = stdx.log.scoped(.clock);
 const constants = @import("../constants.zig");
 const ratio = stdx.PRNG.ratio;

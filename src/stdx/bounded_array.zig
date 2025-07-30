@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 
 /// A version of standard `BoundedArray` with TigerBeetle-idiomatic APIs.

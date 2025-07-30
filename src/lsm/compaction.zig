@@ -39,7 +39,7 @@ const log = std.log.scoped(.compaction);
 
 const constants = @import("../constants.zig");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const vsr = @import("../vsr.zig");
 const trace = @import("../trace.zig");

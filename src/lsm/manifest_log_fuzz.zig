@@ -12,7 +12,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const fixtures = @import("../testing/fixtures.zig");
 const constants = @import("../constants.zig");

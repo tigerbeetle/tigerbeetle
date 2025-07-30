@@ -6,7 +6,7 @@ const expectEqual = std.testing.expectEqual;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const fuzz = @import("../testing/fuzz.zig");

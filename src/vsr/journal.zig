@@ -6,7 +6,7 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 
 const Message = @import("../message_pool.zig").MessagePool.Message;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const IOPSType = @import("../iops.zig").IOPSType;

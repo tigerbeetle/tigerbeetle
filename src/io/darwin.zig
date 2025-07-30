@@ -4,7 +4,7 @@ const mem = std.mem;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;

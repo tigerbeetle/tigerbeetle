@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 /// An intrusive doubly-linked list.
 /// Currently it is LIFO for simplicity because its consumer (IO.awaiting) doesn't care about order.

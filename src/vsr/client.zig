@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const mem = std.mem;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;

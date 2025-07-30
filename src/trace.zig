@@ -100,7 +100,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
 const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const Duration = stdx.Duration;
 const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
@@ -438,8 +438,8 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
 const fixtures = @import("testing/fixtures.zig");
 
 test "trace json" {
-    const Snap = @import("testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
     const gpa = std.testing.allocator;
 
     var trace_buffer: std.ArrayListUnmanaged(u8) = .empty;

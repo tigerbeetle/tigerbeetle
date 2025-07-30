@@ -3,7 +3,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_journal_format);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");

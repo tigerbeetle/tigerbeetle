@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 const mem = std.mem;
 const log = std.log.scoped(.forest);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 const schema = @import("schema.zig");

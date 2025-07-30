@@ -15,15 +15,6 @@ comptime {
     _ = @import("git-review.zig");
     _ = @import("message_buffer.zig");
 
-    _ = @import("stdx.zig");
-    _ = @import("stdx/aegis.zig");
-    _ = @import("stdx/bit_set.zig");
-    _ = @import("stdx/bounded_array.zig");
-    _ = @import("stdx/prng.zig");
-    _ = @import("stdx/ring_buffer.zig");
-    _ = @import("stdx/sort_test.zig");
-    _ = @import("stdx/zipfian.zig");
-
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
     _ = @import("trace/statsd.zig");
@@ -70,7 +61,6 @@ comptime {
     _ = @import("testing/exhaustigen.zig");
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
-    _ = @import("testing/snaptest.zig");
     _ = @import("testing/storage.zig");
     _ = @import("testing/table.zig");
     _ = @import("testing/tmp_tigerbeetle.zig");

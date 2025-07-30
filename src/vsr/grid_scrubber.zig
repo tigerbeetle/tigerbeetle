@@ -24,7 +24,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.grid_scrubber);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const schema = @import("../lsm/schema.zig");
@@ -776,8 +776,8 @@ test "GridScrubber cycle interval" {
     // In other words, P(eventual data loss).
     const p_cluster_blocks_corrupt_per_span = 1.0 - p_cluster_blocks_healthy_per_span;
 
-    const Snap = @import("../testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     try snap(@src(),
         \\4.3582921528e-3

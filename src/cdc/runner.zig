@@ -1424,8 +1424,8 @@ test "amqp: ProgressTrackerMessage" {
 }
 
 test "amqp: JSON message" {
-    const Snap = @import("../testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     const buffer = try testing.allocator.alloc(u8, Message.json_string_size_max);
     defer testing.allocator.free(buffer);

@@ -5,7 +5,7 @@ const mem = std.mem;
 
 const log = std.log.scoped(.state_machine);
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const constants = @import("constants.zig");
