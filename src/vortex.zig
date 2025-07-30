@@ -9,7 +9,6 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
-const flags = @import("flags.zig");
 
 const Supervisor = @import("testing/vortex/supervisor.zig");
 const ZigDriver = @import("testing/vortex/zig_driver.zig");
@@ -55,7 +54,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    switch (flags.parse(&args, CLIArgs)) {
+    switch (stdx.flags(&args, CLIArgs)) {
         .supervisor => |supervisor_args| try Supervisor.main(allocator, supervisor_args),
         .driver => |driver_args| try ZigDriver.main(allocator, driver_args),
         .workload => |driver_args| {

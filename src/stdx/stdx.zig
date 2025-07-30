@@ -4,21 +4,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
-pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const BitSetType = @import("bit_set.zig").BitSetType;
+pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
+pub const PRNG = @import("prng.zig");
+pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+pub const Snap = @import("testing/snaptest.zig").Snap;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
-pub const Snap = @import("testing/snaptest.zig").Snap;
-
-pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
-
-pub const timeit = @import("debug.zig").timeit;
-pub const dbg = @import("debug.zig").dbg;
 
 pub const aegis = @import("aegis.zig");
-
-pub const PRNG = @import("prng.zig");
+pub const dbg = @import("debug.zig").dbg;
+pub const flags = @import("flags.zig").parse;
+pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
+pub const timeit = @import("debug.zig").timeit;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
@@ -1059,11 +1057,133 @@ pub fn unique_u128() u128 {
     return value;
 }
 
+/// NB: intended for parsing CLI arguments where we care to preserve the user-specified unit.
+/// Use `size: u64` for all other use-cases.
+pub const ByteSize = struct {
+    value: u64,
+    unit: Unit = .bytes,
+
+    const Unit = enum(u64) {
+        bytes = 1,
+        kib = 1024,
+        mib = 1024 * 1024,
+        gib = 1024 * 1024 * 1024,
+        tib = 1024 * 1024 * 1024 * 1024,
+    };
+
+    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
+        assert(value.len != 0);
+
+        const split: struct {
+            value_input: []const u8,
+            unit_input: []const u8,
+        } = split: for (0..value.len) |i| {
+            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
+                break :split .{
+                    .value_input = value[0..i],
+                    .unit_input = value[i..],
+                };
+            }
+        } else {
+            break :split .{
+                .value_input = value,
+                .unit_input = "",
+            };
+        };
+
+        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
+            switch (err) {
+                error.Overflow => {
+                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
+                },
+                error.InvalidCharacter => {
+                    // The only case this can happen is for the empty string
+                    return .{ .err = "expected a size, but found:" };
+                },
+            }
+        };
+
+        const unit = if (split.unit_input.len > 0)
+            unit: inline for (comptime std.enums.values(Unit)) |tag| {
+                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
+                    break :unit tag;
+                }
+            } else {
+                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
+            }
+        else
+            Unit.bytes;
+
+        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
+            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
+        };
+
+        return .{ .ok = .{ .value = amount, .unit = unit } };
+    }
+
+    pub fn bytes(size: *const ByteSize) u64 {
+        return std.math.mul(
+            u64,
+            size.value,
+            @intFromEnum(size.unit),
+        ) catch unreachable;
+    }
+
+    pub fn suffix(size: *const ByteSize) []const u8 {
+        return switch (size.unit) {
+            .bytes => "",
+            .kib => "KiB",
+            .mib => "MiB",
+            .gib => "GiB",
+            .tib => "TiB",
+        };
+    }
+};
+
+test "ByteSize.parse_flag_value" {
+    const kib = 1024;
+    const mib = kib * 1024;
+    const gib = mib * 1024;
+    const tib = gib * 1024;
+
+    const cases = .{
+        .{ 0, "0", 0, ByteSize.Unit.bytes },
+        .{ 1, "1", 1, ByteSize.Unit.bytes },
+        .{ 140737488355328, "140737488355328", 140737488355328, ByteSize.Unit.bytes },
+        .{ 140737488355328, "128TiB", 128, ByteSize.Unit.tib },
+        .{ 1 * tib, "1TiB", 1, ByteSize.Unit.tib },
+        .{ 10 * tib, "10tib", 10, ByteSize.Unit.tib },
+        .{ 1 * gib, "1GiB", 1, ByteSize.Unit.gib },
+        .{ 10 * gib, "10gib", 10, ByteSize.Unit.gib },
+        .{ 1 * mib, "1MiB", 1, ByteSize.Unit.mib },
+        .{ 10 * mib, "10mib", 10, ByteSize.Unit.mib },
+        .{ 1 * kib, "1KiB", 1, ByteSize.Unit.kib },
+        .{ 10 * kib, "10kib", 10, ByteSize.Unit.kib },
+        .{ 10 * kib, "1_0kib", 10, ByteSize.Unit.kib },
+    };
+
+    inline for (cases) |case| {
+        const bytes = case[0];
+        const input = case[1];
+        const unit_val = case[2];
+        const unit = case[3];
+        const result = ByteSize.parse_flag_value(input);
+        if (result == .err) {
+            std.debug.panic("expected ok, got: '{s}'", .{result.err});
+        }
+        const got = result.ok;
+        assert(bytes == got.bytes());
+        assert(unit_val == got.value);
+        assert(unit == got.unit);
+    }
+}
+
 comptime {
     _ = @import("stdx.zig");
     _ = @import("aegis.zig");
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
+    _ = @import("flags.zig");
     _ = @import("prng.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("sort_test.zig");

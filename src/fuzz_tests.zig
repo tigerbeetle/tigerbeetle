@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const flags = @import("./flags.zig");
+const stdx = @import("stdx");
 const constants = @import("./constants.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
@@ -90,7 +90,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {

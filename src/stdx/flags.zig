@@ -38,7 +38,7 @@
 //!   caller to manage the lifetime. The caller should be skipping program name.
 
 const std = @import("std");
-const stdx = @import("stdx");
+const stdx = @import("stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
@@ -135,7 +135,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             positional_fields = std.meta.fields(field.type);
             var optional_tail = false;
             for (positional_fields) |positional_field| {
-                if (default_value(positional_field) == null) {
+                if (positional_field.defaultValue() == null) {
                     if (optional_tail) @panic("optional positional arguments must be last");
                 } else {
                     optional_tail = true;
@@ -143,8 +143,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 switch (@typeInfo(positional_field.type)) {
                     .optional => |optional| {
                         // optional flags should have a default
-                        assert(default_value(positional_field) != null);
-                        assert(default_value(positional_field).? == null);
+                        assert(positional_field.defaultValue() != null);
+                        assert(positional_field.defaultValue().? == null);
                         assert_valid_value_type(optional.child);
                     },
                     else => {
@@ -159,13 +159,13 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             switch (@typeInfo(field.type)) {
                 .bool => {
                     // boolean flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == false);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == false);
                 },
                 .optional => |optional| {
                     // optional flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == null);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == null);
 
                     assert_valid_value_type(optional.child);
                 },
@@ -256,7 +256,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     inline for (fields[0..field_count]) |field| {
         const flag = flag_name(field);
         switch (@field(counts, field.name)) {
-            0 => if (default_value(field)) |default| {
+            0 => if (field.defaultValue()) |default| {
                 @field(result, field.name) = default;
             } else {
                 fatal("{s}: argument is required", .{flag});
@@ -271,7 +271,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (positional_index >= counts.positional) {
                 const flag = comptime flag_name_positional(positional_field);
-                if (default_value(positional_field)) |default| {
+                if (positional_field.defaultValue()) |default| {
                     @field(result.positional, positional_field.name) = default;
                 } else {
                     fatal("{s}: argument is required", .{flag});
@@ -360,125 +360,6 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     comptime unreachable;
 }
 
-pub const ByteUnit = enum(u64) {
-    bytes = 1,
-    kib = 1024,
-    mib = 1024 * 1024,
-    gib = 1024 * 1024 * 1024,
-    tib = 1024 * 1024 * 1024 * 1024,
-};
-
-pub const ByteSize = struct {
-    value: u64,
-    unit: ByteUnit = .bytes,
-
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
-        assert(value.len != 0);
-
-        const split: struct {
-            value_input: []const u8,
-            unit_input: []const u8,
-        } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
-                break :split .{
-                    .value_input = value[0..i],
-                    .unit_input = value[i..],
-                };
-            }
-        } else {
-            break :split .{
-                .value_input = value,
-                .unit_input = "",
-            };
-        };
-
-        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
-            switch (err) {
-                error.Overflow => {
-                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
-                },
-                error.InvalidCharacter => {
-                    // The only case this can happen is for the empty string
-                    return .{ .err = "expected a size, but found:" };
-                },
-            }
-        };
-
-        const unit = if (split.unit_input.len > 0)
-            unit: inline for (comptime std.enums.values(ByteUnit)) |tag| {
-                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
-                    break :unit tag;
-                }
-            } else {
-                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
-            }
-        else
-            ByteUnit.bytes;
-
-        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
-        };
-
-        return .{ .ok = .{ .value = amount, .unit = unit } };
-    }
-
-    pub fn bytes(size: *const ByteSize) u64 {
-        return std.math.mul(
-            u64,
-            size.value,
-            @intFromEnum(size.unit),
-        ) catch unreachable;
-    }
-
-    pub fn suffix(size: *const ByteSize) []const u8 {
-        return switch (size.unit) {
-            .bytes => "",
-            .kib => "KiB",
-            .mib => "MiB",
-            .gib => "GiB",
-            .tib => "TiB",
-        };
-    }
-};
-
-test "ByteSize.parse_flag_value" {
-    const kib = 1024;
-    const mib = kib * 1024;
-    const gib = mib * 1024;
-    const tib = gib * 1024;
-
-    const cases = .{
-        .{ 0, "0", 0, ByteUnit.bytes },
-        .{ 1, "1", 1, ByteUnit.bytes },
-        .{ 140737488355328, "140737488355328", 140737488355328, ByteUnit.bytes },
-        .{ 140737488355328, "128TiB", 128, ByteUnit.tib },
-        .{ 1 * tib, "1TiB", 1, ByteUnit.tib },
-        .{ 10 * tib, "10tib", 10, ByteUnit.tib },
-        .{ 1 * gib, "1GiB", 1, ByteUnit.gib },
-        .{ 10 * gib, "10gib", 10, ByteUnit.gib },
-        .{ 1 * mib, "1MiB", 1, ByteUnit.mib },
-        .{ 10 * mib, "10mib", 10, ByteUnit.mib },
-        .{ 1 * kib, "1KiB", 1, ByteUnit.kib },
-        .{ 10 * kib, "10kib", 10, ByteUnit.kib },
-        .{ 10 * kib, "1_0kib", 10, ByteUnit.kib },
-    };
-
-    inline for (cases) |case| {
-        const bytes = case[0];
-        const input = case[1];
-        const unit_val = case[2];
-        const unit = case[3];
-        const result = ByteSize.parse_flag_value(input);
-        if (result == .err) {
-            std.debug.panic("expected ok, got: '{s}'", .{result.err});
-        }
-        const got = result.ok;
-        assert(bytes == got.bytes());
-        assert(unit_val == got.value);
-        assert(unit == got.unit);
-    }
-}
-
 /// Parse string value into an integer, providing a nice error message for the user.
 fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
@@ -539,7 +420,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
     }
 }
 
-pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
     return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 
@@ -562,14 +443,6 @@ test flag_name {
 fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8 {
     comptime assert(std.mem.indexOfScalar(u8, field.name, '_') == null);
     return "<" ++ field.name ++ ">";
-}
-
-/// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-pub fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
-    return if (field.default_value_ptr) |default_opaque|
-        @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
-    else
-        null;
 }
 
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
@@ -601,7 +474,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
         },
         values: struct {
             int: u32 = 0,
-            size: ByteSize = .{ .value = 0 },
+            size: stdx.ByteSize = .{ .value = 0 },
             boolean: bool = false,
             path: []const u8 = "not-set",
             optional: ?[]const u8 = null,
@@ -673,7 +546,7 @@ pub usingnamespace if (@import("root") != @This()) struct {
 
 test "flags" {
     const Snap = stdx.Snap;
-    const module_path = "src";
+    const module_path = "src/stdx";
     const snap = Snap.snap_fn(module_path);
 
     const T = struct {
