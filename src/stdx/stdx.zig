@@ -4,21 +4,19 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
-pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const BitSetType = @import("bit_set.zig").BitSetType;
+pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
+pub const PRNG = @import("prng.zig");
+pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+pub const Snap = @import("testing/snaptest.zig").Snap;
 pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
 pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
-pub const Snap = @import("testing/snaptest.zig").Snap;
-
-pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
-
-pub const timeit = @import("debug.zig").timeit;
-pub const dbg = @import("debug.zig").dbg;
 
 pub const aegis = @import("aegis.zig");
-
-pub const PRNG = @import("prng.zig");
+pub const dbg = @import("debug.zig").dbg;
+pub const flags = @import("flags.zig");
+pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
+pub const timeit = @import("debug.zig").timeit;
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
@@ -1064,6 +1062,7 @@ comptime {
     _ = @import("aegis.zig");
     _ = @import("bit_set.zig");
     _ = @import("bounded_array.zig");
+    _ = @import("flags.zig");
     _ = @import("prng.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("sort_test.zig");

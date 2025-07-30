@@ -5,7 +5,6 @@ comptime {
     _ = @import("ewah.zig");
     _ = @import("queue.zig");
     _ = @import("stack.zig");
-    _ = @import("flags.zig");
     _ = @import("io.zig");
     _ = @import("list.zig");
     _ = @import("shell.zig");

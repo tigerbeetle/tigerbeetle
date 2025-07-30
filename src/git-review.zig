@@ -31,7 +31,6 @@
 const std = @import("std");
 const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
-const flags = @import("./flags.zig");
 
 const log = std.log;
 const assert = std.debug.assert;
@@ -102,7 +101,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags.parse(&args, CLIArgs);
 
     switch (cli_args) {
         .status => _ = try review_status(shell),

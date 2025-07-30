@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 const assert = std.debug.assert;
 
 const multiversioning = @import("./multiversioning.zig");
-const flags = @import("flags.zig");
+const stdx = @import("stdx");
 const Shell = @import("shell.zig");
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
@@ -64,7 +64,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags.parse(&args, CLIArgs);
 
     const tmp_dir_path = try shell.fmt("{s}/{d}", .{
         cli_args.tmp,

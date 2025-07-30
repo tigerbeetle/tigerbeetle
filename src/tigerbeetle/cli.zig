@@ -18,7 +18,7 @@ const net = std.net;
 
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
-const flags = vsr.flags;
+const flags = stdx.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;

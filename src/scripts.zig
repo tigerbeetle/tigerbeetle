@@ -12,7 +12,6 @@
 const std = @import("std");
 
 const stdx = @import("stdx");
-const flags = @import("flags.zig");
 const Shell = @import("shell.zig");
 
 const cfo = @import("./scripts/cfo.zig");
@@ -95,7 +94,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags.parse(&args, CLIArgs);
 
     switch (cli_args) {
         .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),

@@ -9,7 +9,6 @@ const Ratio = stdx.PRNG.Ratio;
 const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
 
 const constants = @import("constants.zig");
-const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const fuzz = @import("./testing/fuzz.zig");
@@ -103,7 +102,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags.parse(&args, CLIArgs);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
