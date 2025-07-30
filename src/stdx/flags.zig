@@ -539,7 +539,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
     }
 }
 
-pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
     return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 

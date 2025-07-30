@@ -764,7 +764,11 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         } else false;
         if (stable_field) continue;
 
-        const flag_name = flags.flag_name(field);
+        const flag_name = comptime blk: {
+            var result: [2 + field.name.len]u8 = ("--" ++ field.name).*;
+            std.mem.replaceScalar(u8, &result, '_', '-');
+            break :blk result;
+        };
 
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
