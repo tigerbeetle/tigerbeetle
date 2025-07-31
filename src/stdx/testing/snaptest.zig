@@ -150,6 +150,14 @@ pub const Snap = struct {
         try snapshot.diff(got.items);
     }
 
+    pub fn diff_hex(snapshot: *const Snap, value: []const u8) !void {
+        var buffer: std.ArrayListUnmanaged(u8) = .empty;
+        defer buffer.deinit(std.testing.allocator);
+
+        try hexdump(value, buffer.writer(std.testing.allocator).any());
+        try snapshot.diff(buffer.items);
+    }
+
     // Compare the snapshot with a given string.
     pub fn diff(snapshot: *const Snap, got: []const u8) !void {
         if (equal_excluding_ignored(got, snapshot.text)) return;
@@ -330,4 +338,23 @@ fn get_indent(line: []const u8) []const u8 {
         if (c != ' ') return line[0..i];
     }
     return line;
+}
+
+fn hexdump(bytes: []const u8, writer: std.io.AnyWriter) !void {
+    for (bytes, 0..) |byte, index| {
+        if (index > 0) {
+            const space = if (index % 16 == 0) "\n" else if (index % 8 == 0) "  " else " ";
+            try writer.writeAll(space);
+        }
+        try writer.print("{x:02}", .{byte});
+    }
+}
+
+test hexdump {
+    const snap = Snap.snap_fn("./src/stdx");
+
+    try snap(@src(),
+        \\68 65 6c 6c 6f 2c 20 77  6f 72 6c 64 0a 00 01 02
+        \\03 fd fe ff
+    ).diff_hex("hello, world\n" ++ .{ 0, 1, 2, 3, 253, 254, 255 });
 }

@@ -1013,8 +1013,8 @@ test "amqp: frame and header" {
         encoder.write_method_header(.{ .class = 1, .method = 10 });
         encoder.finish_frame(.method);
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,1,0,10,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  01 00 0a ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 
     {
@@ -1030,8 +1030,9 @@ test "amqp: frame and header" {
         encoder.finish_header(0);
 
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,10,0,100,206,2,0,1,0,0,0,12,0,10,0,0,0,0,0,0,0,0,0,0,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  0a 00 64 ce 02 00 01 00
+            \\00 00 0c 00 0a 00 00 00  00 00 00 00 00 00 00 ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 
     {
@@ -1051,8 +1052,10 @@ test "amqp: frame and header" {
         encoder.finish_frame(.body);
 
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,100,3,232,206,2,0,1,0,0,0,12,0,100,0,0,0,0,0,0,0,0,0,4,206,3,0,1,0,0,0,4,98,111,100,121,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  64 03 e8 ce 02 00 01 00
+            \\00 00 0c 00 64 00 00 00  00 00 00 00 00 00 04 ce
+            \\03 00 01 00 00 00 04 62  6f 64 79 ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 }
 
