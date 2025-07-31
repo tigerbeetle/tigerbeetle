@@ -819,7 +819,7 @@ fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
 fn git_sha_to_binary(commit: []const u8) ![20]u8 {
     assert(commit.len == 40);
 
-    var commit_bytes: [20]u8 = std.mem.zeroes([20]u8);
+    var commit_bytes: [20]u8 = @splat(0);
     for (0..@divExact(commit.len, 2)) |i| {
         const byte = try std.fmt.parseInt(u8, commit[i * 2 ..][0..2], 16);
         commit_bytes[i] = byte;
