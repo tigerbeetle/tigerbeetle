@@ -453,6 +453,11 @@ const Command = struct {
                 break :blk null;
             }
 
+            if (args.addresses_zero) {
+                log.info("multiversioning: upgrades disabled due to --addresses=0", .{});
+                break :blk null;
+            }
+
             break :blk try vsr.multiversioning.Multiversion.init(
                 allocator,
                 io,
