@@ -206,17 +206,19 @@
 //! enqueued as soon as the request method is called and will be executed even
 //! if the future is dropped.
 //!
-//! With one subtle exception.
+//! It is possible to drop a `Client` while request futures are still
+//! outstanding. In this case any pending requests will be completed with
+//! [`PacketStatus::ClientShutdown`]. Request futures may resolve to successful
+//! results even after the client is closed.
 //!
-//! If a `Client` is dropped, any pending requests are canceled and will not be
-//! executed. Because the futures returned by requests are tied by Rust
-//! lifetimes to the client, it is not possible to drop the client as long as
-//! any of its futures are outstanding.
+//! When `Client` is dropped without calling [`close`],
+//! it will shutdown correctly, but some of that work happens
+//! off-thread after the drop completes.
 //!
-//! If all futures are dropped it becomes possible to accidentally drop the
-//! client before all requests have been submitted. TigerBeetle recommends
-//! awaiting all futures, as well as calling [`close`] and awaiting its future
-//! to destroy the `Client`.
+//! For orderly shutdown, it is recommended to await all
+//! request futures prior to destroying the client,
+//! and to destroy the client by calling `close` and awaiting
+//! its return value.
 //!
 //! [`close`]: Client::close
 //!
@@ -312,8 +314,6 @@
 //! # References
 //!
 //! [The TigerBeetle Reference](https://docs.tigerbeetle.com/reference/).
-
-#![allow(clippy::needless_lifetimes)] // explicit lifetimes for readability
 
 use bitflags::bitflags;
 use futures_channel::oneshot::{channel, Receiver};
@@ -491,10 +491,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`create_accounts`](https://docs.tigerbeetle.com/reference/requests/create_accounts).
-    pub fn create_accounts<'s>(
-        &'s self,
+    pub fn create_accounts(
+        &self,
         events: &[Account],
-    ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
 
@@ -623,10 +623,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`create_transfers`](https://docs.tigerbeetle.com/reference/requests/create_transfers).
-    pub fn create_transfers<'s>(
-        &'s self,
+    pub fn create_transfers(
+        &self,
         events: &[Transfer],
-    ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
 
@@ -731,10 +731,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`lookup_accounts`](https://docs.tigerbeetle.com/reference/requests/lookup_accounts).
-    pub fn lookup_accounts<'s>(
-        &'s self,
+    pub fn lookup_accounts(
+        &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS, events);
 
@@ -820,10 +820,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`lookup_transfers`](https://docs.tigerbeetle.com/reference/requests/lookup_transfers).
-    pub fn lookup_transfers<'s>(
-        &'s self,
+    pub fn lookup_transfers(
+        &self,
         events: &[u128],
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<u128>(tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS, events);
 
@@ -851,10 +851,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`get_account_transfers`](https://docs.tigerbeetle.com/reference/requests/get_account_transfers).
-    pub fn get_account_transfers<'s>(
-        &'s self,
+    pub fn get_account_transfers(
+        &self,
         event: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_TRANSFERS,
             &[event],
@@ -885,10 +885,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`get_account_balances`](https://docs.tigerbeetle.com/reference/requests/get_account_balances).
-    pub fn get_account_balances<'s>(
-        &'s self,
+    pub fn get_account_balances(
+        &self,
         event: AccountFilter,
-    ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<AccountBalance>, PacketStatus>> {
         let (packet, rx) = create_packet::<AccountFilter>(
             tbc::TB_OPERATION_TB_OPERATION_GET_ACCOUNT_BALANCES,
             &[event],
@@ -919,10 +919,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`query_accounts`](https://docs.tigerbeetle.com/reference/requests/query_accounts).
-    pub fn query_accounts<'s>(
-        &'s self,
+    pub fn query_accounts(
+        &self,
         event: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Account>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_ACCOUNTS, &[event]);
 
@@ -951,10 +951,10 @@ impl Client {
     /// # Protocol reference
     ///
     /// [`query_transfers`](https://docs.tigerbeetle.com/reference/requests/query_transfers).
-    pub fn query_transfers<'s>(
-        &'s self,
+    pub fn query_transfers(
+        &self,
         event: QueryFilter,
-    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> + use<'s> {
+    ) -> impl Future<Output = Result<Vec<Transfer>, PacketStatus>> {
         let (packet, rx) =
             create_packet::<QueryFilter>(tbc::TB_OPERATION_TB_OPERATION_QUERY_TRANSFERS, &[event]);
 
@@ -1651,8 +1651,6 @@ pub enum PacketStatus {
     /// The client's version is too high.
     ClientReleaseTooHigh,
     /// The client was already destructed.
-    ///
-    /// This should not be possible in the Rust client.
     ClientShutdown,
     /// An invalid operation was submitted.
     ///
@@ -1760,9 +1758,9 @@ where
     (packet, rx)
 }
 
-fn handle_message<'stack, CEvent, CResult>(
-    msg: &'stack CompletionMessage<CEvent>,
-) -> Result<&'stack [CResult], PacketStatus> {
+fn handle_message<CEvent, CResult>(
+    msg: &CompletionMessage<CEvent>,
+) -> Result<&[CResult], PacketStatus> {
     let packet = &msg.packet;
     let result = &msg.result;
 
