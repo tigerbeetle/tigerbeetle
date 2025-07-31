@@ -38,12 +38,7 @@ pub const DotnetDocs = Docs{
 
     .examples = "",
 
-    .client_object_documentation =
-    \\The `Client` class is thread-safe and for better performance, a
-    \\single instance should be shared between multiple concurrent
-    \\tasks. Multiple clients can be instantiated in case of connecting
-    \\to more than one TigerBeetle cluster.
-    ,
+    .client_object_documentation = "",
     .create_accounts_documentation =
     \\The `UInt128` fields like `ID`, `UserData128`, `Amount` and
     \\account balances have a few extension methods to make it easier
