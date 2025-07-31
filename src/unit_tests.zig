@@ -13,6 +13,7 @@ comptime {
     _ = @import("time.zig");
     _ = @import("git-review.zig");
     _ = @import("message_buffer.zig");
+    _ = @import("multiversioning.zig");
 
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
