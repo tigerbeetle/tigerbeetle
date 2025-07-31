@@ -68,13 +68,13 @@ const SourceLocation = std.builtin.SourceLocation;
 
 const stdx = @import("../stdx.zig");
 
-// Set to `true` to update all snapshots.
-const update_all: bool = false;
-
 pub const Snap = struct {
     comptime {
         assert(builtin.is_test);
     }
+
+    // Set to `true` to update all snapshots.
+    pub var update_all: bool = false;
 
     module_path: []const u8,
     location: SourceLocation,
@@ -137,16 +137,15 @@ pub const Snap = struct {
         try snapshot.diff(got);
     }
 
-    // Compare the snapshot with the json serialization of a `value`.
-    pub fn diff_json(
+    // Compare the snapshot with the zon json serialization of a `value`.
+    pub fn diff_zon(
         snapshot: *const Snap,
         value: anytype,
-        options: std.json.StringifyOptions,
     ) !void {
-        var got = std.ArrayList(u8).init(std.testing.allocator);
-        defer got.deinit();
+        var got: std.ArrayListUnmanaged(u8) = .empty;
+        defer got.deinit(std.testing.allocator);
 
-        try std.json.stringify(value, options, got.writer());
+        try std.zon.stringify.serialize(value, .{}, got.writer(std.testing.allocator));
         try snapshot.diff(got.items);
     }
 
@@ -357,4 +356,8 @@ test hexdump {
         \\68 65 6c 6c 6f 2c 20 77  6f 72 6c 64 0a 00 01 02
         \\03 fd fe ff
     ).diff_hex("hello, world\n" ++ .{ 0, 1, 2, 3, 253, 254, 255 });
+}
+
+test "Snap update disabled" {
+    assert(!Snap.update_all); // Forgot to flip this back to false after updating snapshots?
 }
