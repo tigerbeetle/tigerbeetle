@@ -55,8 +55,9 @@ const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 const Random = std.Random;
 const math = std.math;
-const Snap = @import("../testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const module_path = "src/stdx";
+const snap = Snap.snap_fn(module_path);
 
 /// The default "skew" of the distribution.
 const theta_default = 0.99; // per YCSB
