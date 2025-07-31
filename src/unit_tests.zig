@@ -12,6 +12,7 @@ comptime {
     _ = @import("tidy.zig");
     _ = @import("time.zig");
     _ = @import("message_buffer.zig");
+    _ = @import("multiversioning.zig");
 
     _ = @import("trace.zig");
     _ = @import("trace/event.zig");
