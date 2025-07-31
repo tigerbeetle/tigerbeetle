@@ -341,6 +341,69 @@ fn close_no_wait() -> anyhow::Result<()> {
 }
 
 #[test]
+fn client_drop_before_future_awaited() -> anyhow::Result<()> {
+    let future = {
+        let client = test_client()?;
+
+        let account = tb::Account {
+            id: tb::id(),
+            ledger: TEST_LEDGER,
+            code: TEST_CODE,
+            ..Default::default()
+        };
+
+        let future = client.create_accounts(&[account]);
+        drop(client);
+        future
+    };
+
+    let result = block_on(async { future.await });
+
+    match result {
+        Ok(_) => {}
+        Err(tb::PacketStatus::ClientShutdown) => {}
+        Err(_) => panic!(),
+    }
+
+    Ok(())
+}
+
+#[test]
+fn client_drop_causes_shutdown_status() -> anyhow::Result<()> {
+    let futures = {
+        let client = test_client()?;
+
+        let mut futures = Vec::new();
+        for _ in 0..10 {
+            let account = tb::Account {
+                id: tb::id(),
+                ledger: TEST_LEDGER,
+                code: TEST_CODE,
+                ..Default::default()
+            };
+            futures.push(client.create_accounts(&[account]));
+        }
+
+        drop(client);
+        futures
+    };
+
+    let mut shutdown_count = 0;
+
+    for future in futures {
+        match block_on(async { future.await }) {
+            Ok(_) => {}
+            Err(tb::PacketStatus::ClientShutdown) => shutdown_count += 1,
+            Err(_) => panic!(),
+        }
+    }
+
+    assert!(shutdown_count > 0);
+
+    Ok(())
+}
+
+#[test]
 fn too_many_events() -> anyhow::Result<()> {
     let client = test_client()?;
 
