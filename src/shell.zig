@@ -785,22 +785,22 @@ test "shell: expand_argv" {
             defer argv.deinit();
 
             try expand_argv(&argv, cmd, args);
-            try want.diff_json(argv.slice(), .{});
+            try want.diff_zon(argv.slice());
         }
     };
 
     try T.check("zig version", .{}, snap(@src(),
-        \\["zig","version"]
+        \\.{ "zig", "version" }
     ));
     try T.check("  zig  version  ", .{}, snap(@src(),
-        \\["zig","version"]
+        \\.{ "zig", "version" }
     ));
 
     try T.check(
         "zig {version}",
         .{ .version = @as([]const u8, "version") },
         snap(@src(),
-            \\["zig","version"]
+            \\.{ "zig", "version" }
         ),
     );
 
@@ -808,7 +808,11 @@ test "shell: expand_argv" {
         "zig {version}",
         .{ .version = @as([]const []const u8, &.{ "version", "--verbose" }) },
         snap(@src(),
-            \\["zig","version","--verbose"]
+            \\.{
+            \\    "zig",
+            \\    "version",
+            \\    "--verbose",
+            \\}
         ),
     );
 
@@ -816,14 +820,24 @@ test "shell: expand_argv" {
         "git fetch origin refs/pull/{pr}/head",
         .{ .pr = 92 },
         snap(@src(),
-            \\["git","fetch","origin","refs/pull/92/head"]
+            \\.{
+            \\    "git",
+            \\    "fetch",
+            \\    "origin",
+            \\    "refs/pull/92/head",
+            \\}
         ),
     );
     try T.check(
         "gh pr checkout {pr}",
         .{ .pr = @as(u32, 92) },
         snap(@src(),
-            \\["gh","pr","checkout","92"]
+            \\.{
+            \\    "gh",
+            \\    "pr",
+            \\    "checkout",
+            \\    "92",
+            \\}
         ),
     );
 }
