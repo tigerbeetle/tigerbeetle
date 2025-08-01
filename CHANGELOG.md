@@ -3,6 +3,55 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.53
+
+Released: 2025-08-01
+
+### Safety And Performance
+
+- [#3090](https://github.com/tigerbeetle/tigerbeetle/pull/3090),
+  [#3116](https://github.com/tigerbeetle/tigerbeetle/pull/3116)
+
+  Allowing EWAH to decode bigger free set into smaller. This fixes the `--limit-storage` flag.
+
+- [#3089](https://github.com/tigerbeetle/tigerbeetle/pull/3089)
+
+  Fix Node v24 client.
+
+### Features
+
+- [#3119](https://github.com/tigerbeetle/tigerbeetle/pull/3119)
+
+  Add compaction/checkpoint/journal slot count to `tigerbeetle inspect`.
+
+### Internals
+
+- [#3121](https://github.com/tigerbeetle/tigerbeetle/pull/3121)
+
+  During tests, verify that grid read errors correspond to either storage faults or ongoing state
+  sync.
+
+- [#3122](https://github.com/tigerbeetle/tigerbeetle/pull/3122)
+
+  Teach snaptest how to decode/encode hex & zon.
+
+- [#3110](https://github.com/tigerbeetle/tigerbeetle/pull/3110)
+
+  Fix typo in `manifest_log_fuzz`.
+
+- [#3113](https://github.com/tigerbeetle/tigerbeetle/pull/3113)
+
+  Test `CreateTransfersResult.exists` in VOPR.
+
+- [#3117](https://github.com/tigerbeetle/tigerbeetle/pull/3117),
+  [#3120](https://github.com/tigerbeetle/tigerbeetle/pull/3120)
+
+  `stdx` refactoring.
+
+### TigerTracks 🎧
+
+- [Summer Eyes](https://www.youtube.com/watch?v=4Kc1Cks29-w)
+
 ## TigerBeetle 0.16.52
 
 Released: 2025-07-25
