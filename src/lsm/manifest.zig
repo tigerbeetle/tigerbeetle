@@ -127,8 +127,8 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             assert(options.tree_id > 0);
             assert(table.value_count > 0);
 
-            var key_min = std.mem.zeroes(TableInfo.KeyPadded);
-            var key_max = std.mem.zeroes(TableInfo.KeyPadded);
+            var key_min: TableInfo.KeyPadded = @splat(0);
+            var key_max: TableInfo.KeyPadded = @splat(0);
 
             stdx.copy_disjoint(.inexact, u8, &key_min, std.mem.asBytes(&table.key_min));
             stdx.copy_disjoint(.inexact, u8, &key_max, std.mem.asBytes(&table.key_max));
