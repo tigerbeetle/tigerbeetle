@@ -1185,7 +1185,7 @@ pub const Header = extern struct {
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
+        view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
         protocol: u16 = vsr.Version,
         command: Command,
@@ -1203,7 +1203,6 @@ pub const Header = extern struct {
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
             if (self.release.value != 0) return "release != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
-            if (self.view != 0) return "view == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }

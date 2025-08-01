@@ -7986,6 +7986,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .replica = self.replica,
                 .prepare_op = op,
+                .view = 0,
                 .prepare_checksum = checksum,
             };
 
