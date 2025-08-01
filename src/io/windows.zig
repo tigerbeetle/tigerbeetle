@@ -465,7 +465,7 @@ pub const IO = struct {
                         }
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY).
-                        const inaddr_any = std.mem.zeroes([4]u8);
+                        const inaddr_any: [4]u8 = @splat(0);
                         const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
                         posix.bind(
                             op.socket,

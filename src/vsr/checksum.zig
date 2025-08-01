@@ -53,7 +53,7 @@ comptime {
 }
 
 fn seed_init() void {
-    const key = mem.zeroes([16]u8);
+    const key: [16]u8 = @splat(0);
     seed_state = Aegis128LMac_128.init(&key);
 }
 
