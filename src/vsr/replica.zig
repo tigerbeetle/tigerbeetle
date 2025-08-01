@@ -2339,6 +2339,18 @@ pub fn ReplicaType(
                 return self.flush_loopback_queue();
             }
 
+            // Criteria for caching:
+            // - The primary does not update the cache since it is (or will be) reconstructing its
+            //   pipeline.
+            // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
+            if (self.pipeline == .cache and
+                self.replica != self.primary_index(self.view) and
+                self.commit_min < message.header.op)
+            {
+                const prepare_evicted = self.pipeline.cache.insert(message.ref());
+                if (prepare_evicted) |m| self.message_bus.unref(m);
+            }
+
             if (self.repair_header(message.header)) {
                 assert(self.journal.has_dirty(message.header));
 
@@ -2346,7 +2358,10 @@ pub fn ReplicaType(
                 const write_initiated = self.write_prepare(message, .repair);
 
                 if (write_initiated) {
-                    self.repair_messages_budget_journal.increment(.{ .prepare = message.header });
+                    self.repair_messages_budget_journal.increment(.{ .prepare = .{
+                        .view = message.header.view,
+                        .op = message.header.op,
+                    } });
 
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
@@ -2875,67 +2890,108 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
 
             const op = message.header.prepare_op;
+            const view = message.header.view;
+            const checksum = blk: {
+                if (message.header.prepare_checksum != 0) {
+                    break :blk message.header.prepare_checksum;
+                }
+
+                if (self.journal.header_with_op(op)) |header| {
+                    if (header.view > view) {
+                        log.debug("{}: on_request_prepare: destination replica view={}" ++
+                            " too old, prepare view={}", .{
+                            self.replica,
+                            view,
+                            header.view,
+                        });
+                        return;
+                    } else if (self.journal.find_latest_headers_break_between(
+                        op,
+                        self.op,
+                    )) |range| {
+                        log.debug("{}: on_request_prepare: prepare with op={} untrustworthy," ++
+                            " broken hash chain between [{}, {}]", .{
+                            self.replica,
+                            op,
+                            range.op_min,
+                            range.op_max,
+                        });
+                        return;
+                    }
+
+                    break :blk header.checksum;
+                } else {
+                    log.debug("{}: on_request_prepare: op={} checksum={any} missing", .{
+                        self.replica,
+                        op,
+                        message.header.checksum,
+                    });
+                    return;
+                }
+            };
+
             const slot = self.journal.slot_for_op(op);
-            const checksum = message.header.prepare_checksum;
+            const destination_replica = message.header.replica;
 
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
             if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
-                log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
+                log.debug("{}: on_request_prepare: op={} checksum={any} reply from pipeline", .{
                     self.replica,
                     op,
                     checksum,
                 });
-                self.send_message_to_replica(message.header.replica, prepare);
+                self.on_request_prepare_read(
+                    prepare,
+                    .{
+                        .op = op,
+                        .checksum = checksum,
+                        .destination_replica = destination_replica,
+                    },
+                );
                 return;
             }
 
-            if (self.journal.prepare_inhabited[slot.index]) {
-                const prepare_checksum = self.journal.prepare_checksums[slot.index];
-                // Consult `journal.prepare_checksums` (rather than `journal.headers`):
-                // the former may have the prepare we want — even if journal recovery marked the
-                // slot as faulty and left the in-memory header as reserved.
-                if (checksum == prepare_checksum) {
-                    log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
-                        self.replica,
-                        op,
-                        checksum,
-                    });
-
-                    // Improve availability by calling `read_prepare_with_op_and_checksum` instead
-                    // of `read_prepare` — even if `journal.headers` contains the target message.
-                    // The latter skips the read when the target prepare is present but dirty (e.g.
-                    // it was recovered with decision=fix).
-                    // TODO Do not reissue the read if we are already reading in order to send to
-                    // this particular destination replica.
-                    self.journal.read_prepare_with_op_and_checksum(
-                        on_request_prepare_read,
-                        op,
-                        prepare_checksum,
-                        message.header.replica,
-                    );
-                    return;
-                }
+            if (self.journal.prepare_inhabited[slot.index] and
+                self.journal.prepare_checksums[slot.index] == checksum)
+            {
+                // Improve availability by calling `read_prepare_with_op_and_checksum` instead
+                // of `read_prepare` — even if `journal.headers` contains the target message.
+                // The latter skips the read when the target prepare is present but dirty (e.g.
+                // it was recovered with decision=fix).
+                // TODO Do not reissue the read if we are already reading in order to send to
+                // this particular destination replica.
+                self.journal.read_prepare_with_op_and_checksum(
+                    on_request_prepare_read,
+                    .{
+                        .op = op,
+                        .checksum = checksum,
+                        .destination_replica = destination_replica,
+                    },
+                );
+            } else {
+                log.debug("{}: on_request_prepare: op={} checksum={any} missing", .{
+                    self.replica,
+                    op,
+                    checksum,
+                });
             }
-
-            log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
-                self.replica,
-                op,
-                checksum,
-            });
         }
 
         fn on_request_prepare_read(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.ReadOptions,
         ) void {
             const message = prepare orelse {
                 log.debug("{}: on_request_prepare_read: prepare=null", .{self.replica});
                 return;
             };
+            const destination_replica = options.destination_replica;
+
             assert(message.header.command == .prepare);
+            assert(destination_replica.? != self.replica);
 
             log.debug("{}: on_request_prepare_read: op={} checksum={} sending to replica={}", .{
                 self.replica,
@@ -2944,7 +3000,6 @@ pub fn ReplicaType(
                 destination_replica.?,
             });
 
-            assert(destination_replica.? != self.replica);
             self.send_message_to_replica(destination_replica.?, message);
         }
 
@@ -4477,8 +4532,10 @@ pub fn ReplicaType(
                 } else {
                     self.journal.read_prepare(
                         commit_start_journal_callback,
-                        op,
-                        header.checksum,
+                        .{
+                            .op = op,
+                            .checksum = header.checksum,
+                        },
                     );
                     return .pending;
                 }
@@ -4490,13 +4547,13 @@ pub fn ReplicaType(
         fn commit_start_journal_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.ReadOptions,
         ) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .start);
             assert(self.commit_prepare == null);
-            assert(destination_replica == null);
+            assert(options.destination_replica == null);
 
             if (prepare == null) {
                 log.debug("{}: commit_start_journal_callback: prepare == null", .{self.replica});
@@ -7265,10 +7322,8 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.journal.dirty.count > 0) {
-                // Request and repair any dirty or faulty prepares.
-                self.repair_prepares();
-            }
+            // Request and repair any dirty or faulty prepares.
+            self.repair_prepares();
 
             if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
                 return;
@@ -7684,15 +7739,21 @@ pub fn ReplicaType(
                 op,
                 op_checksum,
             });
-            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum);
+            self.journal.read_prepare(
+                repair_pipeline_read_callback,
+                .{
+                    .op = op,
+                    .checksum = op_checksum,
+                },
+            );
         }
 
         fn repair_pipeline_read_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.ReadOptions,
         ) void {
-            assert(destination_replica == null);
+            assert(options.destination_replica == null);
 
             assert(self.pipeline_repairing);
             self.pipeline_repairing = false;
@@ -7800,26 +7861,23 @@ pub fn ReplicaType(
             }
 
             for (op_min..op_max + 1) |op| {
-                if (self.journal.slot_with_op(op)) |slot| {
-                    if (self.journal.dirty.bit(slot)) {
-                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
-                        // Continue to request prepares until our budget is depleted.
-                        if (self.repair_prepare(op)) {
-                            io_budget -= 1;
+                const slot_with_op_maybe = self.journal.slot_with_op(op);
+                if (slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?)) {
+                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                    // Continue to request prepares until our budget is depleted.
+                    if (self.repair_prepare(op)) {
+                        io_budget -= 1;
 
-                            if (self.repair_messages_budget_journal.available == 0) {
-                                log.debug("{}: repair_prepares: repair budget used", .{
-                                    self.replica,
-                                });
-                                break;
-                            }
-                            if (io_budget == 0) {
-                                log.debug("{}: repair_prepares: IO budget used", .{self.replica});
-                                break;
-                            }
+                        if (self.repair_messages_budget_journal.available == 0) {
+                            log.debug("{}: repair_prepares: repair budget used", .{
+                                self.replica,
+                            });
+                            break;
                         }
-                    } else {
-                        assert(!self.journal.faulty.bit(slot));
+                        if (io_budget == 0) {
+                            log.debug("{}: repair_prepares: IO budget used", .{self.replica});
+                            break;
+                        }
                     }
                 }
             }
@@ -7828,7 +7886,6 @@ pub fn ReplicaType(
         fn repair_prepares(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
@@ -7917,84 +7974,97 @@ pub fn ReplicaType(
         /// This is effectively "many-to-one" repair, where a single replica recovers using the
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Replica, op: u64) bool {
-            const slot = self.journal.slot_with_op(op).?;
-            const header = self.journal.header_with_op(op).?;
-            const checksum = header.checksum;
-
+            const slot_with_op_maybe = self.journal.slot_with_op(op);
+            const checksum = if (slot_with_op_maybe != null)
+                self.journal.header_with_op(op).?.checksum
+            else
+                0;
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.bit(slot));
+            assert(slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?));
             assert(self.journal.writes.available() > 0);
             assert(self.repair_messages_budget_journal.available > 0);
-
-            // We may be appending to or repairing the journal concurrently.
-            // We do not want to re-request any of these prepares unnecessarily.
-            if (self.journal.writing(header) == .exact) {
-                log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-                return false;
-            }
-
-            // The message may be available in the local pipeline.
-            // For example (replica_count=3):
-            // 1. View=1: Replica 1 is primary, and prepares op 5. The local write fails.
-            // 2. Time passes. The view changes (e.g. due to a timeout)…
-            // 3. View=4: Replica 1 is primary again, and is repairing op 5
-            //    (which is still in the pipeline).
-            //
-            // Alternatively, we might have not started the write when we initially received the
-            // prepare because:
-            // - the journal already had another running write to the same slot, or
-            // - the journal had no IOPs available.
-            //
-            // Using the pipeline to repair is faster than a `request_prepare`.
-            // Also, messages in the pipeline are never corrupt.
-            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
-                assert(prepare.header.op == op);
-                assert(prepare.header.checksum == checksum);
-
-                if (self.solo()) {
-                    // Solo replicas don't change views and rewrite prepares.
-                    assert(self.journal.writing(header) == .none);
-
-                    // This op won't start writing until all ops in the pipeline preceding it have
-                    // been written.
-                    log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
+            if (self.journal.header_with_op(op)) |header| {
+                // We may be appending to or repairing the journal concurrently.
+                // We do not want to re-request any of these prepares unnecessarily.
+                if (self.journal.writing(header) == .exact) {
+                    log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
                         self.replica,
                         op,
                         checksum,
                     });
-                    const pipeline_head = self.pipeline.queue.prepare_queue.head_ptr().?;
-                    assert(pipeline_head.message.header.op < op);
                     return false;
                 }
 
-                log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-                _ = self.write_prepare(prepare, .pipeline);
-                return true;
+                // The message may be available in the local pipeline.
+                // For example (replica_count=3):
+                // 1. View=1: Replica 1 is primary, and prepares op 5. The local write fails.
+                // 2. Time passes. The view changes (e.g. due to a timeout)…
+                // 3. View=4: Replica 1 is primary again, and is repairing op 5
+                //    (which is still in the pipeline).
+                //
+                // Alternatively, we might have not started the write when we initially received the
+                // prepare because:
+                // - the journal already had another running write to the same slot, or
+                // - the journal had no IOPs available.
+                //
+                // Using the pipeline to repair is faster than a `request_prepare`.
+                // Also, messages in the pipeline are never corrupt.
+                if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
+                    assert(prepare.header.op == op);
+                    assert(prepare.header.checksum == checksum);
+
+                    if (self.solo()) {
+                        // Solo replicas don't change views and rewrite prepares.
+                        assert(self.journal.writing(header) == .none);
+
+                        // This op won't start writing until all ops in the pipeline preceding it
+                        // have been written.
+                        log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
+                            self.replica,
+                            op,
+                            checksum,
+                        });
+                        const pipeline_head = self.pipeline.queue.prepare_queue.head_ptr().?;
+                        assert(pipeline_head.message.header.op < op);
+                        return false;
+                    }
+
+                    log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
+                        self.replica,
+                        op,
+                        checksum,
+                    });
+                    _ = self.write_prepare(prepare, .pipeline);
+                    return true;
+                }
             }
 
-            const request_prepare = Header.RequestPrepare{
-                .command = .request_prepare,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .prepare_op = op,
-                .view = 0,
-                .prepare_checksum = checksum,
-            };
-
-            if (self.repair_messages_budget_journal.decrement(.{ .prepare = header })) {
+            if (self.repair_messages_budget_journal.decrement(.{ .prepare = .{
+                .view = self.view,
+                .op = op,
+            } })) {
+                const request_prepare = Header.RequestPrepare{
+                    .command = .request_prepare,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = self.view,
+                    .prepare_op = op,
+                    .prepare_checksum = checksum,
+                };
                 const nature = if (op > self.commit_max) "uncommitted" else "committed";
-                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
+                const reason = blk: {
+                    if (self.journal.slot_with_op(op)) |slot| {
+                        if (self.journal.faulty.bit(slot)) {
+                            break :blk "faulty";
+                        } else {
+                            break :blk "dirty";
+                        }
+                    } else break :blk "not present";
+                };
+
                 log.debug(
-                    "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
+                    "{}: repair_prepare: op={} checksum={any} ({s}, {s}, {s})",
                     .{
                         self.replica,
                         op,
@@ -8015,7 +8085,6 @@ pub fn ReplicaType(
                         @bitCast(request_prepare),
                     );
                 }
-
                 return true;
             } else {
                 return false;
@@ -10595,18 +10664,6 @@ pub fn ReplicaType(
                 },
             }
 
-            // Criteria for caching:
-            // - The primary does not update the cache since it is (or will be) reconstructing its
-            //   pipeline.
-            // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
-            if (self.pipeline == .cache and
-                self.replica != self.primary_index(self.view) and
-                self.commit_min < message.header.op)
-            {
-                const prepare_evicted = self.pipeline.cache.insert(message.ref());
-                if (prepare_evicted) |m| self.message_bus.unref(m);
-            }
-
             self.journal.write_prepare(write_prepare_callback, message, trigger);
 
             return true;
@@ -11503,7 +11560,6 @@ const PipelineQueue = struct {
     }
 
     /// Searches the pipeline for a prepare for a given op and checksum.
-    /// When `checksum` is `null`, match any checksum.
     fn prepare_by_op_and_checksum(pipeline: *PipelineQueue, op: u64, checksum: u128) ?*Prepare {
         if (pipeline.prepare_queue.empty()) return null;
 
@@ -11699,7 +11755,6 @@ const PipelineCache = struct {
     }
 
     /// Unlike the PipelineQueue, cached messages may not belong to the current view.
-    /// Thus, a matching checksum is required.
     fn prepare_by_op_and_checksum(
         pipeline: *PipelineCache,
         op: u64,
@@ -11709,6 +11764,7 @@ const PipelineCache = struct {
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
         if (prepare.header.checksum != checksum) return null;
+
         return prepare;
     }
 
