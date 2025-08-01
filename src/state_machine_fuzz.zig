@@ -7,7 +7,7 @@ const vsr = @import("vsr.zig");
 const stdx = @import("stdx");
 
 const tb = @import("tigerbeetle.zig");
-const TestContext = @import("state_machine.zig").TestContext;
+const TestContext = @import("state_machine_tests.zig").TestContext;
 const fuzz = @import("./testing/fuzz.zig");
 
 /// Generate a random number, biased towards all bit 'edges' of T. That is, given a u64, it's very
