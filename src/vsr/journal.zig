@@ -145,19 +145,24 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             recovered: void,
         };
 
+        pub const ReadOptions = struct {
+            op: u64,
+            checksum: u128,
+            destination_replica: ?u8 = null,
+        };
+
+        const ReadCallback = *const fn (
+            replica: *Replica,
+            prepare: ?*Message.Prepare,
+            options: ReadOptions,
+        ) void;
+
         pub const Read = struct {
             journal: *Journal,
             completion: Storage.Read,
-            callback: *const fn (
-                replica: *Replica,
-                prepare: ?*Message.Prepare,
-                destination_replica: ?u8,
-            ) void,
-
             message: *Message.Prepare,
-            op: u64,
-            checksum: u128,
-            destination_replica: ?u8,
+            options: ReadOptions,
+            callback: ReadCallback,
         };
 
         pub const Write = struct {
@@ -721,14 +726,12 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             journal: *Journal,
-            callback: *const fn (
-                replica: *Replica,
-                prepare: ?*Message.Prepare,
-                destination_replica: ?u8,
-            ) void,
-            op: u64,
-            checksum: u128,
+            callback: ReadCallback,
+            options: ReadOptions,
         ) void {
+            const checksum = options.checksum;
+            const op = options.op;
+
             assert(journal.status == .recovered);
             assert(checksum != 0);
             assert(journal.reads.available() > 0);
@@ -736,48 +739,43 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                callback(replica, null, null);
+                callback(replica, null, options);
                 return;
             }
 
             const slot = journal.slot_with_op_and_checksum(op, checksum) orelse {
                 journal.read_prepare_log(op, checksum, "no entry exactly");
-                callback(replica, null, null);
+                callback(replica, null, options);
                 return;
             };
 
             if (journal.prepare_inhabited[slot.index] and
                 journal.prepare_checksums[slot.index] == checksum)
             {
-                journal.read_prepare_with_op_and_checksum(
-                    callback,
-                    op,
-                    checksum,
-                    null,
-                );
+                journal.read_prepare_with_op_and_checksum(callback, options);
             } else {
                 journal.read_prepare_log(op, checksum, "no matching prepare");
-                callback(replica, null, null);
+                callback(replica, null, options);
             }
         }
 
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             journal: *Journal,
-            callback: *const fn (
-                replica: *Replica,
-                prepare: ?*Message.Prepare,
-                destination_replica: ?u8,
-            ) void,
-            op: u64,
-            checksum: u128,
-            destination_replica: ?u8,
+            callback: ReadCallback,
+            options: ReadOptions,
         ) void {
+            const op = options.op;
+            const checksum = options.checksum;
+            const destination_replica = options.destination_replica;
+
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const slot = journal.slot_for_op(op);
+
             assert(journal.status == .recovered);
             assert(journal.prepare_inhabited[slot.index]);
             assert(journal.prepare_checksums[slot.index] == checksum);
+
             if (destination_replica == null) {
                 assert(journal.reads.available() > 0);
             }
@@ -794,7 +792,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     // Normally the message's padding would have been zeroed by the MessageBus,
                     // but we are copying (only) a message header into a new buffer.
                     @memset(message.buffer[@sizeOf(Header)..constants.sector_size], 0);
-                    callback(replica, message, destination_replica);
+                    callback(replica, message, options);
                     return;
                 } else {
                     // As an optimization, we can read fewer than `message_size_max` bytes because
@@ -809,7 +807,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             } else {
                 if (journal.reads_repair_count == reads_repair_count_max) {
                     journal.read_prepare_log(op, checksum, "waiting for IOP");
-                    callback(replica, null, null);
+                    callback(replica, null, options);
                     return;
                 }
                 journal.reads_repair_count += 1;
@@ -824,10 +822,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .journal = journal,
                 .completion = undefined,
                 .message = message.ref(),
+                .options = options,
                 .callback = callback,
-                .op = op,
-                .checksum = checksum,
-                .destination_replica = destination_replica,
             };
 
             const buffer: []u8 = message.buffer[0..message_size];
@@ -848,11 +844,14 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const read: *Journal.Read = @alignCast(@fieldParentPtr("completion", completion));
             const journal = read.journal;
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
-            const op = read.op;
             const callback = read.callback;
-            const checksum = read.checksum;
-            const destination_replica = read.destination_replica;
             const message = read.message;
+
+            const options = read.options;
+            const op = options.op;
+            const checksum = options.checksum;
+            const destination_replica = options.destination_replica;
+
             defer replica.message_bus.unref(message);
 
             assert(journal.status == .recovered);
@@ -866,16 +865,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             if (op > replica.op) {
                 journal.read_prepare_log(op, checksum, "beyond replica.op");
-                callback(replica, null, null);
+                callback(replica, null, options);
                 return;
             }
 
-            const checksum_inhabited = journal.prepare_inhabited[journal.slot_for_op(op).index];
-            const checksum_match =
-                journal.prepare_checksums[journal.slot_for_op(op).index] == checksum;
+            const slot = journal.slot_for_op(op).index;
+            const checksum_inhabited = journal.prepare_inhabited[slot];
+            const checksum_match = journal.prepare_checksums[slot] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
-                callback(replica, null, null);
+                callback(replica, null, options);
                 return;
             }
 
@@ -892,7 +891,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     break :reason "wrong cluster";
                 }
 
-                if (message.header.op != op) {
+                if (message.header.op != op or message.header.operation == .reserved) {
                     // Possible causes:
                     // * The prepare was rewritten since the read began.
                     // * Misdirected read/write.
@@ -935,10 +934,10 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 }
 
                 journal.read_prepare_log(op, checksum, reason);
-                callback(replica, null, null);
+                callback(replica, null, options);
             } else {
                 assert(message.header.checksum == checksum);
-                callback(replica, message, destination_replica);
+                callback(replica, message, options);
             }
         }
 
@@ -993,10 +992,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .journal = journal,
                 .completion = undefined,
                 .message = message.ref(),
+                .options = .{ .op = chunk_index, .checksum = undefined },
                 .callback = undefined,
-                .op = chunk_index,
-                .checksum = undefined,
-                .destination_replica = null,
             };
 
             const offset = constants.message_size_max * chunk_index;
@@ -1028,9 +1025,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             const journal = chunk_read.journal;
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             assert(journal.status == .recovering);
-            assert(chunk_read.destination_replica == null);
+            assert(chunk_read.options.destination_replica == null);
 
-            const chunk_index = chunk_read.op;
+            const chunk_index = chunk_read.options.op;
             assert(journal.header_chunks_requested.is_set(chunk_index));
             assert(!journal.header_chunks_recovered.is_set(chunk_index));
 
@@ -1124,10 +1121,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .journal = journal,
                 .completion = undefined,
                 .message = message.ref(),
+                .options = .{ .op = slot.index, .checksum = undefined },
                 .callback = undefined,
-                .op = slot.index,
-                .checksum = undefined,
-                .destination_replica = null,
             };
 
             log.debug("{}: recover_prepare: recovering slot={}", .{
@@ -1154,9 +1149,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             assert(journal.status == .recovering);
             assert(journal.dirty.count <= journal.faulty.count);
-            assert(read.destination_replica == null);
+            assert(read.options.destination_replica == null);
 
-            const slot = Slot{ .index = @intCast(read.op) };
+            const slot = Slot{ .index = @intCast(read.options.op) };
             assert(slot.index < slot_count);
             assert(!journal.dirty.bit(slot));
             assert(journal.faulty.bit(slot));
