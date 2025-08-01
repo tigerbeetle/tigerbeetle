@@ -2892,7 +2892,7 @@ pub fn ReplicaType(
             const op = message.header.prepare_op;
             const view = message.header.view;
             const checksum = blk: {
-                if (message.header.prepare_checksum != 0) {
+                if (message.header.view == 0) {
                     break :blk message.header.prepare_checksum;
                 }
 
@@ -2921,7 +2921,7 @@ pub fn ReplicaType(
 
                     break :blk header.checksum;
                 } else {
-                    log.debug("{}: on_request_prepare: op={} checksum={any} missing", .{
+                    log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
                         self.replica,
                         op,
                         message.header.checksum,
@@ -2953,6 +2953,9 @@ pub fn ReplicaType(
                 return;
             }
 
+            // Consult `journal.prepare_checksums` (rather than `journal.headers`):
+            // the former may have the prepare we want — even if journal recovery marked the
+            // slot as faulty and left the in-memory header as reserved.
             if (self.journal.prepare_inhabited[slot.index] and
                 self.journal.prepare_checksums[slot.index] == checksum)
             {
@@ -7886,6 +7889,7 @@ pub fn ReplicaType(
         fn repair_prepares(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
+            maybe(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
@@ -7975,10 +7979,11 @@ pub fn ReplicaType(
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Replica, op: u64) bool {
             const slot_with_op_maybe = self.journal.slot_with_op(op);
-            const checksum = if (slot_with_op_maybe != null)
-                self.journal.header_with_op(op).?.checksum
+            const checksum = if (slot_with_op_maybe == null)
+                0
             else
-                0;
+                self.journal.header_with_op(op).?.checksum;
+
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?));
@@ -8048,7 +8053,7 @@ pub fn ReplicaType(
                     .command = .request_prepare,
                     .cluster = self.cluster,
                     .replica = self.replica,
-                    .view = self.view,
+                    .view = if (slot_with_op_maybe == null) self.view else 0,
                     .prepare_op = op,
                     .prepare_checksum = checksum,
                 };
@@ -8064,7 +8069,7 @@ pub fn ReplicaType(
                 };
 
                 log.debug(
-                    "{}: repair_prepare: op={} checksum={any} ({s}, {s}, {s})",
+                    "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
                     .{
                         self.replica,
                         op,
