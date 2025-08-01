@@ -2890,10 +2890,20 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
 
             const op = message.header.prepare_op;
+
             const view = message.header.view;
             const checksum = blk: {
                 if (message.header.view == 0) {
                     break :blk message.header.prepare_checksum;
+                }
+
+                if (op > self.op) {
+                    log.debug("{}: on_request_prepare: requested op={} past head={}", .{
+                        self.replica,
+                        op,
+                        self.op,
+                    });
+                    return;
                 }
 
                 if (self.journal.header_with_op(op)) |header| {
@@ -2905,16 +2915,10 @@ pub fn ReplicaType(
                             header.view,
                         });
                         return;
-                    } else if (self.journal.find_latest_headers_break_between(
-                        op,
-                        self.op,
-                    )) |range| {
-                        log.debug("{}: on_request_prepare: prepare with op={} untrustworthy," ++
-                            " broken hash chain between [{}, {}]", .{
+                    } else if (!self.valid_hash_chain_between(op, self.op)) {
+                        log.debug("{}: on_request_prepare: prepare with op={} untrustworthy", .{
                             self.replica,
                             op,
-                            range.op_min,
-                            range.op_max,
                         });
                         return;
                     }
