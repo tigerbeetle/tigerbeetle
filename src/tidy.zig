@@ -222,7 +222,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
 
-                if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
+                if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
                     (std.mem.startsWith(u8, string_value, " account A") or
                         std.mem.startsWith(u8, string_value, " transfer T") or
                         std.mem.startsWith(u8, string_value, " transfer   ")))
