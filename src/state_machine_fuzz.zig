@@ -159,7 +159,7 @@ fn build_account_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
         if (slice.len == 0) return 0;
         break :filter &slice[0];
     };
-    var reserved = std.mem.zeroes([58]u8);
+    var reserved: [58]u8 = @splat(0);
     if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
         prng.fill(&reserved);
     }
@@ -198,7 +198,7 @@ fn build_query_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
         if (slice.len == 0) return 0;
         break :filter &slice[0];
     };
-    var reserved = std.mem.zeroes([6]u8);
+    var reserved: [6]u8 = @splat(0);
     if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
         prng.fill(&reserved);
     }
@@ -235,7 +235,7 @@ fn build_get_change_events_filter(prng: *stdx.PRNG, buffer: []u8) u32 {
         if (slice.len == 0) return 0;
         break :filter &slice[0];
     };
-    var reserved = std.mem.zeroes([44]u8);
+    var reserved: [44]u8 = @splat(0);
     if (prng.chance(.{ .numerator = 1, .denominator = 1000 })) {
         prng.fill(&reserved);
     }

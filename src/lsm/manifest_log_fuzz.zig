@@ -185,8 +185,8 @@ fn generate_events(
                     .address = table_address,
                     .snapshot_min = 1,
                     .snapshot_max = std.math.maxInt(u64),
-                    .key_min = std.mem.zeroes(TableInfo.KeyPadded),
-                    .key_max = std.mem.zeroes(TableInfo.KeyPadded),
+                    .key_min = @splat(0),
+                    .key_max = @splat(0),
                     .value_count = 1,
                     .tree_id = 1,
                     .label = .{
