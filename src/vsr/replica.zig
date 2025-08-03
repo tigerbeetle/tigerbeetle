@@ -2897,15 +2897,7 @@ pub fn ReplicaType(
                     break :blk message.header.prepare_checksum;
                 }
 
-                if (op > self.op) {
-                    log.debug("{}: on_request_prepare: requested op={} past head={}", .{
-                        self.replica,
-                        op,
-                        self.op,
-                    });
-                    return;
-                }
-
+                assert(message.header.prepare_checksum == 0);
                 if (self.journal.header_with_op(op)) |header| {
                     if (header.view > view) {
                         log.debug("{}: on_request_prepare: destination replica view={}" ++
@@ -2915,21 +2907,11 @@ pub fn ReplicaType(
                             header.view,
                         });
                         return;
-                    } else if (!self.valid_hash_chain_between(op, self.op)) {
-                        log.debug("{}: on_request_prepare: prepare with op={} untrustworthy", .{
-                            self.replica,
-                            op,
-                        });
-                        return;
+                    } else {
+                        break :blk header.checksum;
                     }
-
-                    break :blk header.checksum;
                 } else {
-                    log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
-                        self.replica,
-                        op,
-                        message.header.checksum,
-                    });
+                    log.debug("{}: on_request_prepare: op={} missing", .{ self.replica, op });
                     return;
                 }
             };
@@ -2941,19 +2923,12 @@ pub fn ReplicaType(
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
             if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
-                log.debug("{}: on_request_prepare: op={} checksum={any} reply from pipeline", .{
+                log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
                     self.replica,
                     op,
                     checksum,
                 });
-                self.on_request_prepare_read(
-                    prepare,
-                    .{
-                        .op = op,
-                        .checksum = checksum,
-                        .destination_replica = destination_replica,
-                    },
-                );
+                self.send_message_to_replica(destination_replica, prepare);
                 return;
             }
 
@@ -2978,7 +2953,7 @@ pub fn ReplicaType(
                     },
                 );
             } else {
-                log.debug("{}: on_request_prepare: op={} checksum={any} missing", .{
+                log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
                     self.replica,
                     op,
                     checksum,
@@ -7329,7 +7304,7 @@ pub fn ReplicaType(
                 }
             }
 
-            // Request and repair any dirty or faulty prepares.
+            // Request and repair any missing, dirty, or faulty prepares.
             self.repair_prepares();
 
             if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
@@ -8094,6 +8069,7 @@ pub fn ReplicaType(
                         @bitCast(request_prepare),
                     );
                 }
+
                 return true;
             } else {
                 return false;
@@ -11764,6 +11740,7 @@ const PipelineCache = struct {
     }
 
     /// Unlike the PipelineQueue, cached messages may not belong to the current view.
+    /// Thus, a matching checksum is required.
     fn prepare_by_op_and_checksum(
         pipeline: *PipelineCache,
         op: u64,
@@ -11773,7 +11750,6 @@ const PipelineCache = struct {
         const prepare = pipeline.prepares[slot] orelse return null;
         if (prepare.header.op != op) return null;
         if (prepare.header.checksum != checksum) return null;
-
         return prepare;
     }
 

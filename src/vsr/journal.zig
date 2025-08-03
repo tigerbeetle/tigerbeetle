@@ -869,9 +869,9 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 return;
             }
 
-            const slot = journal.slot_for_op(op).index;
-            const checksum_inhabited = journal.prepare_inhabited[slot];
-            const checksum_match = journal.prepare_checksums[slot] == checksum;
+            const slot = journal.slot_for_op(op);
+            const checksum_inhabited = journal.prepare_inhabited[slot.index];
+            const checksum_match = journal.prepare_checksums[slot.index] == checksum;
             if (!checksum_inhabited or !checksum_match) {
                 journal.read_prepare_log(op, checksum, "prepare changed during read");
                 callback(replica, null, options);
@@ -891,7 +891,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     break :reason "wrong cluster";
                 }
 
-                if (message.header.op != op or message.header.operation == .reserved) {
+                if (message.header.op != op) {
                     // Possible causes:
                     // * The prepare was rewritten since the read began.
                     // * Misdirected read/write.
