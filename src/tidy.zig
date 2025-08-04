@@ -641,7 +641,6 @@ const DeadFilesDetector = struct {
             "dotnet_bindings.zig",
             "file_checker.zig",
             "fuzz_tests.zig",
-            "git-review.zig",
             "go_bindings.zig",
             "integration_tests.zig",
             "java_bindings.zig",
