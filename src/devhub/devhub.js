@@ -114,6 +114,8 @@ async function main_seeds() {
       include = false;
     } else if (record.fuzzer === "canary" && !is_main(record)) {
       include = false;
+    } else if (record.fuzzer === "vopr" && is_release(record)) {
+      include = true;
     } else {
       include = (!record.ok || pull_request_number(record) !== undefined) &&
         !fuzzers_with_failures.has(record.branch + record.fuzzer);
