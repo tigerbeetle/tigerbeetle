@@ -1,5 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
+const log = std.log;
 
 const Shell = @import("../../../shell.zig");
 
@@ -32,5 +33,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
                 .vortex_out_dir = vortex_out_dir,
             },
         );
+    } else {
+        log.warn("Not testing vortex java on OS {}", .{builtin.target.os.tag});
     }
 }
