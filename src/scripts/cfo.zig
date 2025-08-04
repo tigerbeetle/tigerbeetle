@@ -1091,17 +1091,14 @@ const SeedRecord = struct {
             if (record.ok) {
                 // Merge counts with the first ok record for this fuzzer/commit, to make it easy for
                 // the front-end to show the total count by displaying just the first record.
-                var last_ok_index = result.items.len;
-                while (last_ok_index > 0 and
-                    result.items[last_ok_index - 1].ok and
-                    std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
-                    std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
-                {
-                    last_ok_index -= 1;
-                }
-                if (last_ok_index != result.items.len) {
-                    result.items[last_ok_index].count += record.count;
-                    continue;
+                if (result.getLastOrNull()) |record_previous| {
+                    if (record_previous.ok and
+                        std.mem.eql(u8, record_previous.fuzzer, record.fuzzer) and
+                        std.meta.eql(record_previous.commit_sha, record.commit_sha))
+                    {
+                        result.items[result.items.len - 1].count += record.count;
+                        continue;
+                    }
                 }
             }
 
