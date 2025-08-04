@@ -479,16 +479,13 @@ pub const Network = struct {
     pub fn listen(
         allocator: std.mem.Allocator,
         io: *IO,
-        replica_count: u8,
         address_mappings: []Mapping,
         prng: *stdx.PRNG,
     ) !*Network {
-        assert(address_mappings.len == replica_count);
-
         const network = try allocator.create(Network);
         errdefer allocator.destroy(network);
 
-        const proxies = try allocator.alloc(Proxy, replica_count);
+        const proxies = try allocator.alloc(Proxy, address_mappings.len);
         errdefer allocator.free(proxies);
 
         network.* = .{

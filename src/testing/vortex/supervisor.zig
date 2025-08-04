@@ -296,7 +296,6 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     var network = try faulty_network.Network.listen(
         allocator,
         &io,
-        args.replica_count,
         mappings[0..args.replica_count],
         &prng,
     );
