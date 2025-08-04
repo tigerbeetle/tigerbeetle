@@ -2893,6 +2893,10 @@ pub fn ReplicaType(
 
                 assert(message.header.prepare_checksum == 0);
                 if (self.journal.header_with_op(op)) |header| {
+                    // Avoid a wasteful read of a prepare that may ultimately be rejected by the
+                    // requesting replica for belonging to a newer view. On the other hand, sending
+                    // older prepares is okay, since requesting replicas cache those in case they
+                    // can't be immediately written (for example, due to a hash chain break).
                     if (header.view > view) {
                         log.debug("{}: on_request_prepare: destination replica view={}" ++
                             " too old, prepare view={}", .{
@@ -10615,6 +10619,7 @@ pub fn ReplicaType(
             assert(self.status == .normal);
             assert(self.primary_index(self.view) != self.replica);
             assert(self.pipeline == .cache);
+            assert(self.commit_min < message.header.op);
 
             const prepare_evicted = self.pipeline.cache.insert(message.ref());
             if (prepare_evicted) |m| self.message_bus.unref(m);
