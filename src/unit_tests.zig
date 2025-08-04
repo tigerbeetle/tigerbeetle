@@ -11,7 +11,6 @@ comptime {
     _ = @import("storage.zig");
     _ = @import("tidy.zig");
     _ = @import("time.zig");
-    _ = @import("git-review.zig");
     _ = @import("message_buffer.zig");
 
     _ = @import("trace.zig");
