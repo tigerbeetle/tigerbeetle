@@ -2339,16 +2339,10 @@ pub fn ReplicaType(
                 return self.flush_loopback_queue();
             }
 
-            // Criteria for caching:
-            // - The primary does not update the cache since it is (or will be) reconstructing its
-            //   pipeline.
-            // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
-            if (self.pipeline == .cache and
-                self.replica != self.primary_index(self.view) and
+            if (self.replica != self.primary_index(self.view) and
                 self.commit_min < message.header.op)
             {
-                const prepare_evicted = self.pipeline.cache.insert(message.ref());
-                if (prepare_evicted) |m| self.message_bus.unref(m);
+                self.cache_prepare(message);
             }
 
             if (self.repair_header(message.header)) {
@@ -4105,6 +4099,11 @@ pub fn ReplicaType(
                     self.replica,
                     message.header.op,
                 });
+                if (self.replica != self.primary_index(self.view) and
+                    self.commit_min < message.header.op)
+                {
+                    self.cache_prepare(message);
+                }
                 _ = self.write_prepare(message, .append);
             }
         }
@@ -10606,6 +10605,19 @@ pub fn ReplicaType(
                 },
                 else => unreachable,
             }
+        }
+
+        // Criteria for caching:
+        // - The primary does not update the cache since it is (or will be) reconstructing its
+        //   pipeline.
+        // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
+        fn cache_prepare(self: *Replica, message: *Message.Prepare) void {
+            assert(self.status == .normal);
+            assert(self.primary_index(self.view) != self.replica);
+            assert(self.pipeline == .cache);
+
+            const prepare_evicted = self.pipeline.cache.insert(message.ref());
+            if (prepare_evicted) |m| self.message_bus.unref(m);
         }
 
         fn write_prepare(
