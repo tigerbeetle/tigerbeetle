@@ -22,21 +22,19 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         const class_path = class_path_driver ++ ":" ++ base_path ++
             "src/testing/vortex/java_driver/target/vortex-driver-java-0.0.1-SNAPSHOT.jar";
         const driver_command = "java -cp " ++ class_path ++ " Main";
-        try shell.exec("rm -rf ./vortex-out", .{});
-        try shell.exec("mkdir ./vortex-out", .{});
-        defer shell.exec("rm -rf ./vortex-out", .{}) catch {
-            @panic("unable to remove vortex work dir");
-        };
+        const vortex_out_dir = try shell.create_tmp_dir();
+        defer shell.cwd.deleteTree(vortex_out_dir) catch {};
         try shell.exec(
             vortex_bin ++ " " ++
                 "run --driver-command={driver_command} " ++
                 "--tigerbeetle-executable={tigerbeetle_bin} " ++
-                "--output-directory=./vortex-out " ++
+                "--output-directory={vortex_out_dir} " ++
                 "--disable-faults " ++
                 "--test-duration-seconds=10",
             .{
                 .driver_command = driver_command,
                 .tigerbeetle_bin = tigerbeetle_bin,
+                .vortex_out_dir = vortex_out_dir,
             },
         );
     }

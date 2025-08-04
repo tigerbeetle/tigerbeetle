@@ -17,21 +17,19 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         const vortex_bin = base_path ++ "zig-out/bin/vortex";
         const driver_command = base_path ++
             "src/testing/vortex/rust_driver/target/debug/vortex-driver-rust";
-        try shell.exec("rm -rf ./vortex-out", .{});
-        try shell.exec("mkdir ./vortex-out", .{});
-        defer shell.exec("rm -rf ./vortex-out", .{}) catch {
-            @panic("unable to remove vortex work dir");
-        };
+        const vortex_out_dir = try shell.create_tmp_dir();
+        defer shell.cwd.deleteTree(vortex_out_dir) catch {};
         try shell.exec(
             vortex_bin ++ " " ++
                 "run --driver-command={driver_command} " ++
                 "--tigerbeetle-executable={tigerbeetle_bin} " ++
-                "--output-directory=./vortex-out " ++
+                "--output-directory={vortex_out_dir} " ++
                 "--disable-faults " ++
                 "--test-duration-seconds=10",
             .{
                 .driver_command = driver_command,
                 .tigerbeetle_bin = tigerbeetle_bin,
+                .vortex_out_dir = vortex_out_dir,
             },
         );
     }
