@@ -1672,22 +1672,10 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
-            \\    "count": 4,
+            \\    "count": 6,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 3,
-            \\    "command": "fuzz ewah",
-            \\    "branch": "main"
-            \\  },
-            \\  {
-            \\    "commit_timestamp": 1,
-            \\    "commit_sha": "1111111111111111111111111111111111111111",
-            \\    "fuzzer": "ewah",
-            \\    "ok": true,
-            \\    "count": 2,
-            \\    "seed_timestamp_start": 1,
-            \\    "seed_timestamp_end": 1,
-            \\    "seed": 1,
             \\    "command": "fuzz ewah",
             \\    "branch": "main"
             \\  }
