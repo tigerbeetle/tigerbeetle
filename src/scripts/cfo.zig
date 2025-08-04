@@ -1088,26 +1088,26 @@ const SeedRecord = struct {
             }
             seed_previous = record.seed;
 
-            seed_count += 1;
-            if (seed_count <= options.seed_count_max) {
-                try result.append(record);
-            } else {
-                if (record.ok) {
-                    // Merge counts with the first ok record for this fuzzer/commit, to make it
-                    // easy for the front-end to show the total count by displaying just the first
-                    // record
-                    var last_ok_index = result.items.len;
-                    while (last_ok_index > 0 and
-                        result.items[last_ok_index - 1].ok and
-                        std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
-                        std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
-                    {
-                        last_ok_index -= 1;
-                    }
-                    if (last_ok_index != result.items.len) {
-                        result.items[last_ok_index].count += record.count;
-                    }
+            if (record.ok) {
+                // Merge counts with the first ok record for this fuzzer/commit, to make it easy for
+                // the front-end to show the total count by displaying just the first record.
+                var last_ok_index = result.items.len;
+                while (last_ok_index > 0 and
+                    result.items[last_ok_index - 1].ok and
+                    std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
+                    std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
+                {
+                    last_ok_index -= 1;
                 }
+                if (last_ok_index != result.items.len) {
+                    result.items[last_ok_index].count += record.count;
+                    continue;
+                }
+            }
+
+            if (seed_count < options.seed_count_max) {
+                try result.append(record);
+                seed_count += 1;
             }
         }
 
