@@ -850,6 +850,7 @@ fn build_test(
     // to ensure consistency.
     var unit_test_files = std.ArrayList([]const u8).init(b.allocator);
     defer unit_test_files.deinit();
+    defer for (unit_test_files.items) |item| b.allocator.free(item);
 
     var unit_tests_contents = std.ArrayList(u8).init(b.allocator);
     defer unit_tests_contents.deinit();
@@ -865,17 +866,26 @@ fn build_test(
     while (try src_walker.next()) |entry| {
         if (entry.kind != .file) continue;
 
-        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
+        const entry_path = try b.allocator.dupe(u8, entry.path);
+        errdefer b.allocator.free(entry_path);
 
-        if (std.mem.eql(u8, entry.path, "unit_test.zig")) continue;
-        if (std.mem.eql(u8, entry.path, "integration_tests.zig")) continue;
-        if (std.mem.startsWith(u8, entry.path, "stdx/")) continue;
-        if (std.mem.startsWith(u8, entry.path, "testing/vortex/")) continue;
-        if (std.mem.startsWith(u8, entry.path, "clients/") and
-            !std.mem.startsWith(u8, entry.path, "clients/c")) continue;
-        if (std.mem.eql(u8, entry.path, "tigerbeetle/libtb_client.zig")) continue;
+        // Replace the path separator to be Unix-style, for consistency on Windows.
+        // Don't use entry.path directly!
+        if (builtin.os.tag == .windows) {
+            std.mem.replaceScalar(u8, entry_path, '\\', '/');
+        }
 
-        const contents = try src_dir.readFileAlloc(b.allocator, entry.path, 1024 * 1024);
+        if (!std.mem.endsWith(u8, entry_path, ".zig")) continue;
+
+        if (std.mem.eql(u8, entry_path, "unit_test.zig")) continue;
+        if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
+        if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
+        if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
+        if (std.mem.startsWith(u8, entry_path, "clients/") and
+            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
+        if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
+
+        const contents = try src_dir.readFileAlloc(b.allocator, entry_path, 1024 * 1024);
         defer b.allocator.free(contents);
 
         if (std.mem.indexOf(u8, contents, "test \"") == null and
@@ -884,7 +894,7 @@ fn build_test(
             continue;
         }
 
-        try unit_test_files.append(try b.allocator.dupe(u8, entry.path));
+        try unit_test_files.append(entry_path);
     }
 
     std.mem.sort(
@@ -900,7 +910,6 @@ fn build_test(
 
     for (unit_test_files.items) |unit_test_file| {
         try unit_tests_contents.writer().print("    _ = @import(\"{s}\");\n", .{unit_test_file});
-        b.allocator.free(unit_test_file);
     }
 
     try unit_tests_contents.writer().writeAll("}\n");
