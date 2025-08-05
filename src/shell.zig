@@ -614,7 +614,7 @@ pub fn git_env_setup(shell: *Shell, options: struct { use_hostname: bool }) !voi
         if (builtin.target.os.tag != .linux) {
             @panic("use_hostname only supported on linux");
         }
-        var hostname_buffer = std.mem.zeroes([std.posix.HOST_NAME_MAX]u8);
+        var hostname_buffer: [std.posix.HOST_NAME_MAX]u8 = @splat(0);
         const hostname = try std.posix.gethostname(&hostname_buffer);
 
         try shell.env.put("GIT_AUTHOR_NAME", hostname);

@@ -498,7 +498,7 @@ inline fn low_level_hash(seed: u64, input: anytype) u64 {
         state = @as(u64, @truncate(mixed ^ (mixed >> 64)));
     }
 
-    var chunk = std.mem.zeroes([2]u64);
+    var chunk: [2]u64 = .{ 0, 0 };
     if (in.len > 8) {
         chunk[0] = @as(u64, @bitCast(in[0..8].*));
         chunk[1] = @as(u64, @bitCast(in[in.len - 8 ..][0..8].*));

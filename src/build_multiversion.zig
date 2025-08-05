@@ -464,14 +464,8 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     }
 
     var unpacked = std.ArrayList([]const u8).init(shell.arena.allocator());
-    var releases = multiversioning.ListU32{};
-    var checksums = multiversioning.ListU128{};
-    var offsets = multiversioning.ListU32{};
-    var sizes = multiversioning.ListU32{};
-    var flags_ = multiversioning.ListFlag{};
-    var git_commits = multiversioning.ListGitCommit{};
-    var release_client_mins = multiversioning.ListU32{};
-
+    var past_releases: MultiversionHeader.PastReleases = .{};
+    assert(past_releases.count == 0);
     // Extract the old current release - this is the release that was the current release, and not
     // embedded in the past pack.
     const old_current_release = header.current_release;
@@ -571,7 +565,6 @@ fn build_multiversion_body(shell: *Shell, options: struct {
             .data = past_binary_contents[arch_offsets.body_offset..][past_offset..][0..past_size],
             .flags = .{ .exclusive = true, .mode = mode_exec },
         });
-        try unpacked.append(past_name);
 
         // This is double-checked later when validating at runtime with the binary.
         assert(past_checksum == try checksum_file(
@@ -580,30 +573,16 @@ fn build_multiversion_body(shell: *Shell, options: struct {
             multiversion_binary_size_max,
         ));
 
-        const offset = blk: {
-            var offset: u32 = 0;
-            for (sizes.const_slice()) |size| {
-                offset += size;
-            }
-            break :blk offset;
-        };
-
-        releases.push(past_release);
-        checksums.push(past_checksum);
-        offsets.push(offset);
-        sizes.push(past_size);
-        flags_.push(past_flag);
-        git_commits.push(past_commit);
-        release_client_mins.push(past_release_client_min);
+        past_releases.add(.{
+            .release = past_release,
+            .checksum = past_checksum,
+            .size = past_size,
+            .flags = past_flag,
+            .git_commit = past_commit,
+            .release_client_min = past_release_client_min,
+        });
+        try unpacked.append(past_name);
     }
-
-    const old_current_release_offset = blk: {
-        var offset: u32 = 0;
-        for (sizes.const_slice()) |s| {
-            offset += s;
-        }
-        break :blk offset;
-    };
 
     const old_current_release_flags = blk: {
         var old_current_release_flags = header.current_flags;
@@ -615,23 +594,25 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     };
 
     // All of these are in ascending order, so the old current release goes last:
-
-    releases.push(old_current_release);
-    checksums.push(header.current_checksum);
-    offsets.push(old_current_release_offset);
-    sizes.push(old_current_release_size);
-    flags_.push(old_current_release_flags);
-    git_commits.push(header.current_git_commit);
-    release_client_mins.push(header.current_release_client_min);
+    past_releases.add(.{
+        .release = old_current_release,
+        .checksum = header.current_checksum,
+        .size = old_current_release_size,
+        .flags = old_current_release_flags,
+        .git_commit = header.current_git_commit,
+        .release_client_min = header.current_release_client_min,
+    });
     try unpacked.append(old_current_release_output_name);
+    assert(past_releases.count == past_count + 1); // +1 to include the old current release.
+    try past_releases.verify();
 
     const body_file = try shell.cwd.createFile(options.output, .{ .exclusive = true });
     defer body_file.close();
 
     for (
-        releases.const_slice(),
-        offsets.const_slice(),
-        sizes.const_slice(),
+        past_releases.releases[0..past_releases.count],
+        past_releases.offsets[0..past_releases.count],
+        past_releases.sizes[0..past_releases.count],
     ) |release, offset, size| {
         const past_name = try shell.fmt("{s}/tigerbeetle-past-{}-{s}", .{
             options.tmp_path,
@@ -643,16 +624,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     }
 
     return .{
-        // past_count + 1 to include the old current release.
-        .past_releases = MultiversionHeader.PastReleases.init(past_count + 1, .{
-            .releases = releases.const_slice(),
-            .checksums = checksums.const_slice(),
-            .offsets = offsets.const_slice(),
-            .sizes = sizes.const_slice(),
-            .flags = flags_.const_slice(),
-            .git_commits = git_commits.const_slice(),
-            .release_client_mins = release_client_mins.const_slice(),
-        }),
+        .past_releases = past_releases,
         .unpacked = unpacked.items,
     };
 }

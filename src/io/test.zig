@@ -527,7 +527,7 @@ test "tick to wait" {
             // Complete the recv() *outside* of the IO instance.
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system.
-            var send_buf = std.mem.zeroes([64]u8);
+            var send_buf: [64]u8 = @splat(0);
             const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
