@@ -952,12 +952,10 @@ fn unix_to_dos_timestamp(epoch_ns: i128) struct { time: u16, date: u16 } {
     );
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 
-    const seconds = @min(date_time.second, 59); // ZIP max is 58 (29*2)...
-
     const time: u16 =
         (@as(u16, date_time.hour) << 11) |
         (@as(u16, date_time.minute) << 5) |
-        (@as(u16, seconds / 2));
+        (@as(u16, @divFloor(date_time.second, 2)));
 
     const date: u16 =
         ((@as(u16, date_time.year - 1980)) << 9) |
