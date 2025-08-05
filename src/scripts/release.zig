@@ -586,9 +586,7 @@ fn publish(
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            const zip_file = try std.fs.cwd().openFile("zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
-            defer zip_file.close();
-            try std.zip.extract(std.fs.cwd(), zip_file.seekableStream(), .{});
+            try shell.extract_tigerbeetle_zip("zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip");
 
             const past_binary_contents = try shell.cwd.readFileAllocOptions(
                 shell.arena.allocator(),
@@ -890,10 +888,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
+
             const zip_path = "./zig-out/dist/tigerbeetle/tigerbeetle-" ++ triple ++ if (debug) "-debug" else "" ++ ".zip";
-            const zip_file = try std.fs.cwd().openFile(zip_path, .{});
-            defer zip_file.close();
-            try std.zip.extract(std.fs.cwd(), zip_file.seekableStream(), .{});
+            try shell.extract_tigerbeetle_zip(zip_path);
 
             try shell.project_root.rename(
                 "tigerbeetle",

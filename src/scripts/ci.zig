@@ -137,9 +137,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
-    const zip_file = try std.fs.cwd().openFile("tigerbeetle-x86_64-linux.zip", .{});
-    defer zip_file.close();
-    try std.zip.extract(std.fs.cwd(), zip_file.seekableStream(), .{});
+    try shell.extract_tigerbeetle_zip("tigerbeetle-x86_64-linux.zip");
 
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);

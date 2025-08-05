@@ -924,3 +924,24 @@ pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8)
         .{ .datetime_iso8601 = datetime_iso8601 },
     ), 10);
 }
+
+/// Extracts a TigerBeetle zip and ensures the output has correct permissions.
+pub fn extract_tigerbeetle_zip(shell: *Shell, relative_path: []const u8) !void {
+    assert(std.mem.indexOf(u8, relative_path, "tigerbeetle-") != null);
+
+    const zip_file = try shell.cwd.openFile(relative_path, .{});
+    defer zip_file.close();
+
+    try std.zip.extract(shell.cwd, zip_file.seekableStream(), .{});
+
+    const zip_extracted = try (shell.cwd.openFile("tigerbeetle", .{}) catch |e| switch (e) {
+        error.FileNotFound => shell.cwd.openFile("tigerbeetle.exe", .{}),
+        else => e,
+    });
+    defer zip_extracted.close();
+
+    // Zig's std.zip.extract doesn't handle permissions.
+    if (builtin.os.tag != .windows) {
+        try zip_extracted.chmod(0o755);
+    }
+}
