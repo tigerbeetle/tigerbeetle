@@ -114,18 +114,17 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         // Zig only guarantees release builds to be deterministic.
         if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
-        // TODO(Zig): Determinism is broken on Windows:
-        // https://github.com/ziglang/zig/issues/9432
-        if (std.mem.indexOf(u8, artifact, "-windows.zip") != null) continue;
-
         const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
             .artifact = artifact,
         });
 
         shell.popd();
-        const checksum_built = try shell.exec_stdout("sha256sum zig-out/dist/tigerbeetle/{artifact}", .{
-            .artifact = artifact,
-        });
+        const checksum_built = try shell.exec_stdout(
+            "sha256sum zig-out/dist/tigerbeetle/{artifact}",
+            .{
+                .artifact = artifact,
+            },
+        );
         try shell.pushd_dir(tmp_dir.dir);
 
         // Slice the output to suppress the names.
