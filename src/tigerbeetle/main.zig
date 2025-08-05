@@ -543,7 +543,7 @@ const Command = struct {
         // the nearest page by `std.heap.page_allocator`.
         log.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
-            @divFloor(counting_allocator.size, 1024 * 1024),
+            @divFloor(counting_allocator.live_size(), 1024 * 1024),
         });
         log.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
@@ -608,7 +608,9 @@ const Command = struct {
             // potentially introducing undetectable disk corruption into memory.
             // This is a best-effort attempt and not a hard rule as it may not cover all memory edge
             // case. So warn on error to notify the operator to adjust conditions if possible.
-            stdx.memory_lock_allocated(.{ .allocated_size = counting_allocator.size }) catch {
+            stdx.memory_lock_allocated(.{
+                .allocated_size = counting_allocator.live_size(),
+            }) catch {
                 log.warn(
                     "If this is a production replica, consider either " ++
                         "running the replica with CAP_IPC_LOCK privilege, " ++
