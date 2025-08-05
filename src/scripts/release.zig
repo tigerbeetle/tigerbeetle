@@ -255,9 +255,6 @@ fn build_tigerbeetle_target(
     );
     defer section.close();
 
-    // We shell out to `zip` for creating archives, so we need an absolute path here.
-    const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-
     const commit_timestamp_seconds: u64 = commit_timestamp_seconds: {
         const timestamp = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
             .sha = info.sha,
@@ -317,10 +314,14 @@ fn build_tigerbeetle_target(
         try fd.updateTimes(atime_ns, mtime_ns);
     }
 
-    try shell.exec("zip -9 {zip_path} {exe_name}", .{
-        .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
-        .exe_name = exe_name,
-    });
+    const zip_file = try dist_dir.createFile(zip_name, .{ .truncate = false, .exclusive = true });
+    defer zip_file.close();
+
+    try shell.zip_tigerbeetle_create(
+        zip_file,
+        exe_name,
+        multiversioning.multiversion_binary_size_max,
+    );
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
@@ -586,7 +587,9 @@ fn publish(
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            try shell.extract_tigerbeetle_zip("zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip");
+            try shell.zip_tigerbeetle_extract(
+                "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+            );
 
             const past_binary_contents = try shell.cwd.readFileAllocOptions(
                 shell.arena.allocator(),
@@ -889,8 +892,9 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            const zip_path = "./zig-out/dist/tigerbeetle/tigerbeetle-" ++ triple ++ if (debug) "-debug" else "" ++ ".zip";
-            try shell.extract_tigerbeetle_zip(zip_path);
+            const zip_path = "./zig-out/dist/tigerbeetle/tigerbeetle-" ++
+                triple ++ if (debug) "-debug" else "" ++ ".zip";
+            try shell.zip_tigerbeetle_extract(zip_path);
 
             try shell.project_root.rename(
                 "tigerbeetle",
