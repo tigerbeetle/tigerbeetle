@@ -129,7 +129,12 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
         // Slice the output to suppress the names.
         if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
-            std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+            // Still run the code, but suppress failing until a release cycle has taken place.
+            std.log.info(
+                "deterministic builds still need a release cycle for validation to pass:",
+                .{},
+            );
+            std.log.info("checksum mismatch - {s}: downloaded {s}, built {s}", .{
                 artifact,
                 checksum_downloaded[0..64],
                 checksum_built[0..64],
