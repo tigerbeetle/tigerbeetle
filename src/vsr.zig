@@ -1718,11 +1718,13 @@ pub const RepairBudgetJournal = struct {
     refill_max: u32,
 
     // Tracks the headers for prepares requested by inflight RequestPrepare messages.
-    requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void),
+    requested_prepares: std.AutoArrayHashMapUnmanaged(PrepareIdentifier, void),
     // Tracks the number of inflight RequestHeaders messages.
     requested_headers: u32,
     // Tracks the view for an inflight RequestStartView message.
     requested_start_view: ?u32,
+
+    const PrepareIdentifier = struct { view: u32, op: u64 };
 
     pub fn init(gpa: std.mem.Allocator, options: struct {
         capacity: u32,
@@ -1730,7 +1732,7 @@ pub const RepairBudgetJournal = struct {
     }) !RepairBudgetJournal {
         assert(options.refill_max <= options.capacity);
 
-        var requested_prepares: std.AutoArrayHashMapUnmanaged(Header.Prepare, void) = .{};
+        var requested_prepares: std.AutoArrayHashMapUnmanaged(PrepareIdentifier, void) = .{};
         try requested_prepares.ensureTotalCapacity(gpa, options.capacity);
         errdefer requested_prepares.deinit();
 
@@ -1749,7 +1751,7 @@ pub const RepairBudgetJournal = struct {
     }
 
     pub fn decrement(budget: *RepairBudgetJournal, repair_type: union(enum) {
-        prepare: *const Header.Prepare,
+        prepare: PrepareIdentifier,
         headers,
         start_view: u32,
     }) bool {
@@ -1768,8 +1770,8 @@ pub const RepairBudgetJournal = struct {
                     budget.requested_start_view = view;
                 } else return false;
             },
-            .prepare => |header| {
-                const gop = budget.requested_prepares.getOrPutAssumeCapacity(header.*);
+            .prepare => |prepare_identifier| {
+                const gop = budget.requested_prepares.getOrPutAssumeCapacity(prepare_identifier);
                 if (gop.found_existing) {
                     return false;
                 }
@@ -1782,7 +1784,7 @@ pub const RepairBudgetJournal = struct {
     }
 
     pub fn increment(budget: *RepairBudgetJournal, repair_type: union(enum) {
-        prepare: *const Header.Prepare,
+        prepare: PrepareIdentifier,
         headers,
         start_view: u32,
     }) void {
@@ -1797,9 +1799,9 @@ pub const RepairBudgetJournal = struct {
                     budget.requested_start_view = null;
                 } else return;
             },
-            .prepare => |header| {
+            .prepare => |prepare_identifier| {
                 // Increment budget iff we had requested this prepare.
-                if (!budget.requested_prepares.swapRemove(header.*)) {
+                if (!budget.requested_prepares.swapRemove(prepare_identifier)) {
                     return;
                 }
             },

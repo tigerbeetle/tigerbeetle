@@ -1201,6 +1201,7 @@ pub const Header = extern struct {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0 and self.prepare_checksum != 0) return "view != 0 and checksum != 0";
             if (self.release.value != 0) return "release != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
