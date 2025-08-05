@@ -90,7 +90,7 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
 
     if !fs::exists(&zig_compiler)? {
         println!("cargo:warning=No zig compiler found at {zig_compiler}.");
-        println!("cargo:warning=You may need to run zig/download.sh (or zig/download.bat).");
+        println!("cargo:warning=You may need to run zig/download.ps1.");
         panic!("No zig compiler found.");
     }
 
