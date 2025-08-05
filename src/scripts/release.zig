@@ -884,16 +884,18 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         \\docker buildx create --use
     , .{});
 
-    inline for ([_]bool{ true, false }) |debug| {
+    for ([_]bool{ true, false }) |debug| {
         const triples = [_][]const u8{ "aarch64-linux", "x86_64-linux" };
         const docker_arches = [_][]const u8{ "arm64", "amd64" };
-        inline for (triples, docker_arches) |triple, docker_arch| {
+        for (triples, docker_arches) |triple, docker_arch| {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            const zip_path = "./zig-out/dist/tigerbeetle/tigerbeetle-" ++
-                triple ++ if (debug) "-debug" else "" ++ ".zip";
+            const zip_path = try shell.fmt(
+                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}-{s}.zip",
+                .{ triple, if (debug) "-debug" else "" },
+            );
             try shell.zip_tigerbeetle_extract(zip_path);
 
             try shell.project_root.rename(
