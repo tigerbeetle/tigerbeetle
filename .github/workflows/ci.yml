@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck ./zig/download.sh
+      - shell: pwsh
+        run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
       - run: ./zig/download.ps1 && ./zig/zig build ci -- smoke
 
   test:
