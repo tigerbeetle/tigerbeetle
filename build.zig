@@ -217,7 +217,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build test -- "test filter"
-    build_test(b, .{
+    try build_test(b, .{
         .test_unit = build_steps.test_unit,
         .test_unit_build = build_steps.test_unit_build,
         .test_integration = build_steps.test_integration,
@@ -839,15 +839,60 @@ fn build_test(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) void {
+) !void {
     const stdx_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/stdx/stdx.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    var unit_tests_contents = std.ArrayList(u8).init(b.allocator);
+    defer unit_tests_contents.deinit();
+
+    try unit_tests_contents.writer().writeAll("comptime {\n");
+    var src_dir = try b.build_root.handle.openDir("src", .{
+        .access_sub_paths = true,
+        .iterate = true,
+    });
+    var src_walker = try src_dir.walk(b.allocator);
+    defer src_walker.deinit();
+
+    while (try src_walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+
+        if (!std.mem.endsWith(u8, entry.path, ".zig")) continue;
+
+        if (std.mem.eql(u8, entry.path, "unit_test.zig")) continue;
+        if (std.mem.eql(u8, entry.path, "integration_tests.zig")) continue;
+        if (std.mem.startsWith(u8, entry.path, "stdx/")) continue;
+        if (std.mem.startsWith(u8, entry.path, "testing/vortex/")) continue;
+        if (std.mem.startsWith(u8, entry.path, "clients/") and
+            !std.mem.startsWith(u8, entry.path, "clients/c")) continue;
+        if (std.mem.eql(u8, entry.path, "tigerbeetle/libtb_client.zig")) continue;
+
+        const contents = try src_dir.readFileAlloc(b.allocator, entry.path, 1024 * 1024);
+        defer b.allocator.free(contents);
+
+        if (std.mem.indexOf(u8, contents, "test \"") == null and
+            std.mem.indexOf(u8, contents, "test {") == null)
+        {
+            continue;
+        }
+
+        try unit_tests_contents.writer().print("    _ = @import(\"{s}\");\n", .{entry.path});
+    }
+    try unit_tests_contents.writer().writeAll("}\n");
+
+    const unit_tests_file = b.addWriteFiles().add("unit_tests.zig", unit_tests_contents.items);
+
+    // Copy the generated file into the repo and gain change detection in CI.
+    const unit_tests_file_generated = Generated.file_copy(b, .{
+        .from = unit_tests_file,
+        .path = "./src/unit_tests.zig",
+    });
+
     const unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/unit_tests.zig"),
+        .root_source_file = unit_tests_file_generated.path,
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
