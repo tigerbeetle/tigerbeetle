@@ -586,7 +586,10 @@ fn publish(
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            const zip_file = try std.fs.cwd().openFile("zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            defer zip_file.close();
+            try std.zip.extract(std.fs.cwd(), zip_file.seekableStream(), .{});
+
             const past_binary_contents = try shell.cwd.readFileAllocOptions(
                 shell.arena.allocator(),
                 "tigerbeetle",
@@ -880,17 +883,18 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
         \\docker buildx create --use
     , .{});
 
-    for ([_]bool{ true, false }) |debug| {
+    inline for ([_]bool{ true, false }) |debug| {
         const triples = [_][]const u8{ "aarch64-linux", "x86_64-linux" };
         const docker_arches = [_][]const u8{ "arm64", "amd64" };
-        for (triples, docker_arches) |triple, docker_arch| {
+        inline for (triples, docker_arches) |triple, docker_arch| {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
-            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
-                .triple = triple,
-                .debug = if (debug) "-debug" else "",
-            });
+            const zip_path = "./zig-out/dist/tigerbeetle/tigerbeetle-" ++ triple ++ if (debug) "-debug" else "" ++ ".zip";
+            const zip_file = try std.fs.cwd().openFile(zip_path, .{});
+            defer zip_file.close();
+            try std.zip.extract(std.fs.cwd(), zip_file.seekableStream(), .{});
+
             try shell.project_root.rename(
                 "tigerbeetle",
                 try shell.fmt("tigerbeetle-{s}", .{docker_arch}),
