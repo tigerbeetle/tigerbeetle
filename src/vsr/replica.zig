@@ -4103,9 +4103,8 @@ pub fn ReplicaType(
                     self.replica,
                     message.header.op,
                 });
-                if (self.replica != self.primary_index(self.view) and
-                    self.commit_min < message.header.op)
-                {
+
+                if (self.replica != self.primary_index(self.view)) {
                     self.cache_prepare(message);
                 }
                 _ = self.write_prepare(message, .append);
