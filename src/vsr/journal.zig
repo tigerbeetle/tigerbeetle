@@ -145,24 +145,24 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             recovered: void,
         };
 
-        pub const ReadOptions = struct {
-            op: u64,
-            checksum: u128,
-            destination_replica: ?u8 = null,
-        };
-
-        const ReadCallback = *const fn (
-            replica: *Replica,
-            prepare: ?*Message.Prepare,
-            options: ReadOptions,
-        ) void;
-
         pub const Read = struct {
             journal: *Journal,
             completion: Storage.Read,
             message: *Message.Prepare,
-            options: ReadOptions,
-            callback: ReadCallback,
+            options: Options,
+            callback: Callback,
+
+            pub const Options = struct {
+                op: u64,
+                checksum: u128,
+                destination_replica: ?u8 = null,
+            };
+
+            const Callback = *const fn (
+                replica: *Replica,
+                prepare: ?*Message.Prepare,
+                options: Options,
+            ) void;
         };
 
         pub const Write = struct {
@@ -726,8 +726,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There must be a matching in-memory header.
         pub fn read_prepare(
             journal: *Journal,
-            callback: ReadCallback,
-            options: ReadOptions,
+            callback: Read.Callback,
+            options: Read.Options,
         ) void {
             const checksum = options.checksum;
             const op = options.op;
@@ -762,8 +762,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// Read a prepare from disk. There may or may not be an in-memory header.
         pub fn read_prepare_with_op_and_checksum(
             journal: *Journal,
-            callback: ReadCallback,
-            options: ReadOptions,
+            callback: Read.Callback,
+            options: Read.Options,
         ) void {
             const op = options.op;
             const checksum = options.checksum;

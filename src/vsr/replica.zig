@@ -2884,8 +2884,6 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
 
             const op = message.header.prepare_op;
-
-            const view = message.header.view;
             const checksum = blk: {
                 if (message.header.view == 0) {
                     break :blk message.header.prepare_checksum;
@@ -2897,11 +2895,11 @@ pub fn ReplicaType(
                     // requesting replica for belonging to a newer view. On the other hand, sending
                     // older prepares is okay, since requesting replicas cache those in case they
                     // can't be immediately written (for example, due to a hash chain break).
-                    if (header.view > view) {
+                    if (header.view > message.header.view) {
                         log.debug("{}: on_request_prepare: destination replica view={}" ++
                             " too old, prepare view={}", .{
                             self.replica,
-                            view,
+                            message.header.view,
                             header.view,
                         });
                         return;
@@ -2962,25 +2960,25 @@ pub fn ReplicaType(
         fn on_request_prepare_read(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            options: Journal.ReadOptions,
+            options: Journal.Read.Options,
         ) void {
             const message = prepare orelse {
                 log.debug("{}: on_request_prepare_read: prepare=null", .{self.replica});
                 return;
             };
-            const destination_replica = options.destination_replica;
+            const destination_replica = options.destination_replica.?;
 
             assert(message.header.command == .prepare);
-            assert(destination_replica.? != self.replica);
+            assert(destination_replica != self.replica);
 
             log.debug("{}: on_request_prepare_read: op={} checksum={} sending to replica={}", .{
                 self.replica,
                 message.header.op,
                 message.header.checksum,
-                destination_replica.?,
+                destination_replica,
             });
 
-            self.send_message_to_replica(destination_replica.?, message);
+            self.send_message_to_replica(destination_replica, message);
         }
 
         fn on_request_headers(self: *Replica, message: *const Message.RequestHeaders) void {
@@ -4531,7 +4529,7 @@ pub fn ReplicaType(
         fn commit_start_journal_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            options: Journal.ReadOptions,
+            options: Journal.Read.Options,
         ) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
@@ -7735,7 +7733,7 @@ pub fn ReplicaType(
         fn repair_pipeline_read_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            options: Journal.ReadOptions,
+            options: Journal.Read.Options,
         ) void {
             assert(options.destination_replica == null);
 
