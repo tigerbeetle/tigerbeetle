@@ -846,90 +846,19 @@ fn build_test(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
-    // Different platforms can walk the directory in different orders. Store the paths and sort them
-    // to ensure consistency.
-    var unit_test_files = std.ArrayList([]const u8).init(b.allocator);
-    defer unit_test_files.deinit();
-    defer for (unit_test_files.items) |item| b.allocator.free(item);
-
-    var unit_tests_contents = std.ArrayList(u8).init(b.allocator);
-    defer unit_tests_contents.deinit();
-
-    try unit_tests_contents.writer().writeAll("comptime {\n");
-    var src_dir = try b.build_root.handle.openDir("src", .{
-        .access_sub_paths = true,
-        .iterate = true,
-    });
-    var src_walker = try src_dir.walk(b.allocator);
-    defer src_walker.deinit();
-
-    while (try src_walker.next()) |entry| {
-        if (entry.kind != .file) continue;
-
-        const entry_path = try b.allocator.dupe(u8, entry.path);
-        errdefer b.allocator.free(entry_path);
-
-        // Replace the path separator to be Unix-style, for consistency on Windows.
-        // Don't use entry.path directly!
-        if (builtin.os.tag == .windows) {
-            std.mem.replaceScalar(u8, entry_path, '\\', '/');
-        }
-
-        if (!std.mem.endsWith(u8, entry_path, ".zig")) continue;
-
-        if (std.mem.eql(u8, entry_path, "unit_test.zig")) continue;
-        if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
-        if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
-        if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
-        if (std.mem.startsWith(u8, entry_path, "clients/") and
-            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
-        if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
-
-        const contents = try src_dir.readFileAlloc(b.allocator, entry_path, 1024 * 1024);
-        defer b.allocator.free(contents);
-
-        if (std.mem.indexOf(u8, contents, "test \"") == null and
-            std.mem.indexOf(u8, contents, "test {") == null)
-        {
-            continue;
-        }
-
-        try unit_test_files.append(entry_path);
-    }
-
-    std.mem.sort(
-        []const u8,
-        unit_test_files.items,
-        {},
-        struct {
-            fn less_than_fn(_: void, a: []const u8, b_: []const u8) bool {
-                return std.mem.order(u8, a, b_) == .lt;
-            }
-        }.less_than_fn,
-    );
-
-    for (unit_test_files.items) |unit_test_file| {
-        try unit_tests_contents.writer().print("    _ = @import(\"{s}\");\n", .{unit_test_file});
-    }
-
-    try unit_tests_contents.writer().writeAll("}\n");
-
-    const unit_tests_file = b.addWriteFiles().add("unit_tests.zig", unit_tests_contents.items);
-
-    // Copy the generated file into the repo and gain change detection in CI.
-    const unit_tests_file_generated = Generated.file_copy(b, .{
-        .from = unit_tests_file,
-        .path = "./src/unit_tests.zig",
-    });
-
     const unit_tests = b.addTest(.{
-        .root_source_file = unit_tests_file_generated.path,
+        .root_source_file = b.path("src/unit_tests.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
     unit_tests.root_module.addImport("stdx", options.stdx_module);
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
+
+    const build_root = b.addOptions();
+    build_root.addOption([]const u8, "build_root", b.build_root.path.?);
+    unit_tests.root_module.addOptions("build_root", build_root);
+
     unit_tests.addIncludePath(options.tb_client_header.path.dirname());
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
