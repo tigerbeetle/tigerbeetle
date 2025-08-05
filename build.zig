@@ -846,6 +846,11 @@ fn build_test(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    // Different platforms can walk the directory in different orders. Store the paths and sort them
+    // to ensure consistency.
+    var unit_test_files = std.ArrayList([]const u8).init(b.allocator);
+    defer unit_test_files.deinit();
+
     var unit_tests_contents = std.ArrayList(u8).init(b.allocator);
     defer unit_tests_contents.deinit();
 
@@ -879,8 +884,25 @@ fn build_test(
             continue;
         }
 
-        try unit_tests_contents.writer().print("    _ = @import(\"{s}\");\n", .{entry.path});
+        try unit_test_files.append(try b.allocator.dupe(u8, entry.path));
     }
+
+    std.mem.sort(
+        []const u8,
+        unit_test_files.items,
+        {},
+        struct {
+            fn less_than_fn(_: void, a: []const u8, b_: []const u8) bool {
+                return std.mem.order(u8, a, b_) == .lt;
+            }
+        }.less_than_fn,
+    );
+
+    for (unit_test_files.items) |unit_test_file| {
+        try unit_tests_contents.writer().print("    _ = @import(\"{s}\");\n", .{unit_test_file});
+        b.allocator.free(unit_test_file);
+    }
+
     try unit_tests_contents.writer().writeAll("}\n");
 
     const unit_tests_file = b.addWriteFiles().add("unit_tests.zig", unit_tests_contents.items);
