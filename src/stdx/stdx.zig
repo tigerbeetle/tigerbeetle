@@ -995,6 +995,10 @@ pub const DateTimeUTC = struct {
         return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
     }
 
+    pub fn from_timestamp_s(timestamp_s: u64) DateTimeUTC {
+        return DateTimeUTC.from_timestamp_ms(timestamp_s * std.time.ms_per_s);
+    }
+
     pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
         const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
         const year_day = epoch_seconds.getEpochDay().calculateYearDay();

@@ -135,7 +135,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         , .{ .sha = cli_args.sha });
     }
     try shell.project_root.deleteFile("tigerbeetle");
-    try shell.exec("unzip zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+
+    try shell.unzip_executable(
+        "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+        "tigerbeetle",
+    );
 
     const benchmark_result = try shell.exec_stdout(
         "./tigerbeetle benchmark --validate --checksum-performance",

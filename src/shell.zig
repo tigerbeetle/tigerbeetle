@@ -924,3 +924,138 @@ pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8)
         .{ .datetime_iso8601 = datetime_iso8601 },
     ), 10);
 }
+
+pub fn unzip_executable(
+    shell: *Shell,
+    zip_path: []const u8,
+    executable_name: []const u8,
+) !void {
+    const zip_file = try shell.cwd.openFile(zip_path, .{});
+    defer zip_file.close();
+
+    try std.zip.extract(shell.cwd, zip_file.seekableStream(), .{});
+
+    const zip_extracted = try shell.cwd.openFile(executable_name, .{});
+    defer zip_extracted.close();
+
+    // Zig's std.zip.extract doesn't handle permissions.
+    if (builtin.os.tag != .windows) {
+        try zip_extracted.chmod(0o755);
+    }
+}
+
+fn unix_to_dos_timestamp(date_time: stdx.DateTimeUTC) struct { time: u16, date: u16 } {
+    assert(date_time.year >= 1980 and date_time.year <= 2107);
+
+    const time: u16 =
+        (@as(u16, date_time.hour) << 11) |
+        (@as(u16, date_time.minute) << 5) |
+        (@as(u16, @divFloor(date_time.second, 2)));
+
+    const date: u16 =
+        ((@as(u16, date_time.year - 1980)) << 9) |
+        (@as(u16, date_time.month) << 5) |
+        (@as(u16, date_time.day));
+
+    return .{ .time = time, .date = date };
+}
+
+pub fn zip_executable(
+    shell: *Shell,
+    zip_file: std.fs.File,
+    input: struct {
+        executable_name: []const u8,
+        executable_mtime: stdx.DateTimeUTC,
+        max_size: u64,
+    },
+) !void {
+    assert(std.mem.eql(u8, std.fs.path.basename(input.executable_name), input.executable_name));
+
+    var zip_file_writer = std.io.countingWriter(zip_file.writer());
+
+    const executable = try shell.cwd.readFileAlloc(
+        shell.gpa,
+        input.executable_name,
+        input.max_size,
+    );
+    defer shell.gpa.free(executable);
+
+    const executable_mtime_dos = unix_to_dos_timestamp(input.executable_mtime);
+    const crc32 = std.hash.Crc32.hash(executable);
+
+    const executable_deflated_buffer = try shell.gpa.alloc(u8, input.max_size);
+    defer shell.gpa.free(executable_deflated_buffer);
+
+    const executable_deflated = blk: {
+        var executable_stream = std.io.fixedBufferStream(executable);
+        var executable_deflated_stream = std.io.fixedBufferStream(executable_deflated_buffer);
+
+        try std.compress.flate.deflate.compress(
+            .raw,
+            executable_stream.reader(),
+            executable_deflated_stream.writer(),
+            .{ .level = .best },
+        );
+        assert(executable_stream.pos == executable.len);
+
+        break :blk executable_deflated_stream.getWritten();
+    };
+
+    const zip_version_20 = 0x14;
+    const zip_unix = 0x0300;
+
+    const local_file_header: std.zip.LocalFileHeader = .{
+        .signature = std.zip.local_file_header_sig,
+        .version_needed_to_extract = zip_version_20,
+        .flags = .{ .encrypted = false, ._ = 0 },
+        .compression_method = .deflate,
+        .last_modification_time = executable_mtime_dos.time,
+        .last_modification_date = executable_mtime_dos.date,
+        .crc32 = crc32,
+        .compressed_size = @intCast(executable_deflated.len),
+        .uncompressed_size = @intCast(executable.len),
+        .filename_len = @intCast(input.executable_name.len),
+        .extra_len = 0,
+    };
+
+    try zip_file_writer.writer().writeStructEndian(local_file_header, .little);
+    try zip_file_writer.writer().writeAll(input.executable_name);
+    try zip_file_writer.writer().writeAll(executable_deflated);
+
+    const central_directory_file_header: std.zip.CentralDirectoryFileHeader = .{
+        .signature = std.zip.central_file_header_sig,
+        .version_made_by = zip_unix | zip_version_20,
+        .version_needed_to_extract = zip_version_20,
+        .flags = .{ .encrypted = false, ._ = 0 },
+        .compression_method = .deflate,
+        .last_modification_time = executable_mtime_dos.time,
+        .last_modification_date = executable_mtime_dos.date,
+        .crc32 = crc32,
+        .compressed_size = @intCast(executable_deflated.len),
+        .uncompressed_size = @intCast(executable.len),
+        .filename_len = @intCast(input.executable_name.len),
+        .extra_len = 0,
+        .comment_len = 0,
+        .disk_number = 0,
+        .internal_file_attributes = 0,
+        .external_file_attributes = 0o0100755 << 16, // Regular file, executable.
+        .local_file_header_offset = 0,
+    };
+
+    const central_directory_offset = zip_file_writer.bytes_written;
+    try zip_file_writer.writer().writeStructEndian(central_directory_file_header, .little);
+    try zip_file_writer.writer().writeAll(input.executable_name);
+    const central_directory_end = zip_file_writer.bytes_written;
+
+    const end_record: std.zip.EndRecord = .{
+        .signature = std.zip.end_record_sig,
+        .disk_number = 0,
+        .central_directory_disk_number = 0,
+        .record_count_disk = 1,
+        .record_count_total = 1,
+        .central_directory_size = @intCast(central_directory_end - central_directory_offset),
+        .central_directory_offset = @intCast(central_directory_offset),
+        .comment_len = 0,
+    };
+    try zip_file_writer.writer().writeStructEndian(end_record, .little);
+}

@@ -57,7 +57,7 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- release --run-number=<run> --sha=<commit>
+        \\  zig build scripts -- release --sha=<commit>
         \\
         \\Options:
         \\

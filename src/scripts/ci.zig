@@ -105,51 +105,45 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
-    // Enable this once deterministic zip generation has been merged in and released.
-    // const raw_run_number = stdx.cut(stdx.cut(tag, ".").?.suffix, ".").?.suffix;
+    const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    try shell.exec_zig("build scripts -- release --build " ++
+        "--sha={git_sha} --language=zig", .{
+        .git_sha = git_sha,
+    });
+    for (artifacts) |artifact| {
+        // Zig only guarantees release builds to be deterministic.
+        if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
-    // // The +188 comes from how release.zig calculates the version number.
-    // const run_number = try std.fmt.allocPrint(
-    //     shell.arena.allocator(),
-    //     "{}",
-    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 188},
-    // );
+        const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
+            .artifact = artifact,
+        });
 
-    // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
-    // try shell.exec_zig("build scripts -- release --build  --run-number={run_number} " ++
-    //     "--sha={sha} --language=zig", .{
-    //     .run_number = run_number,
-    //     .sha = sha,
-    // });
-    // for (artifacts) |artifact| {
-    //     // Zig only guarantees release builds to be deterministic.
-    //     if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
+        shell.popd();
+        const checksum_built = try shell.exec_stdout(
+            "sha256sum zig-out/dist/tigerbeetle/{artifact}",
+            .{
+                .artifact = artifact,
+            },
+        );
+        try shell.pushd_dir(tmp_dir.dir);
 
-    //     // TODO(Zig): Determinism is broken on Windows:
-    //     // https://github.com/ziglang/zig/issues/9432
-    //     if (std.mem.indexOf(u8, artifact, "-windows.zip") != null) continue;
+        // Slice the output to suppress the names.
+        if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
+            // Still run the code, but suppress failing until a release cycle has taken place.
+            std.log.info(
+                "deterministic builds still need a release cycle for validation to pass:",
+                .{},
+            );
+            std.log.info("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+                artifact,
+                checksum_downloaded[0..64],
+                checksum_built[0..64],
+            });
+        }
+    }
 
-    //     const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
-    //         .artifact = artifact,
-    //     });
+    try shell.unzip_executable("tigerbeetle-x86_64-linux.zip", "tigerbeetle");
 
-    //     shell.popd();
-    //     const checksum_built = try shell.exec_stdout("sha256sum dist/tigerbeetle/{artifact}", .{
-    //         .artifact = artifact,
-    //     });
-    //     try shell.pushd_dir(tmp_dir.dir);
-
-    //     // Slice the output to suppress the names.
-    //     if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
-    //         std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
-    //             artifact,
-    //             checksum_downloaded[0..64],
-    //             checksum_built[0..64],
-    //         });
-    //     }
-    // }
-
-    try shell.exec("unzip tigerbeetle-x86_64-linux.zip", .{});
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);
     assert(std.mem.indexOf(u8, version, "ReleaseSafe") != null);
