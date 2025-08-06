@@ -305,22 +305,16 @@ fn build_tigerbeetle_target(
         assert(std.mem.indexOf(u8, output, build_mode) != null);
     }
 
-    {
-        const fd = try shell.cwd.openFile(exe_name, .{ .mode = .write_only });
-        defer fd.close();
-
-        const atime_ns = commit_timestamp_seconds * std.time.ns_per_s;
-        const mtime_ns = atime_ns;
-        try fd.updateTimes(atime_ns, mtime_ns);
-    }
-
     const zip_file = try dist_dir.createFile(zip_name, .{ .truncate = false, .exclusive = true });
     defer zip_file.close();
 
-    try shell.zip_tigerbeetle_create(
+    try shell.zip_executable(
         zip_file,
-        exe_name,
-        multiversioning.multiversion_binary_size_max,
+        .{
+            .executable_name = exe_name,
+            .executable_mtime_s = commit_timestamp_seconds,
+            .max_size = multiversioning.multiversion_binary_size_max,
+        },
     );
 }
 
@@ -587,8 +581,9 @@ fn publish(
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            try shell.zip_tigerbeetle_extract(
+            try shell.unzip_executable(
                 "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+                "tigerbeetle",
             );
 
             const past_binary_contents = try shell.cwd.readFileAllocOptions(
@@ -896,7 +891,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
                 "./zig-out/dist/tigerbeetle/tigerbeetle-{s}-{s}.zip",
                 .{ triple, if (debug) "-debug" else "" },
             );
-            try shell.zip_tigerbeetle_extract(zip_path);
+            try shell.unzip_executable(zip_path, "tigerbeetle");
 
             try shell.project_root.rename(
                 "tigerbeetle",

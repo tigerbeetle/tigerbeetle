@@ -925,19 +925,17 @@ pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8)
     ), 10);
 }
 
-/// Extracts a TigerBeetle zip and ensures the output has correct permissions.
-pub fn zip_tigerbeetle_extract(shell: *Shell, relative_path: []const u8) !void {
-    assert(std.mem.indexOf(u8, relative_path, "tigerbeetle-") != null);
-
-    const zip_file = try shell.cwd.openFile(relative_path, .{});
+pub fn unzip_executable(
+    shell: *Shell,
+    zip_path: []const u8,
+    executable_name: []const u8,
+) !void {
+    const zip_file = try shell.cwd.openFile(zip_path, .{});
     defer zip_file.close();
 
     try std.zip.extract(shell.cwd, zip_file.seekableStream(), .{});
 
-    const zip_extracted = try (shell.cwd.openFile("tigerbeetle", .{}) catch |e| switch (e) {
-        error.FileNotFound => shell.cwd.openFile("tigerbeetle.exe", .{}),
-        else => e,
-    });
+    const zip_extracted = try shell.cwd.openFile(executable_name, .{});
     defer zip_extracted.close();
 
     // Zig's std.zip.extract doesn't handle permissions.
@@ -946,9 +944,9 @@ pub fn zip_tigerbeetle_extract(shell: *Shell, relative_path: []const u8) !void {
     }
 }
 
-fn unix_to_dos_timestamp(epoch_ns: i128) struct { time: u16, date: u16 } {
+fn unix_to_dos_timestamp(epoch_s: u64) struct { time: u16, date: u16 } {
     const date_time = stdx.DateTimeUTC.from_timestamp_ms(
-        @intCast(@divFloor(epoch_ns, std.time.ns_per_ms)),
+        epoch_s * std.time.ms_per_s,
     );
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 
@@ -965,33 +963,45 @@ fn unix_to_dos_timestamp(epoch_ns: i128) struct { time: u16, date: u16 } {
     return .{ .time = time, .date = date };
 }
 
-pub fn zip_tigerbeetle_create(
+pub fn zip_executable(
     shell: *Shell,
     zip_file: std.fs.File,
-    exe_path: []const u8,
-    max_size: u64,
+    input: struct {
+        executable_name: []const u8,
+        executable_mtime_s: u64,
+        max_size: u64,
+    },
 ) !void {
+    assert(std.mem.eql(u8, std.fs.path.basename(input.executable_name), input.executable_name));
+
     var zip_file_writer = std.io.countingWriter(zip_file.writer());
 
-    const tigerbeetle = try shell.cwd.readFileAlloc(shell.arena.allocator(), exe_path, max_size);
-    const tigerbeetle_dos_mtime = unix_to_dos_timestamp((try shell.cwd.statFile(exe_path)).mtime);
-    const crc32 = std.hash.Crc32.hash(tigerbeetle);
+    const executable = try shell.cwd.readFileAlloc(
+        shell.gpa,
+        input.executable_name,
+        input.max_size,
+    );
+    defer shell.gpa.free(executable);
 
-    const tigerbeetle_deflated = blk: {
-        var tigerbeetle_stream = std.io.fixedBufferStream(tigerbeetle);
+    const executable_mtime_dos = unix_to_dos_timestamp(input.executable_mtime_s);
+    const crc32 = std.hash.Crc32.hash(executable);
 
-        const tigerbeetle_deflated_buffer = try shell.arena.allocator().alloc(u8, max_size);
-        var tigerbeetle_deflated_stream = std.io.fixedBufferStream(tigerbeetle_deflated_buffer);
+    const executable_deflated_buffer = try shell.gpa.alloc(u8, input.max_size);
+    defer shell.gpa.free(executable_deflated_buffer);
+
+    const executable_deflated = blk: {
+        var executable_stream = std.io.fixedBufferStream(executable);
+        var executable_deflated_stream = std.io.fixedBufferStream(executable_deflated_buffer);
 
         try std.compress.flate.deflate.compress(
             .raw,
-            tigerbeetle_stream.reader(),
-            tigerbeetle_deflated_stream.writer(),
+            executable_stream.reader(),
+            executable_deflated_stream.writer(),
             .{ .level = .best },
         );
-        assert(tigerbeetle_stream.pos == tigerbeetle.len);
+        assert(executable_stream.pos == executable.len);
 
-        break :blk tigerbeetle_deflated_stream.getWritten();
+        break :blk executable_deflated_stream.getWritten();
     };
 
     const zip_version_20 = 0x14;
@@ -1002,18 +1012,18 @@ pub fn zip_tigerbeetle_create(
         .version_needed_to_extract = zip_version_20,
         .flags = .{ .encrypted = false, ._ = 0 },
         .compression_method = .deflate,
-        .last_modification_time = tigerbeetle_dos_mtime.time,
-        .last_modification_date = tigerbeetle_dos_mtime.date,
+        .last_modification_time = executable_mtime_dos.time,
+        .last_modification_date = executable_mtime_dos.date,
         .crc32 = crc32,
-        .compressed_size = @intCast(tigerbeetle_deflated.len),
-        .uncompressed_size = @intCast(tigerbeetle.len),
-        .filename_len = @intCast(exe_path.len),
+        .compressed_size = @intCast(executable_deflated.len),
+        .uncompressed_size = @intCast(executable.len),
+        .filename_len = @intCast(input.executable_name.len),
         .extra_len = 0,
     };
 
     try zip_file_writer.writer().writeStructEndian(local_file_header, .little);
-    try zip_file_writer.writer().writeAll(exe_path);
-    try zip_file_writer.writer().writeAll(tigerbeetle_deflated);
+    try zip_file_writer.writer().writeAll(input.executable_name);
+    try zip_file_writer.writer().writeAll(executable_deflated);
 
     const central_directory_file_header: std.zip.CentralDirectoryFileHeader = .{
         .signature = std.zip.central_file_header_sig,
@@ -1021,12 +1031,12 @@ pub fn zip_tigerbeetle_create(
         .version_needed_to_extract = zip_version_20,
         .flags = .{ .encrypted = false, ._ = 0 },
         .compression_method = .deflate,
-        .last_modification_time = tigerbeetle_dos_mtime.time,
-        .last_modification_date = tigerbeetle_dos_mtime.date,
+        .last_modification_time = executable_mtime_dos.time,
+        .last_modification_date = executable_mtime_dos.date,
         .crc32 = crc32,
-        .compressed_size = @intCast(tigerbeetle_deflated.len),
-        .uncompressed_size = @intCast(tigerbeetle.len),
-        .filename_len = @intCast(exe_path.len),
+        .compressed_size = @intCast(executable_deflated.len),
+        .uncompressed_size = @intCast(executable.len),
+        .filename_len = @intCast(input.executable_name.len),
         .extra_len = 0,
         .comment_len = 0,
         .disk_number = 0,
@@ -1037,7 +1047,7 @@ pub fn zip_tigerbeetle_create(
 
     const central_directory_offset = zip_file_writer.bytes_written;
     try zip_file_writer.writer().writeStructEndian(central_directory_file_header, .little);
-    try zip_file_writer.writer().writeAll(exe_path);
+    try zip_file_writer.writer().writeAll(input.executable_name);
     const central_directory_end = zip_file_writer.bytes_written;
 
     const end_record: std.zip.EndRecord = .{

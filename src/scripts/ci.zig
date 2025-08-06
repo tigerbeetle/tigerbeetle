@@ -142,7 +142,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
-    try shell.zip_tigerbeetle_extract("tigerbeetle-x86_64-linux.zip");
+    try shell.unzip_executable("tigerbeetle-x86_64-linux.zip", "tigerbeetle");
 
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);
