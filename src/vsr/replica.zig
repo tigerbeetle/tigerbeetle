@@ -4829,6 +4829,7 @@ pub fn ReplicaType(
         fn commit_checkpoint_data(self: *Replica) enum { ready, pending } {
             assert(self.commit_stage == .checkpoint_data);
             assert(self.commit_stage.checkpoint_data.count() == 0);
+            self.grid.assert_only_repairing();
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -4854,10 +4855,6 @@ pub fn ReplicaType(
             });
 
             if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
-
-            // TODO(Compaction pacing) Move this to before the if guard once there is no IO
-            // between beats.
-            self.grid.assert_only_repairing();
 
             const chunks = self.client_sessions_checkpoint.encode_chunks();
             assert(chunks.len == 1);
