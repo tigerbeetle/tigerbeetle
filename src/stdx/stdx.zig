@@ -913,6 +913,12 @@ pub fn array_print(
     };
 }
 
+/// A moment in time not anchored to any particular epoch.
+///
+/// The absolute value of `ns` is meaningless, but it is possible to compute `Duration` between
+/// two `Instant`s sourced from the same clock.
+///
+/// See also `DateTimeUTC`.
 pub const Instant = struct {
     ns: u64,
 
@@ -927,6 +933,7 @@ pub const Instant = struct {
     }
 };
 
+/// Non-negative time difference between two `Instant`s.
 pub const Duration = struct {
     ns: u64,
 
@@ -976,10 +983,10 @@ test "Instant/Duration" {
     assert(duration.ms() == 1_000);
 }
 
-// DateTime in UTC, intended primarily for logging.
-//
-// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
-// timezones or leap seconds is necessary.
+/// DateTime in UTC, intended primarily for logging.
+///
+/// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
+/// timezones or leap seconds is necessary.
 pub const DateTimeUTC = struct {
     year: u16,
     month: u8,
