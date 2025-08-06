@@ -69,7 +69,6 @@ comptime {
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const build_root = @import("build_root").build_root;
 const max_source_size = 1024 * 1024;
 
 test {
@@ -77,12 +76,8 @@ test {
     defer arena_instance.deinit();
     const arena = arena_instance.allocator();
 
-    const src_path = try std.fmt.allocPrint(
-        arena,
-        "{s}/{s}",
-        .{ build_root, "src" },
-    );
-    var src_dir = try std.fs.openDirAbsolute(src_path, .{
+    // build.zig runs this in the root dir.
+    var src_dir = try std.fs.cwd().openDir("src", .{
         .access_sub_paths = true,
         .iterate = true,
     });

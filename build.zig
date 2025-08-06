@@ -854,11 +854,6 @@ fn build_test(
     });
     unit_tests.root_module.addImport("stdx", options.stdx_module);
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
-
-    const build_root = b.addOptions();
-    build_root.addOption([]const u8, "build_root", b.build_root.path.?);
-    unit_tests.root_module.addOptions("build_root", build_root);
-
     unit_tests.addIncludePath(options.tb_client_header.path.dirname());
 
     steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
@@ -874,6 +869,8 @@ fn build_test(
     }
     steps.test_unit.dependOn(&run_stdx_unit_tests.step);
     steps.test_unit.dependOn(&run_unit_tests.step);
+
+    run_unit_tests.setCwd(b.path("."));
 
     build_test_integration(b, .{
         .test_integration = steps.test_integration,
