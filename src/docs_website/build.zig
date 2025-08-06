@@ -1,5 +1,4 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const Website = @import("src/website.zig").Website;
 const docs = @import("src/docs.zig");
 const redirects = @import("src/redirects.zig");
@@ -25,7 +24,7 @@ pub fn build(b: *std.Build) !void {
     const vale_bin = get_vale_bin(b) orelse return;
 
     const check_spelling = std.Build.Step.Run.create(b, "run vale");
-    hide_stderr(check_spelling);
+    hide_stdout(check_spelling);
     check_spelling.addFileArg(vale_bin);
     const md_files = b.run(&.{ "git", "ls-files", "../../**/*.md" });
     var md_files_iter = std.mem.tokenizeScalar(u8, md_files, '\n');
@@ -129,25 +128,31 @@ fn get_vale_bin(b: *std.Build) ?std.Build.LazyPath {
     }
 }
 
-// Hide step's stderr unless it fails. Sadly, this requires overriding Build.Step.Run make function.
-fn hide_stderr(run: *std.Build.Step.Run) void {
-    const b = run.step.owner;
-
-    run.addCheck(.{ .expect_term = .{ .Exited = 0 } });
-    run.has_side_effects = true;
+// Hide step's stdout unless it fails. Sadly, this requires overriding Build.Step.Run make function.
+fn hide_stdout(run: *std.Build.Step.Run) void {
+    _ = run.captureStdOut();
 
     const override = struct {
         var global_map: std.AutoHashMapUnmanaged(usize, std.Build.Step.MakeFn) = .{};
 
         fn make(step: *std.Build.Step, options: std.Build.Step.MakeOptions) anyerror!void {
             const original = global_map.get(@intFromPtr(step)).?;
-            try original(step, options);
-            assert(step.result_error_msgs.items.len == 0);
-            step.result_stderr = "";
+            original(step, options) catch |err| {
+                const run_step: *std.Build.Step.Run = @fieldParentPtr("step", step);
+                if (run_step.captured_stdout) |output| {
+                    const file = try std.fs.cwd().openFile(output.generated_file.getPath(), .{});
+                    defer file.close();
+
+                    const stdout = try file.readToEndAlloc(step.owner.allocator, 100 * 1024);
+                    std.debug.print("{s}\n", .{stdout});
+                }
+                return err;
+            };
         }
     };
 
     const original = run.step.makeFn;
+    const b = run.step.owner;
     override.global_map.put(b.allocator, @intFromPtr(&run.step), original) catch @panic("OOM");
-    run.step.makeFn = &override.make;
+    run.step.makeFn = override.make;
 }
