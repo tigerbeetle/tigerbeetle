@@ -217,7 +217,7 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build test -- "test filter"
-    build_test(b, .{
+    try build_test(b, .{
         .test_unit = build_steps.test_unit,
         .test_unit_build = build_steps.test_unit_build,
         .test_integration = build_steps.test_integration,
@@ -839,7 +839,7 @@ fn build_test(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) void {
+) !void {
     const stdx_unit_tests = b.addTest(.{
         .root_source_file = b.path("src/stdx/stdx.zig"),
         .target = options.target,
@@ -869,6 +869,8 @@ fn build_test(
     }
     steps.test_unit.dependOn(&run_stdx_unit_tests.step);
     steps.test_unit.dependOn(&run_unit_tests.step);
+
+    run_unit_tests.setCwd(b.path("."));
 
     build_test_integration(b, .{
         .test_integration = steps.test_integration,
