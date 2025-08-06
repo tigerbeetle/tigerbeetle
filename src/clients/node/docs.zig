@@ -14,7 +14,7 @@ pub const NodeDocs = Docs{
     \\The TigerBeetle client for Node.js.
     ,
     .prerequisites =
-    \\* NodeJS >= `18`
+    \\* Node.js >= `18`
     ,
 
     .project_file = "",

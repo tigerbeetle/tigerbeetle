@@ -16,7 +16,7 @@ Released: 2025-08-01
 
 - [#3089](https://github.com/tigerbeetle/tigerbeetle/pull/3089)
 
-  Fix Node v24 client.
+  Fix Node.js v24 client.
 
 ### Features
 
@@ -1164,7 +1164,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2747](https://github.com/tigerbeetle/tigerbeetle/pull/2747)
 
-  Don't use deprecated NodeJS APIs in the samples.
+  Don't use deprecated Node.js APIs in the samples.
 
 - [#2748](https://github.com/tigerbeetle/tigerbeetle/pull/2748),
   [#2744](https://github.com/tigerbeetle/tigerbeetle/pull/2744)
@@ -1215,7 +1215,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2717](https://github.com/tigerbeetle/tigerbeetle/pull/2717)
 
-  Fix a Node client crash when it was closed with outstanding requests.
+  Fix a Node.js client crash when it was closed with outstanding requests.
 
 - [#2720](https://github.com/tigerbeetle/tigerbeetle/pull/2720)
 
@@ -4217,7 +4217,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1482](https://github.com/tigerbeetle/tigerbeetle/pull/1482)
 
-  Bring back Windows tests for .Net client in CI.
+  Bring back Windows tests for .NET client in CI.
 
 - [#1540](https://github.com/tigerbeetle/tigerbeetle/pull/1540)
 
@@ -4407,7 +4407,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1480](https://github.com/tigerbeetle/tigerbeetle/pull/1480)
 
-  Deprecate support and testing for Node 16, which is EOL.
+  Deprecate support and testing for Node.js 16, which is EOL.
 
 - [#1477](https://github.com/tigerbeetle/tigerbeetle/pull/1477),
   [#1469](https://github.com/tigerbeetle/tigerbeetle/pull/1469),
@@ -4419,7 +4419,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1474](https://github.com/tigerbeetle/tigerbeetle/pull/1474)
 
-  Improve integration tests around Node and `pending_transfer_expired` - thanks to our friends at
+  Improve integration tests around Node.js and `pending_transfer_expired` - thanks to our friends at
   Rafiki for reporting!
 
 ### TigerTracks 🎧
@@ -4536,7 +4536,7 @@ Welcome to 2024!
 
 - [#1400](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
 
-  Drop support for .Net Standard 2.1.
+  Drop support for .NET Standard 2.1.
 
 - [#1397](https://github.com/tigerbeetle/tigerbeetle/pull/1397)
 
@@ -4552,7 +4552,8 @@ Welcome to 2024!
 
 - [#1398](https://github.com/tigerbeetle/tigerbeetle/pull/1398)
 
-  Don't test NodeJS client on platforms for which there are no simple upstream installation scripts.
+  Don't test Node.js client on platforms for which there are no simple upstream installation
+  scripts.
 
 - [#1388](https://github.com/tigerbeetle/tigerbeetle/pull/1388)
 
@@ -4686,7 +4687,7 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
   [#1341](https://github.com/tigerbeetle/tigerbeetle/pull/1341),
   [#1340](https://github.com/tigerbeetle/tigerbeetle/pull/1340)
 
-  Gate the main branch on more checks: unit-tests for NodeJS and even more fuzzers.
+  Gate the main branch on more checks: unit-tests for Node.js and even more fuzzers.
 
 - [#1332](https://github.com/tigerbeetle/tigerbeetle/pull/1332),
   [#1348](https://github.com/tigerbeetle/tigerbeetle/pull/1348)
