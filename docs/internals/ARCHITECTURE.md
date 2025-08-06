@@ -51,7 +51,7 @@ Replicas execute committed prepares in sequence number order by applying a batch
 local state. Because all replicas start with the same (empty) state and the state transition function
 is deterministic, the replicas arrive at the same state.
 
-If a primary fails, the consensus algorithm ensures that a different replica becomes a
+If a primary fails, the consensus algorithm proper ensures that a different replica becomes a
 primary. The new primary correctly reconstructs the latest state of the log.
 
 The derived state of the system is the append-only log of immutable transfers and the current
@@ -74,7 +74,7 @@ file and instead write new blocks only. This maintains the state of the superblo
 a while, the superblock is atomically flushed to storage forming a new checkpoint. When a replica
 crashes and restarts it loses access to its previous in-memory superblock. It reads the previous
 checkpoint/superblock from storage and reconstructs the lost state by replaying the suffix of the
-log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the 
+log of prepares after that checkpoint. Determinism guarantees that the replica ends up in the exact  
 same state.
 
 TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
@@ -121,12 +121,12 @@ any other solution wouldn't be significantly faster.
 
 TigerBeetle improves on the in-memory hash-table across two axes:
 
-**Persistence and High Availability:** An in-memory hash table is good until you need to reboot the
+**Persistence and High Availability:** an in-memory hash table is good until you need to reboot the
 computer. Data in TigerBeetle is stored on disk so power cycles are safe. What's more, the data is
 replicated across six replicas. Even if some of them are down, the cluster as a whole remains
 available.
 
-**Large Data Sets:** An in-memory hash table is good until your data stops fitting in RAM.
+**Large Data Sets:** an in-memory hash table is good until your data stops fitting in RAM.
 TigerBeetle allows working with larger-than-memory datasets. To keep optimal performance, the
 hot path of the dataset should still fit within RAM.
 
@@ -405,7 +405,7 @@ time to verify O(1) operation).
 
 ### Synchronous Execution
 
-StateMachine's `commit` function, the one that implements double-entry accounting, is
+StateMachine's `commit` function, the one that actually implements double-entry accounting, is
 synchronous. It takes a slice of transfers as input and decides in a single tight CPU loop per
 transfer whether it is applicable. Then it computes the desired balance change and records
 a result in the output slice. Crucially, the `commit` function itself doesn't do any reading from
