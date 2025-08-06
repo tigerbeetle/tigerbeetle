@@ -151,7 +151,7 @@ export function createClient (args: ClientInitArgs): Client {
 let idLastTimestamp = 0;
 
 // These are two references to the same buffer.
-// We only need the `Uint8Array` because in Node 24, but not earlier, `crypto.randomFillSync`
+// We only need the `Uint8Array` because in Node.js 24, but not earlier, `crypto.randomFillSync`
 // rejects `DataView` typed arguments.
 const idLastBuffer = new DataView(new ArrayBuffer(16));
 const idLastBufferArray = new Uint8Array(

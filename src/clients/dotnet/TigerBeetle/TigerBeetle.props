@@ -1,6 +1,6 @@
 <Project>
     <PropertyGroup>
-      <Description>The TigerBeetle client for C# and .Net</Description>
+      <Description>The TigerBeetle client for C# and .NET</Description>
       <Copyright>TigerBeetle Inc.</Copyright>
       <Authors>TigerBeetle Inc.</Authors>
       <NeutralLanguage>en-US</NeutralLanguage>
