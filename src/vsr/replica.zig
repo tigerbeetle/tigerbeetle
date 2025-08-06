@@ -2883,14 +2883,13 @@ pub fn ReplicaType(
             maybe(self.status == .recovering_head);
             assert(message.header.replica != self.replica);
 
-            const op = message.header.prepare_op;
             const checksum = blk: {
                 if (message.header.view == 0) {
                     break :blk message.header.prepare_checksum;
                 }
 
                 assert(message.header.prepare_checksum == 0);
-                if (self.journal.header_with_op(op)) |header| {
+                if (self.journal.header_with_op(message.header.prepare_op)) |header| {
                     // Avoid a wasteful read of a prepare that may ultimately be rejected by the
                     // requesting replica for belonging to a newer view. On the other hand, sending
                     // older prepares is okay, since requesting replicas cache those in case they
@@ -2907,27 +2906,31 @@ pub fn ReplicaType(
                         break :blk header.checksum;
                     }
                 } else {
-                    log.debug("{}: on_request_prepare: op={} missing", .{ self.replica, op });
+                    log.debug("{}: on_request_prepare: op={} missing", .{
+                        self.replica,
+                        message.header.prepare_op,
+                    });
                     return;
                 }
             };
 
-            const slot = self.journal.slot_for_op(op);
-            const destination_replica = message.header.replica;
-
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
-            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
+            if (self.pipeline_prepare_by_op_and_checksum(
+                message.header.prepare_op,
+                checksum,
+            )) |prepare| {
                 log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
                     self.replica,
-                    op,
+                    message.header.prepare_op,
                     checksum,
                 });
-                self.send_message_to_replica(destination_replica, prepare);
+                self.send_message_to_replica(message.header.replica, prepare);
                 return;
             }
 
+            const slot = self.journal.slot_for_op(message.header.prepare_op);
             // Consult `journal.prepare_checksums` (rather than `journal.headers`):
             // the former may have the prepare we want — even if journal recovery marked the
             // slot as faulty and left the in-memory header as reserved.
@@ -2943,15 +2946,15 @@ pub fn ReplicaType(
                 self.journal.read_prepare_with_op_and_checksum(
                     on_request_prepare_read,
                     .{
-                        .op = op,
+                        .op = message.header.prepare_op,
                         .checksum = checksum,
-                        .destination_replica = destination_replica,
+                        .destination_replica = message.header.replica,
                     },
                 );
             } else {
                 log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
                     self.replica,
-                    op,
+                    message.header.prepare_op,
                     checksum,
                 });
             }
