@@ -180,3 +180,27 @@ limitations for CDC processing:
 
 Transactions committed after version `0.16.29` are fully compatible with CDC and do not require
 the `history` flag.
+
+
+## Using CDC in Production
+
+### High Availability
+
+The CDC job is single instance. Starting a second `tigerbeetle cdc` publishing to the same queue 
+will exit with a non-zero exit code. For high availability, the cdc job could be monitored for 
+crashes and restarted in case a failure.
+
+The CDC job itself is stateless, and will resume from the last event acknowledged by RabbitMQ, 
+however it may replay events that weren't acknowledged but received by the exchange.
+
+
+### TLS Support
+
+We recommend using a TLS Tunnel to wrap the connection between TigerBeetle and RabbitMQ.
+
+
+### Event Replay
+
+By default, when the CDC job starts, it resumes from the timestamp of the last acknowledged event in
+RabbitMQ. This can be overriden to using `--timestamp-last`. For example, `--timestamp-last=0` will 
+replay all events.
