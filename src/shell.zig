@@ -944,10 +944,7 @@ pub fn unzip_executable(
     }
 }
 
-fn unix_to_dos_timestamp(epoch_s: u64) struct { time: u16, date: u16 } {
-    const date_time = stdx.DateTimeUTC.from_timestamp_ms(
-        epoch_s * std.time.ms_per_s,
-    );
+fn unix_to_dos_timestamp(date_time: stdx.DateTimeUTC) struct { time: u16, date: u16 } {
     assert(date_time.year >= 1980 and date_time.year <= 2107);
 
     const time: u16 =
@@ -968,7 +965,7 @@ pub fn zip_executable(
     zip_file: std.fs.File,
     input: struct {
         executable_name: []const u8,
-        executable_mtime_s: u64,
+        executable_mtime: stdx.DateTimeUTC,
         max_size: u64,
     },
 ) !void {
@@ -983,7 +980,7 @@ pub fn zip_executable(
     );
     defer shell.gpa.free(executable);
 
-    const executable_mtime_dos = unix_to_dos_timestamp(input.executable_mtime_s);
+    const executable_mtime_dos = unix_to_dos_timestamp(input.executable_mtime);
     const crc32 = std.hash.Crc32.hash(executable);
 
     const executable_deflated_buffer = try shell.gpa.alloc(u8, input.max_size);

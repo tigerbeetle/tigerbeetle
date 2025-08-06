@@ -17,6 +17,7 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const stdx = @import("stdx");
 const log = std.log;
 const assert = std.debug.assert;
 
@@ -255,11 +256,13 @@ fn build_tigerbeetle_target(
     );
     defer section.close();
 
-    const commit_timestamp_seconds: u64 = commit_timestamp_seconds: {
-        const timestamp = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
+    const commit_date_time = commit_date_time: {
+        const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
             .sha = info.sha,
         });
-        break :commit_timestamp_seconds try std.fmt.parseInt(u64, timestamp, 10);
+        break :commit_date_time stdx.DateTimeUTC.from_timestamp_s(
+            try std.fmt.parseInt(u64, timestamp_s, 10),
+        );
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
@@ -312,7 +315,7 @@ fn build_tigerbeetle_target(
         zip_file,
         .{
             .executable_name = exe_name,
-            .executable_mtime_s = commit_timestamp_seconds,
+            .executable_mtime = commit_date_time,
             .max_size = multiversioning.multiversion_binary_size_max,
         },
     );
