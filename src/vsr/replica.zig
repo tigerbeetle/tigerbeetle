@@ -152,7 +152,7 @@ pub fn ReplicaType(
 ) type {
     const Grid = GridType(Storage);
     const Forest = StateMachine.Forest;
-    const GridScrubber = vsr.GridScrubberType(Forest);
+    const GridScrubber = vsr.GridScrubberType(Forest, constants.grid_scrubber_reads_max);
 
     return struct {
         const Replica = @This();
@@ -3766,7 +3766,10 @@ pub fn ReplicaType(
 
             for (0..constants.grid_scrubber_reads_max + 1) |_| {
                 const scrub_next = self.grid_scrubber.read_next();
-                if (!scrub_next) break;
+                if (!scrub_next) {
+                    if (self.grid_scrubber.tour == .done) self.grid_scrubber.wrap();
+                    break;
+                }
             } else unreachable;
         }
 
