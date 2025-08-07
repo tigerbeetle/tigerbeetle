@@ -227,8 +227,6 @@ const Command = struct {
         options: struct {
             must_create: bool,
             development: bool,
-            trace_path: ?[]const u8,
-            statsd_address: ?std.net.Address,
         },
     ) !void {
         // TODO Resolve the parent directory properly in the presence of .. and symlinks.
@@ -281,8 +279,6 @@ const Command = struct {
         try command.init(allocator, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
-            .trace_path = null,
-            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -311,8 +307,6 @@ const Command = struct {
         try command.init(allocator, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
-            .trace_path = null,
-            .statsd_address = null,
         });
         defer command.deinit(allocator);
 
@@ -388,8 +382,6 @@ const Command = struct {
         try command.init(allocator, io, tracer, args.path, .{
             .must_create = false,
             .development = args.development,
-            .trace_path = args.trace,
-            .statsd_address = args.statsd,
         });
         defer command.deinit(allocator);
 
