@@ -3,6 +3,61 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.54
+
+Released: 2025-08-08
+
+### Safety And Performance
+
+- [#3123](https://github.com/tigerbeetle/tigerbeetle/pull/3123)
+
+  Speed up repair by removing a round-trip to fetch headers.
+
+- [#3134](https://github.com/tigerbeetle/tigerbeetle/pull/3134)
+
+  Check checksums when downloading Zig during the build.
+
+### Features
+
+- [#2993](https://github.com/tigerbeetle/tigerbeetle/pull/2993)
+
+  Add documentation for Rust client library.
+
+- [#2989](https://github.com/tigerbeetle/tigerbeetle/pull/2989)
+
+  Test that release artifacts are fully reproducible.
+
+### Internals
+
+- [#3136](https://github.com/tigerbeetle/tigerbeetle/pull/3136)
+
+  Add a test to test that tests include all the tests.
+
+- [#3143](https://github.com/tigerbeetle/tigerbeetle/pull/3143)
+
+  Remove local variable aliasing as per TigerStyle.
+
+- [#3124](https://github.com/tigerbeetle/tigerbeetle/pull/3124)
+
+  `@splat` all the things.
+
+- [#3135](https://github.com/tigerbeetle/tigerbeetle/pull/3135)
+
+  Use double-entry accounting for allocations.
+
+- [#3129](https://github.com/tigerbeetle/tigerbeetle/pull/3129)
+
+  Remove `git-review`.
+
+- [#3131](https://github.com/tigerbeetle/tigerbeetle/pull/3131),
+  [#3130](https://github.com/tigerbeetle/tigerbeetle/pull/3130)
+
+  Show total number of VOPR runs for release.
+
+### TigerTracks 🎧
+
+- [War Pigs](https://www.youtube.com/watch?v=IB6jbWoGtlA&list=RDIB6jbWoGtlA)
+
 ## TigerBeetle 0.16.53
 
 Released: 2025-08-01
