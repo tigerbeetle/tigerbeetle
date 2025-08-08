@@ -272,9 +272,9 @@ pub fn main() !void {
         // was correct to do so.
         //
         // Heal current network partitions, disable future process, storage, and network faults
-        // on all replicas. Run this fully-connected core of replicas for 600_000 ticks, which
-        // should enough to ensure all faulty grid blocks, headers, or prepares that can be repaired
-        // are repaired. After this, all we must be left with are correlated faults.
+        // on all replicas. Run this fully-connected core of replicas for ticks_max_convergence
+        // ticks, which should be enough to ensure all faulty grid blocks, headers, or prepares that
+        // can be repaired are repaired. After this, all we must be left with are correlated faults.
         {
             var replica: u8 = 0;
             var core: Core = .{};
@@ -285,7 +285,7 @@ pub fn main() !void {
             simulator.transition_to_liveness_mode(core);
 
             tick = 0;
-            while (tick < 600_000) : (tick += 1) simulator.tick();
+            while (tick < cli_args.ticks_max_convergence) : (tick += 1) simulator.tick();
         }
 
         log.info(
