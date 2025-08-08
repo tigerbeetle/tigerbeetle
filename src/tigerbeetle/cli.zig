@@ -26,6 +26,7 @@ const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
 const ByteSize = stdx.ByteSize;
 
+const KiB = stdx.KiB;
 const GiB = stdx.GiB;
 
 const CLIArgs = union(enum) {
@@ -441,7 +442,7 @@ const start_defaults_production = StartDefaults{
 
 const start_defaults_development = StartDefaults{
     .limit_pipeline_requests = 0,
-    .limit_request = .{ .value = 32 * 1024 }, // 32KiB
+    .limit_request = .{ .value = 32 * KiB },
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },

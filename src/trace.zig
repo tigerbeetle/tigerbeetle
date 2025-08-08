@@ -101,6 +101,7 @@ const log = std.log.scoped(.trace);
 
 const constants = @import("constants.zig");
 const stdx = @import("stdx");
+const KiB = stdx.KiB;
 const Duration = stdx.Duration;
 const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
@@ -112,7 +113,7 @@ pub const EventTiming = @import("trace/event.zig").EventTiming;
 pub const EventTimingAggregate = @import("trace/event.zig").EventTimingAggregate;
 pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate;
 
-const trace_span_size_max = 1024;
+const trace_span_size_max = 1 * KiB;
 
 pub const Tracer = @This();
 

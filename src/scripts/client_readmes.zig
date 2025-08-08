@@ -10,6 +10,7 @@ const assert = std.debug.assert;
 const log = std.log;
 
 const stdx = @import("stdx");
+const MiB = stdx.MiB;
 const Shell = @import("../shell.zig");
 const Docs = @import("../clients/docs_types.zig").Docs;
 const Sample = @import("../clients/docs_types.zig").Sample;
@@ -45,7 +46,7 @@ pub fn test_freshness(
     const walkthrough = try shell.cwd.readFileAlloc(
         arena.allocator(),
         walkthrough_path,
-        1024 * 1024,
+        1 * MiB,
     );
 
     var ctx = Context{

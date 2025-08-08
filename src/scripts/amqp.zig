@@ -9,6 +9,7 @@ const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const ratio = stdx.PRNG.ratio;
+const KiB = stdx.KiB;
 
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
@@ -908,7 +909,7 @@ const TmpRabbitMQ = struct {
 
 const TestingBasicProperties = @import("../cdc/amqp/protocol.zig").TestingBasicProperties;
 const TestingContent = struct {
-    const size_max = 1024;
+    const size_max = 1 * KiB;
     bytes: []const u8,
 
     fn init(arena: std.mem.Allocator, prng: *stdx.PRNG) !*TestingContent {

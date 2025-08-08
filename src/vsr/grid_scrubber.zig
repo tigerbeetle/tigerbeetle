@@ -22,6 +22,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 const TiB = stdx.TiB;
 const log = std.log.scoped(.grid_scrubber);
 
@@ -722,7 +723,7 @@ test "GridScrubber cycle interval" {
     //
     // Increasing this parameter increases the likelihood of eventual data loss.
     // (Intuitively, a single bitrot within 1GiB is more likely than a single bitrot within 1KiB.)
-    const block_size = 512 * 1024;
+    const block_size = 512 * KiB;
 
     // The total number of copies of each sector.
     // The cluster is recoverable if a sector's number of faults is less than `replicas_total`.

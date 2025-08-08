@@ -4,6 +4,9 @@ const os = std.os;
 const posix = std.posix;
 const testing = std.testing;
 const assert = std.debug.assert;
+const stdx = @import("stdx");
+const KiB = stdx.KiB;
+const MiB = stdx.MiB;
 
 const TimeOS = @import("../time.zig").TimeOS;
 const Time = @import("../time.zig").Time;
@@ -628,7 +631,7 @@ test "pipe data over socket" {
         rx: Pipe,
         server: Socket = .{},
 
-        const buffer_size = 1 * 1024 * 1024;
+        const buffer_size = 1 * MiB;
 
         const Context = @This();
         const Socket = struct {
@@ -800,7 +803,7 @@ test "cancel_all" {
     const allocator = std.testing.allocator;
     const file_path = "test_cancel_all";
     const read_count = 8;
-    const read_size = 1024 * 16;
+    const read_size = 16 * KiB;
 
     // For this test to be useful, we rely on open(DIRECT).
     // (See below).

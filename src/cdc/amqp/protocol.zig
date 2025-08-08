@@ -46,6 +46,7 @@ const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 
 const spec = @import("spec.zig");
 
@@ -971,7 +972,7 @@ test "amqp: BasicProperties encode/decode" {
 
 test "amqp: Table encode/decode" {
     // 64k ought to be enough for any random!
-    var buffer = try testing.allocator.alloc(u8, 64 * 1024);
+    var buffer = try testing.allocator.alloc(u8, 64 * KiB);
     defer testing.allocator.free(buffer);
 
     var prng = stdx.PRNG.from_seed(42);

@@ -5,6 +5,7 @@ const mem = std.mem;
 
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
+const MiB = stdx.MiB;
 
 const constants = @import("constants.zig");
 const tb = @import("tigerbeetle.zig");
@@ -2840,7 +2841,7 @@ test "StateMachine: batch_elements_max" {
     // the code in another type that doesn’t require creating the state machine.
     if (true) return error.SkipZigTest;
     // 1MiB message:
-    const message_body_size_max = (1024 * 1024) - @sizeOf(vsr.Header);
+    const message_body_size_max = (1 * MiB) - @sizeOf(vsr.Header);
 
     const StateMachine = StateMachineType(TestContext.Storage, .{
         .release = vsr.Release.minimum,

@@ -13,6 +13,7 @@ const assert = std.debug.assert;
 
 const root = @import("root");
 
+const KiB = stdx.KiB;
 const MiB = stdx.MiB;
 const GiB = stdx.GiB;
 const TiB = stdx.TiB;
@@ -104,7 +105,7 @@ const ConfigProcess = struct {
     cache_transfers_size_default: usize,
     cache_transfers_pending_size_default: usize,
     client_request_queue_max: usize = 2,
-    lsm_manifest_node_size: usize = 16 * 1024,
+    lsm_manifest_node_size: usize = 16 * KiB,
     connection_delay_min_ms: u64 = 50,
     connection_delay_max_ms: u64 = 1000,
     tcp_backlog: u31 = 64,
@@ -162,7 +163,7 @@ const ConfigCluster = struct {
     journal_slot_count: usize = 1024,
     message_size_max: usize = 1 * MiB,
     superblock_copies: comptime_int = 4,
-    block_size: comptime_int = 512 * 1024,
+    block_size: comptime_int = 512 * KiB,
     lsm_levels: u6 = 7,
     lsm_growth_factor: u32 = 8,
     lsm_compaction_ops: comptime_int = 32,

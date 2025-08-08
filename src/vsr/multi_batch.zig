@@ -45,6 +45,7 @@ const testing = std.testing;
 const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const MiB = stdx.MiB;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -525,7 +526,7 @@ test "batch: maximum batches with a single element" {
     var prng = stdx.PRNG.from_seed(42);
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const batch_count_max: u16 = multi_batch_count_max(.{
         .batch_size_min = element_size,
         .batch_size_limit = buffer_size,
@@ -554,7 +555,7 @@ test "batch: maximum elements on a single batch" {
     var prng = stdx.PRNG.from_seed(42);
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const batch_size_max = 8189; // maximum number of elements in a single-batch request.
     assert(batch_size_max == @divExact(buffer_size - element_size, element_size));
 
@@ -574,7 +575,7 @@ test "batch: invalid format" {
     var prng = stdx.PRNG.from_seed(42);
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
     defer testing.allocator.free(buffer);
 

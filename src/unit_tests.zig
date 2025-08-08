@@ -69,7 +69,9 @@ comptime {
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const max_source_size = 1024 * 1024;
+const stdx = @import("stdx");
+const MiB = stdx.MiB;
+const max_source_size = 1 * MiB;
 
 test {
     var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
