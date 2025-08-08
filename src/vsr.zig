@@ -63,7 +63,6 @@ pub const SuperBlockManifestReferences = superblock.ManifestReferences;
 pub const SuperBlockTrailerReference = superblock.TrailerReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
-pub const CheckpointStateOld = superblock.SuperBlockHeader.CheckpointStateOld;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
