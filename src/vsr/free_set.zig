@@ -7,6 +7,7 @@ const MaskInt = DynamicBitSetUnmanaged.MaskInt;
 
 const vsr = @import("../vsr.zig");
 const stdx = vsr.stdx;
+const KiB = stdx.KiB;
 const ewah = vsr.ewah(FreeSet.Word);
 const constants = vsr.constants;
 
@@ -763,7 +764,7 @@ fn bit_set_masks(bit_set: DynamicBitSetUnmanaged) []MaskInt {
 }
 
 test "FreeSet block shard count" {
-    if (constants.block_size != 64 * 1024) return;
+    if (constants.block_size != 64 * KiB) return;
     const blocks_in_tb = @divExact(1 << 40, constants.block_size);
     try test_block_shards_count(5120 * 8, 10 * blocks_in_tb);
     try test_block_shards_count(5120 * 8 - 1, 10 * blocks_in_tb - FreeSet.shard_bits);

@@ -3,6 +3,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const stdx = @import("stdx");
+const MiB = stdx.MiB;
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;
@@ -63,7 +64,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(!self.formatting);
 
             const header_zeroes: [@sizeOf(Header)]u8 = @splat(0);
-            const wal_write_size_max = 4 * 1024 * 1024;
+            const wal_write_size_max = 4 * MiB;
             assert(wal_write_size_max % constants.sector_size == 0);
 
             // Direct I/O requires the buffer to be sector-aligned.

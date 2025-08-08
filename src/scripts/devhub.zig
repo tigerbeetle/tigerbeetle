@@ -16,6 +16,8 @@ const Shell = @import("../shell.zig");
 const changelog = @import("./changelog.zig");
 const Release = @import("../multiversioning.zig").Release;
 
+const MiB = stdx.MiB;
+
 const log = std.log;
 
 pub const CLIArgs = struct {
@@ -105,7 +107,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         const changelog_text = try shell.project_root.readFileAlloc(
             shell.arena.allocator(),
             "CHANGELOG.md",
-            1024 * 1024,
+            1 * MiB,
         );
         var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
 

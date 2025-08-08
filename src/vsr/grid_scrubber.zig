@@ -22,6 +22,8 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
+const TiB = stdx.TiB;
 const log = std.log.scoped(.grid_scrubber);
 
 const stdx = @import("stdx");
@@ -701,7 +703,7 @@ test "GridScrubber cycle interval" {
     // The total size of the data file.
     // Note that since this parameter is separate from the faults/year rate, increasing
     // `storage_size` actually reduces the likelihood of data loss.
-    const storage_size = 16 * (1024 * 1024 * 1024 * 1024);
+    const storage_size = 16 * TiB;
 
     // The expected (average) number of sector faults per year.
     // I can't find any good, recent statistics for faults on SSDs.
@@ -721,7 +723,7 @@ test "GridScrubber cycle interval" {
     //
     // Increasing this parameter increases the likelihood of eventual data loss.
     // (Intuitively, a single bitrot within 1GiB is more likely than a single bitrot within 1KiB.)
-    const block_size = 512 * 1024;
+    const block_size = 512 * KiB;
 
     // The total number of copies of each sector.
     // The cluster is recoverable if a sector's number of faults is less than `replicas_total`.

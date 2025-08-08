@@ -31,6 +31,8 @@ const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const Message = @import("message_pool.zig").MessagePool.Message;
 
+const MiB = stdx.MiB;
+
 const releases = [_]Release{
     .{
         .release = vsr.Release.from(.{ .major = 0, .minor = 0, .patch = 1 }),
@@ -65,7 +67,6 @@ pub const std_options: std.Options = .{
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
-const MiB = 1024 * 1024;
 
 const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.

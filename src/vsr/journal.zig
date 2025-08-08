@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 
 const constants = @import("../constants.zig");
 
@@ -2630,5 +2631,5 @@ pub fn format_wal_prepares(cluster: u128, offset_logical: u64, target: []u8) usi
 
 test "format_wal_prepares" {
     const fuzz = @import("./journal_format_fuzz.zig");
-    try fuzz.fuzz_format_wal_prepares(std.testing.allocator, 256 * 1024);
+    try fuzz.fuzz_format_wal_prepares(std.testing.allocator, 256 * KiB);
 }

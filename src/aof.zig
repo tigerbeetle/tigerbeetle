@@ -11,6 +11,8 @@ const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
 
+const MiB = stdx.MiB;
+
 const log = std.log.scoped(.aof);
 
 const magic_number: u128 = 0xbcd8d3fee406119ed192c4f4c4fc82;
@@ -526,7 +528,7 @@ pub fn AOFType(comptime IO: type) type {
             /// by searching from our current position for the next magic_number, seeking
             /// to it, and setting our internal position correctly.
             pub fn skip(it: *Iterator, allocator: std.mem.Allocator, count: usize) !void {
-                var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
+                var skip_buffer = try allocator.alloc(u8, 1 * MiB);
                 defer allocator.free(skip_buffer);
 
                 while (it.offset < it.size) {

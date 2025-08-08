@@ -56,6 +56,8 @@ const maybe = stdx.maybe;
 const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
+const MiB = stdx.MiB;
+
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
     budget_minutes: u64 = 60,
@@ -605,7 +607,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         const branch_cfo = try shell.cwd.readFileAlloc(
             shell.arena.allocator(),
             try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
-            1 * 1024 * 1024,
+            1 * MiB,
         );
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -880,7 +882,7 @@ fn upload_results(
         try shell.exec("git fetch origin main", .{});
         try shell.exec("git reset --hard origin/main", .{});
 
-        const max_size = 1024 * 1024;
+        const max_size = 1 * MiB;
         const data = try shell.cwd.readFileAlloc(
             arena.allocator(),
             "./fuzzing/data.json",

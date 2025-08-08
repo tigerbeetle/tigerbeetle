@@ -8,6 +8,8 @@ const vsr = @import("vsr.zig");
 const Config = @import("config.zig").Config;
 const stdx = @import("stdx");
 
+const MiB = stdx.MiB;
+
 pub const config = @import("config.zig").configs.current;
 
 pub const semver = std.SemanticVersion{
@@ -445,8 +447,8 @@ pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_ma
 
 comptime {
     // Avoid latency issues from setting sndbuf too high:
-    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
-    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_replica <= 16 * MiB);
+    assert(tcp_sndbuf_client <= 16 * MiB);
 }
 
 /// Whether to enable TCP keepalive:
@@ -700,7 +702,7 @@ pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;
 /// to 1MiB so it is a more obvious increment for users.
 pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: {
     const lsm_manifest_memory_multiplier = 64 * lsm_manifest_node_size;
-    assert(lsm_manifest_memory_multiplier == 1024 * 1024);
+    assert(lsm_manifest_memory_multiplier == MiB);
     break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
 };
 

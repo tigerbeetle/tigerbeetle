@@ -25,6 +25,8 @@ const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");
 
+const MiB = stdx.MiB;
+
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
 
 const Language = enum { dotnet, go, java, node, python, zig, docker };
@@ -73,7 +75,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     const changelog_text = try shell.project_root.readFileAlloc(
         shell.arena.allocator(),
         "CHANGELOG.md",
-        1024 * 1024,
+        1 * MiB,
     );
     var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
     const release, const release_multiversion, const changelog_body = blk: {
@@ -511,7 +513,7 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     const pyproject = try shell.cwd.readFileAlloc(
         shell.arena.allocator(),
         "pyproject.toml",
-        1024 * 1024,
+        1 * MiB,
     );
     const version_line = try shell.fmt(
         "version = \"{s}\"",

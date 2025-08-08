@@ -18,6 +18,21 @@ pub const flags = @import("flags.zig").parse;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 
+// Import these as `const GiB = stdx.GiB;`
+pub const KiB = 1 << 10;
+pub const MiB = 1 << 20;
+pub const GiB = 1 << 30;
+pub const TiB = 1 << 40;
+pub const PiB = 1 << 50;
+
+comptime {
+    assert(KiB == 1024);
+    assert(MiB == 1024 * KiB);
+    assert(GiB == 1024 * MiB);
+    assert(TiB == 1024 * GiB);
+    assert(PiB == 1024 * TiB);
+}
+
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
         switch (@typeInfo(@TypeOf(numerator))) {
@@ -1076,10 +1091,10 @@ pub const ByteSize = struct {
 
     const Unit = enum(u64) {
         bytes = 1,
-        kib = 1024,
-        mib = 1024 * 1024,
-        gib = 1024 * 1024 * 1024,
-        tib = 1024 * 1024 * 1024 * 1024,
+        kib = KiB,
+        mib = MiB,
+        gib = GiB,
+        tib = TiB,
     };
 
     pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {

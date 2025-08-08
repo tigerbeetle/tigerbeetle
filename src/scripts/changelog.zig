@@ -7,9 +7,11 @@ const Shell = @import("../shell.zig");
 const Release = @import("../multiversioning.zig").Release;
 const ReleaseTriple = @import("../multiversioning.zig").ReleaseTriple;
 
+const MiB = stdx.MiB;
+
 const log = std.log;
 
-const changelog_bytes_max = 10 * 1024 * 1024;
+const changelog_bytes_max = 10 * MiB;
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;

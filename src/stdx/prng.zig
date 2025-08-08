@@ -21,6 +21,7 @@ const math = std.math;
 const Snap = stdx.Snap;
 const module_path = "src/stdx";
 const snap = Snap.snap_fn(module_path);
+const KiB = stdx.KiB;
 
 s: [4]u64,
 
@@ -604,7 +605,7 @@ test "no floating point please" {
         @src().file,
     });
     defer std.testing.allocator.free(path);
-    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * 1024);
+    const file_text = try std.fs.cwd().readFileAlloc(std.testing.allocator, path, 64 * KiB);
     defer std.testing.allocator.free(file_text);
 
     assert(std.mem.indexOf(u8, file_text, "f" ++ "32") == null);
