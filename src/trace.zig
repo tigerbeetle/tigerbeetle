@@ -470,8 +470,8 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
-        \\{"pid":0,"tid":208,"ph":"E","ts":10000},
+        \\{"pid":0,"tid":209,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
+        \\{"pid":0,"tid":209,"ph":"E","ts":10000},
         \\{"pid":1,"tid":0,"ph":"B","ts":10000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
         \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
         \\{"pid":1,"tid":8,"ph":"E","ts":40000},

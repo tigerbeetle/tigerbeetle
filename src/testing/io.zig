@@ -207,7 +207,10 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
+        _ = options;
+
         assert(fd < self.files.len);
 
         self.submit(
