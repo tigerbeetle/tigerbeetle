@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);
@@ -85,6 +86,11 @@ pub fn StorageType(comptime IO: type) type {
             start: ?stdx.Instant,
         };
 
+        pub const Flush = struct {
+            completion: IO.Completion,
+            callback: *const fn (write: *Storage.Flush) void,
+        };
+
         pub const NextTick = IO.Completion;
 
         pub const NextTickSource = IO.NextTickSource;
@@ -93,6 +99,7 @@ pub fn StorageType(comptime IO: type) type {
         tracer: *Tracer,
         dir_fd: IO.fd_t,
         fd: IO.fd_t,
+        unflushed: u64 = 0,
 
         pub fn init(io: *IO, tracer: *Tracer, options: struct {
             path: []const u8,
@@ -375,6 +382,13 @@ pub fn StorageType(comptime IO: type) type {
             assert(write.offset % constants.sector_size == 0);
             self.assert_bounds(write.buffer, write.offset);
 
+            const dsync = write.zone.dsync();
+
+            if (!dsync) {
+                assert(write.zone == .grid);
+                self.unflushed += 1;
+            }
+
             self.io.write(
                 *Storage,
                 self,
@@ -383,6 +397,7 @@ pub fn StorageType(comptime IO: type) type {
                 self.fd,
                 write.buffer,
                 write.offset,
+                .{ .dsync = dsync },
             );
         }
 
@@ -438,6 +453,49 @@ pub fn StorageType(comptime IO: type) type {
             }
 
             self.start_write(write);
+        }
+
+        pub fn flush_sectors(
+            self: *Storage,
+            callback: *const fn (flush: *Storage.Flush) void,
+            flush: *Storage.Flush,
+        ) void {
+            flush.* = .{
+                .completion = undefined,
+                .callback = callback,
+            };
+
+            if (IO.dsync_all) {
+                // Both Windows and Linux have fast DSYNC writes. Only macOS does not.
+                assert(builtin.os.tag == .windows or builtin.os.tag == .linux);
+
+                self.unflushed = 0;
+                return self.fsync_callback(&flush.completion, {});
+            }
+
+            self.io.fsync(
+                *Storage,
+                self,
+                fsync_callback,
+                &flush.completion,
+                self.fd,
+            );
+        }
+
+        fn fsync_callback(
+            self: *Storage,
+            completion: *IO.Completion,
+            result: IO.FsyncError!void,
+        ) void {
+            _ = result catch @panic("fsync failure");
+
+            const flush: *Storage.Flush = @fieldParentPtr(
+                "completion",
+                completion,
+            );
+
+            self.unflushed = 0;
+            flush.callback(flush);
         }
 
         /// Ensures that the read or write is within bounds and intends to read or write some bytes.

@@ -18,6 +18,8 @@ pub const IO = struct {
     pub const Stats = common.Stats;
     pub const NextTickSource = common.NextTickSource;
 
+    pub const dsync_all = true;
+
     iocp: os.windows.HANDLE,
     time: TimeOS = .{},
     io_pending: usize = 0,
@@ -954,7 +956,11 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
+        // Windows dsync is efficient - it's used on every write.
+        _ = options;
+
         self.submit(
             context,
             callback,
@@ -1277,7 +1283,7 @@ pub const IO = struct {
         attributes |= os.windows.FILE_WRITE_THROUGH;
 
         // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert((attributes & os.windows.FILE_WRITE_THROUGH) > 0);
+        assert((attributes & os.windows.FILE_WRITE_THROUGH) > 0 and dsync_all);
 
         // It's a little confusing, but with NtCreateFile, which is what windows_open_file uses
         // under the hood, not specifying anything gets you a file capable of overlapped IO.
