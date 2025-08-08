@@ -12,8 +12,10 @@ The motivation for specific steps follows after.
 
 1. Open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
    - you are the release manager for the week
-   - that the VOPR results look reasonable (no failures and a bunch of successful runs for recent
+   - the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
+   - the graphs look reasonable (for example, no drastic changes in the RSS, data file size, or
+     executable size during the past week)
 
 2. ```console
    $ ./zig/zig build scripts -- changelog
