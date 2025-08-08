@@ -34,7 +34,7 @@ const EventMetricAggregate = vsr.trace.EventMetricAggregate;
 const EventTiming = vsr.trace.EventTiming;
 const EventTimingAggregate = vsr.trace.EventTimingAggregate;
 
-pub fn main(
+pub fn command_inspect(
     allocator: std.mem.Allocator,
     io: *IO,
     tracer: *Tracer,
@@ -45,8 +45,14 @@ pub fn main(
 
     const inspect_result = main_inspect(allocator, io, tracer, cli_args, stdout_writer.any());
     const flush_result = stdout_buffer.flush();
-    try inspect_result;
-    try flush_result;
+
+    inline for (.{ inspect_result, flush_result }) |result| {
+        result catch |err| switch (err) {
+            // Ignore BrokenPipe so that e.g. "tigerbeetle inspect ... | head -n12" succeeds.
+            error.BrokenPipe => {},
+            else => return err,
+        };
+    }
 }
 
 fn main_inspect(
@@ -454,21 +460,12 @@ const Inspector = struct {
             .superblock_headers = undefined,
         };
 
-        const dirname = std.fs.path.dirname(path) orelse ".";
-        inspector.dir_fd = try vsr.io.IO.open_dir(dirname);
-        errdefer std.posix.close(inspector.dir_fd);
-
-        const basename = std.fs.path.basename(path);
-        inspector.fd = try io.open_data_file(
-            inspector.dir_fd,
-            basename,
-            vsr.superblock.data_file_size_min,
-            .open_read_only,
-            .direct_io_optional,
-        );
-        errdefer std.posix.close(inspector.fd);
-
-        inspector.storage = try Storage.init(io, tracer, inspector.fd);
+        inspector.storage = try Storage.init(io, tracer, .{
+            .path = path,
+            .size_min = vsr.superblock.data_file_size_min,
+            .mode = .open_read_only,
+            .direct_io = .direct_io_optional,
+        });
         errdefer inspector.storage.deinit();
 
         inspector.superblock_buffer = try allocator.alignedAlloc(
@@ -495,7 +492,7 @@ const Inspector = struct {
                 "invalid superblock version; inspector supports version={}, version in {s}={}",
                 .{
                     SuperBlockVersion,
-                    basename,
+                    inspector.storage.basename.const_slice(),
                     superblock.version,
                 },
             );
@@ -506,8 +503,6 @@ const Inspector = struct {
     fn destroy(inspector: *Inspector) void {
         inspector.allocator.free(inspector.superblock_buffer);
         inspector.storage.deinit();
-        std.posix.close(inspector.fd);
-        std.posix.close(inspector.dir_fd);
         inspector.allocator.destroy(inspector);
     }
 
