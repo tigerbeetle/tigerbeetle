@@ -586,7 +586,7 @@ pub fn ReplicaType(
         /// (status=normal backup)
         repair_sync_timeout: Timeout,
 
-        /// The number of ticks before sending a command=request_blocks.
+        /// The number of ticks before replenishing the command=request_blocks budget.
         /// (always running)
         grid_repair_message_timeout: Timeout,
 
@@ -3777,9 +3777,6 @@ pub fn ReplicaType(
 
             const refill_amount = self.repair_messages_budget_grid.refill_max;
             self.repair_messages_budget_grid.refill(refill_amount);
-            if (self.grid.callback != .cancel) {
-                self.send_request_blocks();
-            }
         }
 
         fn on_grid_scrub_timeout(self: *Replica) void {
@@ -7302,6 +7299,15 @@ pub fn ReplicaType(
 
             self.repair_timeout.reset();
             if (self.syncing == .updating_checkpoint) return;
+
+            if (self.grid.callback != .cancel) {
+                if (self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max)
+                {
+                    self.send_request_blocks();
+                }
+            }
+
             if (!self.state_machine_opened) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -10831,9 +10837,8 @@ pub fn ReplicaType(
         fn send_request_blocks(self: *Replica) void {
             assert(self.grid_repair_message_timeout.ticking);
             assert(self.grid.callback != .cancel);
+            assert(self.syncing != .updating_checkpoint);
             maybe(self.state_machine_opened);
-
-            self.grid_repair_message_timeout.reset();
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
