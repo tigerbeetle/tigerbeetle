@@ -1982,14 +1982,6 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.release.value > self.release.value) {
-                // This would be safe to prepare, but rejecting it simplifies assertions.
-                assert(message.header.op > self.op_checkpoint_next_trigger());
-
-                log.warn("{}: on_prepare: ignoring (newer release)", .{self.log_prefix()});
-                return;
-            }
-
             if (message.header.size > self.request_size_limit) {
                 // The replica needs to be restarted with a higher batch size limit.
                 log.err("{}: on_prepare: ignoring (large prepare, op={} size={} size_limit={})", .{
@@ -2029,6 +2021,33 @@ pub fn ReplicaType(
                     self.op,
                     self.commit_max,
                 });
+            }
+
+            // Normally, we cache prepares between (commit_min, commit_min + cache.capacity] to
+            // avoid a disk read for these prepares during commit. However, if we are lagging and
+            // encounter a message from the next log wrap, we prefer caching prepares between
+            // (op_prepare_max, op_prepare_max + cache.capacity], to avoid repairing them over the
+            // network during the subsequent checkpoint. The rationale here is that local reads are
+            // cheaper than repairing prepares over the network.
+            const op_cache_min = if (message.header.op <= self.op_prepare_max())
+                self.commit_min + 1
+            else
+                self.op_prepare_max() + 1;
+            assert(message.header.op >= op_cache_min);
+
+            if (self.backup() and
+                message.header.op < op_cache_min + self.pipeline.cache.capacity)
+            {
+                log.debug("{}: on_prepare: caching prepare.op={} " ++
+                    "(commit_min={} op={} commit_max={} prepare_max={})", .{
+                    self.log_prefix(),
+                    message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
+                    self.op_prepare_max(),
+                });
+                self.cache_prepare(message);
             }
 
             // Verify that the new request will fit in the WAL.
@@ -2383,7 +2402,8 @@ pub fn ReplicaType(
             }
 
             if (self.replica != self.primary_index(self.view) and
-                self.commit_min < message.header.op)
+                message.header.op > self.commit_min and
+                message.header.op <= self.commit_min + self.pipeline.cache.capacity)
             {
                 self.cache_prepare(message);
             }
@@ -2933,21 +2953,7 @@ pub fn ReplicaType(
 
                 assert(message.header.prepare_checksum == 0);
                 if (self.journal.header_with_op(message.header.prepare_op)) |header| {
-                    // Avoid a wasteful read of a prepare that may ultimately be rejected by the
-                    // requesting replica for belonging to a newer view. On the other hand, sending
-                    // older prepares is okay, since requesting replicas cache those in case they
-                    // can't be immediately written (for example, due to a hash chain break).
-                    if (header.view > message.header.view) {
-                        log.debug("{}: on_request_prepare: destination replica view={}" ++
-                            " too old, prepare view={}", .{
-                            self.log_prefix(),
-                            message.header.view,
-                            header.view,
-                        });
-                        return;
-                    } else {
-                        break :blk header.checksum;
-                    }
+                    break :blk header.checksum;
                 } else {
                     log.debug("{}: on_request_prepare: op={} missing", .{
                         self.log_prefix(),
@@ -4150,9 +4156,6 @@ pub fn ReplicaType(
                     message.header.op,
                 });
 
-                if (self.replica != self.primary_index(self.view)) {
-                    self.cache_prepare(message);
-                }
                 _ = self.write_prepare(message, .append);
             }
         }
@@ -10759,7 +10762,6 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op);
             assert(message.header.op >= self.op_repair_min());
-            assert(message.header.release.value <= self.release.value);
 
             if (!self.journal.has_header(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
