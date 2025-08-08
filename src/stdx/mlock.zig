@@ -4,6 +4,8 @@ const os = std.os;
 
 const stdx = @import("stdx.zig");
 
+const MiB = stdx.MiB;
+
 const log = std.log.scoped(.mlock);
 
 const MemoryLockError = error{memory_not_locked} || std.posix.UnexpectedError;
@@ -82,7 +84,7 @@ fn memory_lock_allocated_windows(allocated_size: usize) MemoryLockError!void {
         &working_set_max,
     ) == os.windows.FALSE) {
         working_set_min = allocated_size; // Count bytes allocated so far.
-        working_set_min += 64 * 1024 * 1024; // 64mb buffer room for stack/globals.
+        working_set_min += 64 * MiB; // 64mb buffer room for stack/globals.
         working_set_max = working_set_min * 2; // Buffer room for new page faults.
     }
 

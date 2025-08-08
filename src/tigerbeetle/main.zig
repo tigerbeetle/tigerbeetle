@@ -35,6 +35,10 @@ const ReplicaReformat =
 const SuperBlock = vsr.SuperBlockType(Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
 
+const KiB = stdx.KiB;
+const MiB = stdx.MiB;
+const GiB = stdx.GiB;
+
 /// The runtime maximum log level.
 /// One of: .err, .warn, .info, .debug
 pub var log_level_runtime: std.log.Level = .info;
@@ -410,22 +414,22 @@ const Command = struct {
         // `constants.block_size` and `SetAssociativeCache.value_count_max_multiple`,
         // and it may have been converted to zero if a smaller value is passed in.
         if (grid_cache_size == 0) {
-            if (comptime (grid_cache_size_min >= 1024 * 1024)) {
+            if (comptime (grid_cache_size_min >= MiB)) {
                 vsr.fatal(.cli, "Grid cache must be greater than {}MiB. See --cache-grid", .{
-                    @divExact(grid_cache_size_min, 1024 * 1024),
+                    @divExact(grid_cache_size_min, MiB),
                 });
             } else {
                 vsr.fatal(.cli, "Grid cache must be greater than {}KiB. See --cache-grid", .{
-                    @divExact(grid_cache_size_min, 1024),
+                    @divExact(grid_cache_size_min, KiB),
                 });
             }
         }
         assert(grid_cache_size >= grid_cache_size_min);
 
-        const grid_cache_size_warn = 1024 * 1024 * 1024;
+        const grid_cache_size_warn = 1 * GiB;
         if (grid_cache_size < grid_cache_size_warn) {
             log.warn("Grid cache size of {}MiB is small. See --cache-grid", .{
-                @divExact(grid_cache_size, 1024 * 1024),
+                @divExact(grid_cache_size, MiB),
             });
         }
 
@@ -540,12 +544,12 @@ const Command = struct {
         // the nearest page by `std.heap.page_allocator`.
         log.info("{}: Allocated {}MiB during replica init", .{
             replica.replica,
-            @divFloor(counting_allocator.live_size(), 1024 * 1024),
+            @divFloor(counting_allocator.live_size(), MiB),
         });
         log.info("{}: Grid cache: {}MiB, LSM-tree manifests: {}MiB", .{
             replica.replica,
-            @divFloor(grid_cache_size, 1024 * 1024),
-            @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, 1024 * 1024),
+            @divFloor(grid_cache_size, MiB),
+            @divFloor(args.lsm_forest_node_count * constants.lsm_manifest_node_size, MiB),
         });
 
         log.info("{}: cluster={}: listening on {}", .{

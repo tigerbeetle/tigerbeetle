@@ -8,6 +8,8 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
+const MiB = stdx.MiB;
+
 const log = std.log.scoped(.tmptigerbeetle);
 
 const TmpTigerBeetle = @This();
@@ -198,7 +200,7 @@ const StreamReader = struct {
         defer buffer.deinit();
 
         // NB: don't use `readAllAlloc` to get partial output in case of errors.
-        reader.file.reader().readAllArrayList(&buffer, 100 * 1024 * 1024) catch {};
+        reader.file.reader().readAllArrayList(&buffer, 100 * MiB) catch {};
         switch (reader.log_stderr.load(.seq_cst)) {
             .on_early_exit, .yes => {
                 log.err("tigerbeetle stderr:\n++++\n{s}\n++++", .{buffer.items});

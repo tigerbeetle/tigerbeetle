@@ -26,6 +26,8 @@ const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
 const ByteSize = stdx.ByteSize;
 
+const GiB = stdx.GiB;
+
 const CLIArgs = union(enum) {
     const Format = struct {
         cluster: ?u128 = null,
@@ -408,7 +410,7 @@ const CLIArgs = union(enum) {
         .default_port = constants.port,
         .default_cache_grid_gb = @divExact(
             constants.grid_cache_size_default,
-            1024 * 1024 * 1024,
+            GiB,
         ),
     });
 };

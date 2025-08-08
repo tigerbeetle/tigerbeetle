@@ -32,6 +32,8 @@
 const std = @import("std");
 const stdx = @import("stdx");
 
+const MiB = stdx.MiB;
+
 const log = std.log;
 pub const std_options = .{
     .log_level = .info,
@@ -53,7 +55,7 @@ pub fn main() !void {
 
     const cli_args = stdx.flags(&args, CLIArgs);
 
-    const line_buffer = try allocator.alloc(u8, 1024 * 1024);
+    const line_buffer = try allocator.alloc(u8, MiB);
     const func_buf = try allocator.alloc(u8, 4096);
 
     const stdin = std.io.getStdIn();

@@ -8,6 +8,8 @@ const mem = std.mem;
 const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
 
+const MiB = stdx.MiB;
+
 const UsedDeclarations = std.StringHashMapUnmanaged(struct {
     count: u32,
     offset: u32,
@@ -21,7 +23,7 @@ test "tidy" {
 
     const paths = try list_file_paths(shell);
 
-    const buffer_size = 1024 * 1024;
+    const buffer_size = 1 * MiB;
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
@@ -671,7 +673,7 @@ const DeadFilesDetector = struct {
 test "tidy changelog" {
     const allocator = std.testing.allocator;
 
-    const changelog_size_max = 1024 * 1024;
+    const changelog_size_max = 1 * MiB;
     const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
     defer allocator.free(changelog);
 
@@ -706,7 +708,6 @@ test "tidy no large blobs" {
         return error.ShallowRepository;
     }
 
-    const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout("git rev-list --objects HEAD", .{});
     const objects = try shell.exec_stdout_options(
         .{ .stdin_slice = rev_list },

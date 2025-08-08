@@ -26,6 +26,8 @@ const JournalCheckerType = @import("cluster/journal_checker.zig").JournalChecker
 
 const vsr = @import("../vsr.zig");
 
+const MiB = stdx.MiB;
+
 pub const ReplicaHealth = union(enum) {
     up: struct { paused: bool },
     down,
@@ -395,7 +397,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     u8,
                     constants.sector_size,
                     // Arbitrary value.
-                    32 * 1024 * 1024,
+                    32 * MiB,
                 );
                 errdefer allocator.free(buffer);
 

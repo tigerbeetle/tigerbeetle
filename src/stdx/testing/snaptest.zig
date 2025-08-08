@@ -68,6 +68,8 @@ const SourceLocation = std.builtin.SourceLocation;
 
 const stdx = @import("../stdx.zig");
 
+const MiB = stdx.MiB;
+
 pub const Snap = struct {
     comptime {
         assert(builtin.is_test);
@@ -197,11 +199,7 @@ pub const Snap = struct {
             &.{ snapshot.module_path, snapshot.location.file },
         );
 
-        const file_text = try std.fs.cwd().readFileAlloc(
-            arena,
-            file_path_relative,
-            1024 * 1024,
-        );
+        const file_text = try std.fs.cwd().readFileAlloc(arena, file_path_relative, 1 * MiB);
         var file_text_updated = try std.ArrayList(u8).initCapacity(arena, file_text.len);
 
         const line_zero_based = snapshot.location.line - 1;

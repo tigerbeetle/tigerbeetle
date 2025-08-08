@@ -22,6 +22,8 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const Shell = @This();
 
+const MiB = stdx.MiB;
+
 const cwd_stack_max = 16;
 
 /// For internal use by the `Shell` itself.
@@ -271,7 +273,7 @@ pub fn file_ensure_content(
     content: []const u8,
     create_flags: std.fs.File.CreateFlags,
 ) !enum { unchanged, updated } {
-    const max_bytes = 1024 * 1024;
+    const max_bytes = 1 * MiB;
     const content_current = shell.cwd.readFileAlloc(shell.gpa, path, max_bytes) catch null;
     defer if (content_current) |slice| shell.gpa.free(slice);
 
@@ -463,7 +465,7 @@ fn exec_inner(
     options: struct {
         stdin_slice: ?[]const u8 = null,
         capture_stdout: ?*[]const u8 = null, // Optional out parameter.
-        output_limit_bytes: usize = 128 * 1024 * 1024,
+        output_limit_bytes: usize = 128 * MiB,
         timeout_ns: u64 = 10 * std.time.ns_per_min,
     },
 ) !void {

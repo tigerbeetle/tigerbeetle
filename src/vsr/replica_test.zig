@@ -35,6 +35,8 @@ const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
 const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
 
+const MiB = stdx.MiB;
+
 const log_level = std.log.Level.err;
 
 const releases = [_]Release{
@@ -1983,7 +1985,7 @@ const TestContext = struct {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
         var prng = stdx.PRNG.from_seed(options.seed);
-        const storage_size_limit = vsr.sector_floor(128 * 1024 * 1024);
+        const storage_size_limit = vsr.sector_floor(128 * MiB);
 
         const cluster = try Cluster.init(allocator, .{
             .cluster = .{

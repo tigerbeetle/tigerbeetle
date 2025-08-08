@@ -8,9 +8,14 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 const root = @import("root");
+
+const MiB = stdx.MiB;
+const GiB = stdx.GiB;
+const TiB = stdx.TiB;
 
 const BuildOptions = struct {
     config_verify: bool,
@@ -92,9 +97,9 @@ const ConfigProcess = struct {
     git_commit: ?[40]u8 = null,
     port: u16 = 3001,
     address: []const u8 = "127.0.0.1",
-    storage_size_limit_default: u64 = 16 * 1024 * 1024 * 1024 * 1024,
-    storage_size_limit_max: u64 = 64 * 1024 * 1024 * 1024 * 1024,
-    memory_size_max_default: u64 = 1024 * 1024 * 1024,
+    storage_size_limit_default: u64 = 16 * TiB,
+    storage_size_limit_max: u64 = 64 * TiB,
+    memory_size_max_default: u64 = GiB,
     cache_accounts_size_default: usize,
     cache_transfers_size_default: usize,
     cache_transfers_pending_size_default: usize,
@@ -103,7 +108,7 @@ const ConfigProcess = struct {
     connection_delay_min_ms: u64 = 50,
     connection_delay_max_ms: u64 = 1000,
     tcp_backlog: u31 = 64,
-    tcp_rcvbuf: c_int = 4 * 1024 * 1024,
+    tcp_rcvbuf: c_int = 4 * MiB,
     tcp_keepalive: bool = true,
     tcp_keepidle: c_int = 5,
     tcp_keepintvl: c_int = 4,
@@ -127,7 +132,7 @@ const ConfigProcess = struct {
     clock_synchronization_window_max_ms: u64 = 20000,
     grid_iops_read_max: u64 = 32,
     grid_iops_write_max: u64 = 32,
-    grid_cache_size_default: u64 = 1024 * 1024 * 1024,
+    grid_cache_size_default: u64 = GiB,
     grid_repair_request_max: usize = 4,
     grid_repair_reads_max: usize = 4,
     grid_missing_blocks_max: usize = 30,
@@ -137,7 +142,7 @@ const ConfigProcess = struct {
     grid_scrubber_interval_ms_min: usize = std.time.ms_per_s / 20,
     grid_scrubber_interval_ms_max: usize = std.time.ms_per_s * 10,
     aof_recovery: bool = false,
-    multiversion_binary_platform_size_max: u64 = 64 * 1024 * 1024,
+    multiversion_binary_platform_size_max: u64 = 64 * MiB,
     multiversion_poll_interval_ms: u64 = 1000,
 };
 
@@ -155,7 +160,7 @@ const ConfigCluster = struct {
     view_change_headers_suffix_max: usize = 8 + 1,
     quorum_replication_max: u8 = 3,
     journal_slot_count: usize = 1024,
-    message_size_max: usize = 1 * 1024 * 1024,
+    message_size_max: usize = 1 * MiB,
     superblock_copies: comptime_int = 4,
     block_size: comptime_int = 512 * 1024,
     lsm_levels: u6 = 7,
@@ -224,7 +229,7 @@ pub const configs = struct {
     pub const default_production = Config{
         .process = .{
             .direct_io = true,
-            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 1024 * 1024,
+            .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * MiB,
             .cache_transfers_size_default = 0,
             .cache_transfers_pending_size_default = 0,
             .verify = true,
@@ -239,8 +244,8 @@ pub const configs = struct {
     /// reach.
     pub const test_min = Config{
         .process = .{
-            .storage_size_limit_default = 1 * 1024 * 1024 * 1024,
-            .storage_size_limit_max = 1 * 1024 * 1024 * 1024,
+            .storage_size_limit_default = 1 * GiB,
+            .storage_size_limit_max = 1 * GiB,
             .direct_io = false,
             .cache_accounts_size_default = @sizeOf(vsr.tigerbeetle.Account) * 256,
             .cache_transfers_size_default = 0,
