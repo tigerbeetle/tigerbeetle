@@ -146,7 +146,7 @@ fn readme_root(ctx: *Context) !void {
         // Absolute paths here are necessary for resolving within the docs site.
         for (samples) |sample| {
             if (try ctx.sample_exists(sample)) {
-                ctx.print("* [{s}](/src/clients/{s}/samples/{s}/): {s}\n", .{
+                ctx.print("* [{s}](https://github.com/tigerbeetle/tigerbeetle/tree/release/src/clients/{s}/samples/{s}/): {s}\n", .{
                     sample.proper_name,
                     ctx.docs.directory,
                     sample.directory,
