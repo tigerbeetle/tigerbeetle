@@ -163,6 +163,22 @@ pub const Zone = enum {
         };
     }
 
+    pub fn dsync(zone: Zone) bool {
+        return switch (zone) {
+            .grid => false,
+            else => true,
+        };
+    }
+
+    // Ensuring only the grid is written without dsync is _critical_ to safety!
+    comptime {
+        for (std.enums.values(Zone)) |zone| {
+            if (!zone.dsync()) {
+                assert(zone == .grid);
+            }
+        }
+    }
+
     /// Ensures that the read or write is aligned correctly for Direct I/O.
     /// If this is not the case, then the underlying syscall will return EINVAL.
     /// We check this only at the start of a read or write because the physical sector size may be

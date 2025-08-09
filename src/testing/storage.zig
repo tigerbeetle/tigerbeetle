@@ -123,6 +123,10 @@ pub const Storage = struct {
         }
     };
 
+    pub const Flush = struct {
+        callback: *const fn (write: *Storage.Flush) void,
+    };
+
     pub const NextTick = struct {
         link: QueueType(NextTick).Link = .{},
         source: NextTickSource,
@@ -187,6 +191,7 @@ pub const Storage = struct {
 
     reads: std.PriorityQueue(*Storage.Read, void, Storage.Read.less_than),
     writes: std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than),
+    unflushed: u64 = 0,
 
     ticks: u64 = 0,
     next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
@@ -662,7 +667,21 @@ pub const Storage = struct {
             write.buffer,
         );
 
+        if (!write.zone.dsync()) {
+            storage.unflushed += 1;
+        }
+
         write.callback(write);
+    }
+
+    pub fn flush_sectors(
+        storage: *Storage,
+        callback: *const fn (flush: *Storage.Flush) void,
+        flush: *Storage.Flush,
+    ) void {
+        storage.unflushed = 0;
+        flush.callback = callback;
+        flush.callback(flush);
     }
 
     fn read_latency(storage: *Storage) Duration {

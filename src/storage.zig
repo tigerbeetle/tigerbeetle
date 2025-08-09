@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.storage);
@@ -86,6 +87,13 @@ pub fn StorageType(comptime IO: type) type {
             start: ?stdx.Instant,
         };
 
+        pub const Flush = struct {
+            completion: IO.Completion,
+            callback: *const fn (write: *Storage.Flush) void,
+
+            start: stdx.Instant,
+        };
+
         pub const NextTick = struct {
             link: QueueType(NextTick).Link = .{},
             source: NextTickSource,
@@ -103,6 +111,8 @@ pub fn StorageType(comptime IO: type) type {
         }),
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
+
+        unflushed: u64 = 0,
 
         pub fn init(io: *IO, tracer: *Tracer, fd: IO.fd_t) !Storage {
             return .{
@@ -383,6 +393,13 @@ pub fn StorageType(comptime IO: type) type {
             assert(write.offset % constants.sector_size == 0);
             self.assert_bounds(write.buffer, write.offset);
 
+            const dsync = write.zone.dsync();
+
+            if (!dsync) {
+                assert(write.zone == .grid);
+                self.unflushed += 1;
+            }
+
             self.io.write(
                 *Storage,
                 self,
@@ -391,6 +408,7 @@ pub fn StorageType(comptime IO: type) type {
                 self.fd,
                 write.buffer,
                 write.offset,
+                .{ .dsync = dsync },
             );
         }
 
@@ -444,6 +462,48 @@ pub fn StorageType(comptime IO: type) type {
             }
 
             self.start_write(write);
+        }
+
+        pub fn flush_sectors(
+            self: *Storage,
+            callback: *const fn (flush: *Storage.Flush) void,
+            flush: *Storage.Flush,
+        ) void {
+            flush.* = .{
+                .completion = undefined,
+                .callback = callback,
+                .start = self.tracer.time.monotonic_instant(),
+            };
+
+            // Windows doesn't have per IO fsync support yet - it runs with FILE_WRITE_THROUGH which
+            // is the same as O_DSYNC.
+            if (builtin.os.tag == .windows) {
+                self.unflushed = 0;
+
+                return self.on_fsync(&flush.completion, {});
+            }
+
+            self.io.fsync(
+                *Storage,
+                self,
+                on_fsync,
+                &flush.completion,
+                self.fd,
+            );
+        }
+
+        fn on_fsync(self: *Storage, completion: *IO.Completion, result: IO.FsyncError!void) void {
+            _ = result catch @panic("fsync failure");
+
+            const flush: *Storage.Flush = @fieldParentPtr("completion", completion);
+
+            self.tracer.timing(
+                .storage_flush,
+                self.tracer.time.monotonic_instant().duration_since(flush.start),
+            );
+
+            self.unflushed = 0;
+            flush.callback(flush);
         }
 
         /// Ensures that the read or write is within bounds and intends to read or write some bytes.

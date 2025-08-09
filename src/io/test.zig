@@ -93,6 +93,7 @@ test "open/write/read/close/statx" {
                 self.fd.?,
                 &self.write_buf,
                 10,
+                .{ .dsync = true },
             );
         }
 
