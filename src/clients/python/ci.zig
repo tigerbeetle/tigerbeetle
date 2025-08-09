@@ -69,7 +69,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.exec("python3 main.py", .{});
     }
 
-    // test type annotations of the entire package
+    // We are checking type annotations of the entire package.
     try shell.exec("python3 -m mypy . --strict", .{});
 }
 
