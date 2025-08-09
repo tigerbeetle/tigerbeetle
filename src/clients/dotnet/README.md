@@ -53,10 +53,10 @@ This document is primarily a reference guide to
 the client. Below are various sample projects demonstrating
 features of TigerBeetle.
 
-* [Basic](/src/clients/dotnet/samples/basic/): Create two accounts and transfer an amount between them.
-* [Two-Phase Transfer](/src/clients/dotnet/samples/two-phase/): Create two accounts and start a pending transfer between
+* [Basic](https://github.com/tigerbeetle/tigerbeetle/tree/release/src/clients/dotnet/samples/basic/): Create two accounts and transfer an amount between them.
+* [Two-Phase Transfer](https://github.com/tigerbeetle/tigerbeetle/tree/release/src/clients/dotnet/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/dotnet/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](https://github.com/tigerbeetle/tigerbeetle/tree/release/src/clients/dotnet/samples/two-phase-many/): Create two accounts and start a number of pending transfer
 between them, posting and voiding alternating transfers.
 ## Creating a Client
 
