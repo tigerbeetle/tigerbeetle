@@ -11,8 +11,7 @@
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
 
-const stdx = @import("stdx.zig");
-const flags = @import("flags.zig");
+const stdx = @import("stdx");
 const Shell = @import("shell.zig");
 
 const cfo = @import("./scripts/cfo.zig");
@@ -58,7 +57,7 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- release --run-number=<run> --sha=<commit>
+        \\  zig build scripts -- release --sha=<commit>
         \\
         \\Options:
         \\
@@ -95,7 +94,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     switch (cli_args) {
         .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),

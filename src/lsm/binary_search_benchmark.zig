@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const builtin = @import("builtin");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const binary_search_keys_upsert_index =
     @import("./binary_search.zig").binary_search_keys_upsert_index;

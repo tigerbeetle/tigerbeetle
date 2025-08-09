@@ -27,7 +27,7 @@ const log = std.log.scoped(.manifest_log);
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const SuperBlockType = vsr.SuperBlockType;
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -851,8 +851,8 @@ pub fn ManifestLogType(comptime Storage: type) type {
             assert(manifest_log.read_callback == null);
             assert(manifest_log.write_callback == null);
 
-            if (manifest_log.grid_reservation) |grid_reservation| {
-                manifest_log.grid.forfeit(grid_reservation);
+            if (manifest_log.grid_reservation) |reservation| {
+                manifest_log.grid.forfeit(reservation);
                 manifest_log.grid_reservation = null;
             } else {
                 // Compaction was skipped for this half-bar.

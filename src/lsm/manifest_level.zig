@@ -5,7 +5,7 @@ const mem = std.mem;
 const meta = std.meta;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const lsm = @import("tree.zig");
 const binary_search = @import("binary_search.zig");
@@ -743,7 +743,7 @@ pub fn ManifestLevelType(
                         .table_info = table,
                         .generation = level.generation,
                     };
-                    range.tables.append_assume_capacity(table_info_reference);
+                    range.tables.push(table_info_reference);
                 } else {
                     return null;
                 }
@@ -997,11 +997,11 @@ pub fn TestContextType(
         fn create_snapshot(context: *TestContext) !void {
             if (context.snapshots.full()) return;
 
-            context.snapshots.append_assume_capacity(context.take_snapshot());
+            context.snapshots.push(context.take_snapshot());
 
-            const tables = context.snapshot_tables.add_one_assume_capacity();
-            tables.* = std.ArrayList(TableInfo).init(testing.allocator);
+            var tables = std.ArrayList(TableInfo).init(testing.allocator);
             try tables.insertSlice(0, context.reference.items);
+            context.snapshot_tables.push(tables);
         }
 
         fn drop_snapshot(context: *TestContext) !void {

@@ -7,7 +7,7 @@ The TigerBeetle client for Node.js.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* NodeJS >= `18`
+* Node.js >= `18`
 
 ## Setup
 
@@ -65,7 +65,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -559,7 +560,7 @@ const transfer1 = {
   id: 9n,
   debit_account_id: 102n,
   credit_account_id: 103n,
-  amount: 10n,
+  amount: 0n,
   pending_id: 8n,
   user_data_128: 0n,
   user_data_64: 0n,

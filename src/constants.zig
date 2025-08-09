@@ -6,7 +6,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const Config = @import("config.zig").Config;
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
+
+const MiB = stdx.MiB;
 
 pub const config = @import("config.zig").configs.current;
 
@@ -366,7 +368,7 @@ comptime {
     assert(grid_repair_reads_max > 0);
     assert(grid_repair_writes_max > 0);
     assert(grid_repair_writes_max <=
-        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_data_blocks_max);
+        grid_missing_blocks_max + grid_missing_tables_max * lsm_table_value_blocks_max);
 
     assert(grid_missing_blocks_max > 0);
     assert(grid_missing_tables_max > 0);
@@ -445,8 +447,8 @@ pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_ma
 
 comptime {
     // Avoid latency issues from setting sndbuf too high:
-    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
-    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_replica <= 16 * MiB);
+    assert(tcp_sndbuf_client <= 16 * MiB);
 }
 
 /// Whether to enable TCP keepalive:
@@ -658,8 +660,8 @@ comptime {
 // runtime-known number of free blocks.
 //
 // For simplicity for now, size IOPS to always be available.
-pub const lsm_compaction_queue_read_max = 8;
-pub const lsm_compaction_queue_write_max = 8;
+pub const lsm_compaction_queue_read_max = 16;
+pub const lsm_compaction_queue_write_max = 16;
 pub const lsm_compaction_iops_read_max = lsm_compaction_queue_read_max + 2; // + two index blocks.
 pub const lsm_compaction_iops_write_max = lsm_compaction_queue_write_max + 1; // + one index block.
 
@@ -669,8 +671,8 @@ pub const lsm_snapshots_max = config.cluster.lsm_snapshots_max;
 ///
 /// - This is a very conservative (upper-bound) calculation that doesn't rely on the StateMachine's
 ///   tree configuration. (To prevent Grid from depending on StateMachine).
-/// - This counts data blocks, but does not count the index block itself.
-pub const lsm_table_data_blocks_max = table_blocks_max: {
+/// - This counts value blocks, but does not count the index block itself.
+pub const lsm_table_value_blocks_max = table_blocks_max: {
     const checksum_size = @sizeOf(u256);
     const address_size = @sizeOf(u64);
     break :table_blocks_max @divFloor(
@@ -700,7 +702,7 @@ pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;
 /// to 1MiB so it is a more obvious increment for users.
 pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: {
     const lsm_manifest_memory_multiplier = 64 * lsm_manifest_node_size;
-    assert(lsm_manifest_memory_multiplier == 1024 * 1024);
+    assert(lsm_manifest_memory_multiplier == MiB);
     break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
 };
 

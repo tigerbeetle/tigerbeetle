@@ -224,8 +224,9 @@ test "LoggedProcess: starts and stops" {
     defer allocator.destroy(test_exe_buf);
 
     { // Compile this file as an executable!
+        const module_path = "src";
         const path_relative = try std.fs.path.join(allocator, &.{
-            "src",
+            module_path,
             @src().file,
         });
         defer allocator.free(path_relative);

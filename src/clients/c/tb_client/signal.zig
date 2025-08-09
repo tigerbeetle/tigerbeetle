@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const vsr = @import("../tb_client.zig").vsr;
-const Time = vsr.time.Time;
+const TimeOS = vsr.time.TimeOS;
 const IO = vsr.io.IO;
 
 const Atomic = std.atomic.Value;
@@ -174,7 +174,8 @@ test "signal" {
             try Signal.init(&self.signal, &self.io, on_signal);
             defer self.signal.deinit();
 
-            var timer = Time{};
+            var time_os = TimeOS{};
+            const timer = time_os.time();
             const start = timer.monotonic();
 
             const thread = try std.Thread.spawn(.{}, Context.notify, .{&self});

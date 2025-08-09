@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const assert = std.debug.assert;
 
 /// A version of standard `BoundedArray` with TigerBeetle-idiomatic APIs.
@@ -27,7 +27,7 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
         /// Returns count of elements in this BoundedArray in the specified integer types,
         /// checking at compile time that it indeed can represent the length.
         pub inline fn count_as(array: *const BoundedArray, comptime Int: type) Int {
-            comptime assert(@TypeOf(array.inner.len) != comptime_int);
+            comptime assert(buffer_capacity <= std.math.maxInt(Int));
             return @intCast(array.inner.len);
         }
 
@@ -59,30 +59,24 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             try array.inner.resize(len);
         }
 
-        pub inline fn add_one_assume_capacity(array: *BoundedArray) *T {
-            return array.inner.addOneAssumeCapacity();
-        }
+        pub fn insert_at(array: *BoundedArray, index: usize, item: T) void {
+            assert(!array.full());
+            assert(index <= array.inner.len);
 
-        pub fn insert_assume_capacity(self: *BoundedArray, index: usize, item: T) void {
-            assert(self.inner.len < buffer_capacity);
-            assert(index <= self.inner.len);
+            array.inner.len += 1;
 
-            self.inner.len += 1;
-
-            var slice_ = self.slice();
+            var slice_ = array.slice();
             stdx.copy_right(.exact, T, slice_[index + 1 ..], slice_[index .. slice_.len - 1]);
             slice_[index] = item;
         }
 
-        pub fn append(array: *BoundedArray, item: T) error{Overflow}!void {
-            return array.inner.append(item);
-        }
-
-        pub inline fn append_assume_capacity(array: *BoundedArray, item: T) void {
+        pub fn push(array: *BoundedArray, item: T) void {
+            assert(!array.full());
             array.inner.appendAssumeCapacity(item);
         }
 
-        pub inline fn append_slice_assume_capacity(array: *BoundedArray, items: []const T) void {
+        pub fn push_slice(array: *BoundedArray, items: []const T) void {
+            assert(array.count() + items.len <= array.capacity());
             array.inner.appendSliceAssumeCapacity(items);
         }
 
@@ -117,7 +111,7 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
     };
 }
 
-test "BoundedArray.insert_assume_capacity" {
+test "BoundedArray.insert_at" {
     const items_max = 32;
     const BoundedArrayU64 = BoundedArrayType(u64, items_max);
 
@@ -125,14 +119,14 @@ test "BoundedArray.insert_assume_capacity" {
     for (0..items_max) |len| {
         var list_base = BoundedArrayU64{};
         for (0..len) |i| {
-            list_base.append_assume_capacity(i);
+            list_base.push(i);
         }
 
         // Test an insert at every possible position (including an append).
         for (0..list_base.count() + 1) |i| {
             var list = list_base;
 
-            list.insert_assume_capacity(i, 12345);
+            list.insert_at(i, 12345);
 
             // Verify the result:
 

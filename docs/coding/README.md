@@ -17,7 +17,7 @@ a series of loosely connected guides which can be read in any order.
 - [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
-- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .Net, Go, Java, Node.js, or
+- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .NET, Go, Java, Node.js, or
   Python.
 
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)

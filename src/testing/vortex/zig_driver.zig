@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
 const TestingStorage = @import("../storage.zig").Storage;

@@ -68,34 +68,54 @@ const SourceLocation = std.builtin.SourceLocation;
 
 const stdx = @import("../stdx.zig");
 
-// Set to `true` to update all snapshots.
-const update_all: bool = false;
+const MiB = stdx.MiB;
 
 pub const Snap = struct {
     comptime {
         assert(builtin.is_test);
     }
 
+    // Set to `true` to update all snapshots.
+    pub var update_all: bool = false;
+
+    module_path: []const u8,
     location: SourceLocation,
     text: []const u8,
     update_this: bool = false,
 
-    /// Creates a new Snap.
+    const SnapFn = fn (location: SourceLocation, text: []const u8) Snap;
+
+    /// Takes the path to the root source file of the current module and creates a snap function.
     ///
-    /// For the update logic to work, *must* be formatted as:
+    /// ```
+    /// const snap = Snap.snap_fn("src");
+    /// const snap = Snap.snap_fn("src/stdx");
+    /// ```
+    ///
+    /// For the update logic to work, usage *must* be formatted as:
     ///
     /// ```
     /// snap(@src(),
     ///     \\Text of the snapshot.
     /// )
     /// ```
-    pub fn snap(location: SourceLocation, text: []const u8) Snap {
-        return Snap{ .location = location, .text = text };
+    pub fn snap_fn(comptime module_path: []const u8) SnapFn {
+        return struct {
+            fn snap(location: SourceLocation, text: []const u8) Snap {
+                return init(module_path, location, text);
+            }
+        }.snap;
+    }
+
+    /// Creates a new Snap.
+    fn init(module_path: []const u8, location: SourceLocation, text: []const u8) Snap {
+        return Snap{ .module_path = module_path, .location = location, .text = text };
     }
 
     /// Builder-lite method to update just this particular snapshot.
     pub fn update(snapshot: *const Snap) Snap {
         return Snap{
+            .module_path = snapshot.module_path,
             .location = snapshot.location,
             .text = snapshot.text,
             .update_this = true,
@@ -119,17 +139,24 @@ pub const Snap = struct {
         try snapshot.diff(got);
     }
 
-    // Compare the snapshot with the json serialization of a `value`.
-    pub fn diff_json(
+    // Compare the snapshot with the zon json serialization of a `value`.
+    pub fn diff_zon(
         snapshot: *const Snap,
         value: anytype,
-        options: std.json.StringifyOptions,
     ) !void {
-        var got = std.ArrayList(u8).init(std.testing.allocator);
-        defer got.deinit();
+        var got: std.ArrayListUnmanaged(u8) = .empty;
+        defer got.deinit(std.testing.allocator);
 
-        try std.json.stringify(value, options, got.writer());
+        try std.zon.stringify.serialize(value, .{}, got.writer(std.testing.allocator));
         try snapshot.diff(got.items);
+    }
+
+    pub fn diff_hex(snapshot: *const Snap, value: []const u8) !void {
+        var buffer: std.ArrayListUnmanaged(u8) = .empty;
+        defer buffer.deinit(std.testing.allocator);
+
+        try hexdump(value, buffer.writer(std.testing.allocator).any());
+        try snapshot.diff(buffer.items);
     }
 
     // Compare the snapshot with a given string.
@@ -162,23 +189,18 @@ pub const Snap = struct {
             return error.SnapDiff;
         }
 
-        var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
-        defer arena.deinit();
+        var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
+        defer arena_instance.deinit();
 
-        const allocator = arena.allocator();
+        const arena = arena_instance.allocator();
         const file_path_relative = try std.fs.path.join(
-            allocator,
+            arena,
             // The file location is relative to the module root path.
-            // TODO: Don't hardcode `src` here.
-            &.{ "src/", snapshot.location.file },
+            &.{ snapshot.module_path, snapshot.location.file },
         );
 
-        const file_text = try std.fs.cwd().readFileAlloc(
-            allocator,
-            file_path_relative,
-            1024 * 1024,
-        );
-        var file_text_updated = try std.ArrayList(u8).initCapacity(allocator, file_text.len);
+        const file_text = try std.fs.cwd().readFileAlloc(arena, file_path_relative, 1 * MiB);
+        var file_text_updated = try std.ArrayList(u8).initCapacity(arena, file_text.len);
 
         const line_zero_based = snapshot.location.line - 1;
         const range = snap_range(file_text, line_zero_based);
@@ -313,4 +335,27 @@ fn get_indent(line: []const u8) []const u8 {
         if (c != ' ') return line[0..i];
     }
     return line;
+}
+
+fn hexdump(bytes: []const u8, writer: std.io.AnyWriter) !void {
+    for (bytes, 0..) |byte, index| {
+        if (index > 0) {
+            const space = if (index % 16 == 0) "\n" else if (index % 8 == 0) "  " else " ";
+            try writer.writeAll(space);
+        }
+        try writer.print("{x:02}", .{byte});
+    }
+}
+
+test hexdump {
+    const snap = Snap.snap_fn("./src/stdx");
+
+    try snap(@src(),
+        \\68 65 6c 6c 6f 2c 20 77  6f 72 6c 64 0a 00 01 02
+        \\03 fd fe ff
+    ).diff_hex("hello, world\n" ++ .{ 0, 1, 2, 3, 253, 254, 255 });
+}
+
+test "Snap update disabled" {
+    assert(!Snap.update_all); // Forgot to flip this back to false after updating snapshots?
 }

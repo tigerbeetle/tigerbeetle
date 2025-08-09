@@ -23,7 +23,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.storage_checker);
 
 const constants = @import("../../constants.zig");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../../vsr.zig");
 const schema = @import("../../lsm/schema.zig");
 const Storage = @import("../storage.zig").Storage;
@@ -74,7 +74,7 @@ pub const StorageChecker = struct {
         var free_set = try vsr.FreeSet.init(
             allocator,
             .{
-                .blocks_count = Storage.grid_blocks_max,
+                .grid_size_limit = Storage.grid_blocks_max * constants.block_size,
                 .blocks_released_prior_checkpoint_durability_max = 0,
             },
         );
@@ -83,7 +83,7 @@ pub const StorageChecker = struct {
         var client_sessions = try vsr.ClientSessions.init(allocator);
         errdefer client_sessions.deinit(allocator);
 
-        const free_set_size = vsr.FreeSet.encode_size_max(Storage.grid_blocks_max);
+        const free_set_size = free_set.encode_size_max();
 
         const free_set_blocks_acquired_encoded =
             try allocator.alignedAlloc(u8, @alignOf(u64), free_set_size);

@@ -78,7 +78,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -475,8 +476,7 @@ transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
 // Error handling omitted.
 
 transfer1 := Transfer{
-	ID: ToUint128(9),
-	// Post the entire pending amount.
+	ID:        ToUint128(9),
 	Amount:    ToUint128(0),
 	PendingID: ToUint128(8),
 	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),

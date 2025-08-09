@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 const ScanState = @import("scan_state.zig").ScanState;
@@ -180,7 +180,7 @@ fn ScanMergeType(
 
                 // Mark this scan as `assigned`, so it can't be used to compose other merges.
                 scan.assigned = true;
-                self.streams.append_assume_capacity(.{ .scan = scan });
+                self.streams.push(.{ .scan = scan });
             }
 
             return self;

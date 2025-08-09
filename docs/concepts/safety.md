@@ -26,7 +26,7 @@ might fail catastrophically (e.g. due to a fire in the data center). Primary/bac
 ad-hoc failover can lose data due to split-brain.
 
 To avoid these pitfalls, TigerBeetle implements pioneering
-[Viewstamped Replication](https://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus algorithm,
+[Viewstamped Replication](http://pmg.csail.mit.edu/papers/vr-revisited.pdf) and consensus algorithm,
 that guarantees correct, automatic failover. It's worth emphasizing that consensus proper needs only
 be engaged during actual failover. During the normal operation, the cost of consensus is just the
 cost of replication, which is further minimized because of

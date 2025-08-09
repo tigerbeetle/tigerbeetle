@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 
 const MessagePool = @import("../../message_pool.zig").MessagePool;

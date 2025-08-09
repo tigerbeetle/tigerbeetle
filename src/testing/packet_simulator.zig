@@ -4,9 +4,11 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
 const fuzz = @import("./fuzz.zig");
-const ReadyQueueType = fuzz.ReadyQueueType;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
+const constants = @import("../constants.zig");
 const Ratio = stdx.PRNG.Ratio;
+const Duration = stdx.Duration;
+const Instant = stdx.Instant;
 
 pub const PacketSimulatorOptions = struct {
     node_count: u8,
@@ -16,8 +18,8 @@ pub const PacketSimulatorOptions = struct {
     recorded_count_max: u8 = 0,
 
     /// Mean for the exponential distribution used to calculate forward delay.
-    one_way_delay_mean: u64,
-    one_way_delay_min: u64,
+    one_way_delay_mean: Duration,
+    one_way_delay_min: Duration,
 
     packet_loss_probability: Ratio = Ratio.zero(),
     packet_replay_probability: Ratio = Ratio.zero(),
@@ -43,7 +45,7 @@ pub const PacketSimulatorOptions = struct {
     path_maximum_capacity: u8,
 
     /// Mean for the exponential distribution used to calculate how long a path is clogged for.
-    path_clog_duration_mean: u64,
+    path_clog_duration_mean: Duration,
     path_clog_probability: Ratio,
 };
 
@@ -86,26 +88,31 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             packet_clone: *const fn (*PacketSimulator, Packet) Packet,
             packet_deinit: *const fn (*PacketSimulator, Packet) void,
             packet_deliver: *const fn (*PacketSimulator, Packet, Path) void,
-            packet_delay: *const fn (*PacketSimulator, Packet, Path) u64 = &packet_delay_default,
+            packet_delay: *const fn (*PacketSimulator, Packet, Path) Duration =
+                &packet_delay_default,
         };
 
         const LinkPacket = struct {
-            ready_at_tick: u64,
+            ready_at: Instant,
             packet: Packet,
+
+            fn less_than(_: void, a: LinkPacket, b: LinkPacket) std.math.Order {
+                return std.math.order(a.ready_at.ns, b.ready_at.ns);
+            }
         };
 
         pub const LinkDropPacketFn = *const fn (packet: Packet) bool;
 
         const Link = struct {
-            queue: ReadyQueueType(LinkPacket),
+            queue: std.PriorityQueue(LinkPacket, void, LinkPacket.less_than),
             /// Commands in the set are delivered.
             /// Commands not in the set are dropped.
             filter: LinkFilter = LinkFilter.initFull(),
             drop_packet_fn: ?LinkDropPacketFn = null,
             /// Commands in the set are recorded for a later replay.
             record: LinkFilter = .{},
-            /// We can arbitrary clog a path until a tick.
-            clogged_till: u64 = 0,
+            /// We can arbitrary clog a path until a given moment.
+            clogged_till: Instant = .{ .ns = 0 },
 
             fn should_drop(link: *const @This(), packet: Packet, command: vsr.Command) bool {
                 if (!link.filter.contains(command)) {
@@ -149,22 +156,22 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             vtable: VTable,
         ) !PacketSimulator {
             assert(options.node_count > 0);
-            assert(options.one_way_delay_mean >= options.one_way_delay_min);
+            assert(options.one_way_delay_mean.ns >= options.one_way_delay_min.ns);
 
             const process_count_ = options.node_count + options.client_count;
             const links = try allocator.alloc(Link, @as(usize, process_count_) * process_count_);
             errdefer allocator.free(links);
 
             for (links, 0..) |*link, i| {
-                errdefer for (links[0..i]) |*l| l.queue.deinit(allocator);
+                errdefer for (links[0..i]) |*l| l.queue.deinit();
 
-                const queue = try ReadyQueueType(LinkPacket).init(
-                    allocator,
-                    options.path_maximum_capacity,
-                );
-                link.* = .{ .queue = queue };
+                link.* = .{
+                    .queue = std.PriorityQueue(LinkPacket, void, LinkPacket.less_than)
+                        .init(allocator, {}),
+                };
+                try link.queue.ensureTotalCapacity(options.path_maximum_capacity);
             }
-            errdefer for (links) |*link| link.queue.deinit(allocator);
+            errdefer for (links) |*link| link.queue.deinit();
 
             var recorded = try Recorded.initCapacity(allocator, options.recorded_count_max);
             errdefer recorded.deinit(allocator);
@@ -194,11 +201,11 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
 
         pub fn deinit(self: *PacketSimulator, allocator: std.mem.Allocator) void {
             for (self.links) |*link| {
-                for (link.queue.slice()) |link_packet| {
+                for (link.queue.items) |link_packet| {
                     self.packet_deinit(link_packet.packet);
                 }
 
-                link.queue.deinit(allocator);
+                link.queue.deinit();
             }
 
             while (self.recorded.pop()) |recorded_packet| {
@@ -214,10 +221,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         /// Drop all pending packets.
         pub fn link_clear(self: *PacketSimulator, path: Path) void {
             const link = &self.links[self.path_index(path)];
-            for (link.queue.slice()) |link_packet| {
+            while (link.queue.removeOrNull()) |link_packet| {
                 self.packet_deinit(link_packet.packet);
             }
-            link.queue.reset();
+            assert(link.queue.count() == 0);
         }
 
         pub fn link_filter(self: *PacketSimulator, path: Path) *LinkFilter {
@@ -263,7 +270,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         fn is_clogged(self: *PacketSimulator, path: Path) bool {
-            return self.links[self.path_index(path)].clogged_till > self.ticks;
+            return self.links[self.path_index(path)].clogged_till.ns > self.tick_instant().ns;
         }
 
         fn should_clog(self: *PacketSimulator, path: Path) bool {
@@ -272,13 +279,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             return self.prng.chance(self.options.path_clog_probability);
         }
 
-        fn clog_for(self: *PacketSimulator, path: Path, ticks: u64) void {
-            const clog_expiry = &self.links[self.path_index(path)].clogged_till;
-            clog_expiry.* = self.ticks + ticks;
-            log.debug("Path path.source={} path.target={} clogged for ticks={}", .{
+        fn clog_for(self: *PacketSimulator, path: Path, duration: Duration) void {
+            self.links[self.path_index(path)].clogged_till =
+                self.tick_instant().add(duration);
+            log.debug("Path path.source={} path.target={} clogged for {}", .{
                 path.source,
                 path.target,
-                ticks,
+                duration,
             });
         }
 
@@ -361,11 +368,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                     if (self.is_clogged(path)) continue;
 
                     const queue = &self.links[self.path_index(path)].queue;
-                    while (queue.remove_ready(&self.prng, self.ticks)) |link_packet| {
-                        assert(link_packet.ready_at_tick <= self.ticks);
-                        self.submit_packet_finish(path, link_packet);
-                        self.packet_deinit(link_packet.packet);
-                        advanced = true;
+                    if (queue.peek()) |link_packet| {
+                        if (link_packet.ready_at.ns <= self.tick_instant().ns) {
+                            _ = queue.remove();
+                            self.submit_packet_finish(path, link_packet);
+                            self.packet_deinit(link_packet.packet);
+                            advanced = true;
+                        }
                     }
                 }
             }
@@ -398,12 +407,13 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
                 for (0..self.process_count()) |to| {
                     const path: Path = .{ .source = @intCast(from), .target = @intCast(to) };
                     if (self.should_clog(path)) {
-                        const ticks = fuzz.random_int_exponential(
-                            &self.prng,
-                            u64,
-                            self.options.path_clog_duration_mean,
-                        );
-                        self.clog_for(path, ticks);
+                        self.clog_for(path, .{
+                            .ns = fuzz.random_int_exponential(
+                                &self.prng,
+                                u64,
+                                self.options.path_clog_duration_mean.ns,
+                            ),
+                        });
                     }
                 }
             }
@@ -417,7 +427,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             const queue = &self.links[self.path_index(path)].queue;
             const queue_count = queue.count();
             if (queue_count + 1 > self.options.path_maximum_capacity) {
-                const link_packet = queue.remove_random(&self.prng).?;
+                const link_packet = queue.removeIndex(self.prng.index(queue.items));
                 defer self.packet_deinit(link_packet.packet);
 
                 log.warn("submit_packet: {} reached capacity, dropped packet: {}", .{
@@ -430,9 +440,9 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             }
 
             queue.add(.{
-                .ready_at_tick = self.ticks + self.packet_delay(packet, path),
+                .ready_at = self.tick_instant().add(self.packet_delay(packet, path)),
                 .packet = packet,
-            });
+            }) catch unreachable;
 
             const command = self.packet_command(packet);
             const recording = self.links[self.path_index(path)].record.contains(command);
@@ -445,7 +455,7 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
         }
 
         fn submit_packet_finish(self: *PacketSimulator, path: Path, link_packet: LinkPacket) void {
-            assert(link_packet.ready_at_tick <= self.ticks);
+            assert(link_packet.ready_at.ns <= self.tick_instant().ns);
             const command = self.packet_command(link_packet.packet);
             if (self.links[self.path_index(path)].should_drop(link_packet.packet, command)) {
                 log.warn(
@@ -486,6 +496,10 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.packet_deliver(link_packet.packet, path);
         }
 
+        fn tick_instant(self: *const PacketSimulator) Instant {
+            return .{ .ns = self.ticks * constants.tick_ms * std.time.ns_per_ms };
+        }
+
         fn packet_command(self: *PacketSimulator, packet: Packet) vsr.Command {
             return self.vtable.packet_command(self, packet);
         }
@@ -502,16 +516,18 @@ pub fn PacketSimulatorType(comptime Packet: type) type {
             self.vtable.packet_deliver(self, packet, path);
         }
 
-        fn packet_delay(self: *PacketSimulator, packet: Packet, path: Path) u64 {
+        fn packet_delay(self: *PacketSimulator, packet: Packet, path: Path) Duration {
             return self.vtable.packet_delay(self, packet, path);
         }
 
         /// Return a value produced using an exponential distribution with
         /// the minimum and mean specified in self.options
-        fn packet_delay_default(self: *PacketSimulator, _: Packet, _: Path) u64 {
+        fn packet_delay_default(self: *PacketSimulator, _: Packet, _: Path) Duration {
             const min = self.options.one_way_delay_min;
             const mean = self.options.one_way_delay_mean;
-            return @max(min, fuzz.random_int_exponential(&self.prng, u64, mean));
+            return .{
+                .ns = @max(min.ns, fuzz.random_int_exponential(&self.prng, u64, mean.ns)),
+            };
         }
     };
 }

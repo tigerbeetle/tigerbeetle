@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.amqp);
@@ -1444,7 +1444,7 @@ test "amqp: spec" {
     // Sanity check to ensure the spec hasn't been manually modified.
     // Checking the hash to avoid downloading the XML from external sources during CI.
     try testing.expectEqual(
-        78627771998383224142481720071374607633,
+        269315715514333185404011239500341468006,
         vsr.checksum(@embedFile("amqp/spec.zig")),
     );
 }

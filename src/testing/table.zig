@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 /// Parse a "table" of data with the specified schema.
 /// See test cases for example usage.
@@ -14,7 +14,7 @@ pub fn parse(comptime Row: type, table_string: []const u8) stdx.BoundedArrayType
 
         var columns = std.mem.tokenizeScalar(u8, row_string, ' ');
         const row = parse_data(Row, &columns);
-        rows.append_assume_capacity(row);
+        rows.push(row);
 
         // Ignore trailing line comment.
         if (columns.next()) |last| assert(std.mem.eql(u8, last, "//"));

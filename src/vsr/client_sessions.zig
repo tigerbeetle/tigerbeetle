@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 /// There is a slot corresponding to every active client (i.e. a total of clients_max slots).
 pub const ReplySlot = struct { index: usize };

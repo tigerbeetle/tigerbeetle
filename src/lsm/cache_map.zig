@@ -1,7 +1,7 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 

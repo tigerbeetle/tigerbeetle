@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.journal_checker);
 
 const constants = @import("../../constants.zig");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../../vsr.zig");
 const TestStorage = @import("../storage.zig").Storage;
 

@@ -7,7 +7,7 @@ const log = std.log.scoped(.message_bus);
 
 const vsr = @import("vsr.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const RingBufferType = stdx.RingBufferType;
 const IO = @import("io.zig").IO;

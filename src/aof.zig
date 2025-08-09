@@ -5,12 +5,13 @@ const assert = std.debug.assert;
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+
+const MiB = stdx.MiB;
 
 const log = std.log.scoped(.aof);
 
@@ -127,7 +128,8 @@ pub fn AOFType(comptime IO: type) type {
 
         /// Create an AOF in the dir_fd when given a file name. dir_fd must be opened read write
         /// (except on Windows). This ensures everything (including the dir) is fsync'd
-        /// appropriately. Closing dir_fd is the responsibility of the caller.
+        /// appropriately. Closing dir_fd is the responsibility of the caller, which can be done
+        /// immediately after .init() finishes.
         pub fn init(
             io: *IO,
             options: struct {
@@ -136,6 +138,7 @@ pub fn AOFType(comptime IO: type) type {
             },
         ) !AOF {
             assert(!std.fs.path.isAbsolute(options.relative_path));
+            assert(std.mem.endsWith(u8, options.relative_path, ".aof"));
             assert(IO == @import("io.zig").IO);
 
             const dir = std.fs.Dir{
@@ -293,12 +296,12 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub const ReplayClient = struct {
-            const Storage = vsr.storage.StorageType(IO, Tracer);
+            const Storage = vsr.storage.StorageType(IO);
             const StateMachine = vsr.state_machine.StateMachineType(
                 Storage,
                 constants.state_machine_config,
             );
-            const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+            const Client = vsr.ClientType(StateMachine, MessageBus);
 
             client: *Client,
             io: *IO,
@@ -308,6 +311,7 @@ pub fn AOFType(comptime IO: type) type {
             pub fn init(
                 io: *IO,
                 allocator: std.mem.Allocator,
+                time: vsr.time.Time,
                 addresses: []std.net.Address,
             ) !ReplayClient {
                 assert(addresses.len > 0);
@@ -328,7 +332,7 @@ pub fn AOFType(comptime IO: type) type {
                         .id = stdx.unique_u128(),
                         .cluster = 0,
                         .replica_count = @intCast(addresses.len),
-                        .time = .{},
+                        .time = time,
                         .message_pool = message_pool,
                         .message_bus_options = .{
                             .configuration = addresses,
@@ -524,7 +528,7 @@ pub fn AOFType(comptime IO: type) type {
             /// by searching from our current position for the next magic_number, seeking
             /// to it, and setting our internal position correctly.
             pub fn skip(it: *Iterator, allocator: std.mem.Allocator, count: usize) !void {
-                var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
+                var skip_buffer = try allocator.alloc(u8, 1 * MiB);
                 defer allocator.free(skip_buffer);
 
                 while (it.offset < it.size) {
@@ -878,6 +882,9 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
+    var time_os: vsr.time.TimeOS = .{};
+    const time = time_os.time();
+
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
@@ -924,7 +931,7 @@ pub fn main() !void {
 
         var addresses_buffer: [constants.replicas_max]std.net.Address = undefined;
         const addresses_parsed = try vsr.parse_addresses(addresses.?, &addresses_buffer);
-        var replay = try AOFReplayClient.init(&io, allocator, addresses_parsed);
+        var replay = try AOFReplayClient.init(&io, allocator, time, addresses_parsed);
         defer replay.deinit(allocator);
 
         try replay.replay(&it);

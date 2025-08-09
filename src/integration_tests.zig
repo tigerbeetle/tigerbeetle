@@ -12,11 +12,11 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("./shell.zig");
-const Snap = @import("./testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src");
 const TmpTigerBeetle = @import("./testing/tmp_tigerbeetle.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
 
 const vortex_exe: []const u8 = @import("test_options").vortex_exe;
@@ -341,7 +341,7 @@ test "in-place upgrade" {
     }
 
     const ticks_max = 50;
-    var upgrade_tick: [replica_count]u8 = .{0} ** replica_count;
+    var upgrade_tick: [replica_count]u8 = @splat(0);
     for (0..replica_count) |replica_index| {
         upgrade_tick[replica_index] = cluster.prng.int_inclusive(u8, ticks_max - 1);
     }
@@ -452,10 +452,10 @@ const TmpCluster = struct {
     tmp: []const u8,
 
     prng: stdx.PRNG,
-    replicas: [replica_count]?std.process.Child = .{null} ** replica_count,
+    replicas: [replica_count]?std.process.Child = @splat(null),
     replica_exe: [replica_count][]const u8,
     replica_datafile: [replica_count][]const u8,
-    replica_upgraded: [replica_count]bool = .{false} ** replica_count,
+    replica_upgraded: [replica_count]bool = @splat(false),
 
     workload_thread: ?std.Thread = null,
     workload_exit_ok: bool = false,
@@ -471,8 +471,8 @@ const TmpCluster = struct {
 
         try shell.cwd.makePath(tmp);
 
-        var replica_exe: [replica_count][]const u8 = .{""} ** replica_count;
-        var replica_datafile: [replica_count][]const u8 = .{""} ** replica_count;
+        var replica_exe: [replica_count][]const u8 = @splat("");
+        var replica_datafile: [replica_count][]const u8 = @splat("");
         for (0..replica_count) |replica_index| {
             replica_exe[replica_index] = try shell.fmt("{s}/tigerbeetle{}{s}", .{
                 tmp,

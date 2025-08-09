@@ -1,4 +1,4 @@
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -419,7 +419,7 @@ test "MessageBuffer fuzz" {
                 std.mem.asBytes(&header),
             );
             total_size += header.size;
-            headers.append_assume_capacity(header.frame_const().*);
+            headers.push(header.frame_const().*);
         }
 
         if (fault) {

@@ -11,10 +11,12 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 const changelog = @import("./changelog.zig");
 const Release = @import("../multiversioning.zig").Release;
+
+const MiB = stdx.MiB;
 
 const log = std.log;
 
@@ -105,7 +107,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         const changelog_text = try shell.project_root.readFileAlloc(
             shell.arena.allocator(),
             "CHANGELOG.md",
-            1024 * 1024,
+            1 * MiB,
         );
         var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
 
@@ -135,7 +137,11 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         , .{ .sha = cli_args.sha });
     }
     try shell.project_root.deleteFile("tigerbeetle");
-    try shell.exec("unzip zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+
+    try shell.unzip_executable(
+        "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+        "tigerbeetle",
+    );
 
     const benchmark_result = try shell.exec_stdout(
         "./tigerbeetle benchmark --validate --checksum-performance",

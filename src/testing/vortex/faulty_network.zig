@@ -19,7 +19,7 @@
 //! with whatever chunks of bytes we receive immediately, instead of collecting a buffer with a
 //! full message before piping it through.
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const IO = @import("../../io.zig").IO;
 const constants = @import("./constants.zig");
 

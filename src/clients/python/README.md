@@ -61,7 +61,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -526,7 +527,7 @@ transfer1 = tb.Transfer(
     id=9,
     debit_account_id=102,
     credit_account_id=103,
-    amount=10,
+    amount=0,
     pending_id=8,
     user_data_128=0,
     user_data_64=0,

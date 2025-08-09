@@ -35,7 +35,8 @@ const mem = std.mem;
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
+const MiB = stdx.MiB;
 
 const Aegis128LMac_128 = stdx.aegis.Aegis128LMac_128;
 
@@ -53,7 +54,7 @@ comptime {
 }
 
 fn seed_init() void {
-    const key = mem.zeroes([16]u8);
+    const key: [16]u8 = @splat(0);
     seed_state = Aegis128LMac_128.init(&key);
 }
 
@@ -127,7 +128,7 @@ test "checksum simple fuzzing" {
     var prng = stdx.PRNG.from_seed(42);
 
     const msg_min = 1;
-    const msg_max = 1 * 1024 * 1024;
+    const msg_max = 1 * MiB;
 
     var msg_buf = try testing.allocator.alloc(u8, msg_max);
     defer testing.allocator.free(msg_buf);

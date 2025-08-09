@@ -32,7 +32,7 @@ Storage:
 |             `ping_client` |  client |      replica | [Ping (Replica-Client)](#protocol-ping-replica-client)                                                                                     |
 |             `pong_client` | replica |       client | [Ping (Replica-Client)](#protocol-ping-replica-client)                                                                                     |
 |                 `request` |  client |      primary | [Normal](#protocol-normal)                                                                                                                 |
-|                 `prepare` | replica |       backup | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
+|                 `prepare` | primary |      replica | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
 |              `prepare_ok` | replica |      primary | [Normal](#protocol-normal), [Repair WAL](#protocol-repair-wal)                                                                             |
 |                   `reply` | primary |       client | [Normal](#protocol-normal), [Repair Client Replies](#protocol-repair-client-replies), [Sync Client Replies](#protocol-sync-client-replies) |
 |                  `commit` | primary |       backup | [Normal](#protocol-normal)                                                                                                                 |
@@ -292,6 +292,5 @@ See also:
 - [Flexible Paxos](https://fpaxos.github.io/)
 
 ## Further reading
-
-- [Viewstamped Replication Revisited](https://pmg.csail.mit.edu/papers/vr-revisited.pdf)
+- [Viewstamped Replication Revisited](http://pmg.csail.mit.edu/papers/vr-revisited.pdf)
 - [Protocol Aware Recovery](https://www.usenix.org/system/files/conference/fast18/fast18-alagappan.pdf)

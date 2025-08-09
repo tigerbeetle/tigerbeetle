@@ -3,4 +3,4 @@ echo `# <#`
 ./zig/download.sh
 exit
 #> > $null
-./zig/download.bat
+./zig/download.win.ps1

@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const constants = @import("../../constants.zig");
 const vsr = @import("../../vsr.zig");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
 const message_pool = @import("../../message_pool.zig");
@@ -32,7 +32,7 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
         replica_count: u8,
 
         commits: Commits,
-        commit_mins: [constants.members_max]u64 = [_]u64{0} ** constants.members_max,
+        commit_mins: [constants.members_max]u64 = @splat(0),
 
         replicas: []const Replica,
         clients: []const ?Client,

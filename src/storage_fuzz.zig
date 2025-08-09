@@ -5,13 +5,12 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
-const Time = @import("testing/time.zig").Time;
-const Tracer = vsr.trace.TracerType(Time);
-const Storage = @import("storage.zig").StorageType(IO, Tracer);
+const Storage = @import("storage.zig").StorageType(IO);
+const fixtures = @import("testing/fixtures.zig");
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 
-pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
+pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const zones: []const vsr.Zone = &.{
         .superblock,
         .wal_headers,
@@ -23,6 +22,9 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const sector_count = 64;
     const storage_size = sector_count * sector_size;
     const iterations = args.events_max orelse 10_000;
+
+    var time_os: vsr.time.TimeOS = .{};
+    const time = time_os.time();
 
     var prng = stdx.PRNG.from_seed(args.seed);
     for (0..iterations) |_| {
@@ -76,7 +78,10 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             .larger_than_logical_sector_read_fault_probability = ratio(10, 100),
         });
 
-        var storage = try Storage.init(&io, 0);
+        var tracer = try fixtures.init_tracer(gpa, time, .{});
+        defer tracer.deinit(gpa);
+
+        var storage = try Storage.init(&io, &tracer, 0);
 
         var write_completion: Storage.Write = undefined;
 

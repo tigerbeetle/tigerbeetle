@@ -28,7 +28,7 @@
 //! This is used for tracing and liveness checks.
 
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const tb = @import("../../tigerbeetle.zig");
 const constants = @import("../../constants.zig");
 const StateMachineType = @import("../../state_machine.zig").StateMachineType;
@@ -225,7 +225,7 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
                     continue;
                 }
 
-                successful_transfer_ids.append_assume_capacity(transfer.id);
+                successful_transfer_ids.push(transfer.id);
 
                 if (transfer.flags.pending) {
                     try testing.expect(!model.pending_transfers.contains(transfer.id));

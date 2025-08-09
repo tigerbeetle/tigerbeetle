@@ -1,22 +1,18 @@
 #!/usr/bin/env sh
 set -eu
 
-ZIG_RELEASE_DEFAULT="0.14.1"
-# Default to the release build, or allow the latest dev build, or an explicit release version:
-ZIG_RELEASE=${1:-$ZIG_RELEASE_DEFAULT}
-if [ "$ZIG_RELEASE" = "latest" ]; then
-    ZIG_RELEASE="builds"
-fi
+ZIG_RELEASE="0.14.1"
+ZIG_CHECKSUMS=$(cat<<EOF
+https://ziglang.org/download/0.14.1/zig-aarch64-linux-0.14.1.tar.xz f7a654acc967864f7a050ddacfaa778c7504a0eca8d2b678839c21eea47c992b
+https://ziglang.org/download/0.14.1/zig-aarch64-macos-0.14.1.tar.xz 39f3dc5e79c22088ce878edc821dedb4ca5a1cd9f5ef915e9b3cc3053e8faefa
+https://ziglang.org/download/0.14.1/zig-aarch64-windows-0.14.1.zip b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7
+https://ziglang.org/download/0.14.1/zig-x86_64-linux-0.14.1.tar.xz 24aeeec8af16c381934a6cd7d95c807a8cb2cf7df9fa40d359aa884195c4716c
+https://ziglang.org/download/0.14.1/zig-x86_64-macos-0.14.1.tar.xz b0f8bdfb9035783db58dd6c19d7dea89892acc3814421853e5752fe4573e5f43
+https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip 554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c
+EOF
+)
 
-# Validate the release version explicitly:
-if echo "$ZIG_RELEASE" | grep -q '^builds$'; then
-    echo "Downloading Zig latest build..."
-elif echo "$ZIG_RELEASE" | grep -q '^[0-9]\+.[0-9]\+.[0-9]\+$'; then
-    echo "Downloading Zig $ZIG_RELEASE release build..."
-else
-    echo "Release version invalid"
-    exit 1
-fi
+echo "Downloading Zig $ZIG_RELEASE release build..."
 
 # Determine the architecture:
 if [ "$(uname -m)" = 'arm64' ] || [ "$(uname -m)" = 'aarch64' ]; then
@@ -29,12 +25,15 @@ fi
 case "$(uname)" in
     Linux)
         ZIG_OS="linux"
+        ZIG_EXTENSION=".tar.xz"
         ;;
     Darwin)
         ZIG_OS="macos"
+        ZIG_EXTENSION=".tar.xz"
         ;;
     CYGWIN*)
         ZIG_OS="windows"
+        ZIG_EXTENSION=".zip"
         ;;
     *)
         echo "Unknown OS"
@@ -42,66 +41,51 @@ case "$(uname)" in
         ;;
 esac
 
-ZIG_TARGET="zig-$ZIG_ARCH-$ZIG_OS"
-
-# Determine the build, split the JSON line on whitespace and extract the 2nd field, then remove quotes and commas:
-if command -v wget > /dev/null; then
-    # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
-    # Only A records (for ipv4) are used in DNS:
-    ipv4="-4"
-    # But Alpine doesn't support this argument
-    if [ -f /etc/alpine-release ]; then
-    ipv4=""
-    fi
-    # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
-    ZIG_URL=$(wget $ipv4 --quiet -O - https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | head -1 | awk '{print $2}' | sed 's/[",]//g')
-else
-    ZIG_URL=$(curl --silent https://ziglang.org/download/index.json | grep -F "$ZIG_TARGET" | grep -F "$ZIG_RELEASE" | head -1 | awk '{print $2}' | sed 's/[",]//g')
-fi
-
-# Ensure that the release is actually hosted on the ziglang.org website:
-if [ -z "$ZIG_URL" ]; then
-    echo "Release not found on ziglang.org"
-    exit 1
-fi
+ZIG_URL="https://ziglang.org/download/${ZIG_RELEASE}/zig-${ZIG_ARCH}-${ZIG_OS}-${ZIG_RELEASE}${ZIG_EXTENSION}"
+ZIG_CHECKSUM_EXPECTED=$(echo "$ZIG_CHECKSUMS" | grep -F "$ZIG_URL" | cut -d ' ' -f 2)
 
 # Work out the filename from the URL, as well as the directory without the ".tar.xz" file extension:
 ZIG_ARCHIVE=$(basename "$ZIG_URL")
-
-case "$ZIG_ARCHIVE" in
-    *".tar.xz")
-        ZIG_ARCHIVE_EXT=".tar.xz"
-        ;;
-    *".zip")
-        ZIG_ARCHIVE_EXT=".zip"
-        ;;
-    *)
-        echo "Unknown archive extension"
-        exit 1
-        ;;
-esac
-
-ZIG_DIRECTORY=$(basename "$ZIG_ARCHIVE" "$ZIG_ARCHIVE_EXT")
+ZIG_DIRECTORY=$(basename "$ZIG_ARCHIVE" "$ZIG_EXTENSION")
 
 # Download, making sure we download to the same output document, without wget adding "-1" etc. if the file was previously partially downloaded:
-echo "Downloading $ZIG_URL..."
-if command -v wget > /dev/null; then
+if command -v curl > /dev/null; then
+    curl --silent --output "$ZIG_ARCHIVE" "$ZIG_URL"
+elif command -v wget > /dev/null; then
     # -4 forces `wget` to connect to ipv4 addresses, as ipv6 fails to resolve on certain distros.
     # Only A records (for ipv4) are used in DNS:
     ipv4="-4"
     # But Alpine doesn't support this argument
     if [ -f /etc/alpine-release ]; then
-    ipv4=""
+        ipv4=""
     fi
+
     # shellcheck disable=SC2086 # We control ipv4 and it'll always either be empty or -4
     wget $ipv4 --quiet --output-document="$ZIG_ARCHIVE" "$ZIG_URL"
 else
-    curl --silent --output "$ZIG_ARCHIVE" "$ZIG_URL"
+    echo "Neither curl nor wget available."
+    exit 1
+fi
+
+# Verify the checksum.
+ZIG_CHECKSUM_ACTUAL=""
+if command -v sha256sum > /dev/null; then
+    ZIG_CHECKSUM_ACTUAL=$(sha256sum "$ZIG_ARCHIVE" | cut -d ' ' -f 1)
+elif command -v shasum > /dev/null; then
+    ZIG_CHECKSUM_ACTUAL=$(shasum -a 256 "$ZIG_ARCHIVE" | cut -d ' ' -f 1)
+else
+    echo "Neither sha256sum nor shasum available."
+    exit 1
+fi
+
+if [ "$ZIG_CHECKSUM_ACTUAL" != "$ZIG_CHECKSUM_EXPECTED" ]; then
+    echo "Checksum mismatch. Expected '$ZIG_CHECKSUM_EXPECTED' got '$ZIG_CHECKSUM_ACTUAL'."
+    exit 1
 fi
 
 # Extract and then remove the downloaded archive:
 echo "Extracting $ZIG_ARCHIVE..."
-case "$ZIG_ARCHIVE_EXT" in
+case "$ZIG_EXTENSION" in
     ".tar.xz")
         tar -xf "$ZIG_ARCHIVE"
         ;;
@@ -109,7 +93,7 @@ case "$ZIG_ARCHIVE_EXT" in
         unzip -q "$ZIG_ARCHIVE"
         ;;
     *)
-        echo "Unexpected error"
+        echo "Unexpected error extracting Zig archive."
         exit 1
         ;;
 esac
