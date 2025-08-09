@@ -53,28 +53,39 @@ class InflightPacket:
     on_completion: Callable[[Self], None] | None
     on_completion_context: CompletionContextSync | CompletionContextAsync | None
 
+class _IDGenerator:
+    """Generator for Universally Unique and Sortable Identifiers as a 128-bit integers, based on ULIDs.
+
+    Keeps a monotonically increasing millisecond timestamp between calls to `.generate()`.
+    """
+    def __init__(self) -> None:
+        self._time_ms_last = time.time_ns() // (1000 * 1000)
+
+    def generate(self) -> int:
+        time_ms = time.time_ns() // (1000 * 1000)
+
+        # Ensure time_ms monotonically increases.
+        if time_ms <= self._time_ms_last:
+            time_ms = self._time_ms_last
+        else:
+            self._time_ms_last = time_ms
+
+        randomness = os.urandom(10)
+
+        return int.from_bytes(
+            time_ms.to_bytes(6, "big") + randomness,
+            "big",
+        )
+
+# Module-level singleton instance
+_id_generator = _IDGenerator()
 
 
 def id() -> int:
     """
     Generates a Universally Unique and Sortable Identifier as a 128-bit integer. Based on ULIDs.
     """
-    time_ms = time.time_ns() // (1000 * 1000)
-
-    # Ensure time_ms monotonically increases.
-    time_ms_last = getattr(id, "_time_ms_last", 0)
-    if time_ms <= time_ms_last:
-        time_ms = time_ms_last
-    else:
-        # fixme: this is a very non-pythonic solution, and discouraged
-        id._time_ms_last = time_ms  # type: ignore[attr-defined]
-
-    randomness = os.urandom(10)
-
-    return int.from_bytes(
-        time_ms.to_bytes(6, "big") + randomness,
-        "big",
-    )
+    return _id_generator.generate()
 
 
 amount_max = (2 ** 128) - 1
