@@ -22,7 +22,7 @@ const benchmark_load = @import("./benchmark_load.zig");
 
 const log = std.log;
 
-pub fn main(
+pub fn command_benchmark(
     allocator: Allocator,
     io: *vsr.io.IO,
     time: vsr.time.Time,

@@ -96,6 +96,8 @@ pub fn StorageType(comptime IO: type) type {
 
         io: *IO,
         tracer: *Tracer,
+        dir_fd: IO.fd_t,
+        basename: stdx.BoundedArrayType(u8, std.fs.max_name_bytes),
         fd: IO.fd_t,
 
         next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
@@ -104,17 +106,57 @@ pub fn StorageType(comptime IO: type) type {
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, tracer: *Tracer, fd: IO.fd_t) !Storage {
+        pub fn init(io: *IO, tracer: *Tracer, options: struct {
+            path: []const u8,
+            size_min: u64,
+            mode: enum { create, open, open_read_only },
+            direct_io: vsr.io.DirectIO,
+        }) !Storage {
+            // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+            // TODO Handle physical volumes where there is no directory to fsync.
+            const dirname = std.fs.path.dirname(options.path) orelse ".";
+            var basename: stdx.BoundedArrayType(u8, std.fs.max_name_bytes) = .{};
+            basename.push_slice(std.fs.path.basename(options.path));
+
+            const dir_fd = try IO.open_dir(dirname);
+            errdefer std.posix.close(dir_fd);
+
+            const fd = try io.open_data_file(
+                dir_fd,
+                basename.const_slice(),
+                options.size_min,
+                switch (options.mode) {
+                    .create => .create,
+                    .open => .open,
+                    .open_read_only => .open_read_only,
+                },
+                options.direct_io,
+            );
+            errdefer std.posix.close(fd);
+
             return .{
                 .io = io,
                 .tracer = tracer,
+                .dir_fd = dir_fd,
+                .basename = basename,
                 .fd = fd,
             };
+        }
+
+        pub fn dangerously_delete_data_file(storage: *Storage) void {
+            const flags = 0;
+            std.posix.unlinkat(storage.dir_fd, storage.basename.const_slice(), flags) catch {};
         }
 
         pub fn deinit(storage: *Storage) void {
             assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
+            assert(storage.dir_fd != IO.INVALID_FILE);
+
+            std.posix.close(storage.dir_fd);
+            storage.dir_fd = IO.INVALID_FILE;
+
+            std.posix.close(storage.fd);
             storage.fd = IO.INVALID_FILE;
         }
 
