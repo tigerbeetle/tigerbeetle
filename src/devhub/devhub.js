@@ -38,6 +38,7 @@ function main_release_rotation() {
       "lewisdaly",
       "matklad",
       "sentientwaffle",
+      "toziegler",
     ];
     candidates.sort();
 
