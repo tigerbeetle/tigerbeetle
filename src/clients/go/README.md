@@ -37,17 +37,14 @@ package main
 
 import (
 	"fmt"
-	"log"
-	"os"
 
-	. "github.com/tigerbeetle/tigerbeetle-go"
-	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
+	_ "github.com/tigerbeetle/tigerbeetle-go"
+	_ "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
 func main() {
 	fmt.Println("Import ok!")
 }
-
 ```
 
 Finally, build and run:
@@ -89,16 +86,29 @@ replica. The address is read from the `TB_ADDRESS`
 environment variable and defaults to port `3000`.
 
 ```go
-tbAddress := os.Getenv("TB_ADDRESS")
-if len(tbAddress) == 0 {
-	tbAddress = "3000"
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	
+	. "github.com/tigerbeetle/tigerbeetle-go"
+	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
+)
+
+func main() {
+	tbAddress := os.Getenv("TB_ADDRESS")
+	if len(tbAddress) == 0 {
+		tbAddress = "3000"
+	}
+	client, err := NewClient(ToUint128(0), []string{tbAddress})
+	if err != nil {
+		log.Printf("Error creating client: %s", err)
+		return
+	}
+	defer client.Close()
 }
-client, err := NewClient(ToUint128(0), []string{tbAddress})
-if err != nil {
-	log.Printf("Error creating client: %s", err)
-	return
-}
-defer client.Close()
 ```
 
 The following are valid addresses:
