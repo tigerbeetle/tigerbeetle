@@ -78,8 +78,8 @@ pub const samples = [_]Sample{
         \\
         \\## 6. Fetch and validate final account balances
         \\
-        \\Finally, it fetches both accounts, validates they both exist,
-        \\and checks that credits and debits for both account are now
+        \\Finally, it fetches both accounts, validates that both exist,
+        \\and checks that credits and debits for both accounts are now
         \\*posted*, not pending.
         \\
         \\Specifically, that **account `1`** has:
@@ -99,7 +99,7 @@ pub const samples = [_]Sample{
         .proper_name = "Many Two-Phase Transfers",
         .directory = "two-phase-many",
         .short_description =
-        \\Create two accounts and start a number of pending transfer
+        \\Create two accounts and start a number of pending transfers
         \\between them, posting and voiding alternating transfers.
         ,
         .long_description =
@@ -137,8 +137,8 @@ pub const samples = [_]Sample{
         \\
         \\## 6. Fetch and validate final account balances
         \\
-        \\Finally, it fetches both accounts, validates they both exist,
-        \\and checks that credits and debits for both account are now
+        \\Finally, it fetches both accounts, validates that both exist,
+        \\and checks that credits and debits for both accounts are now
         \\solely *posted*, not pending.
         \\
         \\Specifically, that **account `1`** has:
