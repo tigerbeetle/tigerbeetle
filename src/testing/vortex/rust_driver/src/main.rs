@@ -40,27 +40,27 @@ fn main() -> AnyResult<()> {
     Ok(())
 }
 
-fn execute(client: &mut tb::Client, op: Operation) -> AnyResult<OperationResult> {
+fn execute(client: &mut tb::Client, op: Request) -> AnyResult<Reply> {
     match op {
-        Operation::CreateAccounts(accounts) => {
+        Request::CreateAccounts(accounts) => {
             let response = client.create_accounts(&accounts);
             let response = block_on(response)?;
-            Ok(OperationResult::CreateAccounts(response))
+            Ok(Reply::CreateAccounts(response))
         }
-        Operation::CreateTransfers(transfers) => {
+        Request::CreateTransfers(transfers) => {
             let response = client.create_transfers(&transfers);
             let response = block_on(response)?;
-            Ok(OperationResult::CreateTransfers(response))
+            Ok(Reply::CreateTransfers(response))
         }
-        Operation::LookupAccounts(account_ids) => {
+        Request::LookupAccounts(account_ids) => {
             let response = client.lookup_accounts(&account_ids);
             let response = block_on(response)?;
-            Ok(OperationResult::LookupAccounts(response))
+            Ok(Reply::LookupAccounts(response))
         }
-        Operation::LookupTransfers(transfer_ids) => {
+        Request::LookupTransfers(transfer_ids) => {
             let response = client.lookup_transfers(&transfer_ids);
             let response = block_on(response)?;
-            Ok(OperationResult::LookupTransfers(response))
+            Ok(Reply::LookupTransfers(response))
         }
     }
 }
@@ -85,14 +85,14 @@ impl CliArgs {
     }
 }
 
-enum Operation {
+enum Request {
     CreateAccounts(Vec<tb::Account>),
     CreateTransfers(Vec<tb::Transfer>),
     LookupAccounts(Vec<u128>),
     LookupTransfers(Vec<u128>),
 }
 
-enum OperationResult {
+enum Reply {
     CreateAccounts(Vec<tb::CreateAccountResult>),
     CreateTransfers(Vec<tb::CreateTransferResult>),
     LookupAccounts(Vec<Result<tb::Account, tb::NotFound>>),
@@ -112,7 +112,7 @@ impl From<std::io::Stdin> for Input {
 }
 
 impl Input {
-    fn receive(&mut self) -> AnyResult<Option<Operation>> {
+    fn receive(&mut self) -> AnyResult<Option<Request>> {
         let op = {
             let mut bytes = [0; 1];
             if let Err(e) = self.reader.read_exact(&mut bytes) {
@@ -140,7 +140,7 @@ impl Input {
                     let event: tb::Account = unsafe { mem::transmute(bytes) };
                     events.push(event);
                 }
-                Ok(Some(Operation::CreateAccounts(events)))
+                Ok(Some(Request::CreateAccounts(events)))
             }
             tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS => {
                 let mut events = Vec::with_capacity(event_count as usize);
@@ -150,7 +150,7 @@ impl Input {
                     let event: tb::Transfer = unsafe { mem::transmute(bytes) };
                     events.push(event);
                 }
-                Ok(Some(Operation::CreateTransfers(events)))
+                Ok(Some(Request::CreateTransfers(events)))
             }
             tbc::TB_OPERATION_TB_OPERATION_LOOKUP_ACCOUNTS => {
                 let mut events = Vec::with_capacity(event_count as usize);
@@ -160,7 +160,7 @@ impl Input {
                     let event: u128 = unsafe { mem::transmute(bytes) };
                     events.push(event);
                 }
-                Ok(Some(Operation::LookupAccounts(events)))
+                Ok(Some(Request::LookupAccounts(events)))
             }
             tbc::TB_OPERATION_TB_OPERATION_LOOKUP_TRANSFERS => {
                 let mut events = Vec::with_capacity(event_count as usize);
@@ -170,7 +170,7 @@ impl Input {
                     let event: u128 = unsafe { mem::transmute(bytes) };
                     events.push(event);
                 }
-                Ok(Some(Operation::LookupTransfers(events)))
+                Ok(Some(Request::LookupTransfers(events)))
             }
             _ => todo!("{op}"),
         }
@@ -190,9 +190,9 @@ impl From<std::io::Stdout> for Output {
 }
 
 impl Output {
-    fn send(&mut self, result: OperationResult) -> AnyResult<()> {
+    fn send(&mut self, result: Reply) -> AnyResult<()> {
         match result {
-            OperationResult::CreateAccounts(results) => {
+            Reply::CreateAccounts(results) => {
                 let results_len = u32::try_from(results.len())?;
                 self.writer.write_all(&results_len.to_le_bytes())?;
                 for (index, result) in results.into_iter().enumerate() {
@@ -205,7 +205,7 @@ impl Output {
                     self.writer.write_all(&bytes)?;
                 }
             }
-            OperationResult::CreateTransfers(results) => {
+            Reply::CreateTransfers(results) => {
                 let results_len = u32::try_from(results.len())?;
                 self.writer.write_all(&results_len.to_le_bytes())?;
                 for (index, result) in results.into_iter().enumerate() {
@@ -218,7 +218,7 @@ impl Output {
                     self.writer.write_all(&bytes)?;
                 }
             }
-            OperationResult::LookupAccounts(results) => {
+            Reply::LookupAccounts(results) => {
                 let results_len = u32::try_from(results.len())?;
                 self.writer.write_all(&results_len.to_le_bytes())?;
                 for result in results {
@@ -232,7 +232,7 @@ impl Output {
                     }
                 }
             }
-            OperationResult::LookupTransfers(results) => {
+            Reply::LookupTransfers(results) => {
                 let results_len = u32::try_from(results.len())?;
                 self.writer.write_all(&results_len.to_le_bytes())?;
                 for result in results {
