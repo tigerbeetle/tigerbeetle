@@ -193,8 +193,8 @@ impl Output {
     fn send(&mut self, result: Reply) -> AnyResult<()> {
         match result {
             Reply::CreateAccounts(results) => {
-                let results_len = u32::try_from(results.len())?;
-                self.writer.write_all(&results_len.to_le_bytes())?;
+                let results_length = u32::try_from(results.len())?;
+                self.writer.write_all(&results_length.to_le_bytes())?;
                 for (index, result) in results.into_iter().enumerate() {
                     let result = tbc::tb_create_accounts_result_t {
                         index: u32::try_from(index)?,
@@ -206,8 +206,8 @@ impl Output {
                 }
             }
             Reply::CreateTransfers(results) => {
-                let results_len = u32::try_from(results.len())?;
-                self.writer.write_all(&results_len.to_le_bytes())?;
+                let results_length = u32::try_from(results.len())?;
+                self.writer.write_all(&results_length.to_le_bytes())?;
                 for (index, result) in results.into_iter().enumerate() {
                     let result = tbc::tb_create_transfers_result_t {
                         index: u32::try_from(index)?,
@@ -219,8 +219,8 @@ impl Output {
                 }
             }
             Reply::LookupAccounts(results) => {
-                let results_len = u32::try_from(results.len())?;
-                self.writer.write_all(&results_len.to_le_bytes())?;
+                let results_length = u32::try_from(results.len())?;
+                self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
                     match result {
                         Ok(result) => {
@@ -233,8 +233,8 @@ impl Output {
                 }
             }
             Reply::LookupTransfers(results) => {
-                let results_len = u32::try_from(results.len())?;
-                self.writer.write_all(&results_len.to_le_bytes())?;
+                let results_length = u32::try_from(results.len())?;
+                self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
                     match result {
                         Ok(result) => {
