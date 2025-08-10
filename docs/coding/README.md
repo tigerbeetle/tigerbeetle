@@ -13,7 +13,7 @@ a series of loosely connected guides which can be read in any order.
 - [Two-Phase Transfers](./two-phase-transfers.md) introduces pending transfers, one of the most
   powerful primitives built into TigerBeetle.
 - [Linked Events](./linked-events.md) shows how several transfers can be chained together into a
-  larger transaction, which success or fails atomically.
+  larger transaction, which succeeds or fails atomically.
 - [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
