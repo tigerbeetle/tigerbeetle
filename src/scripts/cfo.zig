@@ -53,8 +53,10 @@ const log = std.log;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
+
+const MiB = stdx.MiB;
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
@@ -605,7 +607,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         const branch_cfo = try shell.cwd.readFileAlloc(
             shell.arena.allocator(),
             try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
-            1 * 1024 * 1024,
+            1 * MiB,
         );
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
@@ -804,18 +806,18 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     // - build time is excluded from overall runtime,
     // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
     args.clear();
-    args.append_slice_assume_capacity(&.{ "./zig/zig", "build", "-Drelease" });
-    args.append_slice_assume_capacity(switch (options.fuzzer) {
+    args.push_slice(&.{ "./zig/zig", "build", "-Drelease" });
+    args.push_slice(switch (options.fuzzer) {
         inline else => |f| comptime f.args_run(),
     });
     var seed_buffer: [32]u8 = undefined;
-    args.append_assume_capacity(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
+    args.push(stdx.array_print(32, &seed_buffer, "{d}", .{options.seed}));
     const command = try std.mem.join(shell.arena.allocator(), " ", args.const_slice());
 
     const exe = exe: {
         args.clear();
-        args.append_slice_assume_capacity(&.{ "build", "-Drelease", "-Dprint-exe" });
-        args.append_slice_assume_capacity(switch (options.fuzzer) {
+        args.push_slice(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.push_slice(switch (options.fuzzer) {
             inline else => |f| comptime f.args_build(),
         });
         break :exe shell.exec_stdout("{zig} {args}", .{
@@ -880,7 +882,7 @@ fn upload_results(
         try shell.exec("git fetch origin main", .{});
         try shell.exec("git reset --hard origin/main", .{});
 
-        const max_size = 1024 * 1024;
+        const max_size = 1 * MiB;
         const data = try shell.cwd.readFileAlloc(
             arena.allocator(),
             "./fuzzing/data.json",
@@ -1088,26 +1090,23 @@ const SeedRecord = struct {
             }
             seed_previous = record.seed;
 
-            seed_count += 1;
-            if (seed_count <= options.seed_count_max) {
-                try result.append(record);
-            } else {
-                if (record.ok) {
-                    // Merge counts with the first ok record for this fuzzer/commit, to make it
-                    // easy for the front-end to show the total count by displaying just the first
-                    // record
-                    var last_ok_index = result.items.len;
-                    while (last_ok_index > 0 and
-                        result.items[last_ok_index - 1].ok and
-                        std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
-                        std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
+            if (record.ok) {
+                // Merge counts with the first ok record for this fuzzer/commit, to make it easy for
+                // the front-end to show the total count by displaying just the first record.
+                if (result.getLastOrNull()) |record_previous| {
+                    if (record_previous.ok and
+                        std.mem.eql(u8, record_previous.fuzzer, record.fuzzer) and
+                        std.meta.eql(record_previous.commit_sha, record.commit_sha))
                     {
-                        last_ok_index -= 1;
-                    }
-                    if (last_ok_index != result.items.len) {
-                        result.items[last_ok_index].count += record.count;
+                        result.items[result.items.len - 1].count += record.count;
+                        continue;
                     }
                 }
+            }
+
+            if (seed_count < options.seed_count_max) {
+                try result.append(record);
+                seed_count += 1;
             }
         }
 
@@ -1115,8 +1114,8 @@ const SeedRecord = struct {
     }
 };
 
-const Snap = @import("../testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src");
 
 test "cfo: deserialization" {
     // Smoke test that we can still deserialize&migrate old devhub data.
@@ -1672,22 +1671,10 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
-            \\    "count": 4,
+            \\    "count": 6,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 3,
-            \\    "command": "fuzz ewah",
-            \\    "branch": "main"
-            \\  },
-            \\  {
-            \\    "commit_timestamp": 1,
-            \\    "commit_sha": "1111111111111111111111111111111111111111",
-            \\    "fuzzer": "ewah",
-            \\    "ok": true,
-            \\    "count": 2,
-            \\    "seed_timestamp_start": 1,
-            \\    "seed_timestamp_end": 1,
-            \\    "seed": 1,
             \\    "command": "fuzz ewah",
             \\    "branch": "main"
             \\  }

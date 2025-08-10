@@ -3,7 +3,7 @@ const mem = std.mem;
 const meta = std.meta;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;

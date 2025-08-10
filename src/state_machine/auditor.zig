@@ -3,7 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.test_auditor);

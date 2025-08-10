@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const mem = std.mem;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -7,6 +7,7 @@ const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
+const Time = vsr.time.Time;
 
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
@@ -17,12 +18,10 @@ const log = stdx.log.scoped(.client);
 pub fn ClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time_: type,
 ) type {
     return struct {
         const Client = @This();
 
-        pub const Time = Time_;
         pub const StateMachine = StateMachine_;
         pub const Request = struct {
             pub const Callback = *const fn (
@@ -484,7 +483,7 @@ pub fn ClientType(
                 var round_trip_times_ns = stdx.BoundedArrayType(u64, constants.replicas_max){};
                 for (self.replica_round_trip_times_ns) |round_trip_time_ns| {
                     if (round_trip_time_ns) |rtt_ns| {
-                        round_trip_times_ns.append_assume_capacity(rtt_ns);
+                        round_trip_times_ns.push(rtt_ns);
                     }
                 }
                 std.mem.sort(u64, round_trip_times_ns.slice(), {}, std.sort.asc(u64));

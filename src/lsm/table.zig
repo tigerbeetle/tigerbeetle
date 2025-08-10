@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const binary_search = @import("binary_search.zig");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const div_ceil = stdx.div_ceil;
 
 const TreeTableInfoType = @import("manifest.zig").TreeTableInfoType;

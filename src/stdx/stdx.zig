@@ -4,20 +4,34 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-pub const BoundedArrayType = @import("./stdx/bounded_array.zig").BoundedArrayType;
-pub const RingBufferType = @import("./stdx/ring_buffer.zig").RingBufferType;
-pub const BitSetType = @import("./stdx/bit_set.zig").BitSetType;
-pub const ZipfianGenerator = @import("./stdx/zipfian.zig").ZipfianGenerator;
-pub const ZipfianShuffled = @import("./stdx/zipfian.zig").ZipfianShuffled;
+pub const BitSetType = @import("bit_set.zig").BitSetType;
+pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
+pub const PRNG = @import("prng.zig");
+pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+pub const Snap = @import("testing/snaptest.zig").Snap;
+pub const ZipfianGenerator = @import("zipfian.zig").ZipfianGenerator;
+pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 
-pub const memory_lock_allocated = @import("./stdx/mlock.zig").memory_lock_allocated;
+pub const aegis = @import("aegis.zig");
+pub const dbg = @import("debug.zig").dbg;
+pub const flags = @import("flags.zig").parse;
+pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
+pub const timeit = @import("debug.zig").timeit;
 
-pub const timeit = @import("./stdx/debug.zig").timeit;
-pub const dbg = @import("./stdx/debug.zig").dbg;
+// Import these as `const GiB = stdx.GiB;`
+pub const KiB = 1 << 10;
+pub const MiB = 1 << 20;
+pub const GiB = 1 << 30;
+pub const TiB = 1 << 40;
+pub const PiB = 1 << 50;
 
-pub const aegis = @import("./stdx/aegis.zig");
-
-pub const PRNG = @import("./stdx/prng.zig");
+comptime {
+    assert(KiB == 1024);
+    assert(MiB == 1024 * KiB);
+    assert(GiB == 1024 * MiB);
+    assert(TiB == 1024 * GiB);
+    assert(PiB == 1024 * TiB);
+}
 
 pub inline fn div_ceil(numerator: anytype, denominator: anytype) @TypeOf(numerator, denominator) {
     comptime {
@@ -215,41 +229,40 @@ pub fn bytes_as_slice(
 }
 
 test bytes_as_slice {
-    const testing = std.testing;
     var buffer: [64]u8 = undefined;
     const T10 = extern struct { content: [10]u8 };
     const T16 = extern struct { content: [16]u8 };
 
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 4),
         bytes_as_slice(.exact, T16, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.exact, T10, buffer[0..60]).len,
     );
 
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.inexact, T10, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 4),
         bytes_as_slice(.inexact, T16, buffer[0..]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 6),
         bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 1]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 3),
         bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 1]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 5),
         bytes_as_slice(.inexact, T10, buffer[0 .. buffer.len - 10]).len,
     );
-    try testing.expectEqual(
+    try std.testing.expectEqual(
         @as(usize, 3),
         bytes_as_slice(.inexact, T16, buffer[0 .. buffer.len - 10]).len,
     );
@@ -500,7 +513,7 @@ inline fn low_level_hash(seed: u64, input: anytype) u64 {
         state = @as(u64, @truncate(mixed ^ (mixed >> 64)));
     }
 
-    var chunk = std.mem.zeroes([2]u64);
+    var chunk: [2]u64 = .{ 0, 0 };
     if (in.len > 8) {
         chunk[0] = @as(u64, @bitCast(in[0..8].*));
         chunk[1] = @as(u64, @bitCast(in[in.len - 8 ..][0..8].*));
@@ -915,8 +928,18 @@ pub fn array_print(
     };
 }
 
+/// A moment in time not anchored to any particular epoch.
+///
+/// The absolute value of `ns` is meaningless, but it is possible to compute `Duration` between
+/// two `Instant`s sourced from the same clock.
+///
+/// See also `DateTimeUTC`.
 pub const Instant = struct {
     ns: u64,
+
+    pub fn add(now: Instant, duration: Duration) Instant {
+        return .{ .ns = now.ns + duration.ns };
+    }
 
     pub fn duration_since(now: Instant, earlier: Instant) Duration {
         assert(now.ns >= earlier.ns);
@@ -925,6 +948,7 @@ pub const Instant = struct {
     }
 };
 
+/// Non-negative time difference between two `Instant`s.
 pub const Duration = struct {
     ns: u64,
 
@@ -951,6 +975,15 @@ pub const Duration = struct {
             return std.sort.asc(u64)(ctx, lhs.ns, rhs.ns);
         }
     };
+
+    pub fn format(
+        duration: Duration,
+        comptime fmt: []const u8,
+        options: std.fmt.FormatOptions,
+        writer: anytype,
+    ) !void {
+        try std.fmt.fmtDuration(duration.ns).format(fmt, options, writer);
+    }
 };
 
 test "Instant/Duration" {
@@ -965,10 +998,10 @@ test "Instant/Duration" {
     assert(duration.ms() == 1_000);
 }
 
-// DateTime in UTC, intended primarily for logging.
-//
-// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
-// timezones or leap seconds is necessary.
+/// DateTime in UTC, intended primarily for logging.
+///
+/// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
+/// timezones or leap seconds is necessary.
 pub const DateTimeUTC = struct {
     year: u16,
     month: u8,
@@ -982,6 +1015,10 @@ pub const DateTimeUTC = struct {
         const timestamp_ms = std.time.milliTimestamp();
         assert(timestamp_ms > 0);
         return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
+    }
+
+    pub fn from_timestamp_s(timestamp_s: u64) DateTimeUTC {
+        return DateTimeUTC.from_timestamp_ms(timestamp_s * std.time.ms_per_s);
     }
 
     pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
@@ -1044,4 +1081,138 @@ pub fn unique_u128() u128 {
     assert(value != std.math.maxInt(u128));
 
     return value;
+}
+
+/// NB: intended for parsing CLI arguments where we care to preserve the user-specified unit.
+/// Use `size: u64` for all other use-cases.
+pub const ByteSize = struct {
+    value: u64,
+    unit: Unit = .bytes,
+
+    const Unit = enum(u64) {
+        bytes = 1,
+        kib = KiB,
+        mib = MiB,
+        gib = GiB,
+        tib = TiB,
+    };
+
+    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
+        assert(value.len != 0);
+
+        const split: struct {
+            value_input: []const u8,
+            unit_input: []const u8,
+        } = split: for (0..value.len) |i| {
+            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
+                break :split .{
+                    .value_input = value[0..i],
+                    .unit_input = value[i..],
+                };
+            }
+        } else {
+            break :split .{
+                .value_input = value,
+                .unit_input = "",
+            };
+        };
+
+        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
+            switch (err) {
+                error.Overflow => {
+                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
+                },
+                error.InvalidCharacter => {
+                    // The only case this can happen is for the empty string
+                    return .{ .err = "expected a size, but found:" };
+                },
+            }
+        };
+
+        const unit = if (split.unit_input.len > 0)
+            unit: inline for (comptime std.enums.values(Unit)) |tag| {
+                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
+                    break :unit tag;
+                }
+            } else {
+                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
+            }
+        else
+            Unit.bytes;
+
+        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
+            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
+        };
+
+        return .{ .ok = .{ .value = amount, .unit = unit } };
+    }
+
+    pub fn bytes(size: *const ByteSize) u64 {
+        return std.math.mul(
+            u64,
+            size.value,
+            @intFromEnum(size.unit),
+        ) catch unreachable;
+    }
+
+    pub fn suffix(size: *const ByteSize) []const u8 {
+        return switch (size.unit) {
+            .bytes => "",
+            .kib => "KiB",
+            .mib => "MiB",
+            .gib => "GiB",
+            .tib => "TiB",
+        };
+    }
+};
+
+test "ByteSize.parse_flag_value" {
+    const kib = 1024;
+    const mib = kib * 1024;
+    const gib = mib * 1024;
+    const tib = gib * 1024;
+
+    const cases = .{
+        .{ 0, "0", 0, ByteSize.Unit.bytes },
+        .{ 1, "1", 1, ByteSize.Unit.bytes },
+        .{ 140737488355328, "140737488355328", 140737488355328, ByteSize.Unit.bytes },
+        .{ 140737488355328, "128TiB", 128, ByteSize.Unit.tib },
+        .{ 1 * tib, "1TiB", 1, ByteSize.Unit.tib },
+        .{ 10 * tib, "10tib", 10, ByteSize.Unit.tib },
+        .{ 1 * gib, "1GiB", 1, ByteSize.Unit.gib },
+        .{ 10 * gib, "10gib", 10, ByteSize.Unit.gib },
+        .{ 1 * mib, "1MiB", 1, ByteSize.Unit.mib },
+        .{ 10 * mib, "10mib", 10, ByteSize.Unit.mib },
+        .{ 1 * kib, "1KiB", 1, ByteSize.Unit.kib },
+        .{ 10 * kib, "10kib", 10, ByteSize.Unit.kib },
+        .{ 10 * kib, "1_0kib", 10, ByteSize.Unit.kib },
+    };
+
+    inline for (cases) |case| {
+        const bytes = case[0];
+        const input = case[1];
+        const unit_val = case[2];
+        const unit = case[3];
+        const result = ByteSize.parse_flag_value(input);
+        if (result == .err) {
+            std.debug.panic("expected ok, got: '{s}'", .{result.err});
+        }
+        const got = result.ok;
+        assert(bytes == got.bytes());
+        assert(unit_val == got.value);
+        assert(unit == got.unit);
+    }
+}
+
+comptime {
+    _ = @import("aegis.zig");
+    _ = @import("bit_set.zig");
+    _ = @import("bounded_array.zig");
+    _ = @import("flags.zig");
+    _ = @import("prng.zig");
+    _ = @import("ring_buffer.zig");
+    _ = @import("sort_test.zig");
+    _ = @import("stdx.zig");
+    _ = @import("testing/snaptest.zig");
+    _ = @import("zipfian.zig");
 }

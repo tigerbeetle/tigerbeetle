@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const ewah = @import("ewah.zig").ewah(usize);
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 const log = std.log;
 

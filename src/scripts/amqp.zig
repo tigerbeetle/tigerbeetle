@@ -5,10 +5,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const testing = std.testing;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const ratio = stdx.PRNG.ratio;
+const KiB = stdx.KiB;
 
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
@@ -376,6 +377,8 @@ fn run_cdc_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
+    var time_os: vsr.time.TimeOS = .{};
+
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
         stdx.unique_u128(),
     });
@@ -441,7 +444,7 @@ fn run_cdc_test(
     //   at most one batch is duplicated.
     // - Start multiple CDC jobs to stress the lock queue.
     var vsr_context: VSRContext = undefined;
-    try vsr_context.init(gpa, tmp_beetle.port);
+    try vsr_context.init(gpa, time_os.time(), tmp_beetle.port);
     defer vsr_context.deinit(gpa);
 
     var count: u32 = 0;
@@ -688,8 +691,7 @@ const AmqpContext = struct {
 const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
-    const Tracer = vsr.trace.TracerType(vsr.time.Time);
-    const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
+    const Storage = vsr.storage.StorageType(vsr.io.IO);
     const StateMachine = vsr.state_machine.StateMachineType(
         Storage,
         vsr.constants.state_machine_config,
@@ -697,7 +699,6 @@ const VSRContext = struct {
     const Client = vsr.ClientType(
         StateMachine,
         vsr.message_bus.MessageBusClient,
-        vsr.time.Time,
     );
 
     client: Client,
@@ -707,7 +708,7 @@ const VSRContext = struct {
     buffer: []tb.ChangeEvent,
     results: ?usize,
 
-    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, port: u16) !void {
+    pub fn init(self: *VSRContext, gpa: std.mem.Allocator, time: vsr.time.Time, port: u16) !void {
         self.io = try vsr.io.IO.init(32, 0);
         errdefer self.io.deinit();
 
@@ -721,7 +722,7 @@ const VSRContext = struct {
                 .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = 1,
-                .time = .{},
+                .time = time,
                 .message_pool = &self.message_pool,
                 .message_bus_options = .{
                     .configuration = &.{address},
@@ -908,7 +909,7 @@ const TmpRabbitMQ = struct {
 
 const TestingBasicProperties = @import("../cdc/amqp/protocol.zig").TestingBasicProperties;
 const TestingContent = struct {
-    const size_max = 1024;
+    const size_max = 1 * KiB;
     bytes: []const u8,
 
     fn init(arena: std.mem.Allocator, prng: *stdx.PRNG) !*TestingContent {

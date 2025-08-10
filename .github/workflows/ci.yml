@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: shellcheck ./zig/download.sh
+      - shell: pwsh
+        run: Invoke-ScriptAnalyzer -Path zig/download.win.ps1 -Severity Error,Warning,Information -EnableExit
       - run: ./zig/download.ps1 && ./zig/zig build ci -- smoke
 
   test:
@@ -59,7 +61,7 @@ jobs:
           - { os: 'ubuntu-latest',  language: 'java',    language_version: '11'    }
           - { os: 'ubuntu-latest',  language: 'java',    language_version: '21'    }
           - { os: 'ubuntu-latest',  language: 'node',    language_version: '18.x'  }
-          - { os: 'ubuntu-latest',  language: 'node',    language_version: '20.x'  }
+          - { os: 'ubuntu-latest',  language: 'node',    language_version: '24.x'  }
 
           # Support Python 3.7 explicitly, even though it's EOL.
           - { os: 'ubuntu-22.04',  language: 'python',  language_version: '3.7'    }

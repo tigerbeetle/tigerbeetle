@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const os = std.os;
@@ -15,12 +15,6 @@ const elf = std.elf;
 pub const checksum = @import("vsr/checksum.zig");
 pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
 pub const multiversion_binary_platform_size_max = constants.multiversion_binary_platform_size_max;
-
-// Useful for test code, or constructing releases in release.zig.
-pub const ListU32 = stdx.BoundedArrayType(u32, constants.vsr_releases_max);
-pub const ListU128 = stdx.BoundedArrayType(u128, constants.vsr_releases_max);
-pub const ListGitCommit = stdx.BoundedArrayType([20]u8, constants.vsr_releases_max);
-pub const ListFlag = stdx.BoundedArrayType(MultiversionHeader.Flags, constants.vsr_releases_max);
 
 /// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
 /// old CPU Type IDs.
@@ -219,50 +213,39 @@ pub const MultiversionHeader = extern struct {
         git_commits: [past_releases_max][20]u8 = std.mem.zeroes([past_releases_max][20]u8),
         release_client_mins: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
 
-        pub fn init(count: u32, past_init: struct {
-            releases: []const u32,
-            checksums: []const u128,
-            offsets: []const u32,
-            sizes: []const u32,
-            flags: []const Flags,
-            git_commits: []const [20]u8,
-            release_client_mins: []const u32,
-        }) PastReleases {
-            assert(past_init.releases.len == count);
-            assert(past_init.checksums.len == count);
-            assert(past_init.offsets.len == count);
-            assert(past_init.sizes.len == count);
-            assert(past_init.flags.len == count);
-            assert(past_init.git_commits.len == count);
-            assert(past_init.release_client_mins.len == count);
+        pub fn add(self: *PastReleases, next: struct {
+            release: u32,
+            checksum: u128,
+            size: u32,
+            flags: Flags,
+            git_commit: [20]u8,
+            release_client_min: u32,
+        }) void {
+            assert(next.release != 0);
+            assert(next.checksum != 0);
+            assert(next.size != 0);
+            assert(next.release_client_min != 0);
 
-            var past_releases = PastReleases{};
-            past_releases.count = count;
+            assert(self.count < past_releases_max);
+            const index = self.count;
 
-            stdx.copy_disjoint(.inexact, u32, &past_releases.releases, past_init.releases);
-            stdx.copy_disjoint(.inexact, u128, &past_releases.checksums, past_init.checksums);
-            stdx.copy_disjoint(.inexact, u32, &past_releases.offsets, past_init.offsets);
-            stdx.copy_disjoint(.inexact, u32, &past_releases.sizes, past_init.sizes);
-            stdx.copy_disjoint(.inexact, Flags, &past_releases.flags, past_init.flags);
-            stdx.copy_disjoint(.inexact, [20]u8, &past_releases.git_commits, past_init.git_commits);
-            stdx.copy_disjoint(
-                .inexact,
-                u32,
-                &past_releases.release_client_mins,
-                past_init.release_client_mins,
-            );
+            if (index > 0) {
+                assert(self.releases[index - 1] < next.release);
+            }
 
-            @memset(std.mem.sliceAsBytes(past_releases.releases[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.checksums[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.offsets[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.sizes[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.flags[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.git_commits[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.release_client_mins[count..]), 0);
+            const offset = if (index > 0)
+                self.offsets[index - 1] + self.sizes[index - 1]
+            else
+                0;
 
-            past_releases.verify() catch @panic("invalid past_release");
-
-            return past_releases;
+            self.releases[index] = next.release;
+            self.checksums[index] = next.checksum;
+            self.offsets[index] = offset;
+            self.sizes[index] = next.size;
+            self.flags[index] = next.flags;
+            self.git_commits[index] = next.git_commit;
+            self.release_client_mins[index] = next.release_client_min;
+            self.count += 1;
         }
 
         pub fn verify(self: *const PastReleases) !void {
@@ -439,14 +422,14 @@ pub const MultiversionHeader = extern struct {
         var release_list: ReleaseList = .{};
 
         for (0..self.past.count) |i| {
-            release_list.append_assume_capacity(Release{ .value = self.past.releases[i] });
+            release_list.push(Release{ .value = self.past.releases[i] });
             if (from_release.value < self.past.releases[i]) {
                 if (self.past.flags[i].visit) {
                     break;
                 }
             }
         } else {
-            release_list.append_assume_capacity(Release{ .value = self.current_release });
+            release_list.push(Release{ .value = self.current_release });
         }
 
         // These asserts should be impossible to reach barring a bug; they're checked in verify()
@@ -480,58 +463,49 @@ pub const MultiversionHeader = extern struct {
 };
 
 test "MultiversionHeader.advertisable" {
-    const tests = [_]struct {
-        releases: []const u32,
-        flags: []const MultiversionHeader.Flags,
+    const tests: []const struct {
+        releases: []const struct { u32, MultiversionHeader.Flags },
         current: u32,
         from: u32,
         expected: []const u32,
-    }{
-        .{ .releases = &.{ 1, 2, 3 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
+    } = &.{
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = false, .debug = false } },
         }, .current = 4, .from = 2, .expected = &.{ 1, 2, 3, 4 } },
-        .{ .releases = &.{ 1, 2, 3 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
         }, .current = 4, .from = 2, .expected = &.{ 1, 2, 3 } },
-        .{ .releases = &.{ 1, 2, 3, 4 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
-            .{ .visit = false, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
+            .{ 4, .{ .visit = false, .debug = false } },
         }, .current = 5, .from = 2, .expected = &.{ 1, 2, 3 } },
-        .{ .releases = &.{ 1, 2, 3, 4 }, .flags = &.{
-            .{ .visit = true, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
-            .{ .visit = true, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = true, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
+            .{ 4, .{ .visit = true, .debug = false } },
         }, .current = 5, .from = 5, .expected = &.{ 1, 2, 3, 4, 5 } },
     };
+
     for (tests) |t| {
-        var checksums: ListU128 = .{};
-        var offsets: ListU32 = .{};
-        var sizes: ListU32 = .{};
-        var git_commits: ListGitCommit = .{};
-
-        for (t.releases) |_| {
-            checksums.append_assume_capacity(0);
-            offsets.append_assume_capacity(@intCast(offsets.count()));
-            sizes.append_assume_capacity(1);
-            git_commits.append_assume_capacity("00000000000000000000".*);
+        var past_releases: MultiversionHeader.PastReleases = .{};
+        for (t.releases) |release_flags| {
+            past_releases.add(.{
+                .release = release_flags[0],
+                .checksum = 1,
+                .size = 1,
+                .flags = release_flags[1],
+                .git_commit = "00000000000000000000".*,
+                .release_client_min = 1,
+            });
         }
-
-        const past_releases = MultiversionHeader.PastReleases.init(@intCast(t.releases.len), .{
-            .releases = t.releases,
-            .checksums = checksums.const_slice(),
-            .offsets = offsets.const_slice(),
-            .sizes = sizes.const_slice(),
-            .flags = t.flags,
-            .release_client_mins = t.releases,
-            .git_commits = git_commits.const_slice(),
-        });
+        try past_releases.verify();
 
         var header = MultiversionHeader{
             .past = past_releases,
@@ -549,7 +523,7 @@ test "MultiversionHeader.advertisable" {
         const advertisable = header.advertisable(Release{ .value = t.from });
         var expected: ReleaseList = .{};
         for (t.expected) |release| {
-            expected.append_assume_capacity(Release{ .value = release });
+            expected.push(Release{ .value = release });
         }
         try std.testing.expectEqualSlices(
             Release,
@@ -781,7 +755,7 @@ pub const Multiversion = struct {
             // If there's been an error starting up multiversioning, don't disable it, but
             // advertise only the current version in memory.
             self.releases_bundled.clear();
-            self.releases_bundled.append_assume_capacity(constants.config.process.release);
+            self.releases_bundled.push(constants.config.process.release);
 
             return self.stage.err;
         }
@@ -1106,7 +1080,7 @@ pub const Multiversion = struct {
         // Since target_fd points to a memfd on Linux, this is functionally a memcpy. On other
         // platforms, it's blocking IO - which is acceptable for development.
         self.releases_bundled.clear();
-        self.releases_bundled.append_slice_assume_capacity(advertisable.const_slice());
+        self.releases_bundled.push_slice(advertisable.const_slice());
 
         // While these look like blocking IO operations, on a memfd they're memory manipulation.
         // TODO: Would panic'ing be a better option? On Linux, these should never fail. On other
@@ -1880,7 +1854,7 @@ pub fn print_information(
         {
             var release_list: ReleaseList = .{};
             for (@field(header.past, field)[0..header.past.count]) |release| {
-                release_list.append_assume_capacity(Release{ .value = release });
+                release_list.push(Release{ .value = release });
             }
 
             try output.print("multiversioning.header.past.{s}={any}\n", .{

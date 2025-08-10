@@ -7,7 +7,7 @@ const constants = @import("../constants.zig");
 const common = @import("./common.zig");
 
 const QueueType = @import("../queue.zig").QueueType;
-const Time = @import("../time.zig").Time;
+const TimeOS = @import("../time.zig").TimeOS;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const DirectIO = @import("../io.zig").DirectIO;
 
@@ -15,7 +15,7 @@ pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
 
     iocp: os.windows.HANDLE,
-    timer: Time = .{},
+    time_os: TimeOS = .{},
     io_pending: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
     completed: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_completed" }),
@@ -150,7 +150,7 @@ pub const IO = struct {
         var timeouts_iterator = self.timeouts.iterate();
         while (timeouts_iterator.next()) |completion| {
             // Lazily get the current time.
-            const now = current_time orelse self.timer.monotonic();
+            const now = current_time orelse self.time_os.time().monotonic();
             current_time = now;
 
             // Move the completion to completed if it expired.
@@ -465,7 +465,7 @@ pub const IO = struct {
                         }
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY).
-                        const inaddr_any = std.mem.zeroes([4]u8);
+                        const inaddr_any: [4]u8 = @splat(0);
                         const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
                         posix.bind(
                             op.socket,
@@ -1018,7 +1018,7 @@ pub const IO = struct {
             callback,
             completion,
             .timeout,
-            .{ .deadline = self.timer.monotonic() + nanoseconds },
+            .{ .deadline = self.time_os.time().monotonic() + nanoseconds },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) TimeoutError!void {
                     _ = ctx;

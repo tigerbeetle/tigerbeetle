@@ -1,13 +1,13 @@
 pub use super::*;
 
 #[rustfmt::skip]
-impl From<tbc::tb_create_accounts_result_t> for CreateAccountResult {
-    fn from(other: tbc::tb_create_accounts_result_t) -> CreateAccountResult {
+impl From<u32> for CreateAccountResult {
+    fn from(other: u32) -> CreateAccountResult {
         use tbc::*;
         use CreateAccountResult::*;
 
-        match other.result {
-            TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK => panic!(),
+        match other {
+            TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_OK => Ok,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_EXPECTED => ImportedEventExpected,
@@ -34,7 +34,7 @@ impl From<tbc::tb_create_accounts_result_t> for CreateAccountResult {
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO => LedgerMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO => CodeMustNotBeZero,
             TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS => ImportedEventTimestampMustNotRegress,
-            v => Unknown(v),
+            v => panic!("Unknown CreateAccountResult: {v}"),
         }
     }
 }
@@ -72,20 +72,19 @@ impl From<CreateAccountResult> for u32 {
             CreditsPostedMustBeZero => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CREDITS_POSTED_MUST_BE_ZERO,
             LedgerMustNotBeZero => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_LEDGER_MUST_NOT_BE_ZERO,
             CodeMustNotBeZero => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_CODE_MUST_NOT_BE_ZERO,
-            ImportedEventTimestampMustNotRegress => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE,
-            Unknown(value) => value,
+            ImportedEventTimestampMustNotRegress => TB_CREATE_ACCOUNT_RESULT_TB_CREATE_ACCOUNT_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_REGRESS,
         }
     }
 }
 
 #[rustfmt::skip]
-impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
-    fn from(other: tbc::tb_create_transfers_result_t) -> CreateTransferResult {
+impl From<u32> for CreateTransferResult {
+    fn from(other: u32) -> CreateTransferResult {
         use tbc::*;
         use CreateTransferResult::*;
 
-        match other.result {
-            TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK => panic!(),
+        match other {
+            TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OK => Ok,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_FAILED => LinkedEventFailed,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_LINKED_EVENT_CHAIN_OPEN => LinkedEventChainOpen,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_IMPORTED_EVENT_EXPECTED => ImportedEventExpected,
@@ -153,7 +152,7 @@ impl From<tbc::tb_create_transfers_result_t> for CreateTransferResult {
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT => OverflowsTimeout,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_CREDITS => ExceedsCredits,
             TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_DEBITS => ExceedsDebits,
-            v => Unknown(v),
+            v => panic!("Unknown CreateTransferResult: {v}"),
         }
     }
 }
@@ -174,7 +173,7 @@ impl From<CreateTransferResult> for u32 {
             ImportedEventTimestampOutOfRange => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_OUT_OF_RANGE,
             ImportedEventTimestampMustNotAdvance => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_IMPORTED_EVENT_TIMESTAMP_MUST_NOT_ADVANCE,
             ReservedFlag => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_RESERVED_FLAG,
-            IdMustNotBeZero => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_ID_MUST_NOT_BE_ZERO, 
+            IdMustNotBeZero => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_ID_MUST_NOT_BE_ZERO,
             IdMustNotBeIntMax => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_ID_MUST_NOT_BE_INT_MAX,
             ExistsWithDifferentFlags => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_FLAGS,
             ExistsWithDifferentPendingId => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXISTS_WITH_DIFFERENT_PENDING_ID,
@@ -233,7 +232,6 @@ impl From<CreateTransferResult> for u32 {
             OverflowsTimeout => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_OVERFLOWS_TIMEOUT,
             ExceedsCredits => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_CREDITS,
             ExceedsDebits => TB_CREATE_TRANSFER_RESULT_TB_CREATE_TRANSFER_EXCEEDS_DEBITS,
-            Unknown(u32) => u32,
         }
     }
 }
@@ -251,20 +249,23 @@ impl From<i32> for InitStatus {
             TB_INIT_STATUS_TB_INIT_ADDRESS_LIMIT_EXCEEDED => AddressLimitExceeded,
             TB_INIT_STATUS_TB_INIT_SYSTEM_RESOURCES => SystemResources,
             TB_INIT_STATUS_TB_INIT_NETWORK_SUBSYSTEM => NetworkSubsystem,
-            v => Unknown(v),
+            v => panic!("Unknown InitStatus: {v}"),
         }
     }
 }
 
-impl From<i32> for ClientStatus {
-    fn from(other: i32) -> ClientStatus {
+impl From<InitStatus> for i32 {
+    fn from(other: InitStatus) -> i32 {
         use tbc::*;
-        use ClientStatus::*;
+        use InitStatus::*;
 
         match other {
-            TB_CLIENT_STATUS_TB_CLIENT_OK => panic!(),
-            TB_CLIENT_STATUS_TB_CLIENT_INVALID => Invalid,
-            v => Unknown(v),
+            Unexpected => TB_INIT_STATUS_TB_INIT_UNEXPECTED,
+            OutOfMemory => TB_INIT_STATUS_TB_INIT_OUT_OF_MEMORY,
+            AddressInvalid => TB_INIT_STATUS_TB_INIT_ADDRESS_INVALID,
+            AddressLimitExceeded => TB_INIT_STATUS_TB_INIT_ADDRESS_LIMIT_EXCEEDED,
+            SystemResources => TB_INIT_STATUS_TB_INIT_SYSTEM_RESOURCES,
+            NetworkSubsystem => TB_INIT_STATUS_TB_INIT_NETWORK_SUBSYSTEM,
         }
     }
 }
@@ -283,7 +284,24 @@ impl From<u8> for PacketStatus {
             TB_PACKET_STATUS_TB_PACKET_CLIENT_SHUTDOWN => ClientShutdown,
             TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION => InvalidOperation,
             TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE => InvalidDataSize,
-            v => Unknown(v),
+            v => panic!("Unknown PacketStatus: {v}"),
+        }
+    }
+}
+
+impl From<PacketStatus> for u8 {
+    fn from(other: PacketStatus) -> u8 {
+        use tbc::*;
+        use PacketStatus::*;
+
+        match other {
+            TooMuchData => TB_PACKET_STATUS_TB_PACKET_TOO_MUCH_DATA,
+            ClientEvicted => TB_PACKET_STATUS_TB_PACKET_CLIENT_EVICTED,
+            ClientReleaseTooLow => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_LOW,
+            ClientReleaseTooHigh => TB_PACKET_STATUS_TB_PACKET_CLIENT_RELEASE_TOO_HIGH,
+            ClientShutdown => TB_PACKET_STATUS_TB_PACKET_CLIENT_SHUTDOWN,
+            InvalidOperation => TB_PACKET_STATUS_TB_PACKET_INVALID_OPERATION,
+            InvalidDataSize => TB_PACKET_STATUS_TB_PACKET_INVALID_DATA_SIZE,
         }
     }
 }

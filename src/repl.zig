@@ -5,9 +5,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
+const Time = vsr.time.Time;
 const StaticAllocator = @import("static_allocator.zig");
-const Storage = vsr.storage.StorageType(IO, Tracer);
+const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     constants.state_machine_config,
@@ -27,8 +27,8 @@ const repl_history_entry_bytes_without_nul = 511;
 
 const ReplBufferBoundedArray = stdx.BoundedArrayType(u8, repl_history_entry_bytes_without_nul);
 
-pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
-    const Client = vsr.ClientType(StateMachine, MessageBus, Time);
+pub fn ReplType(comptime MessageBus: type) type {
+    const Client = vsr.ClientType(StateMachine, MessageBus);
 
     // Requires 512 * 256 == 128KiB of stack space.
     const HistoryBuffer = RingBufferType(
@@ -225,7 +225,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                             });
                         }
 
-                        repl.buffer.insert_assume_capacity(buffer_index, character);
+                        repl.buffer.insert_at(buffer_index, character);
                         buffer_index += 1;
                     },
                     .backspace => if (buffer_index > 0) {
@@ -360,9 +360,9 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         // Re-fill the buffer with prefix, current match and suffix. Set the
                         // buffer index where the current selected match ends.
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(repl.completion.prefix.slice());
-                        repl.buffer.append_slice_assume_capacity(current_completion);
-                        repl.buffer.append_slice_assume_capacity(repl.completion.suffix.slice());
+                        repl.buffer.push_slice(repl.completion.prefix.slice());
+                        repl.buffer.push_slice(current_completion);
+                        repl.buffer.push_slice(repl.completion.suffix.slice());
                         buffer_index = repl.buffer.count() - repl.completion.suffix.count();
                     },
                     .left, .ctrlb => if (buffer_index > 0) {
@@ -408,14 +408,12 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
                         if (history_index == repl.history.count) {
                             repl.buffer_outside_history.clear();
-                            repl.buffer_outside_history.append_slice_assume_capacity(
-                                repl.buffer.const_slice(),
-                            );
+                            repl.buffer_outside_history.push_slice(repl.buffer.const_slice());
                         }
                         history_index = history_index_next;
 
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        repl.buffer.push_slice(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
                     .down, .ctrln => if (history_index < repl.history.count) {
@@ -452,7 +450,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
                         });
 
                         repl.buffer.clear();
-                        repl.buffer.append_slice_assume_capacity(buffer_next);
+                        repl.buffer.push_slice(buffer_next);
                         buffer_index = repl.buffer.count();
                     },
                     .altf, .ctrlright => {
@@ -655,6 +653,7 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
         pub fn init(
             parent_allocator: std.mem.Allocator,
+            io: *IO,
             time: Time,
             options: struct {
                 addresses: []const std.net.Address,
@@ -676,12 +675,6 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
 
             message_pool.* = try MessagePool.init(allocator, .client);
             errdefer message_pool.deinit(allocator);
-
-            var io = try allocator.create(IO);
-            errdefer allocator.destroy(io);
-
-            io.* = try IO.init(32, 0);
-            errdefer io.deinit();
 
             const client_id = stdx.unique_u128();
             const client = try Client.init(
@@ -725,7 +718,6 @@ pub fn ReplType(comptime MessageBus: type, comptime Time: type) type {
             repl.static_allocator.transition_from_static_to_deinit();
 
             repl.client.deinit(allocator);
-            repl.io.deinit();
             repl.message_pool.deinit(allocator);
             allocator.destroy(repl.message_pool);
             repl.arguments.deinit(allocator);

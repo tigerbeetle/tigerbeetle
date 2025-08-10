@@ -10,6 +10,8 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
+const stdx = @import("stdx");
+const KiB = stdx.KiB;
 
 const Shell = @import("../shell.zig");
 
@@ -191,7 +193,7 @@ fn trigger_test(
 ) !void {
     const commit = try shell.exec_stdout("git rev-parse HEAD", .{});
 
-    var body_buf: [4 * 1024]u8 = undefined;
+    var body_buf: [4 * KiB]u8 = undefined;
     var body_stream = std.io.fixedBufferStream(&body_buf);
 
     try std.json.stringify(
@@ -214,13 +216,13 @@ fn trigger_test(
     const user_pass = try shell.fmt("{s}:{s}", .{ antithesis_user, antithesis_password });
     const b64 = std.base64.url_safe.Encoder;
 
-    var auth_buf: [1024]u8 = undefined;
+    var auth_buf: [1 * KiB]u8 = undefined;
     if (b64.calcSize(user_pass.len) > auth_buf.len) {
         return error.PasswordMaxLengthExceeded;
     }
     const auth = b64.encode(&auth_buf, user_pass);
 
-    var response_buf: [4 * 1024]u8 = undefined;
+    var response_buf: [4 * KiB]u8 = undefined;
     var response = std.ArrayListUnmanaged(u8).initBuffer(&response_buf);
 
     const result = try client.fetch(.{

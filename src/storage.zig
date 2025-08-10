@@ -7,8 +7,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const QueueType = vsr.queue.QueueType;
 const constants = vsr.constants;
+const Tracer = vsr.trace.Tracer;
 
-pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
+pub fn StorageType(comptime IO: type) type {
     return struct {
         const Storage = @This();
 
@@ -33,6 +34,9 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
             /// The maximum amount of bytes to read per syscall. We use this to subdivide
             /// troublesome reads into smaller reads to work around latent sector errors (LSEs).
             target_max: u64,
+
+            zone: vsr.Zone,
+            start: ?stdx.Instant,
 
             /// Returns a target slice into `buffer` to read into, capped by `target_max`.
             /// If the previous read was a partial read of physical sectors (e.g. 512 bytes) less
@@ -77,6 +81,9 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
             callback: *const fn (write: *Storage.Write) void,
             buffer: []const u8,
             offset: u64,
+
+            zone: vsr.Zone,
+            start: ?stdx.Instant,
         };
 
         pub const NextTick = struct {
@@ -87,9 +94,8 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
 
         pub const NextTickSource = enum { lsm, vsr };
 
-        pub const Tracer = _Tracer;
-
         io: *IO,
+        tracer: *Tracer,
         fd: IO.fd_t,
 
         next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
@@ -98,9 +104,10 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, fd: IO.fd_t) !Storage {
+        pub fn init(io: *IO, tracer: *Tracer, fd: IO.fd_t) !Storage {
             return .{
                 .io = io,
+                .tracer = tracer,
                 .fd = fd,
             };
         }
@@ -193,6 +200,8 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 .buffer = buffer,
                 .offset = offset_in_storage,
                 .target_max = buffer.len,
+                .zone = zone,
+                .start = self.tracer.time.monotonic_instant(),
             };
 
             self.start_read(read, null);
@@ -215,6 +224,11 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 // read_sectors(). If it was, this is a synchronous callback resolution and should
                 // be reported.
                 assert(bytes_read != null);
+
+                self.tracer.timing(
+                    .{ .storage_read = .{ .zone = read.zone } },
+                    self.tracer.time.monotonic_instant().duration_since(read.start.?),
+                );
 
                 read.callback(read);
                 return;
@@ -356,6 +370,8 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 .callback = callback,
                 .buffer = buffer,
                 .offset = offset_in_storage,
+                .zone = zone,
+                .start = self.tracer.time.monotonic_instant(),
             };
 
             self.start_write(write);
@@ -418,6 +434,11 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
             write.buffer = write.buffer[bytes_written..];
 
             if (write.buffer.len == 0) {
+                self.tracer.timing(
+                    .{ .storage_write = .{ .zone = write.zone } },
+                    self.tracer.time.monotonic_instant().duration_since(write.start.?),
+                );
+
                 write.callback(write);
                 return;
             }

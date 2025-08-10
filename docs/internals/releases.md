@@ -12,8 +12,10 @@ The motivation for specific steps follows after.
 
 1. Open [devhub](https://tigerbeetle.github.io/tigerbeetle/) to check that:
    - you are the release manager for the week
-   - that the VOPR results look reasonable (no failures and a bunch of successful runs for recent
+   - the VOPR results look reasonable (no failures and a bunch of successful runs for recent
      commits)
+   - the graphs look reasonable (for example, no drastic changes in the RSS, data file size, or
+     executable size during the past week)
 
 2. ```console
    $ ./zig/zig build scripts -- changelog
@@ -93,7 +95,7 @@ The motivation for specific steps follows after.
 If the release failed completely (nothing was published), it is safe to re-run the release GitHub
 Actions job.
 
-More likely, the release was partially successful: e.g., the NodeJS package was uploaded, but
+More likely, the release was partially successful: e.g., the Node.js package was uploaded, but
 uploading the Java package failed. This is not a problem --- the replica release on GitHub will remain a draft in
 this case. To retry the release, increment the version number of the latest changelog entry alongside
 any changes to fix the release process, and push the new commit to the release branch. The _old_

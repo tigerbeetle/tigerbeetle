@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 /// An intrusive doubly-linked list.
 /// Currently it is LIFO for simplicity because its consumer (IO.awaiting) doesn't care about order.
@@ -197,7 +197,7 @@ test "DoublyLinkedList fuzz" {
                 const node = &nodes[node_free];
 
                 list.push(node);
-                list_model.append_assume_capacity(node.id);
+                list_model.push(node.id);
                 nodes_free.unset(node.id);
             },
             .pop => {

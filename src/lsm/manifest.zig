@@ -4,7 +4,7 @@ const math = std.math;
 const assert = std.debug.assert;
 const log = std.log.scoped(.manifest);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const growth_factor = constants.lsm_growth_factor;
 
@@ -20,6 +20,7 @@ const ManifestLogType = @import("manifest_log.zig").ManifestLogType;
 const ManifestLevelType = @import("manifest_level.zig").ManifestLevelType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableInfo = schema.ManifestNode.TableInfo;
+const Tracer = vsr.trace.Tracer;
 
 pub fn TreeTableInfoType(comptime Table: type) type {
     const Key = Table.Key;
@@ -126,8 +127,8 @@ pub fn TreeTableInfoType(comptime Table: type) type {
             assert(options.tree_id > 0);
             assert(table.value_count > 0);
 
-            var key_min = std.mem.zeroes(TableInfo.KeyPadded);
-            var key_max = std.mem.zeroes(TableInfo.KeyPadded);
+            var key_min: TableInfo.KeyPadded = @splat(0);
+            var key_max: TableInfo.KeyPadded = @splat(0);
 
             stdx.copy_disjoint(.inexact, u8, &key_min, std.mem.asBytes(&table.key_min));
             stdx.copy_disjoint(.inexact, u8, &key_max, std.mem.asBytes(&table.key_max));
@@ -191,14 +192,14 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
         // registered snapshot seen so far.
         snapshot_max: u64 = 1,
 
-        tracer: *Storage.Tracer,
+        tracer: *Tracer,
 
         pub fn init(
             manifest: *Manifest,
             allocator: mem.Allocator,
             node_pool: *NodePool,
             config: TreeConfig,
-            tracer: *Storage.Tracer,
+            tracer: *Tracer,
         ) !void {
             manifest.* = .{
                 .node_pool = node_pool,
@@ -612,8 +613,8 @@ pub fn ManifestType(comptime Table: type, comptime Storage: type) type {
                             }
 
                             switch (direction) {
-                                .descending => range.tables.insert_assume_capacity(0, table_next),
-                                .ascending => range.tables.append_assume_capacity(table_next),
+                                .descending => range.tables.insert_at(0, table_next),
+                                .ascending => range.tables.push(table_next),
                             }
                         } else {
                             break :inner;

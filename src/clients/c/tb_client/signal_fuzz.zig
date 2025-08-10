@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const Signal = @import("./signal.zig").Signal;
 const IO = @import("../../../io.zig").IO;
-const stdx = @import("../../../stdx.zig");
+const stdx = @import("stdx");
 const fuzz = @import("../../../testing/fuzz.zig");
 
 const threads_limit = 8;
@@ -43,8 +43,8 @@ pub fn main(_: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         const threads_max = prng.range_inclusive(u32, 1, threads_limit);
         var threads: Threads = .{};
         for (0..threads_max) |_| {
-            const thread: *std.Thread = threads.add_one_assume_capacity();
-            thread.* = try std.Thread.spawn(.{}, notify, .{&context});
+            const thread = try std.Thread.spawn(.{}, notify, .{&context});
+            threads.push(thread);
         }
 
         while (context.signal.status() != .stopped) {

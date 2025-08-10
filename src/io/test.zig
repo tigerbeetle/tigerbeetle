@@ -4,7 +4,11 @@ const os = std.os;
 const posix = std.posix;
 const testing = std.testing;
 const assert = std.debug.assert;
+const stdx = @import("stdx");
+const KiB = stdx.KiB;
+const MiB = stdx.MiB;
 
+const TimeOS = @import("../time.zig").TimeOS;
 const Time = @import("../time.zig").Time;
 const IO = @import("../io.zig").IO;
 
@@ -283,15 +287,16 @@ test "timeout" {
         const Context = @This();
 
         io: IO,
-        timer: *Time,
+        timer: Time,
         count: u32 = 0,
         stop_time: u64 = 0,
 
         fn run_test() !void {
-            var timer = Time{};
+            var time_os: TimeOS = .{};
+            const timer = time_os.time();
             const start_time = timer.monotonic();
             var self: Context = .{
-                .timer = &timer,
+                .timer = timer,
                 .io = try IO.init(32, 0),
             };
             defer self.io.deinit();
@@ -355,7 +360,8 @@ test "event" {
             self.event = try self.io.open_event();
             defer self.io.close_event(self.event);
 
-            var timer = Time{};
+            var time_os: TimeOS = .{};
+            const timer = time_os.time();
             const start = timer.monotonic();
 
             // Listen to the event and spawn a thread that triggers the completion after some time.
@@ -524,7 +530,7 @@ test "tick to wait" {
             // Complete the recv() *outside* of the IO instance.
             // Other tests already check .tick() with IO based completions.
             // This simulates IO being completed by an external system.
-            var send_buf = std.mem.zeroes([64]u8);
+            var send_buf: [64]u8 = @splat(0);
             const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
@@ -625,7 +631,7 @@ test "pipe data over socket" {
         rx: Pipe,
         server: Socket = .{},
 
-        const buffer_size = 1 * 1024 * 1024;
+        const buffer_size = 1 * MiB;
 
         const Context = @This();
         const Socket = struct {
@@ -797,7 +803,7 @@ test "cancel_all" {
     const allocator = std.testing.allocator;
     const file_path = "test_cancel_all";
     const read_count = 8;
-    const read_size = 1024 * 16;
+    const read_size = 16 * KiB;
 
     // For this test to be useful, we rely on open(DIRECT).
     // (See below).

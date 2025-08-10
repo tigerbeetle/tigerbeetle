@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 /// Permute indices (or other encoded data) into ids to:
 ///

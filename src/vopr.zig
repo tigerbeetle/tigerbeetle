@@ -1,14 +1,14 @@
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
+const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
 
 const constants = @import("constants.zig");
-const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const fuzz = @import("./testing/fuzz.zig");
@@ -30,6 +30,8 @@ const PartitionSymmetry = @import("testing/packet_simulator.zig").PartitionSymme
 const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const Message = @import("message_pool.zig").MessagePool.Message;
+
+const MiB = stdx.MiB;
 
 const releases = [_]Release{
     .{
@@ -65,7 +67,6 @@ pub const std_options: std.Options = .{
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
-const MiB = 1024 * 1024;
 
 const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
@@ -76,6 +77,7 @@ const CLIArgs = struct {
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
     replica_missing: ?u8 = null,
+    requests_max: ?u32 = null,
 
     positional: struct {
         seed: ?[]const u8 = null,
@@ -101,7 +103,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
@@ -146,6 +148,9 @@ pub fn main() !void {
     options.replica_missing = cli_args.replica_missing;
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
+    }
+    if (cli_args.requests_max) |requests_max| {
+        options.requests_max = requests_max;
     }
 
     log.info(
@@ -418,11 +423,11 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = prng.range_inclusive(u16, 3, 10),
-        .one_way_delay_min = prng.int_inclusive(u16, 3),
+        .one_way_delay_min = range_inclusive_ms(prng, 0, 30),
+        .one_way_delay_mean = range_inclusive_ms(prng, 30, 100),
         .packet_loss_probability = ratio(prng.int_inclusive(u8, 30), 100),
         .path_maximum_capacity = prng.range_inclusive(u8, 2, 20),
-        .path_clog_duration_mean = prng.int_inclusive(u16, 500),
+        .path_clog_duration_mean = range_inclusive_ms(prng, 0, 5_000),
         .path_clog_probability = ratio(prng.int_inclusive(u8, 2), 100),
         .packet_replay_probability = ratio(prng.int_inclusive(u8, 50), 100),
 
@@ -434,14 +439,15 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
         .unpartition_stability = prng.int_inclusive(u32, 20),
     };
 
-    const read_latency_min = prng.range_inclusive(u16, 0, 3);
-    const write_latency_min = prng.range_inclusive(u16, 0, 3);
+    const read_latency_min = range_inclusive_ms(prng, 0, 30);
+    const write_latency_min = range_inclusive_ms(prng, 0, 30);
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
         .read_latency_min = read_latency_min,
-        .read_latency_mean = prng.range_inclusive(u16, read_latency_min, 10),
+        .read_latency_mean = range_inclusive_ms(prng, read_latency_min, 100),
         .write_latency_min = write_latency_min,
-        .write_latency_mean = prng.range_inclusive(u16, write_latency_min, 100),
+        .write_latency_mean = range_inclusive_ms(prng, write_latency_min, 1_000),
         .read_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_fault_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
         .write_misdirect_probability = ratio(prng.range_inclusive(u8, 0, 10), 100),
@@ -539,11 +545,11 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = 5,
-        .one_way_delay_min = 0,
+        .one_way_delay_mean = .{ .ns = 50 * std.time.ns_per_ms },
+        .one_way_delay_min = .{ .ns = 0 },
         .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
-        .path_clog_duration_mean = 200,
+        .path_clog_duration_mean = .{ .ns = 2_000 * std.time.ns_per_ms },
         .path_clog_probability = Ratio.zero(),
         .packet_replay_probability = Ratio.zero(),
 
@@ -556,11 +562,12 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
     };
 
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
-        .read_latency_min = 0,
-        .read_latency_mean = 0,
-        .write_latency_min = 0,
-        .write_latency_mean = 0,
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = .{ .ns = 0 },
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = .{ .ns = 0 },
         .read_fault_probability = Ratio.zero(),
         .write_fault_probability = Ratio.zero(),
         .write_misdirect_probability = Ratio.zero(),
@@ -1635,7 +1642,7 @@ pub const Simulator = struct {
         const replica_releases_count = simulator.replica_releases[replica_index];
         var release_list = vsr.ReleaseList{};
         for (0..replica_releases_count) |i| {
-            release_list.append_assume_capacity(releases[i].release);
+            release_list.push(releases[i].release);
         }
         return release_list;
     }

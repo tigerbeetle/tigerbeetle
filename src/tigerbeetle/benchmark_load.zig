@@ -22,10 +22,11 @@ const ratio = stdx.PRNG.ratio;
 const flags = vsr.flags;
 const random_int_exponential = vsr.testing.random_int_exponential;
 const IO = vsr.io.IO;
+const Time = vsr.time.Time;
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = @import("./main.zig").StateMachine;
-const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+const Client = vsr.ClientType(StateMachine, MessageBus);
 const tb = vsr.tigerbeetle;
 const IdPermutation = vsr.testing.IdPermutation;
 const ZipfianGenerator = stdx.ZipfianGenerator;
@@ -35,6 +36,8 @@ const cli = @import("./cli.zig");
 
 pub fn main(
     allocator: std.mem.Allocator,
+    io: *IO,
+    time: Time,
     addresses: []const std.net.Address,
     cli_args: *const cli.Command.Benchmark,
 ) !void {
@@ -76,13 +79,10 @@ pub fn main(
 
     const cluster_id: u128 = 0;
 
-    var io = try IO.init(32, 0);
-    defer io.deinit();
-
     var message_pools = stdx.BoundedArrayType(MessagePool, constants.clients_max){};
     defer for (message_pools.slice()) |*message_pool| message_pool.deinit(allocator);
     for (0..cli_args.clients) |_| {
-        message_pools.append_assume_capacity(try MessagePool.init(allocator, .client));
+        message_pools.push(try MessagePool.init(allocator, .client));
     }
 
     std.log.info("Benchmark running against {any}", .{addresses});
@@ -91,13 +91,13 @@ pub fn main(
     defer for (clients.slice()) |*client| client.deinit(allocator);
 
     for (0..cli_args.clients) |i| {
-        clients.append_assume_capacity(try Client.init(allocator, .{
+        clients.push(try Client.init(allocator, .{
             .id = stdx.unique_u128(),
             .cluster = cluster_id,
             .replica_count = @intCast(addresses.len),
-            .time = .{},
+            .time = time,
             .message_pool = &message_pools.slice()[i],
-            .message_bus_options = .{ .configuration = addresses, .io = &io },
+            .message_bus_options = .{ .configuration = addresses, .io = io },
         }));
     }
 
@@ -155,7 +155,7 @@ pub fn main(
     });
 
     var benchmark = Benchmark{
-        .io = &io,
+        .io = io,
         .prng = &prng,
         .timer = try std.time.Timer.start(),
         .output = std.io.getStdOut().writer().any(),

@@ -3,6 +3,217 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.54
+
+Released: 2025-08-08
+
+### Safety And Performance
+
+- [#3123](https://github.com/tigerbeetle/tigerbeetle/pull/3123)
+
+  Speed up repair by removing a round-trip to fetch headers.
+
+- [#3134](https://github.com/tigerbeetle/tigerbeetle/pull/3134)
+
+  Check checksums when downloading Zig during the build.
+
+### Features
+
+- [#2993](https://github.com/tigerbeetle/tigerbeetle/pull/2993)
+
+  Add documentation for Rust client library.
+
+- [#2989](https://github.com/tigerbeetle/tigerbeetle/pull/2989)
+
+  Test that release artifacts are fully reproducible.
+
+### Internals
+
+- [#3136](https://github.com/tigerbeetle/tigerbeetle/pull/3136)
+
+  Add a test to test that tests include all the tests.
+
+- [#3143](https://github.com/tigerbeetle/tigerbeetle/pull/3143)
+
+  Remove local variable aliasing as per TigerStyle.
+
+- [#3124](https://github.com/tigerbeetle/tigerbeetle/pull/3124)
+
+  `@splat` all the things.
+
+- [#3135](https://github.com/tigerbeetle/tigerbeetle/pull/3135)
+
+  Use double-entry accounting for allocations.
+
+- [#3129](https://github.com/tigerbeetle/tigerbeetle/pull/3129)
+
+  Remove `git-review`.
+
+- [#3131](https://github.com/tigerbeetle/tigerbeetle/pull/3131),
+  [#3130](https://github.com/tigerbeetle/tigerbeetle/pull/3130)
+
+  Show total number of VOPR runs for release.
+
+### TigerTracks 🎧
+
+- [War Pigs](https://www.youtube.com/watch?v=IB6jbWoGtlA&list=RDIB6jbWoGtlA)
+
+## TigerBeetle 0.16.53
+
+Released: 2025-08-01
+
+### Safety And Performance
+
+- [#3090](https://github.com/tigerbeetle/tigerbeetle/pull/3090),
+  [#3116](https://github.com/tigerbeetle/tigerbeetle/pull/3116)
+
+  Allowing EWAH to decode bigger free set into smaller. This fixes the `--limit-storage` flag.
+
+- [#3089](https://github.com/tigerbeetle/tigerbeetle/pull/3089)
+
+  Fix Node.js v24 client.
+
+### Features
+
+- [#3119](https://github.com/tigerbeetle/tigerbeetle/pull/3119)
+
+  Add compaction/checkpoint/journal slot count to `tigerbeetle inspect`.
+
+### Internals
+
+- [#3121](https://github.com/tigerbeetle/tigerbeetle/pull/3121)
+
+  During tests, verify that grid read errors correspond to either storage faults or ongoing state
+  sync.
+
+- [#3122](https://github.com/tigerbeetle/tigerbeetle/pull/3122)
+
+  Teach snaptest how to decode/encode hex & zon.
+
+- [#3110](https://github.com/tigerbeetle/tigerbeetle/pull/3110)
+
+  Fix typo in `manifest_log_fuzz`.
+
+- [#3113](https://github.com/tigerbeetle/tigerbeetle/pull/3113)
+
+  Test `CreateTransfersResult.exists` in VOPR.
+
+- [#3117](https://github.com/tigerbeetle/tigerbeetle/pull/3117),
+  [#3120](https://github.com/tigerbeetle/tigerbeetle/pull/3120)
+
+  `stdx` refactoring.
+
+### TigerTracks 🎧
+
+- [Summer Eyes](https://www.youtube.com/watch?v=4Kc1Cks29-w)
+
+## TigerBeetle 0.16.52
+
+Released: 2025-07-25
+
+### Safety And Performance
+
+- [#3093](https://github.com/tigerbeetle/tigerbeetle/pull/3093)
+
+  Improve repair performance by tracking requested prepares so each is repaired exactly once per
+  timeout.
+
+### Internals
+
+- [#2956](https://github.com/tigerbeetle/tigerbeetle/pull/2956)
+
+  In VOPR, model events using nanosecond-resolution timestamps to uncover more interesting
+  interleaving.
+
+- [#3088](https://github.com/tigerbeetle/tigerbeetle/pull/3088)
+  [#3100](https://github.com/tigerbeetle/tigerbeetle/pull/3100)
+  [#3102](https://github.com/tigerbeetle/tigerbeetle/pull/3102)
+
+  Initialize `IO` and `Tracer` early. Avoid comptime type specialization.
+
+- [#3101](https://github.com/tigerbeetle/tigerbeetle/pull/3101)
+
+  Update TigerStyle with additional conventions for naming things and ordering struct fields.
+
+- [#3105](https://github.com/tigerbeetle/tigerbeetle/pull/3105)
+
+  Add `--requests-max` CLI flag to VOPR.
+
+- [#3107](https://github.com/tigerbeetle/tigerbeetle/pull/3107)
+
+  In DevHub, use `font-size-adjust` to better match sizes of sans and monospace text.
+
+- [#3108](https://github.com/tigerbeetle/tigerbeetle/pull/3108)
+
+  Introduce a fixtures module for fuzzing and testing to avoid code duplication.
+
+### TigerTracks 🎧
+
+- [Changes](https://open.spotify.com/track/2wNEcJHnFxoKZIrxjxF5jL)
+
+## TigerBeetle 0.16.51
+
+Released: 2025-07-18
+
+
+### Safety And Performance
+
+- [#3096](https://github.com/tigerbeetle/tigerbeetle/pull/3096)
+
+  Fix incorrect assert in the commit stall logic.
+
+  This assert could cause the primary to crash while it is injecting a commit stall, if an old
+  primary has committed ahead of it.
+
+- [#3008](https://github.com/tigerbeetle/tigerbeetle/pull/3008)
+
+  Improve compaction scheduling algorithm to be more performant and memory efficient.
+
+  Earlier, during each beat, we used to compact each active tree and level, leading to multiple
+  context switches. Now, we compact each tree and level to completion before moving on to the next.
+
+### Features
+
+- [#3086](https://github.com/tigerbeetle/tigerbeetle/pull/3086)
+
+  Add metrics that track the time taken to complete read and write IO.
+
+### Internals
+
+- [#3087](https://github.com/tigerbeetle/tigerbeetle/pull/3087)
+
+  Remove comptime type specialization on Time and replace it with a runtime interface.
+
+- [#3085](https://github.com/tigerbeetle/tigerbeetle/pull/3085)
+
+  Change all instances of data block -> value block, more aptly named for blocks containing values.
+
+- [#3084](https://github.com/tigerbeetle/tigerbeetle/pull/3084)
+
+  Update [architecture documentation](docs/internals/ARCHITECTURE.md#systems-thinking) to explain
+  how to correctly integrate TigerBeetle into a larger data processing system.
+
+- [#3083](https://github.com/tigerbeetle/tigerbeetle/pull/3083)
+
+  Fix example for voiding pending transfers in the dotnet, go, node, and python clients.
+
+- [#3082](https://github.com/tigerbeetle/tigerbeetle/pull/3082),
+  [#3091](https://github.com/tigerbeetle/tigerbeetle/pull/3091)
+
+  Fix broken link to the Viewstamped Replication paper and some typos in the documentation.
+
+- [#3078](https://github.com/tigerbeetle/tigerbeetle/pull/3078)
+
+  Fix VOPR false positive where we erroneously find two different versions of an uncommitted header.
+
+- [#2990](https://github.com/tigerbeetle/tigerbeetle/pull/2990)
+
+  Refine BoundedArrayType API, renaming functions to be shorter and consistent with Queue and Stack.
+
+### TigerTracks 🎧
+
+- [LOVE.](https://open.spotify.com/track/6PGoSes0D9eUDeeAafB2As?si=18f44aa580644f66)
+
 ## TigerBeetle 0.16.50
 
 Released: 2025-07-13
@@ -1008,7 +1219,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2747](https://github.com/tigerbeetle/tigerbeetle/pull/2747)
 
-  Don't use deprecated NodeJS APIs in the samples.
+  Don't use deprecated Node.js APIs in the samples.
 
 - [#2748](https://github.com/tigerbeetle/tigerbeetle/pull/2748),
   [#2744](https://github.com/tigerbeetle/tigerbeetle/pull/2744)
@@ -1059,7 +1270,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2717](https://github.com/tigerbeetle/tigerbeetle/pull/2717)
 
-  Fix a Node client crash when it was closed with outstanding requests.
+  Fix a Node.js client crash when it was closed with outstanding requests.
 
 - [#2720](https://github.com/tigerbeetle/tigerbeetle/pull/2720)
 
@@ -4061,7 +4272,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1482](https://github.com/tigerbeetle/tigerbeetle/pull/1482)
 
-  Bring back Windows tests for .Net client in CI.
+  Bring back Windows tests for .NET client in CI.
 
 - [#1540](https://github.com/tigerbeetle/tigerbeetle/pull/1540)
 
@@ -4251,7 +4462,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1480](https://github.com/tigerbeetle/tigerbeetle/pull/1480)
 
-  Deprecate support and testing for Node 16, which is EOL.
+  Deprecate support and testing for Node.js 16, which is EOL.
 
 - [#1477](https://github.com/tigerbeetle/tigerbeetle/pull/1477),
   [#1469](https://github.com/tigerbeetle/tigerbeetle/pull/1469),
@@ -4263,7 +4474,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1474](https://github.com/tigerbeetle/tigerbeetle/pull/1474)
 
-  Improve integration tests around Node and `pending_transfer_expired` - thanks to our friends at
+  Improve integration tests around Node.js and `pending_transfer_expired` - thanks to our friends at
   Rafiki for reporting!
 
 ### TigerTracks 🎧
@@ -4380,7 +4591,7 @@ Welcome to 2024!
 
 - [#1400](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
 
-  Drop support for .Net Standard 2.1.
+  Drop support for .NET Standard 2.1.
 
 - [#1397](https://github.com/tigerbeetle/tigerbeetle/pull/1397)
 
@@ -4396,7 +4607,8 @@ Welcome to 2024!
 
 - [#1398](https://github.com/tigerbeetle/tigerbeetle/pull/1398)
 
-  Don't test NodeJS client on platforms for which there are no simple upstream installation scripts.
+  Don't test Node.js client on platforms for which there are no simple upstream installation
+  scripts.
 
 - [#1388](https://github.com/tigerbeetle/tigerbeetle/pull/1388)
 
@@ -4530,7 +4742,7 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
   [#1341](https://github.com/tigerbeetle/tigerbeetle/pull/1341),
   [#1340](https://github.com/tigerbeetle/tigerbeetle/pull/1340)
 
-  Gate the main branch on more checks: unit-tests for NodeJS and even more fuzzers.
+  Gate the main branch on more checks: unit-tests for Node.js and even more fuzzers.
 
 - [#1332](https://github.com/tigerbeetle/tigerbeetle/pull/1332),
   [#1348](https://github.com/tigerbeetle/tigerbeetle/pull/1348)

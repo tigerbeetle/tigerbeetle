@@ -42,7 +42,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Ratio = stdx.PRNG.Ratio;
 const ratio = stdx.PRNG.ratio;
 const Instant = stdx.Instant;
@@ -256,7 +256,7 @@ fn route_valid(routing: *const Routing, route: Route) bool {
 fn route_view_default(view: u32, replica_count: u8) Route {
     var route: Route = .{};
     for (0..replica_count) |replica| {
-        route.append_assume_capacity(@intCast(replica));
+        route.push(@intCast(replica));
     }
 
     // Rotate primary to the midpoint;
@@ -272,7 +272,7 @@ fn route_view_default(view: u32, replica_count: u8) Route {
 fn route_random(prng: *stdx.PRNG, view: u32, replica_count: u8) Route {
     var route: Route = .{};
     for (0..replica_count) |replica| {
-        route.append_assume_capacity(@intCast(replica));
+        route.push(@intCast(replica));
     }
     prng.shuffle(u8, route.slice());
 
@@ -312,14 +312,14 @@ test route_encode {
 
         while (!g.done()) {
             var pool: stdx.BoundedArrayType(u8, constants.replicas_max) = .{};
-            for (0..replica_count) |i| pool.append_assume_capacity(@intCast(i));
+            for (0..replica_count) |i| pool.push(@intCast(i));
 
             var route: stdx.BoundedArrayType(u8, constants.replicas_max) = .{};
             assert(route.count() == 0);
             assert(pool.count() == replica_count);
             for (0..replica_count) |_| {
                 const index = g.index(pool.const_slice());
-                route.append_assume_capacity(pool.get(index));
+                route.push(pool.get(index));
                 _ = pool.ordered_remove(index);
             }
             assert(route.count() == replica_count);
@@ -348,7 +348,7 @@ pub fn route_decode(routing: *const Routing, code: u64) ?Route {
         const byte: u64 = (code >> shift) & 0xFF;
         if (index < routing.replica_count) {
             if (byte < routing.replica_count) {
-                route.append_assume_capacity(@intCast(byte));
+                route.push(@intCast(byte));
             } else {
                 return null;
             }
@@ -433,10 +433,10 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
         const replica_position = std.mem.indexOfScalar(u8, route.const_slice(), routing.replica).?;
 
         if (replica_position <= primary_position and replica_position > 0) {
-            result.append_assume_capacity(route.const_slice()[replica_position - 1]);
+            result.push(route.const_slice()[replica_position - 1]);
         }
         if (replica_position >= primary_position and replica_position < routing.replica_count - 1) {
-            result.append_assume_capacity(route.const_slice()[replica_position + 1]);
+            result.push(route.const_slice()[replica_position + 1]);
         }
 
         assert(result.count() <= 2);
@@ -445,13 +445,13 @@ pub fn op_next_hop(routing: *const Routing, op: u64) NextHop {
         if (routing.standby_count > 0) {
             if (replica_position == 0) {
                 const first_standby = routing.replica_count;
-                result.append_assume_capacity(first_standby);
+                result.push(first_standby);
             }
         }
     } else {
         // Standby replication uses static ring topology.
         if (routing.replica + 1 < routing.replica_count + routing.standby_count) {
-            result.append_assume_capacity(routing.replica + 1);
+            result.push(routing.replica + 1);
         }
     }
 
@@ -625,10 +625,10 @@ test "Routing finds best route" {
                 .node_count = replica_count,
                 .client_count = 0,
                 .seed = seed,
-                .one_way_delay_mean = 0,
-                .one_way_delay_min = 0,
+                .one_way_delay_mean = .{ .ns = 0 },
+                .one_way_delay_min = .{ .ns = 0 },
                 .path_maximum_capacity = replica_count,
-                .path_clog_duration_mean = 0,
+                .path_clog_duration_mean = .{ .ns = 0 },
                 .path_clog_probability = ratio(0, 100),
             }, .{
                 .packet_command = packet_command,
@@ -744,9 +744,11 @@ test "Routing finds best route" {
             }
         }
 
-        fn packet_delay(packet_simulator: *PacketSimulator, _: Packet, path: Path) u64 {
+        fn packet_delay(packet_simulator: *PacketSimulator, _: Packet, path: Path) Duration {
             const env: *Environment = @fieldParentPtr("packet_simulator", packet_simulator);
-            return env.distance(path.source, path.target);
+            return .{
+                .ns = @as(u64, env.distance(path.source, path.target)) * 10 * std.time.ns_per_ms,
+            };
         }
     };
 

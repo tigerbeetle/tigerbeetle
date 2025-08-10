@@ -17,12 +17,15 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
+const stdx = @import("stdx");
 const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("../shell.zig");
 const multiversioning = @import("../multiversioning.zig");
 const changelog = @import("./changelog.zig");
+
+const MiB = stdx.MiB;
 
 const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
 
@@ -72,7 +75,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     const changelog_text = try shell.project_root.readFileAlloc(
         shell.arena.allocator(),
         "CHANGELOG.md",
-        1024 * 1024,
+        1 * MiB,
     );
     var changelog_iteratator = changelog.ChangelogIterator.init(changelog_text);
     const release, const release_multiversion, const changelog_body = blk: {
@@ -255,14 +258,13 @@ fn build_tigerbeetle_target(
     );
     defer section.close();
 
-    // We shell out to `zip` for creating archives, so we need an absolute path here.
-    const dist_dir_path = try dist_dir.realpathAlloc(shell.arena.allocator(), ".");
-
-    const commit_timestamp_seconds: u64 = commit_timestamp_seconds: {
-        const timestamp = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
+    const commit_date_time = commit_date_time: {
+        const timestamp_s = try shell.exec_stdout("git show -s --format=%ct {sha}", .{
             .sha = info.sha,
         });
-        break :commit_timestamp_seconds try std.fmt.parseInt(u64, timestamp, 10);
+        break :commit_date_time stdx.DateTimeUTC.from_timestamp_s(
+            try std.fmt.parseInt(u64, timestamp_s, 10),
+        );
     };
 
     // Build tigerbeetle binary for all OS/CPU combinations we support and copy the result to
@@ -308,19 +310,17 @@ fn build_tigerbeetle_target(
         assert(std.mem.indexOf(u8, output, build_mode) != null);
     }
 
-    {
-        const fd = try shell.cwd.openFile(exe_name, .{ .mode = .write_only });
-        defer fd.close();
+    const zip_file = try dist_dir.createFile(zip_name, .{ .truncate = false, .exclusive = true });
+    defer zip_file.close();
 
-        const atime_ns = commit_timestamp_seconds * std.time.ns_per_s;
-        const mtime_ns = atime_ns;
-        try fd.updateTimes(atime_ns, mtime_ns);
-    }
-
-    try shell.exec("zip -9 {zip_path} {exe_name}", .{
-        .zip_path = try shell.fmt("{s}/{s}", .{ dist_dir_path, zip_name }),
-        .exe_name = exe_name,
-    });
+    try shell.zip_executable(
+        zip_file,
+        .{
+            .executable_name = exe_name,
+            .executable_mtime = commit_date_time,
+            .max_size = multiversioning.multiversion_binary_size_max,
+        },
+    );
 }
 
 fn build_dotnet(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
@@ -513,7 +513,7 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
     const pyproject = try shell.cwd.readFileAlloc(
         shell.arena.allocator(),
         "pyproject.toml",
-        1024 * 1024,
+        1 * MiB,
     );
     const version_line = try shell.fmt(
         "version = \"{s}\"",
@@ -586,7 +586,11 @@ fn publish(
             shell.project_root.deleteFile("tigerbeetle") catch {};
             defer shell.project_root.deleteFile("tigerbeetle") catch {};
 
-            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip", .{});
+            try shell.unzip_executable(
+                "zig-out/dist/tigerbeetle/tigerbeetle-x86_64-linux.zip",
+                "tigerbeetle",
+            );
+
             const past_binary_contents = try shell.cwd.readFileAllocOptions(
                 shell.arena.allocator(),
                 "tigerbeetle",
@@ -887,10 +891,13 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             // We need to unzip binaries from dist. For simplicity, don't bother with a temporary
             // directory.
             shell.project_root.deleteFile("tigerbeetle") catch {};
-            try shell.exec("unzip ./zig-out/dist/tigerbeetle/tigerbeetle-{triple}{debug}.zip", .{
-                .triple = triple,
-                .debug = if (debug) "-debug" else "",
-            });
+
+            const zip_path = try shell.fmt(
+                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}-{s}.zip",
+                .{ triple, if (debug) "-debug" else "" },
+            );
+            try shell.unzip_executable(zip_path, "tigerbeetle");
+
             try shell.project_root.rename(
                 "tigerbeetle",
                 try shell.fmt("tigerbeetle-{s}", .{docker_arch}),

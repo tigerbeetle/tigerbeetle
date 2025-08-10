@@ -8,15 +8,15 @@ const fatal = @import("amqp/protocol.zig").fatal;
 
 const stdx = vsr.stdx;
 const IO = vsr.io.IO;
-const Tracer = vsr.trace.TracerType(vsr.time.Time);
-const Storage = vsr.storage.StorageType(IO, Tracer);
+const Time = vsr.time.Time;
+const Storage = vsr.storage.StorageType(IO);
 const MessagePool = vsr.message_pool.MessagePool;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,
     vsr.constants.state_machine_config,
 );
-const Client = vsr.ClientType(StateMachine, MessageBus, vsr.time.Time);
+const Client = vsr.ClientType(StateMachine, MessageBus);
 const TimestampRange = vsr.lsm.TimestampRange;
 const tb = vsr.tigerbeetle;
 
@@ -113,6 +113,7 @@ pub const Runner = struct {
     pub fn init(
         self: *Runner,
         allocator: std.mem.Allocator,
+        time: Time,
         options: struct {
             /// TigerBeetle cluster ID.
             cluster_id: u128,
@@ -224,7 +225,7 @@ pub const Runner = struct {
             .id = stdx.unique_u128(),
             .cluster = options.cluster_id,
             .replica_count = @intCast(options.addresses.len),
-            .time = .{},
+            .time = time,
             .message_pool = &self.message_pool,
             .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
         });
@@ -1423,8 +1424,8 @@ test "amqp: ProgressTrackerMessage" {
 }
 
 test "amqp: JSON message" {
-    const Snap = @import("../testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     const buffer = try testing.allocator.alloc(u8, Message.json_string_size_max);
     defer testing.allocator.free(buffer);

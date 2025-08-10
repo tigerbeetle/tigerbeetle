@@ -11,8 +11,9 @@ const SuperBlockType = vsr.SuperBlockType;
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
+const Tracer = vsr.trace.Tracer;
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 
@@ -168,7 +169,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
-        trace: *Storage.Tracer,
+        trace: *Tracer,
         free_set: FreeSet,
         free_set_checkpoint_blocks_acquired: CheckpointTrailer,
         free_set_checkpoint_blocks_released: CheckpointTrailer,
@@ -213,21 +214,20 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
-            trace: *Storage.Tracer,
+            trace: *Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             missing_blocks_max: usize,
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
-            const blocks_count = vsr.block_count_max(options.superblock.storage_size_limit);
             var free_set = try FreeSet.init(allocator, .{
-                .blocks_count = blocks_count,
+                .grid_size_limit = options.superblock.grid_size_limit(),
                 .blocks_released_prior_checkpoint_durability_max = options
                     .blocks_released_prior_checkpoint_durability_max,
             });
             errdefer free_set.deinit(allocator);
 
-            const free_set_encoded_size_max = FreeSet.encode_size_max(blocks_count);
+            const free_set_encoded_size_max = free_set.encode_size_max();
             var free_set_checkpoint_blocks_acquired =
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_acquired.deinit(allocator);
@@ -355,6 +355,26 @@ pub fn GridType(comptime Storage: type) type {
                 });
                 assert((grid.free_set.count_acquired() > 0) ==
                     (grid.free_set_checkpoint_blocks_acquired.size > 0));
+
+                // Assert that the highest acquired address is compatible with storage_size.
+                const storage_size: u64 = storage_size: {
+                    var storage_size = vsr.superblock.data_file_size_min;
+                    if (grid.free_set.highest_address_acquired()) |address| {
+                        assert(address > 0);
+                        assert(grid.free_set_checkpoint_blocks_acquired.size > 0);
+                        maybe(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        storage_size += address * constants.block_size;
+                    } else {
+                        assert(grid.free_set_checkpoint_blocks_acquired.size == 0);
+                        assert(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        assert(grid.free_set.count_released() == 0);
+                    }
+                    break :storage_size storage_size;
+                };
+                assert(storage_size == grid.superblock.working.vsr_state.checkpoint.storage_size);
+
                 assert(grid.free_set.count_released() >=
                     (grid.free_set_checkpoint_blocks_acquired.block_count() +
                         grid.free_set_checkpoint_blocks_released.block_count()));
@@ -1160,6 +1180,8 @@ pub fn GridType(comptime Storage: type) type {
                     const removed = grid.cache.remove(read.address);
                     assert(removed != null);
                 }
+
+                if (constants.verify) grid.verify_read_fault(read);
             }
 
             grid.read_block_resolve(read, result);
@@ -1328,12 +1350,6 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        pub fn free_set_checkpoints_blocks_max(storage_size_limit: u64) usize {
-            const block_count = vsr.block_count_max(storage_size_limit);
-            const free_set_encoded_size = FreeSet.encode_size_max(block_count);
-            return 2 * CheckpointTrailer.block_count_for_trailer_size(free_set_encoded_size);
-        }
-
         fn block_offset(address: u64) u64 {
             assert(address > 0);
 
@@ -1393,6 +1409,36 @@ pub fn GridType(comptime Storage: type) type {
                 cached_block[0..cached_header.size],
                 actual_block[0..actual_header.size],
             ));
+        }
+
+        /// Called when we fail to read a block.
+        fn verify_read_fault(grid: *const Grid, read: *const Read) void {
+            comptime assert(constants.verify);
+
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            // Only check coherent reads -- i.e., when we know for certain that the read's
+            // address/checksum belongs in our current checkpoint.
+            if (!read.coherent) return;
+
+            // Check our storage (bypassing faults).
+            if (grid.superblock.storage.grid_block(read.address)) |actual_block| {
+                const actual_header = schema.header_from_block(actual_block);
+                if (actual_header.checksum == read.checksum) {
+                    // Exact block found. Since the read failed anyway, it must have been a
+                    // simulated read fault.
+                    assert(grid.superblock.storage.area_faulty(.{
+                        .grid = .{ .address = read.address },
+                    }));
+                } else {
+                    // Different block found -- since this is a coherent read, we must be syncing.
+                    assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+                }
+            } else {
+                // No block found -- since this is a coherent read, we must by syncing.
+                assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+            }
         }
     };
 }

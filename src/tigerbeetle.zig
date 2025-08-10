@@ -2,7 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("constants.zig");
 
 pub const Account = extern struct {

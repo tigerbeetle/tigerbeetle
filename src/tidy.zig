@@ -5,8 +5,10 @@ const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
+
+const MiB = stdx.MiB;
 
 const UsedDeclarations = std.StringHashMapUnmanaged(struct {
     count: u32,
@@ -21,7 +23,7 @@ test "tidy" {
 
     const paths = try list_file_paths(shell);
 
-    const buffer_size = 1024 * 1024;
+    const buffer_size = 1 * MiB;
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
@@ -222,7 +224,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
 
-                if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
+                if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
                     (std.mem.startsWith(u8, string_value, " account A") or
                         std.mem.startsWith(u8, string_value, " transfer T") or
                         std.mem.startsWith(u8, string_value, " transfer   ")))
@@ -237,11 +239,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 // trace.zig's JSON snapshot test.
                 if (std.mem.endsWith(u8, file.path, "trace.zig") and
-                    std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
-
-                // AMQP encoder snapshot test.
-                if (std.mem.endsWith(u8, file.path, "cdc/amqp/protocol.zig") and
-                    std.mem.startsWith(u8, string_value, "[1,0,0")) continue;
+                    std.mem.startsWith(u8, string_value, "{\"pid\":1,\"tid\":")) continue;
 
                 // AMQP JSON snapshot test.
                 if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
@@ -382,7 +380,7 @@ fn tidy_dead_declarations(
 }
 
 /// As we trim our functions, make sure to update this constant; tidy will error if you do not.
-const function_line_count_max = 413; // fn check in state_machine.zig
+const function_line_count_max = 411; // fn check in state_machine.zig
 
 fn tidy_long_functions(
     file: SourceFile,
@@ -477,7 +475,7 @@ fn tidy_long_functions(
             last_function.is_innermost = false;
         }
 
-        function_stack.append_assume_capacity(innermost_function);
+        function_stack.push(innermost_function);
     }
 
     if (function_stack.count() > 0) {
@@ -645,7 +643,6 @@ const DeadFilesDetector = struct {
             "dotnet_bindings.zig",
             "file_checker.zig",
             "fuzz_tests.zig",
-            "git-review.zig",
             "go_bindings.zig",
             "integration_tests.zig",
             "java_bindings.zig",
@@ -676,7 +673,7 @@ const DeadFilesDetector = struct {
 test "tidy changelog" {
     const allocator = std.testing.allocator;
 
-    const changelog_size_max = 1024 * 1024;
+    const changelog_size_max = 1 * MiB;
     const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
     defer allocator.free(changelog);
 
@@ -711,7 +708,6 @@ test "tidy no large blobs" {
         return error.ShallowRepository;
     }
 
-    const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout("git rev-list --objects HEAD", .{});
     const objects = try shell.exec_stdout_options(
         .{ .stdin_slice = rev_list },
@@ -743,11 +739,12 @@ test "tidy no large blobs" {
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"},     .{".c"},   .{".cs"},    .{".csproj"}, .{".css"},  .{".go"},
-        .{".h"},       .{".hcl"}, .{".html"},  .{".java"},   .{".js"},   .{".json"},
-        .{".md"},      .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},   .{".rs"},
-        .{".service"}, .{".sln"}, .{".sum"},   .{".svg"},    .{".toml"}, .{".ts"},
-        .{".txt"},     .{".xml"}, .{".yml"},   .{".zig"},    .{".zon"},
+        .{".c"},    .{".cs"},      .{".csproj"}, .{".css"},   .{".go"},
+        .{".h"},    .{".hcl"},     .{".html"},   .{".java"},  .{".js"},
+        .{".json"}, .{".md"},      .{".mod"},    .{".props"}, .{".py"},
+        .{".rs"},   .{".service"}, .{".sln"},    .{".sum"},   .{".svg"},
+        .{".toml"}, .{".ts"},      .{".txt"},    .{".xml"},   .{".yml"},
+        .{".zig"},  .{".zon"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
@@ -769,6 +766,8 @@ test "tidy extensions" {
         .{"edit-link-footer.lua"},
         .{"src/docs_website/.vale.ini"},
         .{"zig/download.sh"},
+        .{"zig/download.ps1"},
+        .{"zig/download.win.ps1"},
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},

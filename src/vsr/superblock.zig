@@ -34,7 +34,7 @@ const mem = std.mem;
 const meta = std.meta;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const log = std.log.scoped(.superblock);
 
@@ -1148,6 +1148,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             };
             superblock.log_context(context);
             superblock.acquire(context);
+        }
+
+        pub fn grid_size_limit(superblock: *const SuperBlock) usize {
+            return superblock.storage_size_limit - data_file_size_min;
         }
 
         pub fn updating(superblock: *const SuperBlock, caller: Caller) bool {

@@ -94,8 +94,6 @@ pub fn build(b: *std.Build) !void {
         .test_jni = b.step("test:jni", "Run Java JNI tests"),
         .vopr = b.step("vopr", "Run the VOPR"),
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
-        .git_review = b.step("git-review", "Run git-review"),
-        .git_review_build = b.step("git-review:build", "Build git-review"),
     };
 
     // Build options passed with `-D` flags.
@@ -159,9 +157,11 @@ pub fn build(b: *std.Build) !void {
     const target = try resolve_target(b, build_options.target);
     const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
+    const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
+
     assert(build_options.git_commit.len == 40);
     const vsr_options, const vsr_module = build_vsr_module(b, .{
-        .target = target,
+        .stdx_module = stdx_module,
         .git_commit = build_options.git_commit[0..40].*,
         .config_verify = build_options.config_verify,
         .config_release = build_options.config_release,
@@ -186,6 +186,7 @@ pub fn build(b: *std.Build) !void {
 
     // zig build check
     build_check(b, build_steps.check, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .target = target,
         .mode = mode,
@@ -196,6 +197,7 @@ pub fn build(b: *std.Build) !void {
         .run = build_steps.run,
         .install = b.getInstallStep(),
     }, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
@@ -208,13 +210,14 @@ pub fn build(b: *std.Build) !void {
 
     // zig build aof
     build_aof(b, build_steps.aof, .{
+        .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
     });
 
     // zig build test -- "test filter"
-    build_test(b, .{
+    try build_test(b, .{
         .test_unit = build_steps.test_unit,
         .test_unit_build = build_steps.test_unit_build,
         .test_integration = build_steps.test_integration,
@@ -222,7 +225,7 @@ pub fn build(b: *std.Build) !void {
         .test_fmt = build_steps.test_fmt,
         .@"test" = build_steps.@"test",
     }, .{
-        .vsr_module = vsr_module,
+        .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = build_options.llvm_objcopy,
         .tb_client_header = tb_client_header,
@@ -241,6 +244,7 @@ pub fn build(b: *std.Build) !void {
         .vopr_build = build_steps.vopr_build,
         .vopr_run = build_steps.vopr,
     }, .{
+        .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
@@ -254,6 +258,7 @@ pub fn build(b: *std.Build) !void {
         .fuzz = build_steps.fuzz,
         .fuzz_build = build_steps.fuzz_build,
     }, .{
+        .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
@@ -265,12 +270,14 @@ pub fn build(b: *std.Build) !void {
         .scripts = build_steps.scripts,
         .scripts_build = build_steps.scripts_build,
     }, .{
+        .stdx_module = stdx_module,
         .vsr_options = vsr_options,
         .target = target,
     });
 
     // zig build vortex
     _ = build_vortex(b, build_steps.vortex, .{
+        .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .target = target,
@@ -326,12 +333,6 @@ pub fn build(b: *std.Build) !void {
         .mode = mode,
     });
 
-    // zig build git-review
-    build_git_review(b, .{
-        .run = build_steps.git_review,
-        .install = build_steps.git_review_build,
-    });
-
     // zig build docs
     build_steps.docs.dependOn(blk: {
         const nested_build = b.addSystemCommand(&.{ b.graph.zig_exe, "build" });
@@ -347,7 +348,7 @@ pub fn build(b: *std.Build) !void {
 }
 
 fn build_vsr_module(b: *std.Build, options: struct {
-    target: std.Build.ResolvedTarget,
+    stdx_module: *std.Build.Module,
     git_commit: [40]u8,
     config_verify: bool,
     config_release: ?[]const u8,
@@ -376,6 +377,7 @@ fn build_vsr_module(b: *std.Build, options: struct {
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
     });
+    vsr_module.addImport("stdx", options.stdx_module);
     vsr_module.addOptions("vsr_options", vsr_options);
 
     return .{ vsr_options, vsr_module };
@@ -566,6 +568,7 @@ fn build_check(
     b: *std.Build,
     step_check: *std.Build.Step,
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
@@ -577,6 +580,7 @@ fn build_check(
         .target = options.target,
         .optimize = options.mode,
     });
+    tigerbeetle.root_module.addImport("stdx", options.stdx_module);
     tigerbeetle.root_module.addImport("vsr", options.vsr_module);
     step_check.dependOn(&tigerbeetle.step);
 }
@@ -588,6 +592,7 @@ fn build_tigerbeetle(
         install: *std.Build.Step,
     },
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         llvm_objcopy: ?[]const u8,
@@ -608,6 +613,7 @@ fn build_tigerbeetle(
     const tigerbeetle_bin = if (multiversion_file) |multiversion_lazy_path| bin: {
         assert(!options.emit_llvm_ir);
         break :bin build_tigerbeetle_executable_multiversion(b, .{
+            .stdx_module = options.stdx_module,
             .vsr_module = options.vsr_module,
             .vsr_options = options.vsr_options,
             .llvm_objcopy = options.llvm_objcopy,
@@ -673,6 +679,7 @@ fn build_tigerbeetle_executable(b: *std.Build, options: struct {
 }
 
 fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
+    stdx_module: *std.Build.Module,
     vsr_module: *std.Build.Module,
     vsr_options: *std.Build.Step.Options,
     llvm_objcopy: ?[]const u8,
@@ -687,6 +694,7 @@ fn build_tigerbeetle_executable_multiversion(b: *std.Build, options: struct {
         // Enable aes extensions for vsr.checksum on the host.
         .target = resolve_target(b, null) catch @panic("unsupported host"),
     });
+    build_multiversion_exe.root_module.addImport("stdx", options.stdx_module);
     // Ideally, we should pass `vsr_options` here at runtime. Making them comptime
     // parameters is inelegant, but practical!
     build_multiversion_exe.root_module.addOptions("vsr_options", options.vsr_options);
@@ -796,6 +804,7 @@ fn build_aof(
     b: *std.Build,
     step_aof: *std.Build.Step,
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
@@ -807,6 +816,7 @@ fn build_aof(
         .target = options.target,
         .optimize = options.mode,
     });
+    aof.root_module.addImport("stdx", options.stdx_module);
     aof.root_module.addOptions("vsr_options", options.vsr_options);
     const run_cmd = b.addRunArtifact(aof);
     if (b.args) |args| run_cmd.addArgs(args);
@@ -825,30 +835,44 @@ fn build_test(
     },
     options: struct {
         llvm_objcopy: ?[]const u8,
-        vsr_module: *std.Build.Module,
+        stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         tb_client_header: *Generated,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) void {
+) !void {
+    const stdx_unit_tests = b.addTest(.{
+        .root_source_file = b.path("src/stdx/stdx.zig"),
+        .target = options.target,
+        .optimize = options.mode,
+        .filters = b.args orelse &.{},
+    });
     const unit_tests = b.addTest(.{
         .root_source_file = b.path("src/unit_tests.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    unit_tests.root_module.addImport("stdx", options.stdx_module);
     unit_tests.root_module.addOptions("vsr_options", options.vsr_options);
     unit_tests.addIncludePath(options.tb_client_header.path.dirname());
 
+    steps.test_unit_build.dependOn(&b.addInstallArtifact(stdx_unit_tests, .{}).step);
     steps.test_unit_build.dependOn(&b.addInstallArtifact(unit_tests, .{}).step);
 
+    const run_stdx_unit_tests = b.addRunArtifact(stdx_unit_tests);
     const run_unit_tests = b.addRunArtifact(unit_tests);
+    run_stdx_unit_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     run_unit_tests.setEnvironmentVariable("ZIG_EXE", b.graph.zig_exe);
     if (b.args != null) { // Don't cache test results if running a specific test.
+        run_stdx_unit_tests.has_side_effects = true;
         run_unit_tests.has_side_effects = true;
     }
+    steps.test_unit.dependOn(&run_stdx_unit_tests.step);
     steps.test_unit.dependOn(&run_unit_tests.step);
+
+    run_unit_tests.setCwd(b.path("."));
 
     build_test_integration(b, .{
         .test_integration = steps.test_integration,
@@ -856,6 +880,7 @@ fn build_test(
     }, .{
         .tb_client_header = options.tb_client_header.path,
         .llvm_objcopy = options.llvm_objcopy,
+        .stdx_module = options.stdx_module,
         .target = options.target,
         .mode = options.mode,
     });
@@ -863,6 +888,7 @@ fn build_test(
     const run_fmt = b.addFmt(.{ .paths = &.{"."}, .check = true });
     steps.test_fmt.dependOn(&run_fmt.step);
 
+    steps.@"test".dependOn(&run_stdx_unit_tests.step);
     steps.@"test".dependOn(&run_unit_tests.step);
     if (b.args == null) {
         steps.@"test".dependOn(steps.test_integration);
@@ -879,6 +905,7 @@ fn build_test_integration(
     options: struct {
         tb_client_header: std.Build.LazyPath,
         llvm_objcopy: ?[]const u8,
+        stdx_module: *std.Build.Module,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
@@ -886,7 +913,7 @@ fn build_test_integration(
     // For integration tests, we build an independent copy of TigerBeetle with "real" config and
     // multiversioning.
     const vsr_options, const vsr_module = build_vsr_module(b, .{
-        .target = options.target,
+        .stdx_module = options.stdx_module,
         .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
         .config_verify = true,
         .config_release = "0.16.99",
@@ -896,6 +923,7 @@ fn build_test_integration(
     });
     const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
+        .stdx_module = options.stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .llvm_objcopy = options.llvm_objcopy,
@@ -910,6 +938,7 @@ fn build_test_integration(
     );
     const vortex_exe = build_vortex(b, step_vortex, .{
         .tb_client_header = options.tb_client_header,
+        .stdx_module = options.stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .target = options.target,
@@ -926,6 +955,7 @@ fn build_test_integration(
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
+    integration_tests.root_module.addImport("stdx", options.stdx_module);
     integration_tests.root_module.addOptions("test_options", integration_tests_options);
     steps.test_integration_build.dependOn(&b.addInstallArtifact(integration_tests, .{}).step);
 
@@ -1015,6 +1045,7 @@ fn build_vopr(
         vopr_run: *std.Build.Step,
     },
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
@@ -1036,6 +1067,7 @@ fn build_vopr(
         .optimize = if (b.args == null) .ReleaseSafe else options.mode,
     });
     vopr.stack_size = 4 * MiB;
+    vopr.root_module.addImport("stdx", options.stdx_module);
     vopr.root_module.addOptions("vsr_options", options.vsr_options);
     vopr.root_module.addOptions("vsr_vopr_options", vopr_options);
     // Ensure that we get stack traces even in release builds.
@@ -1054,6 +1086,7 @@ fn build_fuzz(
         fuzz_build: *std.Build.Step,
     },
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
@@ -1067,6 +1100,7 @@ fn build_fuzz(
         .optimize = options.mode,
     });
     fuzz_exe.stack_size = 4 * MiB;
+    fuzz_exe.root_module.addImport("stdx", options.stdx_module);
     fuzz_exe.root_module.addOptions("vsr_options", options.vsr_options);
     fuzz_exe.root_module.omit_frame_pointer = false;
     steps.fuzz_build.dependOn(print_or_install(b, fuzz_exe, options.print_exe));
@@ -1083,6 +1117,7 @@ fn build_scripts(
         scripts_build: *std.Build.Step,
     },
     options: struct {
+        stdx_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
     },
@@ -1093,6 +1128,7 @@ fn build_scripts(
         .target = options.target,
         .optimize = .Debug,
     });
+    scripts_exe.root_module.addImport("stdx", options.stdx_module);
     scripts_exe.root_module.addOptions("vsr_options", options.vsr_options);
     steps.scripts_build.dependOn(
         &b.addInstallArtifact(scripts_exe, .{}).step,
@@ -1111,6 +1147,7 @@ fn build_vortex(
     step_vortex: *std.Build.Step,
     options: struct {
         tb_client_header: std.Build.LazyPath,
+        stdx_module: *std.Build.Module,
         vsr_module: *std.Build.Module,
         vsr_options: *std.Build.Step.Options,
         target: std.Build.ResolvedTarget,
@@ -1139,6 +1176,7 @@ fn build_vortex(
         .target = options.target,
         .optimize = options.mode,
     });
+    vortex.root_module.addImport("stdx", options.stdx_module);
 
     vortex.root_module.omit_frame_pointer = false;
     vortex.linkLibC();
@@ -1637,30 +1675,6 @@ fn build_clients_c_sample(
 
     const install_step = b.addInstallArtifact(sample, .{});
     step_clients_c_sample.dependOn(&install_step.step);
-}
-
-fn build_git_review(
-    b: *std.Build,
-    steps: struct {
-        run: *std.Build.Step,
-        install: *std.Build.Step,
-    },
-) void {
-    const git_review = b.addExecutable(.{
-        .name = "git-review",
-        .target = b.graph.host,
-        .root_source_file = b.path("./src/git-review.zig"),
-        .optimize = .Debug,
-    });
-
-    steps.run.dependOn(blk: {
-        const run = b.addRunArtifact(git_review);
-        if (b.args) |args| run.addArgs(args);
-        break :blk &run.step;
-    });
-    steps.install.dependOn(
-        &b.addInstallArtifact(git_review, .{}).step,
-    );
 }
 
 fn strip_root_module(root_module: *std.Build.Module) void {

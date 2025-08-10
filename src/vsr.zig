@@ -20,8 +20,7 @@ pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const trace = @import("trace.zig");
-pub const stdx = @import("stdx.zig");
-pub const flags = @import("flags.zig");
+pub const stdx = @import("stdx");
 pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
@@ -35,12 +34,13 @@ pub const lsm = .{
     .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
-    .snaptest = @import("testing/snaptest.zig"),
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
     .parse_seed = @import("testing/fuzz.zig").parse_seed,
 };
+pub const ewah = @import("ewah.zig").ewah;
+pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
 
 pub const multi_batch = @import("vsr/multi_batch.zig");
 
@@ -52,7 +52,7 @@ pub const Status = @import("vsr/replica.zig").Status;
 pub const SyncStage = @import("vsr/sync.zig").Stage;
 pub const SyncTarget = @import("vsr/sync.zig").Target;
 pub const ClientType = @import("vsr/client.zig").ClientType;
-pub const ClockType = @import("vsr/clock.zig").ClockType;
+pub const Clock = @import("vsr/clock.zig").Clock;
 pub const GridType = @import("vsr/grid.zig").GridType;
 pub const JournalType = @import("vsr/journal.zig").JournalType;
 pub const ClientSessions = @import("vsr/client_sessions.zig").ClientSessions;
@@ -1495,20 +1495,20 @@ const ViewChangeHeadersArray = struct {
     ) void {
         headers.command = command;
         headers.array.clear();
-        for (slice) |*header| headers.array.append_assume_capacity(header.*);
+        for (slice) |*header| headers.array.push(header.*);
         headers.verify();
     }
 
     pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Prepare) void {
         // We don't do comprehensive validation here — assume that verify() will be called
         // after any series of appends.
-        headers.array.append_assume_capacity(header.*);
+        headers.array.push(header.*);
     }
 
     pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
         assert(headers.command == .do_view_change);
         assert(headers.array.count() > 0);
-        headers.array.append_assume_capacity(Headers.dvc_blank(op));
+        headers.array.push(Headers.dvc_blank(op));
     }
 };
 
@@ -1604,8 +1604,8 @@ pub const Checkpoint = struct {
 };
 
 test "Checkpoint ops diagram" {
-    const Snap = @import("./testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     var string = std.ArrayList(u8).init(std.testing.allocator);
     defer string.deinit();
@@ -1712,7 +1712,135 @@ pub const Snapshot = struct {
     }
 };
 
-pub const Budget = struct {
+pub const RepairBudgetJournal = struct {
+    capacity: u32,
+    available: u32,
+    refill_max: u32,
+
+    // Tracks the headers for prepares requested by inflight RequestPrepare messages.
+    requested_prepares: std.AutoArrayHashMapUnmanaged(PrepareIdentifier, void),
+    // Tracks the number of inflight RequestHeaders messages.
+    requested_headers: u32,
+    // Tracks the view for an inflight RequestStartView message.
+    requested_start_view: ?u32,
+
+    const PrepareIdentifier = struct { view: u32, op: u64 };
+
+    pub fn init(gpa: std.mem.Allocator, options: struct {
+        capacity: u32,
+        refill_max: u32,
+    }) !RepairBudgetJournal {
+        assert(options.refill_max <= options.capacity);
+
+        var requested_prepares: std.AutoArrayHashMapUnmanaged(PrepareIdentifier, void) = .{};
+        try requested_prepares.ensureTotalCapacity(gpa, options.capacity);
+        errdefer requested_prepares.deinit();
+
+        return RepairBudgetJournal{
+            .capacity = options.capacity,
+            .available = options.capacity,
+            .refill_max = options.refill_max,
+            .requested_prepares = requested_prepares,
+            .requested_headers = 0,
+            .requested_start_view = null,
+        };
+    }
+
+    pub fn deinit(budget: *RepairBudgetJournal, gpa: std.mem.Allocator) void {
+        budget.requested_prepares.deinit(gpa);
+    }
+
+    pub fn decrement(budget: *RepairBudgetJournal, repair_type: union(enum) {
+        prepare: PrepareIdentifier,
+        headers,
+        start_view: u32,
+    }) bool {
+        assert(budget.capacity > 0);
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        if (budget.available == 0) return false;
+
+        switch (repair_type) {
+            .headers => budget.requested_headers += 1,
+            .start_view => |view| {
+                // Decrement budget if there is no other inflight RSV, or if the new view is greater
+                // than the view for the inflight RSV.
+                if (budget.requested_start_view == null or view > budget.requested_start_view.?) {
+                    budget.requested_start_view = view;
+                } else return false;
+            },
+            .prepare => |prepare_identifier| {
+                const gop = budget.requested_prepares.getOrPutAssumeCapacity(prepare_identifier);
+                if (gop.found_existing) {
+                    return false;
+                }
+            },
+        }
+
+        budget.available -= 1;
+
+        return true;
+    }
+
+    pub fn increment(budget: *RepairBudgetJournal, repair_type: union(enum) {
+        prepare: PrepareIdentifier,
+        headers,
+        start_view: u32,
+    }) void {
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        switch (repair_type) {
+            .headers => budget.requested_headers -|= 1,
+            .start_view => |view| {
+                // Increment budget if the SV received is for the same view as the inflight RSV.
+                if (budget.requested_start_view != null and budget.requested_start_view.? == view) {
+                    budget.requested_start_view = null;
+                } else return;
+            },
+            .prepare => |prepare_identifier| {
+                // Increment budget iff we had requested this prepare.
+                if (!budget.requested_prepares.swapRemove(prepare_identifier)) {
+                    return;
+                }
+            },
+        }
+
+        // Artificially cap budget availability, as its tricky to precisely track which headers
+        // we requested for repair and which ones we received, leading to spurious budget updates.
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
+        budget.available = @min((budget.available + 1), budget.capacity - budget_spent_total);
+    }
+
+    pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
+        assert(amount <= budget.refill_max);
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        budget.available = @min((budget.available + amount), budget.capacity);
+
+        budget.requested_prepares.clearRetainingCapacity();
+        budget.requested_headers = 0;
+        budget.requested_start_view = null;
+    }
+
+    fn assert_internally_consistent(budget: *const RepairBudgetJournal) void {
+        const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
+        const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
+        const requested_headers: u32 = budget.requested_headers;
+        const budget_spent_total = requested_start_views + requested_prepares + requested_headers;
+
+        assert(budget.available <= budget.capacity);
+        assert(budget.capacity - budget.available >= budget_spent_total);
+    }
+};
+
+pub const RepairBudgetGrid = struct {
     capacity: u32,
     available: u32,
     refill_max: u32,
@@ -1720,16 +1848,16 @@ pub const Budget = struct {
     pub fn init(options: struct {
         capacity: u32,
         refill_max: u32,
-    }) Budget {
+    }) RepairBudgetGrid {
         assert(options.refill_max <= options.capacity);
-        return Budget{
+        return RepairBudgetGrid{
             .capacity = options.capacity,
             .available = options.capacity,
             .refill_max = options.refill_max,
         };
     }
 
-    pub fn spend(budget: *Budget, amount: u32) bool {
+    pub fn spend(budget: *RepairBudgetGrid, amount: u32) bool {
         assert(budget.capacity > 0);
         assert(budget.available <= budget.capacity);
         assert(amount > 0);
@@ -1739,18 +1867,10 @@ pub const Budget = struct {
         return true;
     }
 
-    pub fn refill(budget: *Budget, amount: u32) void {
+    pub fn refill(budget: *RepairBudgetGrid, amount: u32) void {
         assert(amount <= budget.refill_max);
         assert(budget.available <= budget.capacity);
 
         budget.available = @min((budget.available + amount), budget.capacity);
     }
 };
-
-pub fn block_count_max(storage_size_limit: u64) usize {
-    const shard_count_limit: usize = @intCast(@divFloor(
-        storage_size_limit - superblock.data_file_size_min,
-        constants.block_size * FreeSet.shard_bits,
-    ));
-    return shard_count_limit * FreeSet.shard_bits;
-}

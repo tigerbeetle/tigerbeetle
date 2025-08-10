@@ -1,10 +1,11 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 
 const Command = @import("../vsr.zig").Command;
+const Zone = @import("../vsr.zig").Zone;
 const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const Operation = @import("../tigerbeetle.zig").Operation;
 const Duration = stdx.Duration;
@@ -89,6 +90,8 @@ pub const Event = union(enum) {
 
     grid_read: struct { iop: usize },
     grid_write: struct { iop: usize },
+    storage_read: struct { zone: Zone },
+    storage_write: struct { zone: Zone },
 
     metrics_emit: void,
 
@@ -162,6 +165,8 @@ pub const EventTiming = union(Event.Tag) {
 
     grid_read,
     grid_write,
+    storage_read: struct { zone: Zone },
+    storage_write: struct { zone: Zone },
 
     metrics_emit,
 
@@ -187,6 +192,8 @@ pub const EventTiming = union(Event.Tag) {
         .grid_read = 1,
         .grid_write = 1,
         .metrics_emit = 1,
+        .storage_read = enum_max(Zone),
+        .storage_write = enum_max(Zone),
         .client_request_round_trip = enum_max(Operation),
     });
 
@@ -262,6 +269,13 @@ pub const EventTiming = union(Event.Tag) {
 
                 return slot_bases.get(event.*) + offset;
             },
+            inline .storage_read, .storage_write => |data| {
+                const zone: u32 = @intFromEnum(data.zone);
+                const offset = zone;
+                assert(offset < slot_limits.get(event.*));
+
+                return slot_bases.get(event.*) + offset;
+            },
             inline else => |data, event_tag| {
                 comptime assert(@TypeOf(data) == void);
                 comptime assert(slot_limits.get(event_tag) == 1);
@@ -311,6 +325,8 @@ pub const EventTracing = union(Event.Tag) {
 
     grid_read: struct { iop: usize },
     grid_write: struct { iop: usize },
+    storage_read,
+    storage_write,
 
     metrics_emit,
 
@@ -335,6 +351,8 @@ pub const EventTracing = union(Event.Tag) {
         .scan_tree_level = constants.lsm_scans_max * @as(u32, constants.lsm_levels),
         .grid_read = constants.grid_iops_read_max,
         .grid_write = constants.grid_iops_write_max,
+        .storage_read = 1,
+        .storage_write = 1,
         .metrics_emit = 1,
         .client_request_round_trip = 1,
     });
@@ -634,6 +652,8 @@ test "EventTiming slot doesn't have collisions" {
             } },
             .grid_read => .grid_read,
             .grid_write => .grid_write,
+            .storage_read => .{ .storage_read = .{ .zone = g.enum_value(Zone) } },
+            .storage_write => .{ .storage_write = .{ .zone = g.enum_value(Zone) } },
             .metrics_emit => .metrics_emit,
             .client_request_round_trip => .{ .client_request_round_trip = .{
                 .operation = g.enum_value(Operation),

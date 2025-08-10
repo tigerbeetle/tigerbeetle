@@ -24,7 +24,7 @@
 //! - Tables invisible to snapshot_latest and the current snapshot can be removed.
 //!
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.lsm_manifest_level_fuzz);

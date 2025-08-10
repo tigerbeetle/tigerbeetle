@@ -8,18 +8,17 @@ const stdx = vsr.stdx;
 const constants = vsr.constants;
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
+const Time = vsr.time.Time;
 
 pub fn EchoClientType(
     comptime StateMachine_: type,
     comptime MessageBus: type,
-    comptime Time_: type,
 ) type {
     return struct {
         const EchoClient = @This();
 
         // Exposing the same types the real client does:
-        const VSRClient = vsr.ClientType(StateMachine_, MessageBus, Time);
-        pub const Time = Time_;
+        const VSRClient = vsr.ClientType(StateMachine_, MessageBus);
         pub const StateMachine = EchoStateMachineType(VSRClient.StateMachine);
         pub const Request = VSRClient.Request;
 

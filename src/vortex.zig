@@ -10,9 +10,8 @@
 /// For practical use, Vortex should be run in a Linux namespace where it can control the network.
 /// The `run` command sets up a Linux namespace automatically.
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
-const flags = @import("flags.zig");
 
 const Run = @import("testing/vortex/run.zig");
 const Supervisor = @import("testing/vortex/supervisor.zig");
@@ -60,7 +59,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(allocator);
     defer args.deinit();
 
-    switch (flags.parse(&args, CLIArgs)) {
+    switch (stdx.flags(&args, CLIArgs)) {
         .run => |run_args| {
             _ = run_args; // We're going to pass these through directly to `vortex supervisor`
             try Run.main(allocator);

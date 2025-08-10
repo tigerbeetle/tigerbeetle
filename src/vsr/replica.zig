@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 const SourceLocation = std.builtin.SourceLocation;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;
@@ -19,6 +19,7 @@ const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
+const Time = @import("../time.zig").Time;
 const Duration = stdx.Duration;
 const marks = @import("../testing/marks.zig");
 const Ratio = stdx.PRNG.Ratio;
@@ -30,6 +31,7 @@ const Command = vsr.Command;
 const Version = vsr.Version;
 const SyncStage = vsr.SyncStage;
 const ClientSessions = vsr.ClientSessions;
+const Tracer = vsr.trace.Tracer;
 
 const log = marks.wrap_log(stdx.log.scoped(.replica));
 
@@ -141,7 +143,6 @@ pub fn ReplicaType(
     comptime StateMachine: type,
     comptime MessageBus: type,
     comptime Storage: type,
-    comptime Time: type,
     comptime AOF: type,
 ) type {
     const Grid = GridType(Storage);
@@ -155,9 +156,8 @@ pub fn ReplicaType(
         const CheckpointTrailer = vsr.CheckpointTrailerType(Storage);
         const Journal = vsr.JournalType(Replica, Storage);
         const ClientReplies = vsr.ClientRepliesType(Storage);
-        const Clock = vsr.ClockType(Time);
+        const Clock = vsr.Clock;
         const ForestTableIterator = ForestTableIteratorType(Forest);
-        const Tracer = Storage.Tracer;
 
         pub const ReplicateOptions = struct {
             closed_loop: bool = false,
@@ -174,6 +174,36 @@ pub fn ReplicaType(
         const BlockWrite = struct {
             write: Grid.Write = undefined,
             replica: *Replica,
+        };
+
+        const LogPrefix = struct {
+            replica: u8,
+            status: Status,
+            primary: bool,
+
+            pub fn format(
+                self: LogPrefix,
+                comptime fmt: []const u8,
+                options: std.fmt.FormatOptions,
+                writer: anytype,
+            ) !void {
+                _ = fmt;
+                _ = options;
+                try writer.print("{}", .{self.replica});
+
+                var status_character: u8 = switch (self.status) {
+                    .normal => 'n',
+                    .view_change => 'v',
+                    .recovering => 'r',
+                    .recovering_head => 'h',
+                };
+
+                if (self.primary) {
+                    status_character = std.ascii.toUpper(status_character);
+                }
+
+                try writer.print("{c}", .{status_character});
+            }
         };
 
         /// We use this allocator during open/init and then disable it.
@@ -480,19 +510,8 @@ pub fn ReplicaType(
         /// Unique do_view_change messages for the same view from ALL replicas (including ourself).
         do_view_change_from_all_replicas: DVCQuorumMessages = dvc_quorum_messages_null,
 
-        repair_messages_budget_grid: vsr.Budget,
-
-        repair_messages_budget_journal: vsr.Budget,
-
-        // The next op between [commit_min + 1, op] to be requested during repair.
-        // Used to cycle through uncommitted prepares, to avoid requesting the same missing prepares
-        // repeatedly. Reset to commit_min + 1 when repair timeout is fired.
-        repair_prepare_op_next_uncommitted: u64 = 0,
-
-        // The next op between [op_repair_min, commit_min] to be requested during repair.
-        // Used to cycle through committed prepares, to avoid requesting the same missing prepares
-        // repeatedly. Reset to op_repair_min when repair timeout is fired.
-        repair_prepare_op_next_committed: u64 = 0,
+        repair_messages_budget_grid: vsr.RepairBudgetGrid,
+        repair_messages_budget_journal: vsr.RepairBudgetJournal,
 
         // The op number which should be set as op_min for the next request_headers call.
         // This is an optimization that ensures op_min is not always set to op_repair_min (reducing
@@ -596,7 +615,7 @@ pub fn ReplicaType(
         /// Simulator hooks.
         event_callback: ?*const fn (replica: *const Replica, event: ReplicaEvent) void = null,
 
-        trace: Tracer,
+        trace: *Tracer,
         trace_emit_timeout: Timeout,
 
         aof: ?*AOF,
@@ -610,11 +629,11 @@ pub fn ReplicaType(
             storage: *Storage,
             message_pool: *MessagePool,
             nonce: Nonce,
-            time: *Time,
+            time: Time,
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
-            tracer_options: Tracer.Options = .{},
+            tracer: *Tracer,
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
@@ -671,21 +690,18 @@ pub fn ReplicaType(
             const replica_count = self.superblock.working.vsr_state.replica_count;
             if (replica >= options.node_count or replica_count > options.node_count) {
                 log.err("{}: open: no address for replica (replica_count={} node_count={})", .{
-                    replica,
+                    self.log_prefix(),
                     replica_count,
                     options.node_count,
                 });
                 return error.NoAddress;
             }
 
-            self.trace = try Tracer.init(
-                allocator,
-                options.time,
-                self.superblock.working.cluster,
-                replica,
-                options.tracer_options,
-            );
-            errdefer if (!initialized) self.trace.deinit(allocator);
+            self.trace = options.tracer;
+            self.trace.set_replica(.{
+                .cluster = self.superblock.working.cluster,
+                .replica = replica,
+            });
 
             // Initialize the replica:
             try self.init(allocator, .{
@@ -880,7 +896,7 @@ pub fn ReplicaType(
 
             if (self.superblock.working.vsr_state.sync_op_max != 0) {
                 log.info("{}: sync: ops={}..{}", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.superblock.working.vsr_state.sync_op_min,
                     self.superblock.working.vsr_state.sync_op_max,
                 });
@@ -995,7 +1011,7 @@ pub fn ReplicaType(
             self.assert_free_set_consistent();
 
             log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.superblock.working.vsr_state.sync_op_min,
                 self.superblock.working.vsr_state.sync_op_max,
             });
@@ -1038,7 +1054,7 @@ pub fn ReplicaType(
             replica_index: u8,
             pipeline_requests_limit: u32,
             nonce: Nonce,
-            time: *Time,
+            time: Time,
             storage: *Storage,
             aof: ?*AOF,
             message_pool: *MessagePool,
@@ -1088,12 +1104,15 @@ pub fn ReplicaType(
                 2 * (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_journal_refill =
                 @divFloor(repair_messages_budget_journal_max, 2);
-            self.repair_messages_budget_journal = vsr.Budget.init(
+            self.repair_messages_budget_journal = try vsr.RepairBudgetJournal.init(
+                allocator,
                 .{
                     .capacity = repair_messages_budget_journal_max,
                     .refill_max = repair_messages_budget_journal_refill,
                 },
             );
+            errdefer self.repair_messages_budget_journal.deinit(allocator);
+
             assert(self.repair_messages_budget_journal.available ==
                 self.repair_messages_budget_journal.capacity);
 
@@ -1107,7 +1126,7 @@ pub fn ReplicaType(
                 (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_grid_refill =
                 @divFloor(repair_messages_budget_grid_max, 2);
-            self.repair_messages_budget_grid = vsr.Budget.init(
+            self.repair_messages_budget_grid = vsr.RepairBudgetGrid.init(
                 .{
                     .capacity = repair_messages_budget_grid_max,
                     .refill_max = repair_messages_budget_grid_refill,
@@ -1208,14 +1227,13 @@ pub fn ReplicaType(
 
             self.grid = try Grid.init(allocator, .{
                 .superblock = &self.superblock,
-                .trace = &self.trace,
+                .trace = self.trace,
                 .cache_blocks_count = options.grid_cache_blocks_count,
                 .missing_blocks_max = constants.grid_missing_blocks_max,
                 .missing_tables_max = constants.grid_missing_tables_max,
                 .blocks_released_prior_checkpoint_durability_max = Forest
                     .compaction_blocks_released_per_pipeline_max() +
-                    Grid.free_set_checkpoints_blocks_max(self.superblock.storage_size_limit) +
-                    CheckpointTrailer.block_count_for_trailer_size(ClientSessions.encode_size),
+                    vsr.checkpoint_trailer.block_count_for_trailer_size(ClientSessions.encode_size),
             });
             errdefer self.grid.deinit(allocator);
 
@@ -1419,7 +1437,7 @@ pub fn ReplicaType(
 
             log.debug("{}: init: replica_count={} quorum_view_change={} quorum_replication={} " ++
                 "release={}", .{
-                self.replica,
+                self.log_prefix(),
                 self.replica_count,
                 self.quorum_view_change,
                 self.quorum_replication,
@@ -1433,7 +1451,6 @@ pub fn ReplicaType(
         pub fn deinit(self: *Replica, allocator: Allocator) void {
             self.static_allocator.transition_from_static_to_deinit();
 
-            self.trace.deinit(allocator);
             self.grid_scrubber.deinit(allocator);
             self.client_replies.deinit();
             self.client_sessions_checkpoint.deinit(allocator);
@@ -1443,6 +1460,7 @@ pub fn ReplicaType(
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
             self.grid.deinit(allocator);
+            self.repair_messages_budget_journal.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
             switch (self.pipeline) {
@@ -1589,7 +1607,7 @@ pub fn ReplicaType(
 
             if (message_count > constants.bus_message_burst_warn_min) {
                 log.warn("{}: on_messages: message count={} suspended={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message_count,
                     message_suspended_count,
                 });
@@ -1602,7 +1620,7 @@ pub fn ReplicaType(
                 .prepare => |header_prepare| if (self.journal.writes.available() == 0) {
                     log.warn("{}: on_messages: suspending command=prepare " ++
                         "op={} view={} checksum={}", .{
-                        self.replica,
+                        self.log_prefix(),
                         header_prepare.op,
                         header_prepare.view,
                         header_prepare.checksum,
@@ -1612,7 +1630,7 @@ pub fn ReplicaType(
                 .block => |header_block| if (self.grid_repair_writes.available() == 0) {
                     log.warn("{}: on_messages: suspending command=block " ++
                         "address={} checksum={}", .{
-                        self.replica,
+                        self.log_prefix(),
                         header_block.address,
                         header_block.checksum,
                     });
@@ -1630,7 +1648,7 @@ pub fn ReplicaType(
             defer self.invariants();
 
             log.debug("{}: on_message: view={} status={s} {}", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
                 @tagName(self.status),
                 message.header,
@@ -1638,7 +1656,7 @@ pub fn ReplicaType(
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: on_message: invalid (command={}, {s})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.command,
                     reason,
                 });
@@ -1650,7 +1668,7 @@ pub fn ReplicaType(
 
             if (message.header.cluster != self.cluster) {
                 log.warn("{}: on_message: wrong cluster (cluster must be {} not {})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.cluster,
                     message.header.cluster,
                 });
@@ -1663,7 +1681,7 @@ pub fn ReplicaType(
                     // Ignore further messages until finishing (asynchronous) processing of sync SV.
                     // Notably, this prevents our view from jumping ahead of SV.
                     assert(self.sync_start_view != null);
-                    log.warn("{}: on_message: ignoring (syncing)", .{self.replica});
+                    log.warn("{}: on_message: ignoring (syncing)", .{self.log_prefix()});
                     return;
                 },
                 .updating_checkpoint => {},
@@ -1694,7 +1712,7 @@ pub fn ReplicaType(
                 // A replica should never handle misdirected messages intended for a client:
                 .pong_client, .eviction => {
                     log.warn("{}: on_message: misdirected message ({s})", .{
-                        self.replica,
+                        self.log_prefix(),
                         @tagName(message.header.command),
                     });
                     return;
@@ -1708,7 +1726,7 @@ pub fn ReplicaType(
 
             if (self.loopback_queue) |loopback_message| {
                 log.err("{}: on_message: on_{s}() queued a {s} loopback message with no flush", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(message.header.command),
                     @tagName(loopback_message.header.command),
                 });
@@ -1726,7 +1744,7 @@ pub fn ReplicaType(
             assert(self.status == .normal or self.status == .view_change);
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_ping: misdirected message (self)", .{self.replica});
+                log.warn("{}: on_ping: misdirected message (self)", .{self.log_prefix()});
                 return;
             }
 
@@ -1775,7 +1793,7 @@ pub fn ReplicaType(
 
                     for (releases) |release| {
                         if (release.value > self.release.value) {
-                            upgrade_targets.*.?.releases.append_assume_capacity(release);
+                            upgrade_targets.*.?.releases.push(release);
                         }
                     }
                 }
@@ -1785,7 +1803,7 @@ pub fn ReplicaType(
         fn on_pong(self: *Replica, message: *const Message.Pong) void {
             assert(message.header.command == .pong);
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_pong: misdirected message (self)", .{self.replica});
+                log.warn("{}: on_pong: misdirected message (self)", .{self.log_prefix()});
                 return;
             }
 
@@ -1855,7 +1873,9 @@ pub fn ReplicaType(
                         assert(!self.solo());
                         self.primary_abdicate_timeout.start();
                     }
-                    log.warn("{}: on_request: dropping (clock not synchronized)", .{self.replica});
+                    log.warn("{}: on_request: dropping (clock not synchronized)", .{
+                        self.log_prefix(),
+                    });
                     return;
                 };
 
@@ -1928,7 +1948,7 @@ pub fn ReplicaType(
                 self.replicate(message);
             } else {
                 log.warn("{}: on_prepare: not replicating op={} commit_min={} present={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     self.commit_min,
                     self.journal.has_prepare(message.header),
@@ -1936,7 +1956,7 @@ pub fn ReplicaType(
             }
 
             if (self.syncing == .updating_checkpoint) {
-                log.warn("{}: on_prepare: ignoring (sync)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (sync)", .{self.log_prefix()});
                 return;
             }
 
@@ -1944,33 +1964,28 @@ pub fn ReplicaType(
                 (self.status == .normal and
                     message.header.view == self.view and message.header.op <= self.op))
             {
-                log.debug("{}: on_prepare: ignoring (repair)", .{self.replica});
+                log.debug("{}: on_prepare: ignoring (repair)", .{self.log_prefix()});
                 self.on_repair(message);
                 return;
             }
 
             if (self.status != .normal) {
-                log.warn("{}: on_prepare: ignoring ({})", .{ self.replica, self.status });
+                log.warn("{}: on_prepare: ignoring ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return;
             }
 
             if (message.header.view > self.view) {
-                log.warn("{}: on_prepare: ignoring (newer view)", .{self.replica});
-                return;
-            }
-
-            if (message.header.release.value > self.release.value) {
-                // This would be safe to prepare, but rejecting it simplifies assertions.
-                assert(message.header.op > self.op_checkpoint_next_trigger());
-
-                log.warn("{}: on_prepare: ignoring (newer release)", .{self.replica});
+                log.warn("{}: on_prepare: ignoring (newer view)", .{self.log_prefix()});
                 return;
             }
 
             if (message.header.size > self.request_size_limit) {
                 // The replica needs to be restarted with a higher batch size limit.
                 log.err("{}: on_prepare: ignoring (large prepare, op={} size={} size_limit={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     message.header.size,
                     self.request_size_limit,
@@ -2000,7 +2015,7 @@ pub fn ReplicaType(
             if (message.header.op > self.commit_min + 2 * constants.pipeline_prepare_queue_max) {
                 log.warn("{}: on_prepare: lagging behind the cluster prepare.op={} " ++
                     "(commit_min={} op={} commit_max={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     self.commit_min,
                     self.op,
@@ -2008,11 +2023,38 @@ pub fn ReplicaType(
                 });
             }
 
+            // Normally, we cache prepares between (commit_min, commit_min + cache.capacity] to
+            // avoid a disk read for these prepares during commit. However, if we are lagging and
+            // encounter a message from the next log wrap, we prefer caching prepares between
+            // (op_prepare_max, op_prepare_max + cache.capacity], to avoid repairing them over the
+            // network during the subsequent checkpoint. The rationale here is that local reads are
+            // cheaper than repairing prepares over the network.
+            const op_cache_min = if (message.header.op <= self.op_prepare_max())
+                self.commit_min + 1
+            else
+                self.op_prepare_max() + 1;
+            assert(message.header.op >= op_cache_min);
+
+            if (self.backup() and
+                message.header.op < op_cache_min + self.pipeline.cache.capacity)
+            {
+                log.debug("{}: on_prepare: caching prepare.op={} " ++
+                    "(commit_min={} op={} commit_max={} prepare_max={})", .{
+                    self.log_prefix(),
+                    message.header.op,
+                    self.commit_min,
+                    self.op,
+                    self.commit_max,
+                    self.op_prepare_max(),
+                });
+                self.cache_prepare(message);
+            }
+
             // Verify that the new request will fit in the WAL.
             if (message.header.op > self.op_prepare_max()) {
                 log.warn("{}: on_prepare: ignoring prepare.op={} " ++
                     "(too far ahead, commit_min={} op={} commit_max={} prepare_max={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     self.commit_min,
                     self.op,
@@ -2035,7 +2077,7 @@ pub fn ReplicaType(
                 // replica, the prepare's replica, or both independently.
                 log.err("{}: on_prepare: checkpoint diverged " ++
                     "(op={} expect={x:0>32} received={x:0>32} from={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     self.superblock.working.checkpoint_id(),
                     message.header.checkpoint_id,
@@ -2047,7 +2089,7 @@ pub fn ReplicaType(
             }
 
             if (message.header.op > self.op + 1) {
-                log.debug("{}: on_prepare: newer op", .{self.replica});
+                log.debug("{}: on_prepare: newer op", .{self.log_prefix()});
                 self.jump_to_newer_op_in_normal_status(message.header);
                 // "`replica.op` exists" invariant is temporarily broken.
                 assert(self.journal.header_with_op(message.header.op - 1) == null);
@@ -2073,7 +2115,7 @@ pub fn ReplicaType(
             // journalling. The primary needs this before its journal is outrun by any
             // prepare_ok quorum:
             log.debug("{}: on_prepare: advancing: op={}..{} checksum={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.op,
                 message.header.op,
                 message.header.parent,
@@ -2107,7 +2149,7 @@ pub fn ReplicaType(
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
                 // This can be normal, for example, if an old prepare_ok is replayed.
                 log.debug("{}: on_prepare_ok: not preparing op={} checksum={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     message.header.prepare_checksum,
                 });
@@ -2164,7 +2206,7 @@ pub fn ReplicaType(
             prepare.ok_quorum_received = true;
 
             log.debug("{}: on_prepare_ok: quorum received, context={}", .{
-                self.replica,
+                self.log_prefix(),
                 prepare.message.header.checksum,
             });
 
@@ -2190,7 +2232,7 @@ pub fn ReplicaType(
 
             const entry = self.client_sessions.get(message.header.client) orelse {
                 log.debug("{}: on_reply: ignoring, client not in table (client={} request={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.request,
                 });
@@ -2199,7 +2241,7 @@ pub fn ReplicaType(
 
             if (message.header.checksum != entry.header.checksum) {
                 log.debug("{}: on_reply: ignoring, reply not in table (client={} request={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.request,
                 });
@@ -2209,7 +2251,7 @@ pub fn ReplicaType(
             const slot = self.client_sessions.get_slot_for_header(message.header).?;
             if (!self.client_replies.faulty.is_set(slot.index)) {
                 log.debug("{}: on_reply: ignoring, reply is clean (client={} request={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.request,
                 });
@@ -2218,7 +2260,7 @@ pub fn ReplicaType(
 
             if (!self.client_replies.ready_sync()) {
                 log.debug("{}: on_reply: ignoring, busy (client={} request={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.request,
                 });
@@ -2226,7 +2268,7 @@ pub fn ReplicaType(
             }
 
             log.debug("{}: on_reply: repairing reply (client={} request={})", .{
-                self.replica,
+                self.log_prefix(),
                 message.header.client,
                 message.header.request,
             });
@@ -2243,22 +2285,25 @@ pub fn ReplicaType(
             assert(message.header.replica < self.replica_count);
 
             if (self.status != .normal) {
-                log.debug("{}: on_commit: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_commit: ignoring ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return;
             }
 
             if (message.header.view < self.view) {
-                log.debug("{}: on_commit: ignoring (older view)", .{self.replica});
+                log.debug("{}: on_commit: ignoring (older view)", .{self.log_prefix()});
                 return;
             }
 
             if (message.header.view > self.view) {
-                log.debug("{}: on_commit: ignoring (newer view)", .{self.replica});
+                log.debug("{}: on_commit: ignoring (newer view)", .{self.log_prefix()});
                 return;
             }
 
             if (self.primary()) {
-                log.warn("{}: on_commit: misdirected message (primary)", .{self.replica});
+                log.warn("{}: on_commit: misdirected message (primary)", .{self.log_prefix()});
                 return;
             }
 
@@ -2279,12 +2324,14 @@ pub fn ReplicaType(
             // We may not always have the latest commit entry but if we do our checksum must match:
             if (self.journal.header_with_op(message.header.commit)) |commit_entry| {
                 if (commit_entry.checksum == message.header.commit_checksum) {
-                    log.debug("{}: on_commit: checksum verified", .{self.replica});
+                    log.debug("{}: on_commit: checksum verified", .{self.log_prefix()});
                 } else if (self.valid_hash_chain_between(message.header.commit, self.op)) {
                     @panic("commit checksum verification failed");
                 } else {
                     // We may still be repairing after receiving the start_view message.
-                    log.debug("{}: on_commit: skipping checksum verification", .{self.replica});
+                    log.debug("{}: on_commit: skipping checksum verification", .{
+                        self.log_prefix(),
+                    });
                 }
             }
 
@@ -2297,35 +2344,38 @@ pub fn ReplicaType(
             assert(self.syncing != .updating_checkpoint);
 
             if (self.status != .normal and self.status != .view_change) {
-                log.debug("{}: on_repair: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_repair: ignoring ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return;
             }
 
             if (message.header.view > self.view) {
-                log.debug("{}: on_repair: ignoring (newer view)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (newer view)", .{self.log_prefix()});
                 return;
             }
 
             if (self.status == .view_change and message.header.view == self.view) {
-                log.debug("{}: on_repair: ignoring (view started)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (view started)", .{self.log_prefix()});
                 return;
             }
 
             if (self.status == .view_change and self.primary_index(self.view) != self.replica) {
-                log.debug("{}: on_repair: ignoring (view change, backup)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (view change, backup)", .{self.log_prefix()});
                 return;
             }
 
             if (self.status == .view_change and !self.do_view_change_quorum) {
                 log.debug("{}: on_repair: ignoring (view change, waiting for quorum)", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return;
             }
 
             if (message.header.op > self.op) {
                 assert(message.header.view < self.view);
-                log.debug("{}: on_repair: ignoring (would advance self.op)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (would advance self.op)", .{self.log_prefix()});
                 return;
             }
 
@@ -2335,7 +2385,7 @@ pub fn ReplicaType(
                 // This would be safe to prepare, but rejecting it simplifies assertions.
                 assert(message.header.op > self.op_checkpoint_next_trigger());
 
-                log.debug("{}: on_repair: ignoring (newer release)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (newer release)", .{self.log_prefix()});
                 return;
             }
 
@@ -2345,26 +2395,39 @@ pub fn ReplicaType(
             assert(message.header.op <= self.op); // Repairs may never advance `self.op`.
 
             if (self.journal.has_prepare(message.header)) {
-                log.debug("{}: on_repair: ignoring (duplicate)", .{self.replica});
+                log.debug("{}: on_repair: ignoring (duplicate)", .{self.log_prefix()});
 
                 self.send_prepare_ok(message.header);
                 return self.flush_loopback_queue();
             }
 
+            if (self.replica != self.primary_index(self.view) and
+                message.header.op > self.commit_min and
+                message.header.op <= self.commit_min + self.pipeline.cache.capacity)
+            {
+                self.cache_prepare(message);
+            }
+
             if (self.repair_header(message.header)) {
                 assert(self.journal.has_dirty(message.header));
 
-                log.debug("{}: on_repair: repairing journal", .{self.replica});
-                self.write_prepare(message, .repair);
+                log.debug("{}: on_repair: repairing journal", .{self.log_prefix()});
+                const write_initiated = self.write_prepare(message, .repair);
 
-                if (self.status == .normal and self.backup()) {
+                if (write_initiated) {
+                    self.repair_messages_budget_journal.increment(.{ .prepare = .{
+                        .view = message.header.view,
+                        .op = message.header.op,
+                    } });
+
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
-                    self.commit_journal();
+                    if (self.status == .normal and self.backup()) {
+                        self.commit_journal();
+                    }
 
-                    // Increment budget and initiate repair so `repair_header`/`request_prepare`
-                    // network messages can be sent concurrently with the write IO for this prepare.
-                    self.repair_messages_budget_journal.refill(1);
+                    // Initiate repair so `repair_header`/`request_prepare` network messages can be
+                    // sent concurrently while writing this prepare.
                     self.repair();
                 }
             }
@@ -2397,7 +2460,7 @@ pub fn ReplicaType(
             if (count < threshold) {
                 log.debug("{}: on_start_view_change: view={} waiting for quorum " ++
                     "({}/{}; replicas={b:0>6})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                     count,
                     threshold,
@@ -2406,7 +2469,7 @@ pub fn ReplicaType(
                 return;
             }
             log.debug("{}: on_start_view_change: view={} quorum received (replicas={b:0>6})", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
                 self.start_view_change_from_all_replicas.bits,
             });
@@ -2462,14 +2525,14 @@ pub fn ReplicaType(
                 .awaiting_quorum => {
                     log.debug(
                         "{}: on_do_view_change: view={} waiting for quorum",
-                        .{ self.replica, self.view },
+                        .{ self.log_prefix(), self.view },
                     );
                     return;
                 },
                 .awaiting_repair => {
                     log.mark.warn(
                         "{}: on_do_view_change: view={} quorum received, awaiting repair",
-                        .{ self.replica, self.view },
+                        .{ self.log_prefix(), self.view },
                     );
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
@@ -2477,7 +2540,7 @@ pub fn ReplicaType(
                 .complete_invalid => {
                     log.mark.err(
                         "{}: on_do_view_change: view={} quorum received, deadlocked",
-                        .{ self.replica, self.view },
+                        .{ self.log_prefix(), self.view },
                     );
                     self.primary_log_do_view_change_quorum("on_do_view_change");
                     return;
@@ -2486,7 +2549,7 @@ pub fn ReplicaType(
             };
 
             log.debug("{}: on_do_view_change: view={} quorum received", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
             });
             self.primary_log_do_view_change_quorum("on_do_view_change");
@@ -2540,7 +2603,7 @@ pub fn ReplicaType(
 
                 log.mark.debug("{}: on_do_view_change: lagging primary; forfeiting " ++
                     "(view={}..{} checkpoint={}..{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                     next_view,
                     self.op_checkpoint(),
@@ -2594,7 +2657,7 @@ pub fn ReplicaType(
                 } else {
                     log.mark.debug(
                         "{}: on_start_view: ignoring (recovering_head, nonce mismatch)",
-                        .{self.replica},
+                        .{self.log_prefix()},
                     );
                     return;
                 }
@@ -2626,7 +2689,7 @@ pub fn ReplicaType(
                 assert(self.status == .normal or self.status == .recovering_head);
 
                 log.debug("{}: on_start_view view={} (ignoring, old message)", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.log_view,
                 });
                 return;
@@ -2650,6 +2713,7 @@ pub fn ReplicaType(
                 }
             }
             assert(self.view == message.header.view);
+            self.repair_messages_budget_journal.increment(.{ .start_view = self.view });
 
             // Logically, SV atomically updates both the checkpoint state and the log suffix.
             // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
@@ -2724,7 +2788,7 @@ pub fn ReplicaType(
             log.mark.debug(
                 \\{}: on_start_view_set_checkpoint: sync started view={} checkpoint={}..{}
             , .{
-                self.replica,
+                self.log_prefix(),
                 self.log_view,
                 self.op_checkpoint(),
                 view_checkpoint.header.op,
@@ -2882,78 +2946,91 @@ pub fn ReplicaType(
             maybe(self.status == .recovering_head);
             assert(message.header.replica != self.replica);
 
-            const op = message.header.prepare_op;
-            const slot = self.journal.slot_for_op(op);
-            const checksum = message.header.prepare_checksum;
+            const checksum = blk: {
+                if (message.header.view == 0) {
+                    break :blk message.header.prepare_checksum;
+                }
+
+                assert(message.header.prepare_checksum == 0);
+                if (self.journal.header_with_op(message.header.prepare_op)) |header| {
+                    break :blk header.checksum;
+                } else {
+                    log.debug("{}: on_request_prepare: op={} missing", .{
+                        self.log_prefix(),
+                        message.header.prepare_op,
+                    });
+                    return;
+                }
+            };
 
             // Try to serve the message directly from the pipeline.
             // This saves us from going to disk. And we don't need to worry that the WAL's copy
             // of an uncommitted prepare is lost/corrupted.
-            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
+            if (self.pipeline_prepare_by_op_and_checksum(
+                message.header.prepare_op,
+                checksum,
+            )) |prepare| {
                 log.debug("{}: on_request_prepare: op={} checksum={} reply from pipeline", .{
-                    self.replica,
-                    op,
+                    self.log_prefix(),
+                    message.header.prepare_op,
                     checksum,
                 });
                 self.send_message_to_replica(message.header.replica, prepare);
                 return;
             }
 
-            if (self.journal.prepare_inhabited[slot.index]) {
-                const prepare_checksum = self.journal.prepare_checksums[slot.index];
-                // Consult `journal.prepare_checksums` (rather than `journal.headers`):
-                // the former may have the prepare we want — even if journal recovery marked the
-                // slot as faulty and left the in-memory header as reserved.
-                if (checksum == prepare_checksum) {
-                    log.debug("{}: on_request_prepare: op={} checksum={} reading", .{
-                        self.replica,
-                        op,
-                        checksum,
-                    });
-
-                    // Improve availability by calling `read_prepare_with_op_and_checksum` instead
-                    // of `read_prepare` — even if `journal.headers` contains the target message.
-                    // The latter skips the read when the target prepare is present but dirty (e.g.
-                    // it was recovered with decision=fix).
-                    // TODO Do not reissue the read if we are already reading in order to send to
-                    // this particular destination replica.
-                    self.journal.read_prepare_with_op_and_checksum(
-                        on_request_prepare_read,
-                        op,
-                        prepare_checksum,
-                        message.header.replica,
-                    );
-                    return;
-                }
+            const slot = self.journal.slot_for_op(message.header.prepare_op);
+            // Consult `journal.prepare_checksums` (rather than `journal.headers`):
+            // the former may have the prepare we want — even if journal recovery marked the
+            // slot as faulty and left the in-memory header as reserved.
+            if (self.journal.prepare_inhabited[slot.index] and
+                self.journal.prepare_checksums[slot.index] == checksum)
+            {
+                // Improve availability by calling `read_prepare_with_op_and_checksum` instead
+                // of `read_prepare` — even if `journal.headers` contains the target message.
+                // The latter skips the read when the target prepare is present but dirty (e.g.
+                // it was recovered with decision=fix).
+                // TODO Do not reissue the read if we are already reading in order to send to
+                // this particular destination replica.
+                self.journal.read_prepare_with_op_and_checksum(
+                    on_request_prepare_read,
+                    .{
+                        .op = message.header.prepare_op,
+                        .checksum = checksum,
+                        .destination_replica = message.header.replica,
+                    },
+                );
+            } else {
+                log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
+                    self.log_prefix(),
+                    message.header.prepare_op,
+                    checksum,
+                });
             }
-
-            log.debug("{}: on_request_prepare: op={} checksum={} missing", .{
-                self.replica,
-                op,
-                checksum,
-            });
         }
 
         fn on_request_prepare_read(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.Read.Options,
         ) void {
             const message = prepare orelse {
-                log.debug("{}: on_request_prepare_read: prepare=null", .{self.replica});
+                log.debug("{}: on_request_prepare_read: prepare=null", .{self.log_prefix()});
                 return;
             };
+            const destination_replica = options.destination_replica.?;
+
             assert(message.header.command == .prepare);
+            assert(destination_replica != self.replica);
 
             log.debug("{}: on_request_prepare_read: op={} checksum={} sending to replica={}", .{
-                self.replica,
+                self.log_prefix(),
                 message.header.op,
                 message.header.checksum,
-                destination_replica.?,
+                destination_replica,
             });
 
-            assert(destination_replica.? != self.replica);
-            self.send_message_to_replica(destination_replica.?, message);
+            self.send_message_to_replica(destination_replica, message);
         }
 
         fn on_request_headers(self: *Replica, message: *const Message.RequestHeaders) void {
@@ -2993,7 +3070,7 @@ pub fn ReplicaType(
 
             if (count == 0) {
                 log.debug("{}: on_request_headers: ignoring (op={}..{}, no headers)", .{
-                    self.replica,
+                    self.log_prefix(),
                     op_min,
                     op_max,
                 });
@@ -3018,7 +3095,9 @@ pub fn ReplicaType(
             assert(message.header.replica != self.replica);
 
             const entry = self.client_sessions.get(message.header.reply_client) orelse {
-                log.debug("{}: on_request_reply: ignoring, client not in table", .{self.replica});
+                log.debug("{}: on_request_reply: ignoring, client not in table", .{
+                    self.log_prefix(),
+                });
                 return;
             };
             assert(entry.header.client == message.header.reply_client);
@@ -3026,7 +3105,7 @@ pub fn ReplicaType(
             if (entry.header.checksum != message.header.reply_checksum) {
                 log.debug("{}: on_request_reply: ignoring, reply not in table " ++
                     "(requested={} stored={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.reply_checksum,
                     entry.header.checksum,
                 });
@@ -3053,7 +3132,7 @@ pub fn ReplicaType(
                     assert(err == error.Busy);
 
                     log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                 };
             }
@@ -3069,7 +3148,7 @@ pub fn ReplicaType(
             const reply = reply_ orelse {
                 log.debug("{}: on_request_reply: reply not found for replica={} " ++
                     "(op={} checksum={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     destination_replica.?,
                     reply_header.op,
                     reply_header.checksum,
@@ -3085,7 +3164,7 @@ pub fn ReplicaType(
             assert(reply.header.checksum == reply_header.checksum);
 
             log.debug("{}: on_request_reply: sending reply to replica={} (op={} checksum={})", .{
-                self.replica,
+                self.log_prefix(),
                 destination_replica.?,
                 reply_header.op,
                 reply_header.checksum,
@@ -3111,7 +3190,10 @@ pub fn ReplicaType(
             for (message_body_as_prepare_headers(message.base_const())) |*h| {
                 if (op_min == null or h.op < op_min.?) op_min = h.op;
                 if (op_max == null or h.op > op_max.?) op_max = h.op;
-                if (self.repair_header(h)) {
+
+                const header_present = self.journal.has_header(h);
+                const header_correct = self.repair_header(h);
+                if (!header_present and header_correct) {
                     header_repaired = true;
                 }
             }
@@ -3121,7 +3203,7 @@ pub fn ReplicaType(
             // one header. This guards us against double incrementing the budget in case of
             // duplicate headers messages.
             if (header_repaired) {
-                self.repair_messages_budget_journal.refill(1);
+                self.repair_messages_budget_journal.increment(.headers);
             }
 
             self.repair();
@@ -3132,20 +3214,20 @@ pub fn ReplicaType(
 
             if (message.header.replica == self.replica) {
                 log.warn("{}: on_request_blocks: ignoring; misdirected message (self)", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return;
             }
 
             if (self.standby()) {
                 log.warn("{}: on_request_blocks: ignoring; misdirected message (standby)", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return;
             }
 
             if (self.grid.callback == .cancel) {
-                log.debug("{}: on_request_blocks: ignoring; canceling grid", .{self.replica});
+                log.debug("{}: on_request_blocks: ignoring; canceling grid", .{self.log_prefix()});
                 return;
             }
 
@@ -3165,7 +3247,7 @@ pub fn ReplicaType(
                     {
                         log.debug("{}: on_request_blocks: ignoring block request;" ++
                             " already reading (destination={} address={} checksum={})", .{
-                            self.replica,
+                            self.log_prefix(),
                             message.header.replica,
                             request.block_address,
                             request.block_checksum,
@@ -3177,7 +3259,7 @@ pub fn ReplicaType(
                 const read = self.grid_reads.acquire() orelse {
                     log.debug("{}: on_request_blocks: ignoring remaining blocks; busy " ++
                         "(replica={} ignored={}/{})", .{
-                        self.replica,
+                        self.log_prefix(),
                         message.header.replica,
                         requests.len - i,
                         requests.len,
@@ -3187,7 +3269,7 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_request_blocks: reading block " ++
                     "(replica={} address={} checksum={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.replica,
                     request.block_address,
                     request.block_checksum,
@@ -3229,7 +3311,7 @@ pub fn ReplicaType(
             if (result != .valid) {
                 log.debug("{}: on_request_blocks: error: {s}: " ++
                     "(destination={} address={} checksum={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(result),
                     read.destination,
                     grid_read.address,
@@ -3239,7 +3321,7 @@ pub fn ReplicaType(
             }
 
             log.debug("{}: on_request_blocks: success: (destination={} address={} checksum={})", .{
-                self.replica,
+                self.log_prefix(),
                 read.destination,
                 grid_read.address,
                 grid_read.checksum,
@@ -3268,7 +3350,7 @@ pub fn ReplicaType(
                 assert(self.grid.read_global_queue.empty());
 
                 log.debug("{}: on_block: ignoring; grid is canceling (address={} checksum={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
                 });
@@ -3282,7 +3364,7 @@ pub fn ReplicaType(
                 assert(!self.grid.free_set.is_free(message.header.address));
 
                 log.debug("{}: on_block: fulfilled address={} checksum={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
                 });
@@ -3298,7 +3380,7 @@ pub fn ReplicaType(
                 const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
 
                 log.debug("{}: on_block: repairing address={} checksum={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
                 });
@@ -3325,7 +3407,7 @@ pub fn ReplicaType(
 
             if (!grid_fulfill and !grid_repair) {
                 log.debug("{}: on_block: ignoring; block not needed (address={} checksum={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
                 });
@@ -3339,7 +3421,7 @@ pub fn ReplicaType(
                 self.grid_repair_writes.release(write);
             }
             log.debug("{}: on_block: repair done address={}", .{
-                self.replica,
+                self.log_prefix(),
                 grid_write.address,
             });
 
@@ -3426,7 +3508,7 @@ pub fn ReplicaType(
             {
                 log.warn("{}: on_prepare_timeout: received quorum " ++
                     "(prepare_oks={} quorum_replication={} replica_count={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     prepare.ok_from_all_replicas.count(),
                     self.quorum_replication,
                     self.replica_count,
@@ -3483,7 +3565,7 @@ pub fn ReplicaType(
                 assert(prepare.message.header.op <= self.op);
 
                 self.prepare_timeout.reset();
-                log.debug("{}: on_prepare_timeout: waiting for journal", .{self.replica});
+                log.debug("{}: on_prepare_timeout: waiting for journal", .{self.log_prefix()});
 
                 // We may be slow and waiting for the write to complete.
                 //
@@ -3506,7 +3588,7 @@ pub fn ReplicaType(
                 assert(replica < self.replica_count);
 
                 log.debug("{}: on_prepare_timeout: waiting for replica {}", .{
-                    self.replica,
+                    self.log_prefix(),
                     replica,
                 });
             }
@@ -3517,7 +3599,7 @@ pub fn ReplicaType(
             assert(replica != self.replica);
 
             log.debug("{}: on_prepare_timeout: replicating to replica {}", .{
-                self.replica,
+                self.log_prefix(),
                 replica,
             });
             self.send_message_to_replica(replica, prepare.message);
@@ -3530,7 +3612,7 @@ pub fn ReplicaType(
             if (self.solo()) return;
 
             log.debug("{}: on_primary_abdicate_timeout: abdicating (view={})", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
             });
             self.primary_abdicating = true;
@@ -3554,7 +3636,7 @@ pub fn ReplicaType(
             if (self.solo()) return;
 
             log.debug("{}: on_normal_heartbeat_timeout: heartbeat lost (view={})", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
             });
             self.send_start_view_change();
@@ -3615,7 +3697,7 @@ pub fn ReplicaType(
             self.request_start_view_message_timeout.reset();
 
             log.debug("{}: on_request_start_view_message_timeout: view={}", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
             });
             self.send_header_to_replica(
@@ -3635,17 +3717,6 @@ pub fn ReplicaType(
 
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
-
-            // We intentionally omit setting `repair_header_op_next` to `op_repair_min`. This avoids
-            // fetching extraneous headers from `op_repair_min → header break` every time the
-            // repair_timeout is fired, since we have already attempted to fetch these headers once!
-            // If we encounter a break before `repair_header_op_next`, (for example if replica
-            // we requested from is down or if its headers message was dropped), we simply request
-            // the missing headers, which is a smaller range to request.
-            {
-                self.repair_prepare_op_next_committed = self.op_repair_min();
-                self.repair_prepare_op_next_uncommitted = self.commit_min + 1;
-            }
 
             self.repair();
         }
@@ -3667,7 +3738,7 @@ pub fn ReplicaType(
             if (self.repair_stuck()) {
                 log.warn("{}: on_repair_sync_timeout: request sync; lagging behind cluster " ++
                     "(op_head={} commit_min={} commit_max={} commit_stage={s})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.op,
                     self.commit_min,
                     self.commit_max,
@@ -3724,7 +3795,7 @@ pub fn ReplicaType(
 
                 log.debug("{}: on_grid_scrub_timeout: fault found: " ++
                     "block_address={} block_checksum={x:0>32} block_type={s}", .{
-                    self.replica,
+                    self.log_prefix(),
                     fault.block_address,
                     fault.block_checksum,
                     @tagName(fault.block_type),
@@ -3805,7 +3876,7 @@ pub fn ReplicaType(
                 self.state_machine.prepare_timestamp = timestamp;
                 if (self.view_durable_updating()) {
                     log.debug("{}: on_pulse_timeout: ignoring (still persisting view)", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                 } else {
                     self.send_request_pulse_to_self();
@@ -3830,7 +3901,7 @@ pub fn ReplicaType(
                 if (release_next == null or release_next.?.value != upgrade_release.value) {
                     if (self.view_durable_updating()) {
                         log.debug("{}: on_upgrade_timeout: ignoring (still persisting view)", .{
-                            self.replica,
+                            self.log_prefix(),
                         });
                     } else {
                         self.send_request_upgrade_to_self();
@@ -3874,7 +3945,7 @@ pub fn ReplicaType(
 
             if (release_target) |release_target_| {
                 log.info("{}: on_upgrade_timeout: upgrading from release={}..{}", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.release,
                     release_target_,
                 });
@@ -3934,7 +4005,7 @@ pub fn ReplicaType(
                 {
                     log.debug("{}: on_{s}: replacing " ++
                         "(newer message replica={} checkpoint={}..{} commit={}..{})", .{
-                        self.replica,
+                        self.log_prefix(),
                         command,
                         message.header.replica,
                         m.header.checkpoint_op,
@@ -3952,7 +4023,7 @@ pub fn ReplicaType(
                     m.header.present_bitset != message.header.present_bitset)
                 {
                     log.debug("{}: on_{s}: ignoring (older message replica={})", .{
-                        self.replica,
+                        self.log_prefix(),
                         command,
                         message.header.replica,
                     });
@@ -3961,7 +4032,7 @@ pub fn ReplicaType(
                 }
 
                 log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     command,
                     message.header.replica,
                 });
@@ -4002,7 +4073,7 @@ pub fn ReplicaType(
             // transition:
             if (counter.is_set(message.header.replica)) {
                 log.debug("{}: on_{s}: ignoring (duplicate message replica={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     command,
                     message.header.replica,
                 });
@@ -4015,12 +4086,12 @@ pub fn ReplicaType(
 
             // Count the number of unique messages now received:
             const count = counter.count();
-            log.debug("{}: on_{s}: {} message(s)", .{ self.replica, command, count });
+            log.debug("{}: on_{s}: {} message(s)", .{ self.log_prefix(), command, count });
             assert(count <= self.replica_count);
 
             // Wait until we have exactly `threshold` messages for quorum:
             if (count < threshold) {
-                log.debug("{}: on_{s}: waiting for quorum", .{ self.replica, command });
+                log.debug("{}: on_{s}: waiting for quorum", .{ self.log_prefix(), command });
                 return null;
             }
 
@@ -4028,7 +4099,7 @@ pub fn ReplicaType(
             // happened:
             if (count > threshold) {
                 log.debug("{}: on_{s}: ignoring (quorum received already)", .{
-                    self.replica,
+                    self.log_prefix(),
                     command,
                 });
                 return null;
@@ -4054,7 +4125,7 @@ pub fn ReplicaType(
 
             if (commit > self.commit_max) {
                 log.debug("{}: {s}: advancing commit_max={}..{}", .{
-                    self.replica,
+                    self.log_prefix(),
                     source.fn_name,
                     self.commit_max,
                     commit,
@@ -4076,15 +4147,16 @@ pub fn ReplicaType(
                 // (never concurrently). This ensures that there will be no gaps in the WAL during
                 // crash recovery.
                 log.debug("{}: append: serializing append op={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                 });
             } else {
                 log.debug("{}: append: appending to journal op={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                 });
-                self.write_prepare(message, .append);
+
+                _ = self.write_prepare(message, .append);
             }
         }
 
@@ -4150,7 +4222,7 @@ pub fn ReplicaType(
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
                 log.debug("{}: commit_pipeline: already committing ({s}; commit_min={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(self.commit_stage),
                     self.commit_min,
                 });
@@ -4182,7 +4254,7 @@ pub fn ReplicaType(
             // Guard against multiple concurrent invocations of commit_journal()/commit_pipeline():
             if (self.commit_stage != .idle) {
                 log.debug("{}: commit_journal: already committing ({s}; commit_min={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(self.commit_stage),
                     self.commit_min,
                 });
@@ -4441,7 +4513,7 @@ pub fn ReplicaType(
 
             if (!prepare.ok_quorum_received) {
                 // Eventually handled by on_prepare_timeout().
-                log.debug("{}: commit_start_pipeline: waiting for quorum", .{self.replica});
+                log.debug("{}: commit_start_pipeline: waiting for quorum", .{self.log_prefix()});
                 return;
             }
 
@@ -4484,7 +4556,7 @@ pub fn ReplicaType(
 
                 if (self.pipeline.cache.prepare_by_op_and_checksum(op, header.checksum)) |prepare| {
                     log.debug("{}: commit_start_journal: cached prepare op={} checksum={}", .{
-                        self.replica,
+                        self.log_prefix(),
                         op,
                         header.checksum,
                     });
@@ -4493,8 +4565,10 @@ pub fn ReplicaType(
                 } else {
                     self.journal.read_prepare(
                         commit_start_journal_callback,
-                        op,
-                        header.checksum,
+                        .{
+                            .op = op,
+                            .checksum = header.checksum,
+                        },
                     );
                     return .pending;
                 }
@@ -4506,16 +4580,18 @@ pub fn ReplicaType(
         fn commit_start_journal_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.Read.Options,
         ) void {
             assert(self.status == .normal or self.status == .view_change or
                 (self.status == .recovering and self.solo()));
             assert(self.commit_stage == .start);
             assert(self.commit_prepare == null);
-            assert(destination_replica == null);
+            assert(options.destination_replica == null);
 
             if (prepare == null) {
-                log.debug("{}: commit_start_journal_callback: prepare == null", .{self.replica});
+                log.debug("{}: commit_start_journal_callback: prepare == null", .{
+                    self.log_prefix(),
+                });
                 if (self.solo()) @panic("cannot recover corrupt prepare");
                 return self.commit_dispatch_resume();
             }
@@ -4524,10 +4600,10 @@ pub fn ReplicaType(
                 .normal => {},
                 .view_change => {
                     if (self.primary_index(self.view) != self.replica) {
-                        log.debug("{}: commit_start_journal_callback: no longer primary view={}", .{
-                            self.replica,
-                            self.view,
-                        });
+                        log.debug(
+                            "{}: commit_start_journal_callback: no longer primary view={}",
+                            .{ self.log_prefix(), self.view },
+                        );
                         assert(!self.solo());
                         return self.commit_dispatch_resume();
                     }
@@ -4575,7 +4651,7 @@ pub fn ReplicaType(
                 // replaying a message that we prepared before a restart, and the restart changed
                 // our batch_size_limit.
                 log.err("{}: commit_prefetch: op={} size={} size_limit={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     prepare.header.op,
                     prepare.header.size,
                     self.request_size_limit,
@@ -4636,8 +4712,10 @@ pub fn ReplicaType(
                 }
                 break :commit_min_min min;
             };
-            assert(commit_min_min <= self.commit_min);
-            const commit_lag = self.commit_min - commit_min_min;
+            // An old primary may have committed ahead of us (the new primary), but not participated
+            // in the DVC quorum.
+            assert(commit_min_min <= self.commit_min + constants.pipeline_prepare_queue_max);
+            const commit_lag = self.commit_min -| commit_min_min;
 
             const stall_ms = ms: {
                 if (!pipeline_waiting) break :ms 0;
@@ -4672,7 +4750,7 @@ pub fn ReplicaType(
                 return .ready;
             } else {
                 log.debug("{}: commit_stall op={} (oks={b} commit_lag={} stall_ticks={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     prepare.message.header.op,
                     prepare.ok_from_all_replicas.bits,
                     commit_lag,
@@ -4733,10 +4811,10 @@ pub fn ReplicaType(
                         // A cluster-of-one writes prepares sequentially to avoid gaps in the
                         // WAL caused by reordered writes.
                         log.debug("{}: append: appending to journal op={}", .{
-                            self.replica,
+                            self.log_prefix(),
                             next.message.header.op,
                         });
-                        self.write_prepare(next.message, .append);
+                        _ = self.write_prepare(next.message, .append);
                     }
                 }
 
@@ -4801,6 +4879,7 @@ pub fn ReplicaType(
         fn commit_checkpoint_data(self: *Replica) enum { ready, pending } {
             assert(self.commit_stage == .checkpoint_data);
             assert(self.commit_stage.checkpoint_data.count() == 0);
+            self.grid.assert_only_repairing();
 
             const op = self.commit_prepare.?.header.op;
             assert(op == self.commit_min);
@@ -4814,7 +4893,7 @@ pub fn ReplicaType(
             log.info("{}: commit_checkpoint_data: checkpoint_data start " ++
                 "(checkpoint={}..{} commit_min={} op={} commit_max={} op_prepare_max={} " ++
                 "free_set.acquired={} free_set.released={})", .{
-                self.replica,
+                self.log_prefix(),
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
                 self.commit_min,
@@ -4826,10 +4905,6 @@ pub fn ReplicaType(
             });
 
             if (self.event_callback) |hook| hook(self, .checkpoint_commenced);
-
-            // TODO(Compaction pacing) Move this to before the if guard once there is no IO
-            // between beats.
-            self.grid.assert_only_repairing();
 
             const chunks = self.client_sessions_checkpoint.encode_chunks();
             assert(chunks.len == 1);
@@ -4912,7 +4987,7 @@ pub fn ReplicaType(
             {
                 log.info("{}: commit_checkpoint_data_callback_join: checkpoint_data done " ++
                     "(op={} current_checkpoint={} next_checkpoint={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.op,
                     self.op_checkpoint(),
                     self.op_checkpoint_next(),
@@ -4968,7 +5043,7 @@ pub fn ReplicaType(
                 if (self.grid.free_set.highest_address_acquired()) |address| {
                     assert(address > 0);
                     assert(self.grid.free_set_checkpoint_blocks_acquired.size > 0);
-                    assert(self.grid.free_set_checkpoint_blocks_released.size > 0);
+                    maybe(self.grid.free_set_checkpoint_blocks_released.size == 0);
 
                     storage_size += address * constants.block_size;
                 } else {
@@ -4981,7 +5056,7 @@ pub fn ReplicaType(
             };
 
             if (self.superblock.working.vsr_state.sync_op_max != 0 and sync_op_max == 0) {
-                log.info("{}: sync: done", .{self.replica});
+                log.info("{}: sync: done", .{self.log_prefix()});
             }
 
             if (self.status == .view_change and self.view == self.log_view) {
@@ -5005,7 +5080,7 @@ pub fn ReplicaType(
             log.info("{}: commit_checkpoint_superblock: checkpoint_superblock start " ++
                 "(op={} checkpoint={}..{} view_durable={}..{} " ++
                 "log_view_durable={}..{})", .{
-                self.replica,
+                self.log_prefix(),
                 self.op,
                 self.op_checkpoint(),
                 self.op_checkpoint_next(),
@@ -5066,7 +5141,7 @@ pub fn ReplicaType(
             log.info(
                 "{}: commit_checkpoint_superblock_callback: " ++
                     "checkpoint_superblock done (op={} new_checkpoint={})",
-                .{ self.replica, self.op, self.op_checkpoint() },
+                .{ self.log_prefix(), self.op, self.op_checkpoint() },
             );
 
             self.grid.assert_only_repairing();
@@ -5100,7 +5175,7 @@ pub fn ReplicaType(
             self.commit_started = null;
             if (commit_completion_time_local.ms() > constants.client_request_completion_warn_ms) {
                 log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
                     self.commit_prepare.?.header.operation.tag_name(StateMachine),
@@ -5177,7 +5252,7 @@ pub fn ReplicaType(
             }
 
             log.debug("{}: execute_op: executing view={} primary={} op={} checksum={} ({s})", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
                 self.primary_index(self.view) == self.replica,
                 prepare.header.op,
@@ -5189,7 +5264,7 @@ pub fn ReplicaType(
             defer self.message_bus.unref(reply);
 
             log.debug("{}: execute_op: commit_timestamp={} prepare.header.timestamp={}", .{
-                self.replica,
+                self.log_prefix(),
                 self.state_machine.commit_timestamp,
                 prepare.header.timestamp,
             });
@@ -5308,7 +5383,7 @@ pub fn ReplicaType(
 
                 log.debug(
                     "{}: execute_op: skip client table update: prepare.op={} checkpoint={}",
-                    .{ self.replica, prepare.header.op, self.op_checkpoint() },
+                    .{ self.log_prefix(), prepare.header.op, self.op_checkpoint() },
                 );
             } else {
                 switch (reply.header.operation) {
@@ -5322,12 +5397,12 @@ pub fn ReplicaType(
             if (self.primary_index(self.view) == self.replica) {
                 if (reply.header.client == 0) {
                     log.debug("{}: execute_op: no reply to client: {}", .{
-                        self.replica,
+                        self.log_prefix(),
                         reply.header,
                     });
                 } else {
                     log.debug("{}: execute_op: replying to client: {}", .{
-                        self.replica,
+                        self.log_prefix(),
                         reply.header,
                     });
                     self.send_reply_message_to_client(reply);
@@ -5452,17 +5527,17 @@ pub fn ReplicaType(
                     vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()).?);
 
                 log.debug("{}: execute_op_upgrade: release={} (ignoring, already upgraded)", .{
-                    self.replica,
+                    self.log_prefix(),
                     request.release,
                 });
             } else {
                 if (self.upgrade_release) |upgrade_release| {
                     assert(upgrade_release.value == request.release.value);
 
-                    log.debug("{}: execute_op_upgrade: release={} (ignoring, already upgrading)", .{
-                        self.replica,
-                        request.release,
-                    });
+                    log.debug(
+                        "{}: execute_op_upgrade: release={} (ignoring, already upgrading)",
+                        .{ self.log_prefix(), request.release },
+                    );
                 } else {
                     if (self.pipeline == .queue) {
                         self.pipeline.queue.verify();
@@ -5473,7 +5548,7 @@ pub fn ReplicaType(
                     }
 
                     log.debug("{}: execute_op_upgrade: release={}", .{
-                        self.replica,
+                        self.log_prefix(),
                         request.release,
                     });
 
@@ -5521,7 +5596,7 @@ pub fn ReplicaType(
                 assert(self.client_sessions.count() == constants.clients_max - 1);
 
                 log.warn("{}: client_table_entry_create: clients={}/{} evicting client={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     clients,
                     constants.clients_max,
                     evictee,
@@ -5533,7 +5608,7 @@ pub fn ReplicaType(
             }
 
             log.debug("{}: client_table_entry_create: write (client={} session={} request={})", .{
-                self.replica,
+                self.log_prefix(),
                 reply.header.client,
                 session,
                 request,
@@ -5570,7 +5645,7 @@ pub fn ReplicaType(
                 // still have access to the prepare in the journal (it may have been snapshotted).
 
                 log.debug("{}: client_table_entry_update: client={} session={} request={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     reply.header.client,
                     entry.session,
                     reply.header.request,
@@ -5786,7 +5861,9 @@ pub fn ReplicaType(
             assert(message.header.client != 0);
 
             if (self.standby()) {
-                log.warn("{}: on_ping_client: misdirected message (standby)", .{self.replica});
+                log.warn("{}: on_ping_client: misdirected message (standby)", .{
+                    self.log_prefix(),
+                });
                 return true;
             }
 
@@ -5801,7 +5878,7 @@ pub fn ReplicaType(
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.release,
                     self.release_client_min,
@@ -5819,7 +5896,7 @@ pub fn ReplicaType(
             if (message.header.release.value > self.release.value) {
                 log.warn("{}: on_ping_client: ignoring unsupported client version; too high " ++
                     "(client={} version={}>{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.release,
                     self.release,
@@ -5845,24 +5922,29 @@ pub fn ReplicaType(
             }
 
             if (self.status != .normal) {
-                log.debug("{}: on_prepare_ok: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_prepare_ok: ignoring ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return true;
             }
 
             if (message.header.view < self.view) {
-                log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.replica});
+                log.debug("{}: on_prepare_ok: ignoring (older view)", .{self.log_prefix()});
                 return true;
             }
 
             if (message.header.view > self.view) {
                 // Another replica is treating us as the primary for a view we do not know about.
                 // This may be caused by a fault in the network topology.
-                log.warn("{}: on_prepare_ok: misdirected message (newer view)", .{self.replica});
+                log.warn("{}: on_prepare_ok: misdirected message (newer view)", .{
+                    self.log_prefix(),
+                });
                 return true;
             }
 
             if (self.backup()) {
-                log.warn("{}: on_prepare_ok: misdirected message (backup)", .{self.replica});
+                log.warn("{}: on_prepare_ok: misdirected message (backup)", .{self.log_prefix()});
                 return true;
             }
 
@@ -5890,7 +5972,11 @@ pub fn ReplicaType(
                 // but does not itself install headers, since its head is unknown.
             } else {
                 if (self.status != .normal and self.status != .view_change) {
-                    log.debug("{}: on_{s}: ignoring ({})", .{ self.replica, command, self.status });
+                    log.debug("{}: on_{s}: ignoring ({})", .{
+                        self.log_prefix(),
+                        command,
+                        self.status,
+                    });
                     return true;
                 }
             }
@@ -5905,12 +5991,18 @@ pub fn ReplicaType(
                 assert(message.header.command == .request_start_view);
 
                 if (message.header.view < self.view) {
-                    log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
+                    log.debug("{}: on_{s}: ignoring (older view)", .{
+                        self.log_prefix(),
+                        command,
+                    });
                     return true;
                 }
 
                 if (message.header.view > self.view) {
-                    log.debug("{}: on_{s}: ignoring (newer view)", .{ self.replica, command });
+                    log.debug("{}: on_{s}: ignoring (newer view)", .{
+                        self.log_prefix(),
+                        command,
+                    });
                     return true;
                 }
             }
@@ -5918,7 +6010,10 @@ pub fn ReplicaType(
             if (self.ignore_repair_message_during_view_change(message)) return true;
 
             if (message.header.replica == self.replica) {
-                log.warn("{}: on_{s}: misdirected message (self)", .{ self.replica, command });
+                log.warn("{}: on_{s}: misdirected message (self)", .{
+                    self.log_prefix(),
+                    command,
+                });
                 return true;
             }
 
@@ -5927,7 +6022,7 @@ pub fn ReplicaType(
                     .headers => {},
                     .request_start_view, .request_headers, .request_prepare, .request_reply => {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -5941,7 +6036,7 @@ pub fn ReplicaType(
                     // Only the primary may receive these messages:
                     .request_start_view => {
                         log.warn("{}: on_{s}: misdirected message (backup)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -5960,19 +6055,22 @@ pub fn ReplicaType(
 
             switch (message.header.command) {
                 .request_start_view => {
-                    log.debug("{}: on_{s}: ignoring (view change)", .{ self.replica, command });
+                    log.debug("{}: on_{s}: ignoring (view change)", .{
+                        self.log_prefix(),
+                        command,
+                    });
                     return true;
                 },
                 .headers => {
                     if (self.primary_index(self.view) != self.replica) {
                         log.debug("{}: on_{s}: ignoring (view change, received by backup)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
                     } else if (!self.do_view_change_quorum) {
                         log.debug("{}: on_{s}: ignoring (view change, waiting for quorum)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -5991,12 +6089,15 @@ pub fn ReplicaType(
 
         fn ignore_request_message(self: *Replica, message: *Message.Request) bool {
             if (self.standby()) {
-                log.warn("{}: on_request: misdirected message (standby)", .{self.replica});
+                log.warn("{}: on_request: misdirected message (standby)", .{self.log_prefix()});
                 return true;
             }
 
             if (self.status != .normal) {
-                log.debug("{}: on_request: ignoring ({})", .{ self.replica, self.status });
+                log.debug("{}: on_request: ignoring ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return true;
             }
 
@@ -6007,7 +6108,7 @@ pub fn ReplicaType(
                 // or a message was misdirected. Intentionally don't try to forward the message to
                 // the primary, to avoid amplifying the network load.
                 log.debug("{}: on_request: ignoring (backup view={} header.view={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                     message.header.view,
                 });
@@ -6018,7 +6119,7 @@ pub fn ReplicaType(
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_request: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.release,
                     self.release_client_min,
@@ -6033,7 +6134,7 @@ pub fn ReplicaType(
             if (message.header.release.value > self.release.value) {
                 log.warn("{}: on_request: ignoring unsupported client version; too high " ++
                     "(client={} version={}>{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.release,
                     self.release,
@@ -6047,7 +6148,7 @@ pub fn ReplicaType(
 
             if (message.header.size > self.request_size_limit) {
                 log.warn("{}: on_request: ignoring oversized request (client={} size={}>{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.size,
                     self.request_size_limit,
@@ -6065,7 +6166,7 @@ pub fn ReplicaType(
             // - client/replica version mismatch
             if (!message.header.operation.valid(StateMachine)) {
                 log.warn("{}: on_request: ignoring invalid operation (client={} operation={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     @intFromEnum(message.header.operation),
                 });
@@ -6083,7 +6184,7 @@ pub fn ReplicaType(
                     log.warn(
                         "{}: on_request: ignoring invalid body (operation={s}, body.len={})",
                         .{
-                            self.replica,
+                            self.log_prefix(),
                             @tagName(operation),
                             message.body_used().len,
                         },
@@ -6108,7 +6209,7 @@ pub fn ReplicaType(
             {
                 log.warn("{}: on_request: ignoring register without body" ++
                     " (client={} version={}<{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.client,
                     message.header.release,
                     self.release_client_min,
@@ -6121,7 +6222,9 @@ pub fn ReplicaType(
             }
 
             if (self.view_durable_updating()) {
-                log.debug("{}: on_request: ignoring (still persisting view)", .{self.replica});
+                log.debug("{}: on_request: ignoring (still persisting view)", .{
+                    self.log_prefix(),
+                });
                 return true;
             }
 
@@ -6145,14 +6248,14 @@ pub fn ReplicaType(
 
                 if (upgrade_request.release.value == self.release.value) {
                     log.debug("{}: on_request: ignoring (upgrade to current version)", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                     return true;
                 }
 
                 if (upgrade_request.release.value < self.release.value) {
                     log.warn("{}: on_request: ignoring (upgrade to old version)", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                     return true;
                 }
@@ -6160,7 +6263,7 @@ pub fn ReplicaType(
                 if (self.upgrade_release) |upgrade_release| {
                     if (upgrade_request.release.value != upgrade_release.value) {
                         log.warn("{}: on_request: ignoring (upgrade to different version)", .{
-                            self.replica,
+                            self.log_prefix(),
                         });
                         return true;
                     }
@@ -6173,13 +6276,13 @@ pub fn ReplicaType(
                     // immediately prior to the checkpoint trigger are noops (operation=upgrade) so
                     // that they will behave identically before and after the upgrade when they are
                     // replayed.
-                    log.debug("{}: on_request: ignoring (upgrading)", .{self.replica});
+                    log.debug("{}: on_request: ignoring (upgrading)", .{self.log_prefix()});
                     return true;
                 }
 
                 // Even though `operation=upgrade` hasn't committed, it may be in the pipeline.
                 if (self.pipeline.queue.contains_operation(.upgrade)) {
-                    log.debug("{}: on_request: ignoring (upgrade queued)", .{self.replica});
+                    log.debug("{}: on_request: ignoring (upgrade queued)", .{self.log_prefix()});
                     return true;
                 }
             }
@@ -6219,7 +6322,7 @@ pub fn ReplicaType(
                     //    the other clients).
                     // 8. `A` sends a second request (`A₂`), but `A` has the session number from the
                     //    first time `A₁` was committed.
-                    log.mark.err("{}: on_request: ignoring older session", .{self.replica});
+                    log.mark.err("{}: on_request: ignoring older session", .{self.log_prefix()});
                     self.send_eviction_message_to_client(message.header.client, .session_too_low);
                     return true;
                 } else if (entry.session < message.header.session) {
@@ -6227,7 +6330,7 @@ pub fn ReplicaType(
                     // number.
                     log.err(
                         "{}: on_request: ignoring newer session (client bug)",
-                        .{self.replica},
+                        .{self.log_prefix()},
                     );
                     return true;
                 }
@@ -6237,7 +6340,7 @@ pub fn ReplicaType(
                     log.err(
                         "{}: on_request: ignoring request from unexpected release" ++
                             " expected={} found={} (client bug)",
-                        .{ self.replica, entry.header.release, message.header.release },
+                        .{ self.log_prefix(), entry.header.release, message.header.release },
                     );
                     self.send_eviction_message_to_client(
                         message.header.client,
@@ -6247,28 +6350,32 @@ pub fn ReplicaType(
                 }
 
                 if (entry.header.request > message.header.request) {
-                    log.debug("{}: on_request: ignoring older request", .{self.replica});
+                    log.debug("{}: on_request: ignoring older request", .{self.log_prefix()});
                     return true;
                 } else if (entry.header.request == message.header.request) {
                     if (message.header.checksum == entry.header.request_checksum) {
                         assert(entry.header.operation == message.header.operation);
 
-                        log.debug("{}: on_request: replying to duplicate request", .{self.replica});
+                        log.debug("{}: on_request: replying to duplicate request", .{
+                            self.log_prefix(),
+                        });
                         self.on_request_repeat_reply(message, entry);
                         return true;
                     } else {
-                        log.err("{}: on_request: request collision (client bug)", .{self.replica});
+                        log.err("{}: on_request: request collision (client bug)", .{
+                            self.log_prefix(),
+                        });
                         return true;
                     }
                 } else if (entry.header.request + 1 == message.header.request) {
                     if (message.header.parent == entry.header.context) {
                         // The client has proved that they received our last reply.
-                        log.debug("{}: on_request: new request", .{self.replica});
+                        log.debug("{}: on_request: new request", .{self.log_prefix()});
                         return false;
                     } else {
                         // The client may have only one request inflight at a time.
                         log.err("{}: on_request: ignoring new request (client bug)", .{
-                            self.replica,
+                            self.log_prefix(),
                         });
                         return true;
                     }
@@ -6277,12 +6384,12 @@ pub fn ReplicaType(
                     // - client bug, or
                     // - this primary is no longer the actual primary
                     log.err("{}: on_request: ignoring newer request (client|network bug)", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                     return true;
                 }
             } else if (message.header.operation == .register) {
-                log.debug("{}: on_request: new session", .{self.replica});
+                log.debug("{}: on_request: new session", .{self.log_prefix()});
                 return false;
             } else if (self.pipeline.queue.message_by_client(message.header.client)) |_| {
                 // The client registered with the previous primary, which committed and replied back
@@ -6292,7 +6399,7 @@ pub fn ReplicaType(
                 // However, the session is about to be registered, so we must wait for it to commit.
                 log.debug(
                     "{}: on_request: waiting for session to commit (client={})",
-                    .{ self.replica, message.header.client },
+                    .{ self.log_prefix(), message.header.client },
                 );
                 return true;
             } else {
@@ -6307,7 +6414,7 @@ pub fn ReplicaType(
                     // primary) if we are partitioned and don't yet know about a session. We solve
                     // this by having clients include the view number and rejecting messages from
                     // clients with newer views.
-                    log.warn("{}: on_request: no session", .{self.replica});
+                    log.warn("{}: on_request: no session", .{self.log_prefix()});
                     self.send_eviction_message_to_client(message.header.client, .no_session);
                     return true;
                 }
@@ -6357,7 +6464,7 @@ pub fn ReplicaType(
                     assert(err == error.Busy);
 
                     log.debug("{}: on_request: ignoring (client_replies busy)", .{
-                        self.replica,
+                        self.log_prefix(),
                     });
                 };
             }
@@ -6386,7 +6493,7 @@ pub fn ReplicaType(
             assert(reply.header.size > @sizeOf(Header));
 
             log.debug("{}: on_request: repeat reply (client={} request={})", .{
-                self.replica,
+                self.log_prefix(),
                 reply.header.client,
                 reply.header.request,
             });
@@ -6412,7 +6519,9 @@ pub fn ReplicaType(
 
                         if (pipeline_message.header.checksum == message.header.checksum) {
                             assert(pipeline_message_header.request == message.header.request);
-                            log.debug("{}: on_request: ignoring (already queued)", .{self.replica});
+                            log.debug("{}: on_request: ignoring (already queued)", .{
+                                self.log_prefix(),
+                            });
                             return true;
                         }
                     },
@@ -6423,7 +6532,7 @@ pub fn ReplicaType(
                             assert(pipeline_message_header.op > self.commit_max);
                             assert(pipeline_message_header.request == message.header.request);
                             log.debug("{}: on_request: ignoring (already preparing)", .{
-                                self.replica,
+                                self.log_prefix(),
                             });
                             return true;
                         }
@@ -6431,12 +6540,12 @@ pub fn ReplicaType(
                     else => unreachable,
                 }
 
-                log.warn("{}: on_request: ignoring (client forked)", .{self.replica});
+                log.warn("{}: on_request: ignoring (client forked)", .{self.log_prefix()});
                 return true;
             }
 
             if (self.pipeline.queue.full()) {
-                log.debug("{}: on_request: ignoring (pipeline full)", .{self.replica});
+                log.debug("{}: on_request: ignoring (pipeline full)", .{self.log_prefix()});
                 return true;
             }
 
@@ -6452,7 +6561,7 @@ pub fn ReplicaType(
 
             if (self.standby()) {
                 log.warn("{}: on_start_view_change: misdirected message (standby)", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return true;
             }
@@ -6464,7 +6573,7 @@ pub fn ReplicaType(
                 .recovering => unreachable, // Single node clusters don't have view changes.
                 .recovering_head => {
                     log.debug("{}: on_start_view_change: ignoring (status={})", .{
-                        self.replica,
+                        self.log_prefix(),
                         self.status,
                     });
                     return true;
@@ -6473,14 +6582,14 @@ pub fn ReplicaType(
 
             if (self.syncing != .idle) {
                 log.debug("{}: on_start_view_change: ignoring (sync_status={s})", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(self.syncing),
                 });
                 return true;
             }
 
             if (message.header.view < self.view) {
-                log.debug("{}: on_start_view_change: ignoring (older view)", .{self.replica});
+                log.debug("{}: on_start_view_change: ignoring (older view)", .{self.log_prefix()});
                 return true;
             }
 
@@ -6496,7 +6605,10 @@ pub fn ReplicaType(
             const command: []const u8 = @tagName(message.header.command);
 
             if (message.header.view < self.view) {
-                log.debug("{}: on_{s}: ignoring (older view)", .{ self.replica, command });
+                log.debug("{}: on_{s}: ignoring (older view)", .{
+                    self.log_prefix(),
+                    command,
+                });
                 return true;
             }
 
@@ -6505,7 +6617,7 @@ pub fn ReplicaType(
                     // This may be caused by faults in the network topology.
                     if (message.header.replica == self.replica) {
                         log.warn("{}: on_{s}: misdirected message (self)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6515,7 +6627,7 @@ pub fn ReplicaType(
                     // may have fast-forwarded their commit_max via their checkpoint target.
                     if (message_header.commit_max < self.op_checkpoint()) {
                         log.debug("{}: on_{s}: ignoring (older checkpoint)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6526,7 +6638,7 @@ pub fn ReplicaType(
 
                     if (self.standby()) {
                         log.warn("{}: on_{s}: misdirected message (standby)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6534,7 +6646,7 @@ pub fn ReplicaType(
 
                     if (self.status == .recovering_head) {
                         log.debug("{}: on_{s}: ignoring (recovering_head)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6542,7 +6654,7 @@ pub fn ReplicaType(
 
                     if (message.header.view == self.view and self.status == .normal) {
                         log.debug("{}: on_{s}: ignoring (view started)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6550,7 +6662,7 @@ pub fn ReplicaType(
 
                     if (self.do_view_change_quorum) {
                         log.debug("{}: on_{s}: ignoring (quorum received already)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6560,7 +6672,7 @@ pub fn ReplicaType(
                         for (self.do_view_change_from_all_replicas) |dvc| assert(dvc == null);
 
                         log.debug("{}: on_{s}: ignoring (backup awaiting start_view)", .{
-                            self.replica,
+                            self.log_prefix(),
                             command,
                         });
                         return true;
@@ -6627,7 +6739,7 @@ pub fn ReplicaType(
             assert(header.op <= self.op_prepare_max());
 
             log.debug("{}: jump_to_newer_op: advancing: op={}..{} checksum={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.op,
                 header.op - 1,
                 self.journal.header_with_op(self.op).?.checksum,
@@ -6684,7 +6796,7 @@ pub fn ReplicaType(
             // slot may have originally been op that is a wrap ahead.
             if (self.journal.faulty.bit(slot_op_head)) {
                 log.warn("{}: op_head_certain: faulty head slot={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     slot_op_head,
                 });
                 return false;
@@ -6695,7 +6807,7 @@ pub fn ReplicaType(
             // - op=op_prepare_max
             if (self.journal.faulty.bit(slot_prepare_max)) {
                 log.warn("{}: op_head_certain: faulty prepare_max slot={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     slot_prepare_max,
                 });
                 return false;
@@ -6714,7 +6826,10 @@ pub fn ReplicaType(
                 if ((range_empty and index == slot_prepare_max.index) or
                     (!range_empty and slot_known_range.contains(.{ .index = index })))
                 {
-                    log.warn("{}: op_head_certain: faulty slot={}", .{ self.replica, index });
+                    log.warn("{}: op_head_certain: faulty slot={}", .{
+                        self.log_prefix(),
+                        index,
+                    });
                     return false;
                 }
             }
@@ -6912,8 +7027,14 @@ pub fn ReplicaType(
             if (a.view == b.view and a.op + 1 == b.op and a.checksum != b.parent) {
                 assert(a.valid_checksum());
                 assert(b.valid_checksum());
-                log.err("{}: panic_if_hash_chain_would_break: a: {}", .{ self.replica, a });
-                log.err("{}: panic_if_hash_chain_would_break: b: {}", .{ self.replica, b });
+                log.err("{}: panic_if_hash_chain_would_break: a: {}", .{
+                    self.log_prefix(),
+                    a,
+                });
+                log.err("{}: panic_if_hash_chain_would_break: b: {}", .{
+                    self.log_prefix(),
+                    b,
+                });
                 @panic("hash chain would break");
             }
         }
@@ -6930,7 +7051,7 @@ pub fn ReplicaType(
             defer self.message_bus.unref(request.message);
 
             log.debug("{}: primary_pipeline_prepare: request checksum={} client={}", .{
-                self.replica,
+                self.log_prefix(),
                 request.message.header.checksum,
                 request.message.header.client,
             });
@@ -7036,7 +7157,7 @@ pub fn ReplicaType(
             assert(stdx.zeroed(message.buffer[message.header.size..size_ceil]));
 
             log.debug("{}: primary_pipeline_prepare: prepare checksum={} op={}", .{
-                self.replica,
+                self.log_prefix(),
                 message.header.checksum,
                 message.header.op,
             });
@@ -7163,7 +7284,7 @@ pub fn ReplicaType(
         ///    increases, so go to step 1 and repeat.
         fn repair(self: *Replica) void {
             if (!self.repair_timeout.ticking) {
-                log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.replica});
+                log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.log_prefix()});
                 return;
             }
 
@@ -7196,7 +7317,7 @@ pub fn ReplicaType(
                     "{}: repair: break: view={} break={}..{} " ++
                         "(commit={}..{} op={} view_headers_op={})",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         self.view,
                         self.op + 1,
                         self.op_repair_max(),
@@ -7207,7 +7328,9 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-                if (self.repair_messages_budget_journal.spend(1)) {
+                if (self.repair_messages_budget_journal.decrement(.{
+                    .start_view = self.view,
+                })) {
                     self.send_header_to_replica(
                         self.primary_index(self.view),
                         @bitCast(Header.RequestStartView{
@@ -7248,7 +7371,7 @@ pub fn ReplicaType(
                 log.debug(
                     "{}: repair: break: view={} break={}..{} (commit={}..{} op={})",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         self.view,
                         range.op_min,
                         range.op_max,
@@ -7258,7 +7381,7 @@ pub fn ReplicaType(
                     },
                 );
 
-                if (self.repair_messages_budget_journal.spend(1)) {
+                if (self.repair_messages_budget_journal.decrement(.headers)) {
                     self.send_header_to_replica(
                         self.choose_any_other_replica(),
                         @bitCast(Header.RequestHeaders{
@@ -7277,10 +7400,8 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.journal.dirty.count > 0) {
-                // Request and repair any dirty or faulty prepares.
-                self.repair_prepares();
-            }
+            // Request and repair any missing, dirty, or faulty prepares.
+            self.repair_prepares();
 
             if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
                 return;
@@ -7405,7 +7526,7 @@ pub fn ReplicaType(
 
             if (header.view > self.view) {
                 log.debug("{}: repair_header: op={} checksum={} view={} (newer view)", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                     header.view,
@@ -7415,7 +7536,7 @@ pub fn ReplicaType(
 
             if (header.op > self.op) {
                 log.debug("{}: repair_header: op={} checksum={} (advances hash chain head)", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                 });
@@ -7423,7 +7544,7 @@ pub fn ReplicaType(
             } else if (header.op == self.op and !self.journal.has_header(header)) {
                 assert(self.journal.header_with_op(self.op) != null);
                 log.debug("{}: repair_header: op={} checksum={} (changes hash chain head)", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                 });
@@ -7434,7 +7555,7 @@ pub fn ReplicaType(
                 // Slots too far back belong to the next wrap of the log.
                 log.debug(
                     "{}: repair_header: op={} checksum={} (precedes op_repair_min={})",
-                    .{ self.replica, header.op, header.checksum, self.op_repair_min() },
+                    .{ self.log_prefix(), header.op, header.checksum, self.op_repair_min() },
                 );
                 return false;
             }
@@ -7442,14 +7563,14 @@ pub fn ReplicaType(
             if (self.journal.has_header(header)) {
                 if (self.journal.has_prepare(header)) {
                     log.debug("{}: repair_header: op={} checksum={} (checksum clean)", .{
-                        self.replica,
+                        self.log_prefix(),
                         header.op,
                         header.checksum,
                     });
                     return false;
                 } else {
                     log.debug("{}: repair_header: op={} checksum={} (checksum dirty)", .{
-                        self.replica,
+                        self.log_prefix(),
                         header.op,
                         header.checksum,
                     });
@@ -7461,13 +7582,13 @@ pub fn ReplicaType(
                     assert(existing.op != header.op);
                     if (existing.op > header.op) {
                         log.debug("{}: repair_header: op={} checksum={} (same view, newer op)", .{
-                            self.replica,
+                            self.log_prefix(),
                             header.op,
                             header.checksum,
                         });
                     } else {
                         log.debug("{}: repair_header: op={} checksum={} (same view, older op)", .{
-                            self.replica,
+                            self.log_prefix(),
                             header.op,
                             header.checksum,
                         });
@@ -7476,14 +7597,14 @@ pub fn ReplicaType(
                     assert(existing.view != header.view);
 
                     log.debug("{}: repair_header: op={} checksum={} (different view)", .{
-                        self.replica,
+                        self.log_prefix(),
                         header.op,
                         header.checksum,
                     });
                 }
             } else {
                 log.debug("{}: repair_header: op={} checksum={} (gap)", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                 });
@@ -7502,7 +7623,7 @@ pub fn ReplicaType(
                 // 1. undermine any prior prepare_ok guarantee made to the primary, and
                 // 2. leak stale ops back into our in-memory headers (and so into a view change).
                 log.debug("{}: repair_header: op={} checksum={} (disconnected from hash chain)", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                 });
@@ -7606,12 +7727,14 @@ pub fn ReplicaType(
             assert(self.primary_journal_repaired());
 
             if (self.pipeline_repairing) {
-                log.debug("{}: primary_repair_pipeline: already repairing...", .{self.replica});
+                log.debug("{}: primary_repair_pipeline: already repairing...", .{
+                    self.log_prefix(),
+                });
                 return .busy;
             }
 
             if (self.primary_repair_pipeline_op()) |_| {
-                log.debug("{}: primary_repair_pipeline: repairing", .{self.replica});
+                log.debug("{}: primary_repair_pipeline: repairing", .{self.log_prefix()});
                 assert(!self.pipeline_repairing);
                 self.pipeline_repairing = true;
                 self.primary_repair_pipeline_read();
@@ -7692,25 +7815,33 @@ pub fn ReplicaType(
             const op = self.primary_repair_pipeline_op().?;
             const op_checksum = self.journal.header_with_op(op).?.checksum;
             log.debug("{}: primary_repair_pipeline_read: op={} checksum={}", .{
-                self.replica,
+                self.log_prefix(),
                 op,
                 op_checksum,
             });
-            self.journal.read_prepare(repair_pipeline_read_callback, op, op_checksum);
+            self.journal.read_prepare(
+                repair_pipeline_read_callback,
+                .{
+                    .op = op,
+                    .checksum = op_checksum,
+                },
+            );
         }
 
         fn repair_pipeline_read_callback(
             self: *Replica,
             prepare: ?*Message.Prepare,
-            destination_replica: ?u8,
+            options: Journal.Read.Options,
         ) void {
-            assert(destination_replica == null);
+            assert(options.destination_replica == null);
 
             assert(self.pipeline_repairing);
             self.pipeline_repairing = false;
 
             if (prepare == null) {
-                log.debug("{}: repair_pipeline_read_callback: prepare == null", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: prepare == null", .{
+                    self.log_prefix(),
+                });
                 return;
             }
 
@@ -7719,26 +7850,28 @@ pub fn ReplicaType(
                 assert(self.primary_index(self.view) != self.replica);
 
                 log.debug("{}: repair_pipeline_read_callback: no longer in view change status", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return;
             }
 
             if (self.primary_index(self.view) != self.replica) {
-                log.debug("{}: repair_pipeline_read_callback: no longer primary", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: no longer primary", .{
+                    self.log_prefix(),
+                });
                 return;
             }
 
             if (self.commit_min != self.commit_max or self.commit_stage != .idle) {
                 log.debug("{}: repair_pipeline_read_callback: no longer repairing", .{
-                    self.replica,
+                    self.log_prefix(),
                 });
                 return;
             }
 
             if (self.journal.find_latest_headers_break_between(self.commit_max, self.op)) |range| {
                 log.debug("{}: repair_pipeline_read_callback: header break {}..{}", .{
-                    self.replica,
+                    self.log_prefix(),
                     range.op_min,
                     range.op_max,
                 });
@@ -7754,7 +7887,9 @@ pub fn ReplicaType(
 
             // But we still need to check that we are repairing the right prepare.
             const op = self.primary_repair_pipeline_op() orelse {
-                log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: pipeline changed", .{
+                    self.log_prefix(),
+                });
                 return;
             };
 
@@ -7762,17 +7897,19 @@ pub fn ReplicaType(
             assert(op <= self.op);
 
             if (prepare.?.header.op != op) {
-                log.debug("{}: repair_pipeline_read_callback: op changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: op changed", .{self.log_prefix()});
                 return;
             }
 
             if (prepare.?.header.checksum != self.journal.header_with_op(op).?.checksum) {
-                log.debug("{}: repair_pipeline_read_callback: checksum changed", .{self.replica});
+                log.debug("{}: repair_pipeline_read_callback: checksum changed", .{
+                    self.log_prefix(),
+                });
                 return;
             }
 
             log.debug("{}: repair_pipeline_read_callback: op={} checksum={}", .{
-                self.replica,
+                self.log_prefix(),
                 prepare.?.header.op,
                 prepare.?.header.checksum,
             });
@@ -7791,9 +7928,7 @@ pub fn ReplicaType(
 
         /// Attempt to repair prepares between [op_min, op_max], skipping over ops for which we
         /// don't have a header and disregarding hash chain breaks.
-        ///
-        /// Returns maximum op for which request_prepare has been sent.
-        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) ?u64 {
+        fn repair_prepares_between(self: *Replica, op_min: u64, op_max: u64) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
             assert(op_min <= self.op);
@@ -7804,55 +7939,42 @@ pub fn ReplicaType(
             // Request enough prepares to utilize our max IO depth:
             var io_budget = self.journal.writes.available();
             if (io_budget == 0) {
-                log.debug("{}: repair_prepares: waiting for IOP", .{self.replica});
-                return null;
+                log.debug("{}: repair_prepares: waiting for IOP", .{self.log_prefix()});
+                return;
             }
 
-            // Don't check the repair budget for a potential primary in view change, use the full
-            // write bandwidth for repair.
-            if (self.status == .normal and self.repair_messages_budget_journal.available == 0) {
-                log.debug("{}: repair_prepares: waiting for repair budget", .{self.replica});
-                return null;
+            if (self.repair_messages_budget_journal.available == 0) {
+                log.debug("{}: repair_prepares: waiting for repair budget", .{self.log_prefix()});
+                return;
             }
 
-            var requested_op_max: ?u64 = null;
             for (op_min..op_max + 1) |op| {
-                if (self.journal.slot_with_op(op)) |slot| {
-                    if (self.journal.dirty.bit(slot)) {
-                        // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
-                        // Continue to request prepares until our budget is depleted.
-                        if (self.repair_prepare(op)) {
-                            requested_op_max = op;
+                const slot_with_op_maybe = self.journal.slot_with_op(op);
+                if (slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?)) {
+                    // Rebroadcast outstanding `request_prepare` every `repair_timeout` tick.
+                    // Continue to request prepares until our budget is depleted.
+                    if (self.repair_prepare(op)) {
+                        io_budget -= 1;
 
-                            io_budget -= 1;
-                            if (self.status == .normal) {
-                                assert(self.repair_messages_budget_journal.spend(1));
-                                if (self.repair_messages_budget_journal.available == 0) {
-                                    log.debug("{}: repair_prepares: repair budget used", .{
-                                        self.replica,
-                                    });
-                                    break;
-                                }
-                            }
-
-                            if (io_budget == 0) {
-                                log.debug("{}: repair_prepares: IO budget used", .{self.replica});
-                                break;
-                            }
+                        if (self.repair_messages_budget_journal.available == 0) {
+                            log.debug("{}: repair_prepares: repair budget used", .{
+                                self.log_prefix(),
+                            });
+                            break;
                         }
-                    } else {
-                        assert(!self.journal.faulty.bit(slot));
+                        if (io_budget == 0) {
+                            log.debug("{}: repair_prepares: IO budget used", .{self.log_prefix()});
+                            break;
+                        }
                     }
                 }
             }
-
-            return requested_op_max;
         }
 
         fn repair_prepares(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.count > 0);
+            maybe(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
             assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
@@ -7873,7 +7995,7 @@ pub fn ReplicaType(
                         self.journal.faulty.clear(slot);
                         log.debug("{}: repair_prepares: remove slot={} " ++
                             "(faulty, op known, first cycle)", .{
-                            self.replica,
+                            self.log_prefix(),
                             slot.index,
                         });
                     }
@@ -7885,37 +8007,12 @@ pub fn ReplicaType(
             // - our first priority is to commit further,
             // - afterwards, repair committed prepares which are at risk of getting evicted from
             //   the journal, to help repair any lagging replicas.
-            const range_min_uncommitted = @max(
-                self.repair_prepare_op_next_uncommitted,
-                self.commit_min + 1,
-            );
-            const range_max_uncommitted = self.op;
-            if (range_min_uncommitted <= range_max_uncommitted) {
-                if (self.repair_prepares_between(
-                    range_min_uncommitted,
-                    range_max_uncommitted,
-                )) |op| {
-                    assert(op >= self.commit_min + 1);
-                    assert(op <= self.op);
-                    assert(op >= self.repair_prepare_op_next_uncommitted);
-
-                    self.repair_prepare_op_next_uncommitted = op + 1;
-                }
+            if (self.commit_min + 1 <= self.op) {
+                self.repair_prepares_between(self.commit_min + 1, self.op);
             }
 
-            const range_min_committed = @max(
-                self.repair_prepare_op_next_committed,
-                self.op_repair_min(),
-            );
-            const range_max_committed = self.commit_min;
-            if (range_min_committed <= range_max_committed) {
-                if (self.repair_prepares_between(range_min_committed, range_max_committed)) |op| {
-                    assert(op >= self.op_repair_min());
-                    assert(op <= range_max_committed);
-                    assert(op >= self.repair_prepare_op_next_committed);
-
-                    self.repair_prepare_op_next_committed = op + 1;
-                }
+            if (self.op_repair_min() <= self.commit_min) {
+                self.repair_prepares_between(self.op_repair_min(), self.commit_min);
             }
 
             // Clean up out-of-bounds dirty slots so repair() can finish.
@@ -7941,7 +8038,7 @@ pub fn ReplicaType(
                     if (self.journal.dirty.bit(slot)) {
                         log.debug("{}: repair_prepares: remove slot={} " ++
                             "(faulty, precedes checkpoint)", .{
-                            self.replica,
+                            self.log_prefix(),
                             slot.index,
                         });
                         self.journal.remove_entry(slot);
@@ -7966,109 +8063,123 @@ pub fn ReplicaType(
         /// This is effectively "many-to-one" repair, where a single replica recovers using the
         /// resources of many replicas, for faster recovery.
         fn repair_prepare(self: *Replica, op: u64) bool {
-            const slot = self.journal.slot_with_op(op).?;
-            const header = self.journal.header_with_op(op).?;
-            const checksum = header.checksum;
+            const slot_with_op_maybe = self.journal.slot_with_op(op);
+            const checksum = if (slot_with_op_maybe == null)
+                0
+            else
+                self.journal.header_with_op(op).?.checksum;
 
             assert(self.status == .normal or self.status == .view_change);
             assert(self.repairs_allowed());
-            assert(self.journal.dirty.bit(slot));
-
-            // We may be appending to or repairing the journal concurrently.
-            // We do not want to re-request any of these prepares unnecessarily.
-            if (self.journal.writing(header) == .exact) {
-                log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-                return false;
-            }
-
-            // The message may be available in the local pipeline.
-            // For example (replica_count=3):
-            // 1. View=1: Replica 1 is primary, and prepares op 5. The local write fails.
-            // 2. Time passes. The view changes (e.g. due to a timeout)…
-            // 3. View=4: Replica 1 is primary again, and is repairing op 5
-            //    (which is still in the pipeline).
-            //
-            // Alternatively, we might have not started the write when we initially received the
-            // prepare because:
-            // - the journal already had another running write to the same slot, or
-            // - the journal had no IOPs available.
-            //
-            // Using the pipeline to repair is faster than a `request_prepare`.
-            // Also, messages in the pipeline are never corrupt.
-            if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
-                assert(prepare.header.op == op);
-                assert(prepare.header.checksum == checksum);
-
-                if (self.solo()) {
-                    // Solo replicas don't change views and rewrite prepares.
-                    assert(self.journal.writing(header) == .none);
-
-                    // This op won't start writing until all ops in the pipeline preceding it have
-                    // been written.
-                    log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
-                        self.replica,
+            assert(slot_with_op_maybe == null or self.journal.dirty.bit(slot_with_op_maybe.?));
+            assert(self.journal.writes.available() > 0);
+            assert(self.repair_messages_budget_journal.available > 0);
+            if (self.journal.header_with_op(op)) |header| {
+                // We may be appending to or repairing the journal concurrently.
+                // We do not want to re-request any of these prepares unnecessarily.
+                if (self.journal.writing(header) == .exact) {
+                    log.debug("{}: repair_prepare: op={} checksum={} (already writing)", .{
+                        self.log_prefix(),
                         op,
                         checksum,
                     });
-                    const pipeline_head = self.pipeline.queue.prepare_queue.head_ptr().?;
-                    assert(pipeline_head.message.header.op < op);
                     return false;
                 }
 
-                log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
-                    self.replica,
-                    op,
-                    checksum,
-                });
-                self.write_prepare(prepare, .pipeline);
-                return true;
-            }
+                // The message may be available in the local pipeline.
+                // For example (replica_count=3):
+                // 1. View=1: Replica 1 is primary, and prepares op 5. The local write fails.
+                // 2. Time passes. The view changes (e.g. due to a timeout)…
+                // 3. View=4: Replica 1 is primary again, and is repairing op 5
+                //    (which is still in the pipeline).
+                //
+                // Alternatively, we might have not started the write when we initially received the
+                // prepare because:
+                // - the journal already had another running write to the same slot, or
+                // - the journal had no IOPs available.
+                //
+                // Using the pipeline to repair is faster than a `request_prepare`.
+                // Also, messages in the pipeline are never corrupt.
+                if (self.pipeline_prepare_by_op_and_checksum(op, checksum)) |prepare| {
+                    assert(prepare.header.op == op);
+                    assert(prepare.header.checksum == checksum);
 
-            const request_prepare = Header.RequestPrepare{
-                .command = .request_prepare,
-                .cluster = self.cluster,
-                .replica = self.replica,
-                .prepare_op = op,
-                .prepare_checksum = checksum,
-            };
+                    if (self.solo()) {
+                        // Solo replicas don't change views and rewrite prepares.
+                        assert(self.journal.writing(header) == .none);
 
-            if (self.status == .view_change and op > self.commit_max) {
-                // Only the primary is allowed to do repairs in a view change:
-                assert(self.primary_index(self.view) == self.replica);
+                        // This op won't start writing until all ops in the pipeline preceding it
+                        // have been written.
+                        log.debug("{}: repair_prepare: op={} checksum={} (serializing append)", .{
+                            self.log_prefix(),
+                            op,
+                            checksum,
+                        });
+                        const pipeline_head = self.pipeline.queue.prepare_queue.head_ptr().?;
+                        assert(pipeline_head.message.header.op < op);
+                        return false;
+                    }
 
-                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
-                log.debug(
-                    "{}: repair_prepare: op={} checksum={} (uncommitted, {s}, view_change)",
-                    .{
-                        self.replica,
+                    log.debug("{}: repair_prepare: op={} checksum={} (from pipeline)", .{
+                        self.log_prefix(),
                         op,
                         checksum,
-                        reason,
-                    },
-                );
-                self.send_header_to_other_replicas(@bitCast(request_prepare));
-            } else {
-                const nature = if (op > self.commit_max) "uncommitted" else "committed";
-                const reason = if (self.journal.faulty.bit(slot)) "faulty" else "dirty";
-                log.debug("{}: repair_prepare: op={} checksum={} ({s}, {s})", .{
-                    self.replica,
-                    op,
-                    checksum,
-                    nature,
-                    reason,
-                });
-
-                self.send_header_to_replica(
-                    self.choose_any_other_replica(),
-                    @bitCast(request_prepare),
-                );
+                    });
+                    _ = self.write_prepare(prepare, .pipeline);
+                    return true;
+                }
             }
 
-            return true;
+            if (self.repair_messages_budget_journal.decrement(.{ .prepare = .{
+                .view = self.view,
+                .op = op,
+            } })) {
+                const request_prepare = Header.RequestPrepare{
+                    .command = .request_prepare,
+                    .cluster = self.cluster,
+                    .replica = self.replica,
+                    .view = if (slot_with_op_maybe == null) self.view else 0,
+                    .prepare_op = op,
+                    .prepare_checksum = checksum,
+                };
+                const nature = if (op > self.commit_max) "uncommitted" else "committed";
+                const reason = blk: {
+                    if (self.journal.slot_with_op(op)) |slot| {
+                        if (self.journal.faulty.bit(slot)) {
+                            break :blk "faulty";
+                        } else {
+                            break :blk "dirty";
+                        }
+                    } else break :blk "not present";
+                };
+
+                log.debug(
+                    "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
+                    .{
+                        self.log_prefix(),
+                        op,
+                        checksum,
+                        nature,
+                        reason,
+                        @tagName(self.status),
+                    },
+                );
+
+                if (self.status == .view_change) {
+                    // Only the primary is allowed to do repairs in a view change.
+                    assert(self.primary_index(self.view) == self.replica);
+                    self.send_header_to_other_replicas(@bitCast(request_prepare));
+                } else {
+                    self.send_header_to_replica(
+                        self.choose_any_other_replica(),
+                        @bitCast(request_prepare),
+                    );
+                }
+
+                return true;
+            } else {
+                return false;
+            }
         }
 
         fn repairs_allowed(self: *const Replica) bool {
@@ -8176,7 +8287,9 @@ pub fn ReplicaType(
                 // Don't replica messages on a newer release than us if we were the one who
                 // originally sent it. This can happen if our release backtracked due to being
                 // reformatted.
-                log.warn("{}: replicate: ignoring prepare from newer release", .{self.replica});
+                log.warn("{}: replicate: ignoring prepare from newer release", .{
+                    self.log_prefix(),
+                });
                 return;
             }
 
@@ -8195,7 +8308,7 @@ pub fn ReplicaType(
                 assert(replica_target != self.view % self.replica_count);
                 assert(replica_target < self.replica_count + self.standby_count);
                 log.debug("{}: replicate: replicating op={} to replica {}", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     replica_target,
                 });
@@ -8232,7 +8345,7 @@ pub fn ReplicaType(
             }
             assert(count <= self.replica_count);
             log.debug("{}: reset {} {s} message(s) from view={?}", .{
-                self.replica,
+                self.log_prefix(),
                 count,
                 @tagName(command),
                 view,
@@ -8272,31 +8385,37 @@ pub fn ReplicaType(
             maybe(!self.sync_grid_done());
 
             if (self.status != .normal) {
-                log.debug("{}: send_prepare_ok: not sending ({})", .{ self.replica, self.status });
+                log.debug("{}: send_prepare_ok: not sending ({})", .{
+                    self.log_prefix(),
+                    self.status,
+                });
                 return;
             }
 
             if (header.op > self.op) {
                 assert(header.view < self.view);
                 // An op may be reordered concurrently through a view change while being journalled:
-                log.debug("{}: send_prepare_ok: not sending (reordered)", .{self.replica});
+                log.debug("{}: send_prepare_ok: not sending (reordered)", .{self.log_prefix()});
                 return;
             }
 
             if (self.syncing != .idle) {
                 log.debug("{}: send_prepare_ok: not sending (sync_status={s})", .{
-                    self.replica,
+                    self.log_prefix(),
                     @tagName(self.syncing),
                 });
                 return;
             }
             if (header.op > self.op_prepare_ok_max()) {
                 if (!self.sync_grid_done()) {
-                    log.debug("{}: send_prepare_ok: not sending (syncing replica falsely " ++
-                        "contributes to durability of the current checkpoint)", .{self.replica});
+                    log.debug(
+                        "{}: send_prepare_ok: not sending (syncing replica falsely " ++
+                            "contributes to durability of the current checkpoint)",
+                        .{self.log_prefix()},
+                    );
                 } else {
                     log.debug("{}: send_prepare_ok: not sending (falsely contributes to " ++
-                        "durability of the next checkpoint)", .{self.replica});
+                        "durability of the next checkpoint)", .{self.log_prefix()});
                 }
                 return;
             }
@@ -8309,7 +8428,7 @@ pub fn ReplicaType(
 
             if (self.journal.has_prepare(header)) {
                 log.debug("{}: send_prepare_ok: op={} checksum={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     header.op,
                     header.checksum,
                 });
@@ -8317,7 +8436,7 @@ pub fn ReplicaType(
                 if (self.standby()) return;
 
                 const checkpoint_id = self.checkpoint_id_for_op(header.op) orelse {
-                    log.debug("{}: send_prepare_ok: not sending (old)", .{self.replica});
+                    log.debug("{}: send_prepare_ok: not sending (old)", .{self.log_prefix()});
                     return;
                 };
                 assert(checkpoint_id == header.checkpoint_id);
@@ -8352,7 +8471,7 @@ pub fn ReplicaType(
                     }),
                 );
             } else {
-                log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.replica});
+                log.debug("{}: send_prepare_ok: not sending (dirty)", .{self.log_prefix()});
                 return;
             }
         }
@@ -8572,7 +8691,7 @@ pub fn ReplicaType(
             assert(self.primary());
 
             log.warn("{}: sending eviction message to client={} reason={s}", .{
-                self.replica,
+                self.log_prefix(),
                 client,
                 @tagName(reason),
             });
@@ -8711,7 +8830,7 @@ pub fn ReplicaType(
             switch (message.header.into_any()) {
                 inline else => |header| {
                     log.debug("{}: sending {s} to replica {}: {}", .{
-                        self.replica,
+                        self.log_prefix(),
                         @tagName(message.header.command),
                         replica,
                         header,
@@ -8723,7 +8842,10 @@ pub fn ReplicaType(
             } }, 1);
 
             if (message.header.invalid()) |reason| {
-                log.warn("{}: send_message_to_replica: invalid ({s})", .{ self.replica, reason });
+                log.warn("{}: send_message_to_replica: invalid ({s})", .{
+                    self.log_prefix(),
+                    reason,
+                });
                 @panic("send_message_to_replica: invalid message");
             }
 
@@ -8888,7 +9010,7 @@ pub fn ReplicaType(
 
                     log.debug("{}: send_message_to_replica: dropped {s} " ++
                         "(view_durable={} message.view={})", .{
-                        self.replica,
+                        self.log_prefix(),
                         @tagName(message.header.command),
                         self.view_durable(),
                         message.header.view,
@@ -8906,7 +9028,7 @@ pub fn ReplicaType(
                     if (self.log_view_durable() < self.log_view) {
                         log.debug("{}: send_message_to_replica: dropped {s} " ++
                             "(log_view_durable={} log_view={})", .{
-                            self.replica,
+                            self.log_prefix(),
                             @tagName(message.header.command),
                             self.log_view_durable(),
                             self.log_view,
@@ -9021,7 +9143,7 @@ pub fn ReplicaType(
             if (self.view_durable_updating()) return;
 
             log.debug("{}: view_durable_update: view_durable={}..{} log_view_durable={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.view_durable(),
                 self.view,
                 self.log_view_durable(),
@@ -9100,7 +9222,7 @@ pub fn ReplicaType(
 
             log.debug("{}: view_durable_update_callback: " ++
                 "(view_durable={} log_view_durable={})", .{
-                self.replica,
+                self.log_prefix(),
                 self.view_durable(),
                 self.log_view_durable(),
             });
@@ -9201,7 +9323,7 @@ pub fn ReplicaType(
             // new primary will also commit the operation.
             if (commit_max < self.commit_max and self.commit_min == self.commit_max) {
                 log.debug("{}: {s}: k={} < commit_max={} and commit_min == commit_max", .{
-                    self.replica,
+                    self.log_prefix(),
                     source.fn_name,
                     commit_max,
                     self.commit_max,
@@ -9225,7 +9347,7 @@ pub fn ReplicaType(
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             log.debug("{}: {s}: view={} op={}..{} commit={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 source.fn_name,
                 self.view,
                 previous_op,
@@ -9337,7 +9459,7 @@ pub fn ReplicaType(
                         log.debug(
                             "{}: on_do_view_change: committed: replica={} op={} checksum={}",
                             .{
-                                self.replica,
+                                self.log_prefix(),
                                 message.header.replica,
                                 header.op,
                                 header.checksum,
@@ -9364,7 +9486,7 @@ pub fn ReplicaType(
                 log.debug(
                     "{}: {s}: dvc: replica={} log_view={} op={} commit_min={} checkpoint={}",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         context,
                         dvc.header.replica,
                         dvc.header.log_view,
@@ -9381,7 +9503,7 @@ pub fn ReplicaType(
                 for (dvc_headers.slice, 0..) |*header, i| {
                     log.debug("{}: {s}: dvc: header: " ++
                         "replica={} op={} checksum={} nack={} present={} type={s}", .{
-                        self.replica,
+                        self.log_prefix(),
                         context,
                         dvc.header.replica,
                         header.op,
@@ -9425,7 +9547,7 @@ pub fn ReplicaType(
 
                     log.debug("{}: start_view_as_the_new_primary: pipeline " ++
                         "(op={} checksum={x} parent={x})", .{
-                        self.replica,
+                        self.log_prefix(),
                         prepare.message.header.op,
                         prepare.message.header.checksum,
                         prepare.message.header.parent,
@@ -9479,7 +9601,7 @@ pub fn ReplicaType(
 
             log.warn("{}: transition_to_recovering_head_from_recovering_status: " ++
                 "op_checkpoint={} commit_min={} op_head={} log_view={} view={}", .{
-                self.replica,
+                self.log_prefix(),
                 self.op_checkpoint(),
                 self.commit_min,
                 self.op,
@@ -9519,7 +9641,7 @@ pub fn ReplicaType(
                 log.info(
                     "{}: transition_to_normal_from_recovering_status: view={} primary",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         self.view,
                     },
                 );
@@ -9541,7 +9663,7 @@ pub fn ReplicaType(
                 log.info(
                     "{}: transition_to_normal_from_recovering_status: view={} backup",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         self.view,
                     },
                 );
@@ -9572,7 +9694,7 @@ pub fn ReplicaType(
             log.debug(
                 "{}: transition_to_normal_from_recovering_head_status: view={}..{} backup",
                 .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                     view_new,
                 },
@@ -9628,7 +9750,7 @@ pub fn ReplicaType(
             if (self.primary()) {
                 log.info(
                     "{}: transition_to_normal_from_view_change_status: view={}..{} primary",
-                    .{ self.replica, self.view, view_new },
+                    .{ self.log_prefix(), self.view, view_new },
                 );
 
                 assert(!self.prepare_timeout.ticking);
@@ -9667,7 +9789,7 @@ pub fn ReplicaType(
                 }
             } else {
                 log.info("{}: transition_to_normal_from_view_change_status: view={}..{} backup", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                     view_new,
                 });
@@ -9741,7 +9863,7 @@ pub fn ReplicaType(
             };
 
             log.info("{}: transition_to_view_change_status: view={}..{} status={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.view,
                 view_new,
                 self.status,
@@ -9912,7 +10034,7 @@ pub fn ReplicaType(
 
             log.debug("{}: sync_start_from_committing " ++
                 "(commit_stage={s} checkpoint_op={} checkpoint_id={x:0>32})", .{
-                self.replica,
+                self.log_prefix(),
                 @tagName(self.commit_stage),
                 self.op_checkpoint(),
                 self.superblock.staging.checkpoint_id(),
@@ -9954,7 +10076,7 @@ pub fn ReplicaType(
             self.syncing = state_new;
 
             log.debug("{}: sync_dispatch: {s}..{s}", .{
-                self.replica,
+                self.log_prefix(),
                 @tagName(state_old),
                 @tagName(self.syncing),
             });
@@ -10118,10 +10240,11 @@ pub fn ReplicaType(
             // committing again.
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
+
             if (self.repair_timeout.ticking) self.repair_timeout.reset();
 
             log.info("{}: sync: ops={}..{}", .{
-                self.replica,
+                self.log_prefix(),
                 self.superblock.working.vsr_state.sync_op_min,
                 self.superblock.working.vsr_state.sync_op_max,
             });
@@ -10164,7 +10287,7 @@ pub fn ReplicaType(
                 }
                 log.info(
                     "{}: sync: {} tables (by level: {any})",
-                    .{ self.replica, table_count, table_count_by_level },
+                    .{ self.log_prefix(), table_count, table_count_by_level },
                 );
             }
 
@@ -10227,7 +10350,7 @@ pub fn ReplicaType(
                 {
                     log.debug("{}: sync_enqueue_tables: " ++
                         "request address={} checksum={} level={} snapshot_min={} ({}..{})", .{
-                        self.replica,
+                        self.log_prefix(),
                         table_info.address,
                         table_info.checksum,
                         table_info.label.level,
@@ -10274,7 +10397,7 @@ pub fn ReplicaType(
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
                 log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
-                    self.replica,
+                    self.log_prefix(),
                     sync_op_min,
                     sync_op_max,
                 });
@@ -10340,7 +10463,7 @@ pub fn ReplicaType(
             }
 
             log.info("{}: release_transition: release={}..{} (reason={s})", .{
-                self.replica,
+                self.log_prefix(),
                 self.release,
                 release_target,
                 source.fn_name,
@@ -10406,7 +10529,7 @@ pub fn ReplicaType(
                 log.debug(
                     "{}: {s}: waiting for repair (op={} < op_repair_max={}, commit_max={})",
                     .{
-                        self.replica,
+                        self.log_prefix(),
                         source.fn_name,
                         self.op,
                         self.op_repair_max(),
@@ -10424,7 +10547,7 @@ pub fn ReplicaType(
                 // the ops between the checkpoint and the previous checkpoint trigger may not be
                 // in our journal yet.
                 log.debug("{}: {s}: recently synced; waiting for ops (op=checkpoint={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     source.fn_name,
                     self.op,
                 });
@@ -10440,7 +10563,7 @@ pub fn ReplicaType(
             // fork:
             if (!self.valid_hash_chain_between(op_verify_min, self.op)) {
                 log.debug("{}: {s}: waiting for repair (hash chain)", .{
-                    self.replica,
+                    self.log_prefix(),
                     source.fn_name,
                 });
                 return false;
@@ -10471,17 +10594,20 @@ pub fn ReplicaType(
                         b = a;
                     } else {
                         log.debug("{}: valid_hash_chain_between: break: A: {}", .{
-                            self.replica,
+                            self.log_prefix(),
                             a,
                         });
                         log.debug("{}: valid_hash_chain_between: break: B: {}", .{
-                            self.replica,
+                            self.log_prefix(),
                             b,
                         });
                         return false;
                     }
                 } else {
-                    log.debug("{}: valid_hash_chain_between: missing op={}", .{ self.replica, op });
+                    log.debug("{}: valid_hash_chain_between: missing op={}", .{
+                        self.log_prefix(),
+                        op,
+                    });
                     return false;
                 }
             }
@@ -10559,14 +10685,16 @@ pub fn ReplicaType(
                     if (header.view == self.view) {
                         assert(self.status == .view_change or self.status == .recovering_head);
 
-                        log.debug("{}: jump_view: waiting to exit view change", .{self.replica});
+                        log.debug("{}: jump_view: waiting to exit view change", .{
+                            self.log_prefix(),
+                        });
                     } else {
                         assert(header.view > self.view);
                         assert(self.status == .view_change or self.status == .recovering_head or
                             self.status == .normal);
 
                         log.debug("{}: jump_view: waiting to jump to newer view ({}..{})", .{
-                            self.replica,
+                            self.log_prefix(),
                             self.view,
                             header.view,
                         });
@@ -10574,7 +10702,9 @@ pub fn ReplicaType(
 
                     // TODO Debounce and decouple this from `on_message()` by moving into `tick()`:
                     // (Using request_start_view_message_timeout).
-                    log.debug("{}: jump_view: requesting start_view message", .{self.replica});
+                    log.debug("{}: jump_view: requesting start_view message", .{
+                        self.log_prefix(),
+                    });
                     self.send_header_to_replica(
                         self.primary_index(header.view),
                         @bitCast(Header.RequestStartView{
@@ -10592,9 +10722,11 @@ pub fn ReplicaType(
                     assert(!self.standby());
 
                     if (header.view == self.view + 1) {
-                        log.debug("{}: jump_view: jumping to view change", .{self.replica});
+                        log.debug("{}: jump_view: jumping to view change", .{self.log_prefix()});
                     } else {
-                        log.debug("{}: jump_view: jumping to next view change", .{self.replica});
+                        log.debug("{}: jump_view: jumping to next view change", .{
+                            self.log_prefix(),
+                        });
                     }
                     self.transition_to_view_change_status(header.view);
                 },
@@ -10602,11 +10734,25 @@ pub fn ReplicaType(
             }
         }
 
+        // Criteria for caching:
+        // - The primary does not update the cache since it is (or will be) reconstructing its
+        //   pipeline.
+        // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
+        fn cache_prepare(self: *Replica, message: *Message.Prepare) void {
+            assert(self.status == .normal);
+            assert(self.primary_index(self.view) != self.replica);
+            assert(self.pipeline == .cache);
+            assert(self.commit_min < message.header.op);
+
+            const prepare_evicted = self.pipeline.cache.insert(message.ref());
+            if (prepare_evicted) |m| self.message_bus.unref(m);
+        }
+
         fn write_prepare(
             self: *Replica,
             message: *Message.Prepare,
             trigger: Journal.Write.Trigger,
-        ) void {
+        ) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.status == .normal or self.primary_index(self.view) == self.replica);
             assert(self.status == .normal or self.do_view_change_quorum);
@@ -10616,15 +10762,14 @@ pub fn ReplicaType(
             assert(message.header.view <= self.view);
             assert(message.header.op <= self.op);
             assert(message.header.op >= self.op_repair_min());
-            assert(message.header.release.value <= self.release.value);
 
             if (!self.journal.has_header(message.header)) {
                 log.debug("{}: write_prepare: ignoring op={} checksum={} (header changed)", .{
-                    self.replica,
+                    self.log_prefix(),
                     message.header.op,
                     message.header.checksum,
                 });
-                return;
+                return false;
             }
 
             switch (self.journal.writing(message.header)) {
@@ -10633,29 +10778,19 @@ pub fn ReplicaType(
                     log.debug(
                         "{}: write_prepare: ignoring op={} checksum={} (already writing {s})",
                         .{
-                            self.replica,
+                            self.log_prefix(),
                             message.header.op,
                             message.header.checksum,
                             @tagName(reason),
                         },
                     );
-                    return;
+                    return false;
                 },
             }
 
-            // Criteria for caching:
-            // - The primary does not update the cache since it is (or will be) reconstructing its
-            //   pipeline.
-            // - Cache uncommitted ops, since it will avoid a WAL read in the common case.
-            if (self.pipeline == .cache and
-                self.replica != self.primary_index(self.view) and
-                self.commit_min < message.header.op)
-            {
-                const prepare_evicted = self.pipeline.cache.insert(message.ref());
-                if (prepare_evicted) |m| self.message_bus.unref(m);
-            }
-
             self.journal.write_prepare(write_prepare_callback, message, trigger);
+
+            return true;
         }
 
         fn write_prepare_callback(
@@ -10708,7 +10843,7 @@ pub fn ReplicaType(
                 assert(!self.grid.free_set.is_free(request.block_address));
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
-                    self.replica,
+                    self.log_prefix(),
                     request.block_address,
                     request.block_checksum,
                 });
@@ -10735,7 +10870,7 @@ pub fn ReplicaType(
                 assert(self.primary_abdicate_timeout.ticking);
 
                 log.mark.debug("{}: send_commit: primary abdicating (view={})", .{
-                    self.replica,
+                    self.log_prefix(),
                     self.view,
                 });
                 return;
@@ -10874,6 +11009,14 @@ pub fn ReplicaType(
             assert((self.grid.free_set.count_acquired() - self.grid.free_set.count_released()) ==
                 (tables_index_block_count + tables_value_block_count +
                     self.state_machine.forest.manifest_log.log_block_checksums.count));
+        }
+
+        pub fn log_prefix(self: *const Replica) LogPrefix {
+            return .{
+                .replica = self.replica,
+                .status = self.status,
+                .primary = self.primary_index(self.view) == self.replica,
+            };
         }
     };
 }
@@ -11050,7 +11193,7 @@ const DVCQuorum = struct {
                 assert(message.header.command == .do_view_change);
                 assert(message.header.replica == replica);
 
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
@@ -11065,7 +11208,7 @@ const DVCQuorum = struct {
         const dvcs = DVCQuorum.dvcs_all(dvc_quorum);
         for (dvcs.const_slice()) |message| {
             if (message.header.log_view == log_view) {
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
@@ -11079,7 +11222,7 @@ const DVCQuorum = struct {
             assert(message.header.log_view <= log_view_max_);
 
             if (message.header.log_view < log_view_max_) {
-                array.append_assume_capacity(message);
+                array.push(message);
             }
         }
         return array;
@@ -11549,7 +11692,6 @@ const PipelineQueue = struct {
     }
 
     /// Searches the pipeline for a prepare for a given op and checksum.
-    /// When `checksum` is `null`, match any checksum.
     fn prepare_by_op_and_checksum(pipeline: *PipelineQueue, op: u64, checksum: u128) ?*Prepare {
         if (pipeline.prepare_queue.empty()) return null;
 

@@ -9,7 +9,7 @@ const io_uring_sqe = linux.io_uring_sqe;
 const log = std.log.scoped(.io);
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const common = @import("./common.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;

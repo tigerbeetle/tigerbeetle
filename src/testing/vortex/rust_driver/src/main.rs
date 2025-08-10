@@ -93,10 +93,10 @@ enum Request {
 }
 
 enum Reply {
-    CreateAccounts(Vec<tb::CreateAccountResult>),
-    CreateTransfers(Vec<tb::CreateTransferResult>),
-    LookupAccounts(Vec<Result<tb::Account, tb::NotFound>>),
-    LookupTransfers(Vec<Result<tb::Transfer, tb::NotFound>>),
+    CreateAccounts(Vec<tb::CreateAccountsResult>),
+    CreateTransfers(Vec<tb::CreateTransfersResult>),
+    LookupAccounts(Vec<tb::Account>),
+    LookupTransfers(Vec<tb::Transfer>),
 }
 
 struct Input {
@@ -195,10 +195,10 @@ impl Output {
             Reply::CreateAccounts(results) => {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
-                for (index, result) in results.into_iter().enumerate() {
+                for result in results {
                     let result = tbc::tb_create_accounts_result_t {
-                        index: u32::try_from(index)?,
-                        result: u32::from(result),
+                        index: u32::try_from(result.index)?,
+                        result: u32::from(result.result),
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_accounts_result_t>()] =
                         unsafe { mem::transmute(result) };
@@ -208,10 +208,10 @@ impl Output {
             Reply::CreateTransfers(results) => {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
-                for (index, result) in results.into_iter().enumerate() {
+                for result in results {
                     let result = tbc::tb_create_transfers_result_t {
-                        index: u32::try_from(index)?,
-                        result: u32::from(result),
+                        index: u32::try_from(result.index)?,
+                        result: u32::from(result.result),
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_transfers_result_t>()] =
                         unsafe { mem::transmute(result) };
@@ -222,28 +222,18 @@ impl Output {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
-                    match result {
-                        Ok(result) => {
-                            let bytes: [u8; mem::size_of::<tb::Account>()] =
-                                unsafe { mem::transmute(result) };
-                            self.writer.write_all(&bytes)?;
-                        }
-                        Err(_) => { /* pass */ }
-                    }
+                    let bytes: [u8; mem::size_of::<tb::Account>()] =
+                        unsafe { mem::transmute(result) };
+                    self.writer.write_all(&bytes)?;
                 }
             }
             Reply::LookupTransfers(results) => {
                 let results_length = u32::try_from(results.len())?;
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
-                    match result {
-                        Ok(result) => {
-                            let bytes: [u8; mem::size_of::<tb::Transfer>()] =
-                                unsafe { mem::transmute(result) };
-                            self.writer.write_all(&bytes)?;
-                        }
-                        Err(_) => { /* pass */ }
-                    }
+                    let bytes: [u8; mem::size_of::<tb::Transfer>()] =
+                        unsafe { mem::transmute(result) };
+                    self.writer.write_all(&bytes)?;
                 }
             }
         }

@@ -6,9 +6,10 @@ const expectEqual = std.testing.expectEqual;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
+const fuzz = @import("../testing/fuzz.zig");
 const Process = @import("../testing/cluster/message_bus.zig").Process;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
@@ -33,6 +34,8 @@ const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 // const checkpoint_3_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(checkpoint_3).?;
 const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
 const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
+
+const MiB = stdx.MiB;
 
 const log_level = std.log.Level.err;
 
@@ -1982,6 +1985,7 @@ const TestContext = struct {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
         var prng = stdx.PRNG.from_seed(options.seed);
+        const storage_size_limit = vsr.sector_floor(128 * MiB);
 
         const cluster = try Cluster.init(allocator, .{
             .cluster = .{
@@ -1989,7 +1993,7 @@ const TestContext = struct {
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .client_count = options.client_count,
-                .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
+                .storage_size_limit = storage_size_limit,
                 .seed = prng.int(u64),
                 .releases = &releases,
                 .client_release = options.client_release,
@@ -2003,19 +2007,20 @@ const TestContext = struct {
                 .node_count = options.replica_count + options.standby_count,
                 .client_count = options.client_count,
                 .seed = prng.int(u64),
-                .one_way_delay_mean = prng.range_inclusive(u16, 3, 12),
-                .one_way_delay_min = prng.int_inclusive(u16, 2),
+                .one_way_delay_mean = fuzz.range_inclusive_ms(&prng, 30, 120),
+                .one_way_delay_min = fuzz.range_inclusive_ms(&prng, 0, 20),
 
                 .path_maximum_capacity = 10,
-                .path_clog_duration_mean = 0,
+                .path_clog_duration_mean = .{ .ns = 0 },
                 .path_clog_probability = Ratio.zero(),
                 .recorded_count_max = 16,
             },
             .storage = .{
-                .read_latency_min = 1,
-                .read_latency_mean = 5,
-                .write_latency_min = 1,
-                .write_latency_mean = 5,
+                .size = storage_size_limit,
+                .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+                .read_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
+                .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+                .write_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
             },
             .storage_fault_atlas = .{
                 .faulty_superblock = false,
@@ -2065,7 +2070,7 @@ const TestContext = struct {
     pub fn replica(t: *TestContext, selector: ProcessSelector) TestReplicas {
         const replica_processes = t.processes(selector);
         var replica_indexes = stdx.BoundedArrayType(u8, constants.members_max){};
-        for (replica_processes.const_slice()) |p| replica_indexes.append_assume_capacity(p.replica);
+        for (replica_processes.const_slice()) |p| replica_indexes.push(p.replica);
         return TestReplicas{
             .context = t,
             .cluster = t.cluster,
@@ -2084,7 +2089,7 @@ const TestContext = struct {
         assert(index + count <= t.cluster.options.client_count);
 
         var client_indexes = stdx.BoundedArrayType(usize, constants.clients_max){};
-        for (index..index + count) |i| client_indexes.append_assume_capacity(i);
+        for (index..index + count) |i| client_indexes.push(i);
         return TestClients{
             .context = t,
             .cluster = t.cluster,
@@ -2145,45 +2150,45 @@ const TestContext = struct {
 
         var array = ProcessList{};
         switch (selector) {
-            .R0 => array.append_assume_capacity(.{ .replica = 0 }),
-            .R1 => array.append_assume_capacity(.{ .replica = 1 }),
-            .R2 => array.append_assume_capacity(.{ .replica = 2 }),
-            .R3 => array.append_assume_capacity(.{ .replica = 3 }),
-            .R4 => array.append_assume_capacity(.{ .replica = 4 }),
-            .R5 => array.append_assume_capacity(.{ .replica = 5 }),
-            .S0 => array.append_assume_capacity(.{ .replica = replica_count + 0 }),
-            .S1 => array.append_assume_capacity(.{ .replica = replica_count + 1 }),
-            .S2 => array.append_assume_capacity(.{ .replica = replica_count + 2 }),
-            .S3 => array.append_assume_capacity(.{ .replica = replica_count + 3 }),
-            .S4 => array.append_assume_capacity(.{ .replica = replica_count + 4 }),
-            .S5 => array.append_assume_capacity(.{ .replica = replica_count + 5 }),
+            .R0 => array.push(.{ .replica = 0 }),
+            .R1 => array.push(.{ .replica = 1 }),
+            .R2 => array.push(.{ .replica = 2 }),
+            .R3 => array.push(.{ .replica = 3 }),
+            .R4 => array.push(.{ .replica = 4 }),
+            .R5 => array.push(.{ .replica = 5 }),
+            .S0 => array.push(.{ .replica = replica_count + 0 }),
+            .S1 => array.push(.{ .replica = replica_count + 1 }),
+            .S2 => array.push(.{ .replica = replica_count + 2 }),
+            .S3 => array.push(.{ .replica = replica_count + 3 }),
+            .S4 => array.push(.{ .replica = replica_count + 4 }),
+            .S5 => array.push(.{ .replica = replica_count + 5 }),
             .A0 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 0) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 0) % replica_count) }),
             .B1 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 1) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 1) % replica_count) }),
             .B2 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 2) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 2) % replica_count) }),
             .B3 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 3) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 3) % replica_count) }),
             .B4 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 4) % replica_count) }),
+                .push(.{ .replica = @intCast((view + 4) % replica_count) }),
             .B5 => array
-                .append_assume_capacity(.{ .replica = @intCast((view + 5) % replica_count) }),
-            .C0 => array.append_assume_capacity(.{ .client = t.cluster.clients[0].?.id }),
+                .push(.{ .replica = @intCast((view + 5) % replica_count) }),
+            .C0 => array.push(.{ .client = t.cluster.clients[0].?.id }),
             .__, .R_, .S_, .C_ => {
                 if (selector == .__ or selector == .R_) {
                     for (t.cluster.replicas[0..replica_count], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @intCast(i) });
+                        array.push(.{ .replica = @intCast(i) });
                     }
                 }
                 if (selector == .__ or selector == .S_) {
                     for (t.cluster.replicas[replica_count..], 0..) |_, i| {
-                        array.append_assume_capacity(.{ .replica = @intCast(replica_count + i) });
+                        array.push(.{ .replica = @intCast(replica_count + i) });
                     }
                 }
                 if (selector == .__ or selector == .C_) {
                     for (t.cluster.clients) |*client| {
-                        array.append_assume_capacity(.{ .client = client.*.?.id });
+                        array.push(.{ .client = client.*.?.id });
                     }
                 }
             },
@@ -2232,7 +2237,7 @@ const TestReplicas = struct {
     pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
         var releases_bundled = vsr.ReleaseList{};
         for (releases_bundled_patch) |patch| {
-            releases_bundled.append_assume_capacity(vsr.Release.from(.{
+            releases_bundled.push(vsr.Release.from(.{
                 .major = 0,
                 .minor = 0,
                 .patch = patch,
@@ -2552,10 +2557,10 @@ const TestReplicas = struct {
             const process_a = Process{ .replica = a };
             for (peers.const_slice()) |process_b| {
                 if (direction == .bidirectional or direction == .outgoing) {
-                    paths.append_assume_capacity(.{ .source = process_a, .target = process_b });
+                    paths.push(.{ .source = process_a, .target = process_b });
                 }
                 if (direction == .bidirectional or direction == .incoming) {
-                    paths.append_assume_capacity(.{ .source = process_b, .target = process_a });
+                    paths.push(.{ .source = process_b, .target = process_a });
                 }
             }
         }

@@ -3,16 +3,18 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_ewah);
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 const ewah = @import("./ewah.zig");
 const fuzz = @import("./testing/fuzz.zig");
+
+const MiB = stdx.MiB;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
         var prng = stdx.PRNG.from_seed(args.seed);
 
-        const decoded_size_max = @divExact(1024 * 1024, @sizeOf(Word));
+        const decoded_size_max = @divExact(1 * MiB, @sizeOf(Word));
         const decoded_size = prng.range_inclusive(usize, 1, decoded_size_max);
         const decoded = try gpa.alloc(Word, decoded_size);
         defer gpa.free(decoded);

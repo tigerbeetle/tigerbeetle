@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 
 const os = std.os;
 const posix = std.posix;
@@ -13,17 +13,59 @@ const is_linux = builtin.target.os.tag == .linux;
 const Instant = stdx.Instant;
 
 pub const Time = struct {
+    context: *anyopaque,
+    vtable: *const VTable,
+
+    const VTable = struct {
+        monotonic: *const fn (*anyopaque) u64,
+        realtime: *const fn (*anyopaque) i64,
+        tick: *const fn (*anyopaque) void,
+    };
+
+    /// A timestamp to measure elapsed time, meaningful only on the same system, not across reboots.
+    /// Always use a monotonic timestamp if the goal is to measure elapsed time.
+    /// This clock is not affected by discontinuous jumps in the system time, for example if the
+    /// system administrator manually changes the clock.
+    pub fn monotonic(self: Time) u64 {
+        return self.vtable.monotonic(self.context);
+    }
+
+    pub fn monotonic_instant(self: Time) Instant {
+        return Instant{ .ns = self.monotonic() };
+    }
+
+    /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
+    /// This clock is affected by discontinuous jumps in the system time.
+    pub fn realtime(self: Time) i64 {
+        return self.vtable.realtime(self.context);
+    }
+
+    pub fn tick(self: Time) void {
+        self.vtable.tick(self.context);
+    }
+};
+
+pub const TimeOS = struct {
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
     /// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
     /// We crash the process for safety if this ever happens, to protect against infinite loops.
     /// It's better to crash and come back with a valid monotonic clock than get stuck forever.
     monotonic_guard: u64 = 0,
 
-    /// A timestamp to measure elapsed time, meaningful only on the same system, not across reboots.
-    /// Always use a monotonic timestamp if the goal is to measure elapsed time.
-    /// This clock is not affected by discontinuous jumps in the system time, for example if the
-    /// system administrator manually changes the clock.
-    pub fn monotonic(self: *Time) u64 {
+    pub fn time(self: *TimeOS) Time {
+        return .{
+            .context = self,
+            .vtable = &.{
+                .monotonic = monotonic,
+                .realtime = realtime,
+                .tick = tick,
+            },
+        };
+    }
+
+    fn monotonic(context: *anyopaque) u64 {
+        const self: *TimeOS = @ptrCast(@alignCast(context));
+
         const m = blk: {
             if (is_windows) break :blk monotonic_windows();
             if (is_darwin) break :blk monotonic_darwin();
@@ -35,10 +77,6 @@ pub const Time = struct {
         if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
         return m;
-    }
-
-    pub fn monotonic_instant(self: *Time) Instant {
-        return Instant{ .ns = self.monotonic() };
     }
 
     fn monotonic_windows() u64 {
@@ -107,9 +145,7 @@ pub const Time = struct {
         return @as(u64, @intCast(ts.sec)) * std.time.ns_per_s + @as(u64, @intCast(ts.nsec));
     }
 
-    /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
-    /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(_: *Time) i64 {
+    fn realtime(_: *anyopaque) i64 {
         if (is_windows) return realtime_windows();
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
@@ -147,11 +183,12 @@ pub const Time = struct {
         return @as(i64, ts.sec) * std.time.ns_per_s + ts.nsec;
     }
 
-    pub fn tick(_: *Time) void {}
+    fn tick(_: *anyopaque) void {}
 };
 
 test "Time monotonic smoke" {
-    var time: Time = .{};
+    var time_os: TimeOS = .{};
+    const time = time_os.time();
     const instant_1 = time.monotonic_instant();
     const instant_2 = time.monotonic_instant();
     assert(instant_1.duration_since(instant_1).ns == 0);

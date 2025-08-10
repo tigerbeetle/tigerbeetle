@@ -2,7 +2,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
+const MiB = stdx.MiB;
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
 const format_wal_headers = @import("./journal.zig").format_wal_headers;
@@ -63,7 +64,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             assert(!self.formatting);
 
             const header_zeroes: [@sizeOf(Header)]u8 = @splat(0);
-            const wal_write_size_max = 4 * 1024 * 1024;
+            const wal_write_size_max = 4 * MiB;
             assert(wal_write_size_max % constants.sector_size == 0);
 
             // Direct I/O requires the buffer to be sector-aligned.
@@ -218,21 +219,13 @@ fn ReplicaFormatType(comptime Storage: type) type {
 test "format" {
     const data_file_size_min = @import("./superblock.zig").data_file_size_min;
     const Storage = @import("../testing/storage.zig").Storage;
+    const fixtures = @import("../testing/fixtures.zig");
     const allocator = std.testing.allocator;
     const cluster = 0;
     const replica = 1;
     const replica_count = 1;
 
-    var storage = try Storage.init(
-        allocator,
-        data_file_size_min,
-        .{
-            .read_latency_min = 0,
-            .read_latency_mean = 0,
-            .write_latency_min = 0,
-            .write_latency_mean = 0,
-        },
-    );
+    var storage = try fixtures.init_storage(allocator, .{ .size = data_file_size_min });
     defer storage.deinit(allocator);
 
     try format(Storage, allocator, .{
