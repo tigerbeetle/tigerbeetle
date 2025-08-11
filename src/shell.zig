@@ -450,13 +450,26 @@ pub fn exec_stdout_options(
 
 /// Runs the zig compiler.
 pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !void {
+    return shell.exec_zig_options(.{}, cmd, cmd_args);
+}
+
+pub fn exec_zig_options(
+    shell: *Shell,
+    options: struct {
+        timeout_ns: u64 = 10 * std.time.ns_per_min,
+    },
+    comptime cmd: []const u8,
+    cmd_args: anytype,
+) !void {
     var argv = Argv.init(shell.gpa);
     defer argv.deinit();
 
     try argv.append_new_arg("{s}", .{shell.zig_exe.?});
     try expand_argv(&argv, cmd, cmd_args);
 
-    return shell.exec_inner(argv.slice(), .{});
+    return shell.exec_inner(argv.slice(), .{
+        .timeout_ns = options.timeout_ns,
+    });
 }
 
 fn exec_inner(
