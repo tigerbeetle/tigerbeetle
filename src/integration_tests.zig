@@ -606,7 +606,7 @@ const TmpCluster = struct {
                 defer shell.destroy();
 
                 try shell.exec_options(.{
-                    .timeout_ns = 10 * std.time.ns_per_min,
+                    .timeout = .{ .ns = 10 * std.time.ns_per_min },
                 },
                     \\{tigerbeetle} benchmark
                     \\    --print-batch-timings

@@ -402,7 +402,7 @@ pub fn exec_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
-        timeout_ns: u64 = 10 * std.time.ns_per_min,
+        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -412,7 +412,7 @@ pub fn exec_options(
 
     return exec_inner(shell, argv.slice(), .{
         .stdin_slice = options.stdin_slice,
-        .timeout_ns = options.timeout_ns,
+        .timeout = options.timeout,
     });
 }
 
@@ -456,7 +456,7 @@ pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !voi
 pub fn exec_zig_options(
     shell: *Shell,
     options: struct {
-        timeout_ns: u64 = 10 * std.time.ns_per_min,
+        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -468,7 +468,7 @@ pub fn exec_zig_options(
     try expand_argv(&argv, cmd, cmd_args);
 
     return shell.exec_inner(argv.slice(), .{
-        .timeout_ns = options.timeout_ns,
+        .timeout = options.timeout,
     });
 }
 
@@ -479,7 +479,7 @@ fn exec_inner(
         stdin_slice: ?[]const u8 = null,
         capture_stdout: ?*[]const u8 = null, // Optional out parameter.
         output_limit_bytes: usize = 128 * MiB,
-        timeout_ns: u64 = 10 * std.time.ns_per_min,
+        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
     },
 ) !void {
     const argv_formatted = try std.mem.join(shell.gpa, " ", argv);
@@ -531,7 +531,7 @@ fn exec_inner(
             assert(poller.?.fifo(stream).head == 0);
         };
 
-        const deadline: i128 = std.time.nanoTimestamp() + options.timeout_ns;
+        const deadline: i128 = std.time.nanoTimestamp() + options.timeout.ns;
         for (0..1_000_000) |_| {
             const timeout: i128 = deadline - std.time.nanoTimestamp();
             if (timeout <= 0) return error.ExecTimeout;
