@@ -158,7 +158,7 @@ const Command = struct {
 
     fn init(
         command: *Command,
-        allocator: mem.Allocator,
+        gpa: mem.Allocator,
         io: *IO,
         tracer: *Tracer,
         path: []const u8,
@@ -193,34 +193,34 @@ const Command = struct {
         command.storage = try Storage.init(io, tracer, command.fd);
         errdefer command.storage.deinit();
 
-        command.self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
-        errdefer allocator.free(command.self_exe_path);
+        command.self_exe_path = try vsr.multiversioning.self_exe_path(gpa);
+        errdefer gpa.free(command.self_exe_path);
 
         command.data_file_path = path;
     }
 
-    fn deinit(command: *Command, allocator: mem.Allocator) void {
-        allocator.free(command.self_exe_path);
+    fn deinit(command: *Command, gpa: mem.Allocator) void {
+        gpa.free(command.self_exe_path);
         command.storage.deinit();
         std.posix.close(command.fd);
         std.posix.close(command.dir_fd);
     }
 
     pub fn format(
-        allocator: mem.Allocator,
+        gpa: mem.Allocator,
         io: *IO,
         tracer: *Tracer,
         args: *const cli.Command.Format,
         options: SuperBlock.FormatOptions,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, io, tracer, args.path, .{
+        try command.init(gpa, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit(allocator);
+        defer command.deinit(gpa);
 
-        vsr.format(Storage, allocator, options, .{
+        vsr.format(Storage, gpa, options, .{
             .storage = &command.storage,
             .storage_size_limit = data_file_size_min,
         }) catch |err| {
@@ -236,22 +236,22 @@ const Command = struct {
     }
 
     pub fn reformat(
-        allocator: mem.Allocator,
+        gpa: mem.Allocator,
         io: *IO,
         tracer: *Tracer,
         args: *const cli.Command.Recover,
     ) !void {
         var command: Command = undefined;
-        try command.init(allocator, io, tracer, args.path, .{
+        try command.init(gpa, io, tracer, args.path, .{
             .must_create = true,
             .development = args.development,
         });
-        defer command.deinit(allocator);
+        defer command.deinit(gpa);
 
-        var message_pool = try MessagePool.init(allocator, .client);
-        defer message_pool.deinit(allocator);
+        var message_pool = try MessagePool.init(gpa, .client);
+        defer message_pool.deinit(gpa);
 
-        var client = try Client.init(allocator, .{
+        var client = try Client.init(gpa, .{
             .id = stdx.unique_u128(),
             .cluster = args.cluster,
             .replica_count = args.replica_count,
@@ -264,9 +264,9 @@ const Command = struct {
             },
             .eviction_callback = &reformat_client_eviction_callback,
         });
-        defer client.deinit(allocator);
+        defer client.deinit(gpa);
 
-        var reformatter = try ReplicaReformat.init(allocator, &client, .{
+        var reformatter = try ReplicaReformat.init(gpa, &client, .{
             .format = .{
                 .cluster = args.cluster,
                 .replica = args.replica,
@@ -279,7 +279,7 @@ const Command = struct {
                 .storage_size_limit = data_file_size_min,
             },
         });
-        defer reformatter.deinit(allocator);
+        defer reformatter.deinit(gpa);
 
         reformatter.start();
         while (reformatter.done() == null) {
@@ -311,23 +311,23 @@ const Command = struct {
         args: *const cli.Command.Start,
     ) !void {
         var counting_allocator = vsr.CountingAllocator.init(base_allocator);
-        const allocator = counting_allocator.allocator();
+        const gpa = counting_allocator.allocator();
 
         // TODO Panic if the data file's size is larger that args.storage_size_limit.
         // (Here or in Replica.open()?).
 
         var command: Command = undefined;
-        try command.init(allocator, io, tracer, args.path, .{
+        try command.init(gpa, io, tracer, args.path, .{
             .must_create = false,
             .development = args.development,
         });
-        defer command.deinit(allocator);
+        defer command.deinit(gpa);
 
-        var message_pool = try MessagePool.init(allocator, .{ .replica = .{
+        var message_pool = try MessagePool.init(gpa, .{ .replica = .{
             .members_count = args.addresses.count_as(u8),
             .pipeline_requests_limit = args.pipeline_requests_limit,
         } });
-        defer message_pool.deinit(allocator);
+        defer message_pool.deinit(gpa);
 
         var aof: ?AOF = if (args.aof_file) |*aof_file| blk: {
             const aof_dir = std.fs.path.dirname(aof_file.const_slice()) orelse ".";
@@ -389,14 +389,14 @@ const Command = struct {
             }
 
             break :blk try vsr.multiversioning.Multiversion.init(
-                allocator,
+                gpa,
                 io,
                 command.self_exe_path,
                 .native,
             );
         };
 
-        defer if (multiversion != null) multiversion.?.deinit(allocator);
+        defer if (multiversion != null) multiversion.?.deinit(gpa);
 
         // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
         // enabled even if the first version fails to load.
@@ -418,7 +418,7 @@ const Command = struct {
         const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
         var replica: Replica = undefined;
-        replica.open(allocator, .{
+        replica.open(gpa, .{
             .node_count = args.addresses.count_as(u8),
             .release = config.process.release,
             .release_client_min = config.process.release_client_min,
@@ -568,7 +568,7 @@ const Command = struct {
         }
     }
 
-    pub fn version(allocator: mem.Allocator, verbose: bool) !void {
+    pub fn version(gpa: mem.Allocator, verbose: bool) !void {
         var stdout_buffer = std.io.bufferedWriter(std.io.getStdOut().writer());
         var stdout_writer = stdout_buffer.writer();
         const stdout = stdout_writer.any();
@@ -601,35 +601,36 @@ const Command = struct {
             }
 
             try stdout.writeAll("\n");
-            const self_exe_path = try vsr.multiversioning.self_exe_path(allocator);
-            defer allocator.free(self_exe_path);
-            vsr.multiversioning.print_information(allocator, self_exe_path, stdout) catch {};
+            const self_exe_path = try vsr.multiversioning.self_exe_path(gpa);
+            defer gpa.free(self_exe_path);
+
+            vsr.multiversioning.print_information(gpa, self_exe_path, stdout) catch {};
         }
         try stdout_buffer.flush();
     }
 
     pub fn repl(
-        allocator: mem.Allocator,
+        gpa: mem.Allocator,
         io: *IO,
         time: Time,
         args: *const cli.Command.Repl,
     ) !void {
         const Repl = vsr.repl.ReplType(vsr.message_bus.MessageBusClient);
 
-        var repl_instance = try Repl.init(allocator, io, time, .{
+        var repl_instance = try Repl.init(gpa, io, time, .{
             .cluster_id = args.cluster,
             .addresses = args.addresses.const_slice(),
             .verbose = args.verbose,
         });
-        defer repl_instance.deinit(allocator);
+        defer repl_instance.deinit(gpa);
 
         try repl_instance.run(args.statements);
     }
 
-    pub fn amqp(allocator: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
+    pub fn amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !void {
         var runner: vsr.cdc.Runner = undefined;
         try runner.init(
-            allocator,
+            gpa,
             time,
             .{
                 .cluster_id = args.cluster,
