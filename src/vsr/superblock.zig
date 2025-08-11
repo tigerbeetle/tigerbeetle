@@ -905,9 +905,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica_count = options.replica_count,
                 },
                 .view_headers_count = 0,
-                .view_headers_all = mem.zeroes(
-                    [constants.view_change_headers_max]vsr.Header.Prepare,
-                ),
+                .view_headers_all = @splat(mem.zeroes(vsr.Header.Prepare)),
             };
 
             superblock.working.set_checksum();
