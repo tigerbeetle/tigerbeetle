@@ -891,7 +891,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             shell.project_root.deleteFile("tigerbeetle") catch {};
 
             const zip_path = try shell.fmt(
-                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}-{s}.zip",
+                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}{s}.zip",
                 .{ triple, if (debug) "-debug" else "" },
             );
             try shell.unzip_executable(zip_path, "tigerbeetle");
