@@ -80,7 +80,7 @@ same state.
 TigerBeetle assumes that replica's storage can fail. If a replica writes a prepare to the WAL or a
 block of an LSM trees and the corresponding `fsync` returns `0` it could still be the case that when
 reading this data later it will be found to be corrupted. Given that the system is already replicated
-for high-availability, it would be wasteful to not use redundancy to repair local storage failures. So
+for high-availability, it would be wasteful not to use redundancy to repair local storage failures. So
 this is exactly what TigerBeetle does.
 
 ## Design Decisions
@@ -135,7 +135,7 @@ hot path of the dataset should still fit within RAM.
 The function of consensus algorithm is to convert durability into availability. Data placed on
 durable storage is valuable and should be utilized fully.
 
-If an individual block on any replica bit rots it is wasteful not to repair this block using
+If an individual block on any replica bit rots, it is wasteful not to repair this block using
 equivalent data from other replicas in the cluster.
 
 ### Non-Interactive Transactions
@@ -146,7 +146,7 @@ the application:
 
 1. Opens a transaction
 2. Fetches balances from the database
-3. Computes balance update in the application
+3. Computes the balance update in the application
 4. Sends updates to the database
 5. Commits the transaction.
 
@@ -162,14 +162,14 @@ to avoid moving data to code over the network.
 
 TigerBeetle is single-threaded. There are both positive and negative reasons for this design choice.
 
-The primarily negative reason is that the underlying workload is inherently contentious. Some
+The primary negative reason is that the underlying workload is inherently contentious. Some
 accounts are just way more popular than others. Transfers between hot accounts inherently
 sequentialize the system. Trying to make transactions parallel doesn't make it faster. The
 overhead of synchronization tends to dominate useful work. Channeling [Frank
 McSherry's paper](https://www.usenix.org/system/files/conference/hotos15/hotos15-paper-mcsherry.pdf),
 our claim is that financial transaction processing is an infinite-COST problem.
 
-The positive reason for using a single thread is that CPUs are actually quite fast and the reports
+The positive reason for using a single thread is that CPUs are quite fast and the reports
 of Moore's Law demise are somewhat overstated. A single core can easily scale to 1mil TPS if you:
 
 - use the core efficiently, keep it busy with useful work and move everything else off the hot path
@@ -190,7 +190,7 @@ bound for the number of objects needed, based on CLI arguments. Then TigerBeetle
 that number of objects and enters the main event loop. After startup, no new objects are created.
 Therefore no dynamic memory allocation or deallocation is needed.
 
-This is different form truly static allocation of some embedded systems. TigerBeetle doesn't use
+This is different from truly static allocation of some embedded systems. TigerBeetle doesn't use
 global statics (`.bss` section) for allocation and memory usage depends on the runtime CLI arguments.
 
 This is also different from arena allocation. Some systems allocate a fixed-sized arena at the start
@@ -204,7 +204,7 @@ has a limit, there's nothing to grow without bound to begin with. Backpressure a
 system of components needing to honor each-other's limits.
 
 Another interesting consequence of static limits is runway concurrency. In highly concurrent
-applications there are more concurrent tasks than the number of underlying resources available. This
+applications, there are more concurrent tasks than the number of underlying resources available. This
 leads to oversubscription. A concurrent task is usually a closure allocated somewhere on the heap
 and registered with an event loop (a `Box<dyn Future>`). TigerBeetle _can't_ heap allocate
 structures at runtime. Each TigerBeetle "future" is represented by an explicit struct which is
@@ -219,7 +219,7 @@ You spend more time thinking up-front but after the initial design the interplay
 out.
 
 Static allocation makes the system faster and greatly reduces latency variation. This is another
-consequence of knowing the limits and "physics" of the underlying system, but is not the main reason
+consequence of knowing the limits and "physics" of the underlying system, but it is not the main reason
 for choosing static allocation.
 
 ### No Dependencies
@@ -245,7 +245,7 @@ most of the code in the database isn't _that_ hard.
 
 As follows from the [static allocation](#static-memory-allocation) section, TigerBeetle doesn't need
 a garbage collector. While it is possible to do static allocation in a GC language, it makes it much
-harder to guarantee that no allocation actually happens. This significantly narrows down the choice
+harder to guarantee that no allocation happens. This significantly narrows down the choice
 of programming languages. Of the languages that remain, Zig makes the most sense, although Rust is a
 close contender.
 
@@ -253,7 +253,7 @@ Both Zig and Rust provide spatial memory safety. Rust has better temporal and th
 static allocation and single-threaded execution reduce the relative importance of these benefits.
 Additionally, mere memory safety would be a low bar for TigerBeetle. General correctness is table
 stakes. Requiring a comprehensive testing strategy leaves little space for bugs to escape testing
-but be caught by Rust-style type system.
+but be caught by the Rust-style type system.
 
 The primary benefit of Zig is the favorable ratio of expressivity to language complexity.
 "Expressivity" here means ability to produce the desired machine code versus source-level
@@ -267,7 +267,7 @@ constructor. Instead they explicitly pass allocator to the specific methods that
 This is a perfect fit for the memory management strategy used in TigerBeetle. Cross compilation
 that works and direct (glibc-less) bindings to the kernel help keep dependency count down.
 
-Most importantly, this all is possible using very frugal language machinery. Zig lends itself to
+Most importantly, this is all possible using very frugal language machinery. Zig lends itself to
 low-abstraction first-order code that does the work directly. This makes it easy to author
 and debug performance-oriented code.
 
@@ -275,7 +275,7 @@ and debug performance-oriented code.
 
 A meta principle above "static allocation" is determinism. Determinism means that given the same input
 the software gives the same logical result and arrives at it using the same physical path. In general,
-everything in TigerBeetle is deterministic.There's no single reason to demand determinism but it
+everything in TigerBeetle is deterministic. There's no single reason to demand determinism but it
 consistently simplifies and improves the system. Here are some of the places where determinism leads
 to big advantages:
 
@@ -290,8 +290,8 @@ to big advantages:
   If on top of logical consistency the replicas guarantee that the bytes on disk representing the data
   are _also_ the same it becomes sufficient for repair to transfer just a single disk block containing
   the problematic byte. This is the approach taken by TigerBeetle. It is guaranteed that replicas in the
-  cluster converge on byte-for-byte identical LSM tree structure.
-- Physical repair in turn massively simplifies error handing. The function that reads data from
+  cluster converge on a byte-for-byte identical LSM tree structure.
+- Physical repair in turn massively simplifies error handling. The function that reads data from
   storage doesn't have an error condition. It _always_ receives the block with the requested
   checksum but the block can be transparently read from a different replica.
 - Physical determinism requires that LSM compaction work is scheduled deterministically. Compaction work
@@ -346,7 +346,7 @@ the storage and there is a limit on the maximum number of concurrent IO operatio
 **Memory** is not fast. Operations that miss the cache and hit the memory are dramatically slower.
 TigerBeetle data structures are compact, to maximize the chance that the data is cached, and
 organized around cache lines. All data for a particular operation can be found in a single cache
-line as opposed to spread out in memory. For example, the size of a Transfer object is two cache lines.
+line as opposed to being spread out in memory. For example, the size of a Transfer object is two cache lines.
 
 **CPU** can both sprint and parkour. But it is so much better at sprinting! CPU is very fast at straight
 line code and can sweep several lanes at once with SIMD but `if`s (especially unpredictable ones)
@@ -363,7 +363,7 @@ TigerBeetle uses batching at many different levels:
 - Individual transfers are aggregated into a prepare. This amortizes replication and prefetch IO
   overhead.
 - Changes from 32 prepares are aggregated in memory before being written to disk together
-- Changes from 1024 prepares are aggregated before checkpoint is atomically advanced by overwriting
+- Changes from 1024 prepares are aggregated before the checkpoint is atomically advanced by overwriting
   the superblock
 - The LSM tree operates mostly in terms of tables and value blocks, each aggregating many individual
   records.
@@ -436,19 +436,19 @@ This pattern generalizes: TigerBeetle embraces concurrency. Sequential execution
   - starts the replication loop.
 
   The prepare is considered committed when the primary receives a quorum of `prepare_ok`from a set
-  of replicas. This quorum doesn't need to include the primary. It can the case that the primary
-  concurrently executes a prepare while still writing corresponding message to the (WAL).
+  of replicas. This quorum doesn't need to include the primary. It can be the case that the primary
+  concurrently executes a prepare while still writing the corresponding message to the (WAL).
 
 - A similar pipelining structure works in LSM compaction. Compaction is a batched two-way merge
   operation. It merges two sorted sequences of values, where values come from blocks on disk. The
   resulting sequence of values is likewise split into blocks which are written to disk. Although the
   merge needs to be sequential, it is possible to fetch several blocks from disk at the same time.
-  With some more legwork it is possible to structure compaction so that reading blocks of values
+  With some more legwork, it is possible to structure compaction so that reading blocks of values
   from disk, merging them in memory, and writing the resulting blocks to disk happen concurrently.
 
 ### io_uring
 
-TigerBeetle use io_uring exclusively for IO. It is a perfect interface for TigerBeetle as it
+TigerBeetle uses io_uring exclusively for IO. It is a perfect interface for TigerBeetle as it
 combines [batching](#batching) and [concurrency](#embracing-concurrency). At micro level, the
 code in TigerBeetle isn't a good fit for coroutines or threads. The concurrency is very
 fine-grained at the level of individual syscall. For example, for pipelined compaction the natural
@@ -463,12 +463,12 @@ fit for the problem.
 
 Accounting business logic needs access to wall-clock time for transfer timeouts. The state machine
 can't access OS to get time directly as that would violate determinism. Instead, the TigerBeetle
-primary injects a specific timestamp into the logic of state machine when it converts a request to a
+primary injects a specific timestamp into the logic of the state machine when it converts a request to a
 prepare.
 
 The ultimate source of time for the TigerBeetle cluster is Network Time Protocol (NTP). A potential
 failure mode with NTP is primary partitioned from NTP servers. To make sure that the primary's clock
-is within acceptable error margin, the cluster aggregates timing information from a replication quorum
+is within an acceptable error margin, the cluster aggregates timing information from a replication quorum
 of replicas. TigerBeetle also guarantees that the time observed by the state machine is strictly monotonic.
 
 This high-quality time implementation is utilized for business logic (timeouts) and plays a key role
@@ -527,8 +527,8 @@ in the original primary's WAL. As the request was prepared, the prepare should m
 But because there's only one copy of prepare in the cluster, and it got corrupted, it is impossible
 to execute this prepare.
 
-The key difficulty: _potentially_ committed prepares are not necessary replicated to a full
-replication quorum. As such their durability is reduced. Corruption of a potentially committed
+The key difficulty: _potentially_ committed prepares are not necessarily replicated to a full
+replication quorum. As such, their durability is reduced. Corruption of a potentially committed
 prepare requires special handling. The solution is to use the NACK protocol.
 
 During a view change, participating replicas can positively state that they _never_ accepted a particular
