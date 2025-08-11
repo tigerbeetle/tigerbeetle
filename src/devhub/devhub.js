@@ -29,7 +29,8 @@ function main_release_rotation() {
   }
 
   function get_release_manager() {
-    const week = get_week(new Date());
+    const shift = 4; // Adjust when changing the set of candidates to avoid shifts.
+    const week = get_week(new Date()) + shift;
     const candidates = [
       "batiati",
       "cb22",
