@@ -1026,9 +1026,9 @@ pub const Simulator = struct {
                             // (e.g. due to "quorum received, awaiting repair") then they may
                             // linger, so if we only looked at the journal headers it would appear
                             // as if the replicas disagreed about the uncommitted headers.
-                            const headers_count = replica.superblock.working.vsr_headers_count;
+                            const headers_count = replica.superblock.working.view_headers_count;
                             const headers =
-                                replica.superblock.working.vsr_headers_all[0..headers_count];
+                                replica.superblock.working.view_headers_all[0..headers_count];
                             for (headers) |*header| {
                                 if (header.op == op) {
                                     break :header switch (vsr.Headers.dvc_header_type(header)) {

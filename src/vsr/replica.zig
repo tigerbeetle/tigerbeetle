@@ -752,10 +752,10 @@ pub fn ReplicaType(
             // Abort if all slots are faulty, since something is very wrong.
             if (self.journal.faulty.count == constants.journal_slot_count) return error.WALInvalid;
 
-            const vsr_headers = self.superblock.working.vsr_headers();
+            const view_headers = self.superblock.working.view_headers();
             // If we were a lagging backup that installed an SV but didn't finish fast-forwarding,
-            // the vsr_headers head op may be part of the checkpoint after this one.
-            maybe(vsr_headers.slice[0].op > self.op_prepare_max());
+            // the view_headers head op may be part of the checkpoint after this one.
+            maybe(view_headers.slice[0].op > self.op_prepare_max());
 
             // Given on-disk state, try to recover the head op after a restart.
             //
@@ -764,7 +764,7 @@ pub fn ReplicaType(
             // only) record in WAL is the root prepare.
             //
             // Otherwise, the head is recovered from the superblock. When transitioning to a
-            // view_change, replicas encode the current head into vsr_headers.
+            // view_change, replicas encode the current head into view_headers.
             //
             // It is a possibility that the head can't be recovered from the local data.
             // In this case, the replica transitions to .recovering_head and waits for a .start_view
@@ -782,31 +782,31 @@ pub fn ReplicaType(
                     }
                 }
             } else {
-                // Fall-through to choose op-head from vsr_headers.
+                // Fall-through to choose op-head from view_headers.
                 //
                 // "Highest op from log_view in WAL" is not the correct choice for op-head when
                 // recovering with a durable DVC (though we still resort to this if there are no
-                // usable headers in the vsr_headers). It is possible that we started the view and
+                // usable headers in the view_headers). It is possible that we started the view and
                 // finished some repair before updating our view_durable.
                 //
                 // To avoid special-casing this all over, we pretend this higher op doesn't
                 // exist. This is safe because we never prepared any ops in the view we joined just
                 // before the crash.
                 assert(self.log_view < self.view);
-                maybe(self.journal.op_maximum() > vsr_headers.slice[0].op);
+                maybe(self.journal.op_maximum() > view_headers.slice[0].op);
             }
 
-            // Try to use vsr_headers to update our head op and its header.
+            // Try to use view_headers to update our head op and its header.
             // To avoid the following scenario, don't load headers prior to the head:
             // 1. Replica A prepares[/commits] op X.
             // 2. Replica A crashes.
             // 3. Prepare X is corrupted in the WAL.
             // 4. Replica A recovers. During `Replica.open()`, Replica A loads the header
-            //    for op `X - journal_slot_count` (same slot, prior wrap) from vsr_headers
+            //    for op `X - journal_slot_count` (same slot, prior wrap) from view_headers
             //    into the journal.
             // 5. Replica A participates in a view-change, but nacks[/does not include] op X.
             // 6. Checkpoint X is truncated.
-            for (vsr_headers.slice) |*vsr_header| {
+            for (view_headers.slice) |*vsr_header| {
                 if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
                     vsr_header.op <= self.op_prepare_max() and
                     (op_head == null or op_head.? <= vsr_header.op))
@@ -883,7 +883,7 @@ pub fn ReplicaType(
                     }
                 } else {
                     // Don't call op_head_certain() here, as we didn't use the journal to infer our
-                    // head op. We used only vsr_headers, and a DVC always has a certain head op.
+                    // head op. We used only view_headers, and a DVC always has a certain head op.
                     assert(self.view > self.log_view);
                     self.transition_to_view_change_status(self.view);
                 }
@@ -1330,8 +1330,8 @@ pub fn ReplicaType(
                     .standby_count = standby_count,
                 }),
                 .view_headers = vsr.Headers.ViewChangeArray.init(
-                    self.superblock.working.vsr_headers().command,
-                    self.superblock.working.vsr_headers().slice,
+                    self.superblock.working.view_headers().command,
+                    self.superblock.working.view_headers().slice,
                 ),
                 .ping_timeout = Timeout{
                     .name = "ping_timeout",
@@ -5749,7 +5749,7 @@ pub fn ReplicaType(
                 op -= 1;
                 self.view_headers.append(self.journal.header_with_op(op).?);
             }
-            assert(self.view_headers.array.count() + 2 <= constants.view_change_headers_max);
+            assert(self.view_headers.array.count() + 2 <= constants.view_headers_max);
 
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
@@ -8553,7 +8553,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_quorum);
             // The DVC headers are already up to date, either via:
             // - transition_to_view_change_status(), or
-            // - superblock's vsr_headers (after recovery).
+            // - superblock's view_headers (after recovery).
             assert(self.view_headers.command == .do_view_change);
             assert(self.view_headers.array.get(0).op >= self.op);
             self.view_headers.verify();
@@ -9038,7 +9038,7 @@ pub fn ReplicaType(
                     assert(message.header.command != .do_view_change or std.mem.eql(
                         u8,
                         message.body_used(),
-                        std.mem.sliceAsBytes(self.superblock.working.vsr_headers().slice),
+                        std.mem.sliceAsBytes(self.superblock.working.view_headers().slice),
                     ));
                 }
             }
