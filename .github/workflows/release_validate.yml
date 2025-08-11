@@ -23,7 +23,9 @@ jobs:
           ref: release
       # Run on the latest tag. The release branch is ahead of release tag over the weekend.
       - run: |
-          TAG=$(gh release list --limit 1 | cut -f1)
+          # TODO: Switch back after 2025-08-18's release.
+          #TAG=$(gh release list --limit 1 | cut -f1)
+          TAG=release
           git fetch origin $TAG && git switch -d FETCH_HEAD
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
