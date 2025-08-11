@@ -46,8 +46,8 @@ pub const SuperBlockVersion: u16 =
     // Make sure that data files created by development builds are distinguished through version.
     if (constants.config.process.release.value == vsr.Release.minimum.value) 0 else 2;
 
-const vsr_headers_reserved_size = constants.sector_size -
-    ((constants.view_change_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
+const view_headers_reserved_size = constants.sector_size -
+    ((constants.view_headers_max * @sizeOf(vsr.Header)) % constants.sector_size);
 
 // Fields are aligned to work as an extern or packed struct.
 pub const SuperBlockHeader = extern struct {
@@ -84,25 +84,25 @@ pub const SuperBlockHeader = extern struct {
     /// Reserved for future minor features (e.g. changing a compression algorithm).
     flags: u64 = 0,
 
-    /// The number of headers in vsr_headers_all.
-    vsr_headers_count: u32,
+    /// The number of headers in view_headers_all.
+    view_headers_count: u32,
 
     reserved: [1940]u8 = @splat(0),
 
     /// SV/DVC header suffix. Headers are ordered from high-to-low op.
-    /// Unoccupied headers (after vsr_headers_count) are zeroed.
+    /// Unoccupied headers (after view_headers_count) are zeroed.
     ///
     /// When `vsr_state.log_view < vsr_state.view`, the headers are for a DVC.
     /// When `vsr_state.log_view = vsr_state.view`, the headers are for a SV.
-    vsr_headers_all: [constants.view_change_headers_max]vsr.Header.Prepare,
-    vsr_headers_reserved: [vsr_headers_reserved_size]u8 = @splat(0),
+    view_headers_all: [constants.view_headers_max]vsr.Header.Prepare,
+    view_headers_reserved: [view_headers_reserved_size]u8 = @splat(0),
 
     comptime {
         assert(@sizeOf(SuperBlockHeader) % constants.sector_size == 0);
         assert(@divExact(@sizeOf(SuperBlockHeader), constants.sector_size) >= 2);
         assert(@offsetOf(SuperBlockHeader, "parent") % @sizeOf(u256) == 0);
         assert(@offsetOf(SuperBlockHeader, "vsr_state") % @sizeOf(u256) == 0);
-        assert(@offsetOf(SuperBlockHeader, "vsr_headers_all") == constants.sector_size);
+        assert(@offsetOf(SuperBlockHeader, "view_headers_all") == constants.sector_size);
         // Assert that there is no implicit padding in the struct.
         assert(stdx.no_padding(SuperBlockHeader));
     }
@@ -502,7 +502,7 @@ pub const SuperBlockHeader = extern struct {
         assert(stdx.zeroed(&superblock.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.reserved));
         assert(stdx.zeroed(&superblock.vsr_state.checkpoint.reserved));
-        assert(stdx.zeroed(&superblock.vsr_headers_reserved));
+        assert(stdx.zeroed(&superblock.view_headers_reserved));
 
         assert(superblock.checksum_padding == 0);
         assert(superblock.parent_padding == 0);
@@ -533,8 +533,8 @@ pub const SuperBlockHeader = extern struct {
         assert(stdx.zeroed(&a.vsr_state.reserved));
         assert(stdx.zeroed(&b.vsr_state.reserved));
 
-        assert(stdx.zeroed(&a.vsr_headers_reserved));
-        assert(stdx.zeroed(&b.vsr_headers_reserved));
+        assert(stdx.zeroed(&a.view_headers_reserved));
+        assert(stdx.zeroed(&b.view_headers_reserved));
 
         assert(a.checksum_padding == 0);
         assert(b.checksum_padding == 0);
@@ -546,23 +546,23 @@ pub const SuperBlockHeader = extern struct {
         if (a.sequence != b.sequence) return false;
         if (a.parent != b.parent) return false;
         if (!stdx.equal_bytes(VSRState, &a.vsr_state, &b.vsr_state)) return false;
-        if (a.vsr_headers_count != b.vsr_headers_count) return false;
+        if (a.view_headers_count != b.view_headers_count) return false;
         if (!stdx.equal_bytes(
-            [constants.view_change_headers_max]vsr.Header.Prepare,
-            &a.vsr_headers_all,
-            &b.vsr_headers_all,
+            [constants.view_headers_max]vsr.Header.Prepare,
+            &a.view_headers_all,
+            &b.view_headers_all,
         )) return false;
 
         return true;
     }
 
-    pub fn vsr_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
+    pub fn view_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
         return vsr.Headers.ViewChangeSlice.init(
             if (superblock.vsr_state.log_view < superblock.vsr_state.view)
                 .do_view_change
             else
                 .start_view,
-            superblock.vsr_headers_all[0..superblock.vsr_headers_count],
+            superblock.view_headers_all[0..superblock.view_headers_count],
         );
     }
 
@@ -677,7 +677,7 @@ pub const superblock_zone_size = superblock_copy_size * constants.superblock_cop
 
 /// Leave enough padding after every superblock copy so that it is feasible, in the future, to
 /// modify the `pipeline_prepare_queue_max` of an existing cluster (up to a maximum of clients_max).
-/// (That is, this space is reserved for potential `vsr_headers`).
+/// (That is, this space is reserved for potential `view_headers`).
 const superblock_copy_padding: comptime_int = stdx.div_ceil(
     (constants.clients_max - constants.pipeline_prepare_queue_max) * @sizeOf(vsr.Header),
     constants.sector_size,
@@ -740,7 +740,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             /// Used by format(), checkpoint(), view_change().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
-            vsr_headers: ?vsr.Headers.ViewChangeArray = null,
+            view_headers: ?vsr.Headers.ViewChangeArray = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
         };
 
@@ -904,8 +904,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .view = 0,
                     .replica_count = options.replica_count,
                 },
-                .vsr_headers_count = 0,
-                .vsr_headers_all = mem.zeroes(
+                .view_headers_count = 0,
+                .view_headers_all = mem.zeroes(
                     [constants.view_change_headers_max]vsr.Header.Prepare,
                 ),
             };
@@ -924,7 +924,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica_count = options.replica_count,
                     .view = options.view orelse 0,
                 }),
-                .vsr_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
+                .view_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
 
             // TODO At a higher layer, we must:
@@ -1057,12 +1057,12 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .checkpoint,
                 .vsr_state = vsr_state,
-                .vsr_headers = if (update.view_attributes) |*view_attributes|
+                .view_headers = if (update.view_attributes) |*view_attributes|
                     view_attributes.headers.*
                 else
                     vsr.Headers.ViewChangeArray.init(
-                        superblock.staging.vsr_headers().command,
-                        superblock.staging.vsr_headers().slice,
+                        superblock.staging.view_headers().command,
+                        superblock.staging.view_headers().slice,
                     ),
             };
             superblock.log_context(context);
@@ -1144,7 +1144,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .view_change,
                 .vsr_state = vsr_state,
-                .vsr_headers = update.headers.*,
+                .view_headers = update.headers.*,
             };
             superblock.log_context(context);
             superblock.acquire(context);
@@ -1181,22 +1181,22 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.parent = superblock.staging.checksum;
             superblock.staging.vsr_state = context.vsr_state.?;
 
-            if (context.vsr_headers) |*headers| {
-                assert(context.caller.updates_vsr_headers());
+            if (context.view_headers) |*headers| {
+                assert(context.caller.updates_view_headers());
 
-                superblock.staging.vsr_headers_count = headers.array.count_as(u32);
+                superblock.staging.view_headers_count = headers.array.count_as(u32);
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header.Prepare,
-                    superblock.staging.vsr_headers_all[0..headers.array.count()],
+                    superblock.staging.view_headers_all[0..headers.array.count()],
                     headers.array.const_slice(),
                 );
                 @memset(
-                    superblock.staging.vsr_headers_all[headers.array.count()..],
+                    superblock.staging.view_headers_all[headers.array.count()..],
                     std.mem.zeroes(vsr.Header.Prepare),
                 );
             } else {
-                assert(!context.caller.updates_vsr_headers());
+                assert(!context.caller.updates_view_headers());
             }
 
             context.copy = 0;
@@ -1377,7 +1377,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     assert(working.vsr_state.commit_max == 0);
                     assert(working.vsr_state.log_view == 0);
                     maybe(working.vsr_state.view == 0); // On reformat view≠0.
-                    assert(working.vsr_headers_count == 1);
+                    assert(working.view_headers_count == 1);
 
                     assert(working.vsr_state.replica_count <= constants.replicas_max);
                     assert(vsr.member_index(
@@ -1496,7 +1496,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .snapshots_block_address = working_checkpoint.snapshots_block_address,
                     },
                 );
-                for (superblock.working.vsr_headers().slice) |*header| {
+                for (superblock.working.view_headers().slice) |*header| {
                     log.debug("{?}: {s}: vsr_header: op={} checksum={}", .{
                         superblock.replica_index,
                         @tagName(context.caller),
@@ -1676,8 +1676,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .view_old = superblock.staging.vsr_state.view,
                 .view_new = context.vsr_state.?.view,
 
-                .head_old = superblock.staging.vsr_headers().slice[0].checksum,
-                .head_new = if (context.vsr_headers) |*headers|
+                .head_old = superblock.staging.view_headers().slice[0].checksum,
+                .head_new = if (context.view_headers) |*headers|
                     @as(?u128, headers.array.get(0).checksum)
                 else
                     null,
@@ -1706,7 +1706,7 @@ pub const Caller = enum {
         });
     };
 
-    fn updates_vsr_headers(caller: Caller) bool {
+    fn updates_view_headers(caller: Caller) bool {
         return switch (caller) {
             .format => true,
             .open => unreachable,

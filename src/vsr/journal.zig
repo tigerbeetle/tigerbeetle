@@ -1243,7 +1243,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn recover_slots(journal: *Journal) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const log_view = replica.superblock.working.vsr_state.log_view;
-            const view_change_headers = replica.superblock.working.vsr_headers();
+            const view_headers = replica.superblock.working.view_headers();
 
             assert(journal.status == .recovering);
             assert(journal.reads.executing() == 0);
@@ -1317,7 +1317,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             for (journal.headers, 0..) |*header_untrusted, index| {
                 const slot = Slot{ .index = index };
                 if (header_ok(replica.cluster, slot, header_untrusted)) |header| {
-                    const view_range = view_change_headers.view_for_op(header.op, log_view);
+                    const view_range = view_headers.view_for_op(header.op, log_view);
                     assert(view_range.max <= log_view);
 
                     if (header.operation != .reserved and !view_range.contains(header.view)) {
