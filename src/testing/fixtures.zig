@@ -96,7 +96,7 @@ pub fn storage_format(
         .release = options.release,
         .view = null,
     });
-    for (0..1_000) |_| {
+    for (0..10_000) |_| {
         if (context.done) break;
         storage.run();
     } else @panic("superblock format loop stuck");
