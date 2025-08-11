@@ -136,6 +136,51 @@ pub const GridBlocksMissing = struct {
         queue.* = undefined;
     }
 
+    pub fn verify(queue: *const GridBlocksMissing) void {
+        assert(queue.faulty_blocks_repair_index == 0 or
+            queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
+
+        var enqueued_blocks_single: u32 = 0;
+        var enqueued_blocks_table: u32 = 0;
+        var enqueued_blocks_aborting: u32 = 0;
+        {
+            var faulty_blocks_iterator = queue.faulty_blocks.iterator();
+            while (faulty_blocks_iterator.next()) |fault_entry| {
+                const fault = fault_entry.value_ptr;
+                switch (fault.progress) {
+                    .block => enqueued_blocks_single += 1,
+                    .table_index => enqueued_blocks_table += 1,
+                    .table_value => enqueued_blocks_table += 1,
+                }
+                enqueued_blocks_aborting += @intFromBool(fault.state == .aborting);
+
+                switch (fault.progress) {
+                    .block => {},
+                    inline .table_index, .table_value => |progress| {
+                        // These are not exclusive because the replica may reuse a RepairTable while
+                        // we are still aborting the old blocks.
+                        assert(queue.faulty_tables.contains(progress.table) or
+                            (fault.state == .aborting));
+                    },
+                }
+            }
+        }
+        assert(queue.enqueued_blocks_single == enqueued_blocks_single);
+        assert(queue.enqueued_blocks_table == enqueued_blocks_table);
+        if (enqueued_blocks_table == 0) assert(queue.faulty_tables.empty());
+
+        if (queue.checkpoint_durable) |checkpoint_durable| {
+            assert(enqueued_blocks_aborting == checkpoint_durable.aborting);
+        } else {
+            assert(enqueued_blocks_aborting == 0);
+        }
+
+        var faulty_tables_free = queue.faulty_tables_free.iterate();
+        while (faulty_tables_free.next()) |table_free| {
+            assert(!queue.faulty_tables.contains(table_free));
+        }
+    }
+
     /// When the queue wants more blocks than fit in a single request message, successive calls
     /// to this function cycle through the pending BlockRequests.
     pub fn next_batch_of_block_requests(
@@ -440,6 +485,7 @@ pub const GridBlocksMissing = struct {
     }
 
     pub fn cancel(queue: *GridBlocksMissing) void {
+        queue.verify();
         queue.faulty_blocks.clearRetainingCapacity();
         while (queue.faulty_tables.pop()) |table| {
             queue.faulty_tables_free.push(table);
@@ -457,6 +503,7 @@ pub const GridBlocksMissing = struct {
         queue: *GridBlocksMissing,
         free_set: *const vsr.FreeSet,
     ) void {
+        queue.verify();
         assert(queue.checkpoint_durable == null);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
@@ -506,6 +553,7 @@ pub const GridBlocksMissing = struct {
     /// Returns `true` when the `state == aborting` faults for blocks to be freed at checkpoint
     /// durability have finished. (All other writes can safely complete after checkpoint durability)
     pub fn checkpoint_durable_complete(queue: *GridBlocksMissing) bool {
+        queue.verify();
         assert(queue.checkpoint_durable != null);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
