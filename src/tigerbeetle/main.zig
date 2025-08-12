@@ -163,7 +163,7 @@ const Command = struct {
         tracer: *Tracer,
         path: []const u8,
         options: struct {
-            must_create: bool,
+            format: bool,
             development: bool,
         },
     ) !void {
@@ -185,7 +185,7 @@ const Command = struct {
             command.dir_fd,
             basename,
             data_file_size_min,
-            if (options.must_create) .create else .open,
+            if (options.format) .format else .open,
             direct_io,
         );
         errdefer std.posix.close(command.fd);
@@ -215,7 +215,7 @@ const Command = struct {
     ) !void {
         var command: Command = undefined;
         try command.init(gpa, io, tracer, args.path, .{
-            .must_create = true,
+            .format = true,
             .development = args.development,
         });
         defer command.deinit(gpa);
@@ -243,7 +243,7 @@ const Command = struct {
     ) !void {
         var command: Command = undefined;
         try command.init(gpa, io, tracer, args.path, .{
-            .must_create = true,
+            .format = true,
             .development = args.development,
         });
         defer command.deinit(gpa);
@@ -318,7 +318,7 @@ const Command = struct {
 
         var command: Command = undefined;
         try command.init(gpa, io, tracer, args.path, .{
-            .must_create = false,
+            .format = false,
             .development = args.development,
         });
         defer command.deinit(gpa);
