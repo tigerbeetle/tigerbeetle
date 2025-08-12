@@ -3346,6 +3346,16 @@ pub fn ReplicaType(
             maybe(message.header.protocol < vsr.Version);
             assert(self.grid_repair_writes.available() > 0);
 
+            if (self.release.value < message.header.release.value) {
+                log.debug("{}: on_block: ignoring; release={} (address={} checksum={})", .{
+                    self.log_prefix(),
+                    message.header.release,
+                    message.header.address,
+                    message.header.checksum,
+                });
+                return;
+            }
+
             if (self.grid.callback == .cancel) {
                 assert(self.grid.read_global_queue.empty());
 
@@ -3363,10 +3373,11 @@ pub fn ReplicaType(
             if (grid_fulfill) {
                 assert(!self.grid.free_set.is_free(message.header.address));
 
-                log.debug("{}: on_block: fulfilled address={} checksum={}", .{
+                log.debug("{}: on_block: fulfilled address={} checksum={} {s}", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
+                    @tagName(message.header.block_type),
                 });
             }
 
@@ -3379,10 +3390,11 @@ pub fn ReplicaType(
                 const write_index = self.grid_repair_writes.index(write);
                 const write_block: *BlockPtr = &self.grid_repair_write_blocks[write_index];
 
-                log.debug("{}: on_block: repairing address={} checksum={}", .{
+                log.debug("{}: on_block: repairing address={} checksum={} {s}", .{
                     self.log_prefix(),
                     message.header.address,
                     message.header.checksum,
+                    @tagName(message.header.block_type),
                 });
 
                 stdx.copy_disjoint(
