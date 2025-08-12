@@ -851,10 +851,6 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .view_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
             };
 
-            // TODO At a higher layer, we must:
-            // 1. verify that there is no valid superblock, and
-            // 2. zero the superblock, WAL and client table to ensure storage determinism.
-
             superblock.acquire(context);
         }
 
