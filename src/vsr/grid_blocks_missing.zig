@@ -144,13 +144,12 @@ pub const GridBlocksMissing = struct {
         var enqueued_blocks_table: u32 = 0;
         var enqueued_blocks_aborting: u32 = 0;
         {
-            var faulty_blocks_iterator = queue.faulty_blocks.iterator();
-            while (faulty_blocks_iterator.next()) |fault_entry| {
-                const fault = fault_entry.value_ptr;
+            for (queue.faulty_blocks.values()) |fault| {
                 switch (fault.progress) {
+                    .table_index,
+                    .table_value,
+                    => enqueued_blocks_table += 1,
                     .block => enqueued_blocks_single += 1,
-                    .table_index => enqueued_blocks_table += 1,
-                    .table_value => enqueued_blocks_table += 1,
                 }
                 enqueued_blocks_aborting += @intFromBool(fault.state == .aborting);
 
