@@ -201,7 +201,8 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: posix.sockaddr,
+            address_size: posix.socklen_t,
             initiated: bool,
         },
         fsync: struct {
@@ -407,7 +408,8 @@ pub const IO = struct {
             .connect,
             .{
                 .socket = socket,
-                .address = address,
+                .address = address.any,
+                .address_size = address.getOsSockLen(),
                 .initiated = false,
             },
             struct {
@@ -418,8 +420,8 @@ pub const IO = struct {
                         true => posix.getsockoptError(op.socket),
                         else => posix.connect(
                             op.socket,
-                            &op.address.any,
-                            op.address.getOsSockLen(),
+                            &op.address,
+                            op.address_size,
                         ),
                     };
 

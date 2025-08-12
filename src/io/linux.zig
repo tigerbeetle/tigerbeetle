@@ -402,8 +402,8 @@ pub const IO = struct {
                 .connect => |*op| {
                     sqe.prep_connect(
                         op.socket,
-                        &op.address.any,
-                        op.address.getOsSockLen(),
+                        &op.address,
+                        op.address_size,
                     );
                 },
                 .fsync => |op| {
@@ -803,7 +803,8 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: posix.sockaddr,
+            address_size: posix.socklen_t,
         },
         fsync: struct {
             fd: fd_t,
@@ -957,7 +958,8 @@ pub const IO = struct {
             .operation = .{
                 .connect = .{
                     .socket = socket,
-                    .address = address,
+                    .address = address.any,
+                    .address_size = address.getOsSockLen(),
                 },
             },
         };

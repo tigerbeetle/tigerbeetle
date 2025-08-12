@@ -205,7 +205,8 @@ pub const IO = struct {
             },
             connect: struct {
                 socket: socket_t,
-                address: std.net.Address,
+                address: os.windows.ws2_32.sockaddr,
+                address_size: os.windows.ws2_32.socklen_t,
                 overlapped: Overlapped,
                 pending: bool,
             },
@@ -444,6 +445,7 @@ pub const IO = struct {
             .{
                 .socket = socket,
                 .address = address,
+                .address_size = address.getOsSockLen(),
                 .overlapped = undefined,
                 .pending = false,
             },
@@ -527,8 +529,8 @@ pub const IO = struct {
                         // Start the connect operation.
                         break :blk (connect_ex)(
                             op.socket,
-                            &op.address.any,
-                            op.address.getOsSockLen(),
+                            &op.address,
+                            op.address_size,
                             null,
                             0,
                             &transferred,
