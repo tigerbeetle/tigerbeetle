@@ -220,13 +220,10 @@ const Command = struct {
         });
         defer command.deinit(gpa);
 
-        vsr.format(Storage, gpa, options, .{
+        try vsr.format(Storage, gpa, options, .{
             .storage = &command.storage,
             .storage_size_limit = data_file_size_min,
-        }) catch |err| {
-            std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
-            return err;
-        };
+        });
 
         log.info("{}: formatted: cluster={} replica_count={}", .{
             options.replica,
@@ -289,7 +286,6 @@ const Command = struct {
         switch (reformatter.done().?) {
             .failed => |err| {
                 log.err("{}: error: {s}", .{ args.replica, @errorName(err) });
-                std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
                 return err;
             },
             .ok => log.info("{}: success", .{args.replica}),
