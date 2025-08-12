@@ -1012,11 +1012,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .path = start.positional.path,
         .log_debug = start.log_debug,
         .statsd = if (start.statsd) |statsd_address|
-            parse_addresses(
-                statsd_address,
-                "--statsd",
-                stdx.BoundedArrayType(std.net.Address, 1),
-            ).get(0)
+            parse_address_and_port(statsd_address, "--statsd", 8125)
         else
             null,
     };
