@@ -231,6 +231,7 @@ pub const IO = struct {
             buf: [*]const u8,
             len: u32,
             offset: u64,
+            dsync: bool,
         },
     };
 
@@ -687,6 +688,7 @@ pub const IO = struct {
         fd: fd_t,
         buffer: []const u8,
         offset: u64,
+        options: struct { dsync: bool },
     ) void {
         self.submit(
             context,
@@ -698,6 +700,7 @@ pub const IO = struct {
                 .buf = buffer.ptr,
                 .len = @as(u32, @intCast(buffer_limit(buffer.len))),
                 .offset = offset,
+                .dsync = options.dsync,
             },
             struct {
                 fn do_operation(op: anytype) WriteError!usize {
@@ -705,7 +708,9 @@ pub const IO = struct {
                     // below) is _synchronous_, so it's safe to call fs_sync after it has
                     // completed.
                     const result = posix.pwrite(op.fd, op.buf[0..op.len], op.offset);
-                    try fs_sync(op.fd);
+                    if (op.dsync) {
+                        try fs_sync(op.fd);
+                    }
 
                     return result;
                 }
@@ -888,7 +893,15 @@ pub const IO = struct {
         var flags: posix.O = .{
             .CLOEXEC = true,
             .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
-            .DSYNC = true,
+
+            // Even though DSYNC false is the default, spell it out here explicitly. Non-grid writes
+            // are flushed immediately after writing with fs_sync. Grid writes aren't, and are
+            // flushed before returning from compaction after each beat.
+            //
+            // In any case, DSYNC is broken on Darwin:
+            // https://x.com/TigerBeetleDB/status/1536628729031581697
+            // To work around this, fs_sync() is explicitly called after writing in do_operation.
+            .DSYNC = false,
         };
         var mode: posix.mode_t = 0;
 
@@ -912,8 +925,8 @@ pub const IO = struct {
             },
         }
 
-        // This is critical as we rely on O_DSYNC for fsync() whenever we write to the file:
-        assert(flags.DSYNC);
+        // Potentially surprising: see the explanation in `var flags`.
+        assert(!flags.DSYNC);
 
         // Be careful with openat(2): "If pathname is absolute, then dirfd is ignored." (man page)
         assert(!std.fs.path.isAbsolute(relative_path));

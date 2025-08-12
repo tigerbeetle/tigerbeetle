@@ -247,6 +247,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
         compaction_schedule: CompactionSchedule,
 
         scan_buffer_pool: ScanBufferPool,
+        flush: Grid.Flush = undefined,
 
         pub fn init(
             forest: *Forest,
@@ -538,6 +539,34 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                         tree.manifest.assert_level_table_counts();
                     }
                 }
+            }
+
+            // On the last beat, wait until everything has been persisted before calling the
+            // callback.
+            if (last_beat) {
+                forest.grid.superblock.storage.flush_sectors(flush_callback, &forest.flush);
+            } else {
+                forest.compact_finish_dispatch_callback();
+            }
+        }
+
+        pub fn flush_callback(flush: *Grid.Flush) void {
+            const forest: *Forest = @alignCast(@fieldParentPtr("flush", flush));
+            forest.compact_finish_dispatch_callback();
+        }
+
+        pub fn compact_finish_dispatch_callback(forest: *Forest) void {
+            assert(forest.progress.? == .compact);
+            assert(forest.compaction_progress != null);
+            assert(forest.compaction_progress.?.trees_done);
+            assert(forest.compaction_progress.?.manifest_log_done);
+
+            const op = forest.progress.?.compact.op;
+            const compaction_beat = op % constants.lsm_compaction_ops;
+            const last_beat = compaction_beat == constants.lsm_compaction_ops - 1;
+
+            if (last_beat) {
+                assert(forest.grid.superblock.storage.unflushed == 0);
             }
 
             const callback = forest.progress.?.compact.callback;

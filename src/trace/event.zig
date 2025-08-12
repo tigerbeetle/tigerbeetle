@@ -92,6 +92,7 @@ pub const Event = union(enum) {
     grid_write: struct { iop: usize },
     storage_read: struct { zone: Zone },
     storage_write: struct { zone: Zone },
+    storage_flush,
 
     metrics_emit: void,
 
@@ -167,6 +168,7 @@ pub const EventTiming = union(Event.Tag) {
     grid_write,
     storage_read: struct { zone: Zone },
     storage_write: struct { zone: Zone },
+    storage_flush,
 
     metrics_emit,
 
@@ -194,6 +196,7 @@ pub const EventTiming = union(Event.Tag) {
         .metrics_emit = 1,
         .storage_read = enum_max(Zone),
         .storage_write = enum_max(Zone),
+        .storage_flush = 1,
         .client_request_round_trip = enum_max(Operation),
     });
 
@@ -327,6 +330,7 @@ pub const EventTracing = union(Event.Tag) {
     grid_write: struct { iop: usize },
     storage_read,
     storage_write,
+    storage_flush,
 
     metrics_emit,
 
@@ -353,6 +357,7 @@ pub const EventTracing = union(Event.Tag) {
         .grid_write = constants.grid_iops_write_max,
         .storage_read = 1,
         .storage_write = 1,
+        .storage_flush = 1,
         .metrics_emit = 1,
         .client_request_round_trip = 1,
     });
@@ -654,6 +659,7 @@ test "EventTiming slot doesn't have collisions" {
             .grid_write => .grid_write,
             .storage_read => .{ .storage_read = .{ .zone = g.enum_value(Zone) } },
             .storage_write => .{ .storage_write = .{ .zone = g.enum_value(Zone) } },
+            .storage_flush => .storage_flush,
             .metrics_emit => .metrics_emit,
             .client_request_round_trip => .{ .client_request_round_trip = .{
                 .operation = g.enum_value(Operation),
