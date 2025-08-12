@@ -107,7 +107,7 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 
     const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
     try shell.exec_zig_options(.{
-        .timeout_ns = 20 * std.time.ns_per_min,
+        .timeout = .{ .ns = 20 * std.time.ns_per_min },
     }, "build scripts -- release --build " ++
         "--sha={git_sha} --language=zig", .{
         .git_sha = git_sha,
