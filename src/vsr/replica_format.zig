@@ -11,14 +11,15 @@ const data_file_size_min = @import("./superblock.zig").data_file_size_min;
 pub fn format(
     comptime Storage: type,
     gpa: std.mem.Allocator,
+    storage: *Storage,
     options: vsr.SuperBlockType(Storage).FormatOptions,
-    superblock_options: vsr.SuperBlockType(Storage).Options,
 ) !void {
     const ReplicaFormat = ReplicaFormatType(Storage);
     const SuperBlock = vsr.SuperBlockType(Storage);
 
-    const storage = superblock_options.storage;
-    var superblock = try SuperBlock.init(gpa, superblock_options);
+    var superblock = try SuperBlock.init(gpa, storage, .{
+        .storage_size_limit = data_file_size_min,
+    });
     defer superblock.deinit(gpa);
 
     var replica_format = try ReplicaFormat.init(gpa);
@@ -335,15 +336,12 @@ test "format" {
     });
     defer storage.deinit(allocator);
 
-    try format(Storage, allocator, .{
+    try format(Storage, allocator, &storage, .{
         .cluster = cluster,
         .release = vsr.Release.minimum,
         .replica = replica,
         .replica_count = replica_count,
         .view = null,
-    }, .{
-        .storage = &storage,
-        .storage_size_limit = data_file_size_min,
     });
 
     // Verify the superblock headers.

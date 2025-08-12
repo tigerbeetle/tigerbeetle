@@ -220,10 +220,7 @@ const Command = struct {
         });
         defer command.deinit(gpa);
 
-        vsr.format(Storage, gpa, options, .{
-            .storage = &command.storage,
-            .storage_size_limit = data_file_size_min,
-        }) catch |err| {
+        vsr.format(Storage, gpa, &command.storage, options) catch |err| {
             std.posix.unlinkat(command.dir_fd, command.data_file_path, 0) catch {};
             return err;
         };
@@ -266,18 +263,12 @@ const Command = struct {
         });
         defer client.deinit(gpa);
 
-        var reformatter = try ReplicaReformat.init(gpa, &client, .{
-            .format = .{
-                .cluster = args.cluster,
-                .replica = args.replica,
-                .replica_count = args.replica_count,
-                .release = config.process.release,
-                .view = null,
-            },
-            .superblock = .{
-                .storage = &command.storage,
-                .storage_size_limit = data_file_size_min,
-            },
+        var reformatter = try ReplicaReformat.init(gpa, &client, &command.storage, .{
+            .cluster = args.cluster,
+            .replica = args.replica,
+            .replica_count = args.replica_count,
+            .release = config.process.release,
+            .view = null,
         });
         defer reformatter.deinit(gpa);
 

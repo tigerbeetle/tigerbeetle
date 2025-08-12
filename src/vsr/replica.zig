@@ -670,8 +670,8 @@ pub fn ReplicaType(
 
             self.superblock = try SuperBlock.init(
                 allocator,
+                options.storage,
                 .{
-                    .storage = options.storage,
                     .storage_size_limit = options.storage_size_limit,
                 },
             );

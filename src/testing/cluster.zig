@@ -357,16 +357,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 try vsr.format(
                     Storage,
                     allocator,
+                    storage,
                     .{
                         .cluster = options.cluster.cluster_id,
                         .release = options.cluster.releases[0].release,
                         .replica = @intCast(replica_index),
                         .replica_count = options.cluster.replica_count,
                         .view = null,
-                    },
-                    .{
-                        .storage = storage,
-                        .storage_size_limit = options.cluster.storage_size_limit,
                     },
                 );
             }
@@ -860,18 +857,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.replica_reformats[replica_index] = try ReplicaReformat.init(
                 cluster.allocator,
                 &cluster.clients[client_index].?,
+                storage,
                 .{
-                    .format = .{
-                        .cluster = cluster.options.cluster_id,
-                        .release = cluster.options.releases[0].release,
-                        .replica = @intCast(replica_index),
-                        .replica_count = cluster.options.replica_count,
-                        .view = null,
-                    },
-                    .superblock = .{
-                        .storage = storage,
-                        .storage_size_limit = cluster.options.storage_size_limit,
-                    },
+                    .cluster = cluster.options.cluster_id,
+                    .release = cluster.options.releases[0].release,
+                    .replica = @intCast(replica_index),
+                    .replica_count = cluster.options.replica_count,
+                    .view = null,
                 },
             );
             cluster.replica_reformats[replica_index].?.start();
