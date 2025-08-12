@@ -81,7 +81,13 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         var tracer = try fixtures.init_tracer(gpa, time, .{});
         defer tracer.deinit(gpa);
 
-        var storage = try Storage.init(&io, &tracer, 0);
+        var storage: Storage = .{
+            .io = &io,
+            .tracer = &tracer,
+            .dir_fd = 0,
+            .fd = 0,
+        };
+        // NB: Intentionally skipping deinit to avoid closing stdin.
 
         var write_completion: Storage.Write = undefined;
 

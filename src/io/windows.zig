@@ -1250,6 +1250,7 @@ pub const IO = struct {
         return handle;
     }
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on windows).
@@ -1263,7 +1264,7 @@ pub const IO = struct {
         dir_handle: fd_t,
         relative_path: []const u8,
         size: u64,
-        purpose: enum { format, open, inspect },
+        purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
         assert(relative_path.len > 0);
