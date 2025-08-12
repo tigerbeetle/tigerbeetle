@@ -713,31 +713,28 @@ pub fn SuperBlockType(comptime Storage: type) type {
         /// Used for logging.
         replica_index: ?u8 = null,
 
-        pub const Options = struct {
-            storage: *Storage,
+        pub fn init(gpa: mem.Allocator, storage: *Storage, options: struct {
             storage_size_limit: u64,
-        };
-
-        pub fn init(allocator: mem.Allocator, options: Options) !SuperBlock {
+        }) !SuperBlock {
             assert(options.storage_size_limit >= data_file_size_min);
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
             assert(options.storage_size_limit % constants.sector_size == 0);
 
-            const a = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
-            errdefer allocator.free(a);
+            const a = try gpa.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
+            errdefer gpa.free(a);
 
-            const b = try allocator.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
-            errdefer allocator.free(b);
+            const b = try gpa.alignedAlloc(SuperBlockHeader, constants.sector_size, 1);
+            errdefer gpa.free(b);
 
-            const reading = try allocator.alignedAlloc(
+            const reading = try gpa.alignedAlloc(
                 [constants.superblock_copies]SuperBlockHeader,
                 constants.sector_size,
                 1,
             );
-            errdefer allocator.free(reading);
+            errdefer gpa.free(reading);
 
             return SuperBlock{
-                .storage = options.storage,
+                .storage = storage,
                 .working = &a[0],
                 .staging = &b[0],
                 .reading = &reading[0],
@@ -745,10 +742,10 @@ pub fn SuperBlockType(comptime Storage: type) type {
             };
         }
 
-        pub fn deinit(superblock: *SuperBlock, allocator: mem.Allocator) void {
-            allocator.destroy(superblock.working);
-            allocator.destroy(superblock.staging);
-            allocator.free(superblock.reading);
+        pub fn deinit(superblock: *SuperBlock, gpa: mem.Allocator) void {
+            gpa.destroy(superblock.working);
+            gpa.destroy(superblock.staging);
+            gpa.free(superblock.reading);
         }
 
         pub const FormatOptions = struct {

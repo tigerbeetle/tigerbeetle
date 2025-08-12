@@ -107,8 +107,7 @@ pub fn storage_format(
 pub fn init_superblock(gpa: std.mem.Allocator, storage: *Storage, options: struct {
     storage_size_limit: ?u64 = null,
 }) !SuperBlock {
-    return try SuperBlock.init(gpa, .{
-        .storage = storage,
+    return try SuperBlock.init(gpa, storage, .{
         .storage_size_limit = options.storage_size_limit orelse storage.size,
     });
 }
