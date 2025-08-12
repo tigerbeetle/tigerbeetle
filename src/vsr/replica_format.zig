@@ -196,15 +196,16 @@ fn ReplicaFormatType(comptime Storage: type) type {
         ) void {
             assert(self.writes_pending == writes_max);
 
+            self.formatting = true;
+            while (self.formatting) storage.run();
+
+            self.formatting_superblock = true;
             superblock.format(
                 format_superblock_callback,
                 &self.superblock_context,
                 superblock_options,
             );
-
-            self.formatting = true;
-            self.formatting_superblock = true;
-            while (self.formatting or self.formatting_superblock) storage.run();
+            while (self.formatting_superblock) storage.run();
         }
 
         fn write_sectors_callback(storage_write: *Storage.Write) void {
@@ -212,6 +213,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
             const self = write.replica_format;
 
             assert(self.formatting);
+            assert(!self.formatting_superblock);
 
             self.writes_pending -= 1;
 
@@ -233,6 +235,7 @@ fn ReplicaFormatType(comptime Storage: type) type {
         fn format_superblock_callback(superblock_context: *SuperBlock.Context) void {
             const self: *ReplicaFormat =
                 @alignCast(@fieldParentPtr("superblock_context", superblock_context));
+            assert(!self.formatting);
             assert(self.formatting_superblock);
             self.formatting_superblock = false;
         }
