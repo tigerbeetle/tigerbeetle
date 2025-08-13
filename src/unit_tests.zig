@@ -68,9 +68,11 @@ comptime {
 
 const quine =
     \\const std = @import("std");
+    \\const stdx = @import("stdx");
     \\const builtin = @import("builtin");
     \\const assert = std.debug.assert;
-    \\const max_source_size = 1024 * 1024;
+    \\
+    \\const MiB = stdx.MiB;
     \\
     \\test quine {
     \\    var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -103,11 +105,7 @@ const quine =
     \\    try writer.writeAll(quine);
     \\
     \\    assert(std.mem.eql(u8, @src().file, "unit_tests.zig"));
-    \\    const unit_tests_contents_disk = try src_dir.readFileAlloc(
-    \\        arena,
-    \\        @src().file,
-    \\        max_source_size,
-    \\    );
+    \\    const unit_tests_contents_disk = try src_dir.readFileAlloc(arena, @src().file, 1 * MiB);
     \\    assert(std.mem.startsWith(u8, unit_tests_contents_disk, "comptime {"));
     \\    assert(std.mem.endsWith(u8, unit_tests_contents.items, "}\n"));
     \\
@@ -165,7 +163,7 @@ const quine =
     \\            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
     \\        if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
     \\
-    \\        const contents = try src_dir.readFileAlloc(arena, entry_path, max_source_size);
+    \\        const contents = try src_dir.readFileAlloc(arena, entry_path, 1 * MiB);
     \\        var line_iterator = std.mem.splitScalar(u8, contents, '\n');
     \\        while (line_iterator.next()) |line| {
     \\            const line_trimmed = std.mem.trimLeft(u8, line, " ");
@@ -193,11 +191,11 @@ const quine =
 ;
 
 const std = @import("std");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const stdx = @import("stdx");
+
 const MiB = stdx.MiB;
-const max_source_size = 1 * MiB;
 
 test quine {
     var arena_instance = std.heap.ArenaAllocator.init(std.testing.allocator);
@@ -230,11 +228,7 @@ test quine {
     try writer.writeAll(quine);
 
     assert(std.mem.eql(u8, @src().file, "unit_tests.zig"));
-    const unit_tests_contents_disk = try src_dir.readFileAlloc(
-        arena,
-        @src().file,
-        max_source_size,
-    );
+    const unit_tests_contents_disk = try src_dir.readFileAlloc(arena, @src().file, 1 * MiB);
     assert(std.mem.startsWith(u8, unit_tests_contents_disk, "comptime {"));
     assert(std.mem.endsWith(u8, unit_tests_contents.items, "}\n"));
 
@@ -292,7 +286,7 @@ fn unit_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []con
             !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
         if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
 
-        const contents = try src_dir.readFileAlloc(arena, entry_path, max_source_size);
+        const contents = try src_dir.readFileAlloc(arena, entry_path, 1 * MiB);
         var line_iterator = std.mem.splitScalar(u8, contents, '\n');
         while (line_iterator.next()) |line| {
             const line_trimmed = std.mem.trimLeft(u8, line, " ");
