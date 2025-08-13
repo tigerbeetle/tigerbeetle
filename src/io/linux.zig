@@ -1410,6 +1410,7 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (if possible in development mode, but required in production mode).
@@ -1423,7 +1424,7 @@ pub const IO = struct {
         dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
-        purpose: enum { format, open, inspect },
+        purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
         _ = self;

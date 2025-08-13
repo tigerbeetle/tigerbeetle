@@ -123,6 +123,8 @@ pub const IO = struct {
         self.completed.push(completion);
     }
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
+
     pub const ReadError = error{
         WouldBlock,
         NotOpenForReading,
