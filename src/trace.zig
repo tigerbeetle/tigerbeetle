@@ -294,7 +294,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         .thread_id = event_tracing.stack(),
         .category = @tagName(event),
         .event = 'B',
-        .timestamp = time_elapsed.us(),
+        .timestamp = time_elapsed.to_us(),
         .event_tracing = event_tracing,
         .event_timing = event_timing,
         .args = std.json.Formatter(Event){ .value = event, .options = .{} },
@@ -334,9 +334,9 @@ pub fn stop(tracer: *Tracer, event: Event) void {
         event_tracing,
         event_timing,
         if (event_duration.ns < us_log_threshold_ns)
-            event_duration.us()
+            event_duration.to_us()
         else
-            event_duration.ms(),
+            event_duration.to_ms(),
         if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
     });
 
@@ -376,7 +376,7 @@ fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
             .process_id = tracer.process_id.json(),
             .thread_id = stack,
             .event = 'E',
-            .timestamp = time_elapsed.us(),
+            .timestamp = time_elapsed.to_us(),
         },
     ) catch unreachable;
 

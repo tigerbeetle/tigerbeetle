@@ -5185,13 +5185,15 @@ pub fn ReplicaType(
             const commit_completion_time_local = self.clock.time.monotonic_instant()
                 .duration_since(self.commit_started.?);
             self.commit_started = null;
-            if (commit_completion_time_local.ms() > constants.client_request_completion_warn_ms) {
+            if (commit_completion_time_local.to_ms() >
+                constants.client_request_completion_warn_ms)
+            {
                 log.warn("{}: commit_dispatch: slow request, request={} size={} {s} time={}ms", .{
                     self.log_prefix(),
                     self.commit_prepare.?.header.request,
                     self.commit_prepare.?.header.size,
                     self.commit_prepare.?.header.operation.tag_name(StateMachine),
-                    commit_completion_time_local.ms(),
+                    commit_completion_time_local.to_ms(),
                 });
             }
 
