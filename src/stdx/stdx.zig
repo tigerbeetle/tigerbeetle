@@ -952,6 +952,14 @@ pub const Instant = struct {
 pub const Duration = struct {
     ns: u64,
 
+    pub fn ms(amount_ms: u64) Duration {
+        return .{ .ns = amount_ms * std.time.ns_per_ms };
+    }
+
+    pub fn minutes(amount_minutes: u64) Duration {
+        return .{ .ns = amount_minutes * std.time.ns_per_min };
+    }
+
     // Duration in microseconds, μs, 1/1_000_000 of a second.
     pub fn to_us(duration: Duration) u64 {
         return @divFloor(duration.ns, std.time.ns_per_us);

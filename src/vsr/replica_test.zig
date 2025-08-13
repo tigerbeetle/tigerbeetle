@@ -2017,10 +2017,10 @@ const TestContext = struct {
             },
             .storage = .{
                 .size = storage_size_limit,
-                .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
-                .read_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
-                .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
-                .write_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
+                .read_latency_min = .ms(10),
+                .read_latency_mean = .ms(50),
+                .write_latency_min = .ms(10),
+                .write_latency_mean = .ms(50),
             },
             .storage_fault_atlas = .{
                 .faulty_superblock = false,

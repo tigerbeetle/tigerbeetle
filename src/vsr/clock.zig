@@ -948,11 +948,11 @@ test "clock: fuzz test" {
             .client_count = 0,
             .seed = seed,
 
-            .one_way_delay_mean = .{ .ns = 250 * std.time.ns_per_ms },
-            .one_way_delay_min = .{ .ns = 100 * std.time.ns_per_ms },
+            .one_way_delay_mean = .ms(250),
+            .one_way_delay_min = .ms(100),
             .packet_loss_probability = ratio(10, 100),
             .path_maximum_capacity = 20,
-            .path_clog_duration_mean = .{ .ns = 200 * std.time.ns_per_ms },
+            .path_clog_duration_mean = .ms(200),
             .path_clog_probability = ratio(2, 100),
             .packet_replay_probability = ratio(2, 100),
 

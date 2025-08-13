@@ -605,9 +605,7 @@ const TmpCluster = struct {
                 const shell = try Shell.create(std.testing.allocator);
                 defer shell.destroy();
 
-                try shell.exec_options(.{
-                    .timeout = .{ .ns = 10 * std.time.ns_per_min },
-                },
+                try shell.exec_options(.{ .timeout = .minutes(10) },
                     \\{tigerbeetle} benchmark
                     \\    --print-batch-timings
                     \\    --transfer-count={transfer_count}
