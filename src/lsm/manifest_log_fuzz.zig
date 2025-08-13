@@ -62,9 +62,9 @@ fn run_fuzz(
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
         .size = constants.storage_size_limit_default,
-        .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .read_latency_min = .ms(10),
         .read_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
-        .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .write_latency_min = .ms(10),
         .write_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
     };
 

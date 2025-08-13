@@ -529,11 +529,11 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = .{ .ns = 50 * std.time.ns_per_ms },
+        .one_way_delay_mean = .ms(50),
         .one_way_delay_min = .{ .ns = 0 },
         .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
-        .path_clog_duration_mean = .{ .ns = 2_000 * std.time.ns_per_ms },
+        .path_clog_duration_mean = .ms(2_000),
         .path_clog_probability = Ratio.zero(),
         .packet_replay_probability = Ratio.zero(),
 

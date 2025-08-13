@@ -339,11 +339,11 @@ fn format_metric(
         .metric => |data| .{ "", "g", data.aggregate.value },
         .timing => |data| switch (data.stat) {
             .count => .{ "_us.count", "c", data.aggregate.values.count },
-            .sum => .{ "_us.sum", "c", data.aggregate.values.duration_sum.us() },
-            .min => .{ "_us.min", "g", data.aggregate.values.duration_min.us() },
-            .max => .{ "_us.max", "g", data.aggregate.values.duration_max.us() },
+            .sum => .{ "_us.sum", "c", data.aggregate.values.duration_sum.to_us() },
+            .min => .{ "_us.min", "g", data.aggregate.values.duration_min.to_us() },
+            .max => .{ "_us.max", "g", data.aggregate.values.duration_max.to_us() },
             .avg => .{ "_us.avg", "g", @divFloor(
-                data.aggregate.values.duration_sum.us(),
+                data.aggregate.values.duration_sum.to_us(),
                 data.aggregate.values.count,
             ) },
         },

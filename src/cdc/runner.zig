@@ -939,9 +939,9 @@ const Metrics = struct {
                     "event_count={} throughput={} op/s " ++
                     "last timestamp={} ({})", .{
                     @tagName(field),
-                    summary.duration_min.?.ms(),
-                    @divFloor(summary.duration_sum.ms(), summary.count),
-                    summary.duration_max.?.ms(),
+                    summary.duration_min.?.to_ms(),
+                    @divFloor(summary.duration_sum.to_ms(), summary.count),
+                    summary.duration_max.?.to_ms(),
                     summary.event_count,
                     event_rate,
                     timestamp_last,

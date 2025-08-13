@@ -402,7 +402,7 @@ pub fn exec_options(
     shell: *Shell,
     options: struct {
         stdin_slice: ?[]const u8 = null,
-        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
+        timeout: stdx.Duration = .minutes(10),
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -456,7 +456,7 @@ pub fn exec_zig(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !voi
 pub fn exec_zig_options(
     shell: *Shell,
     options: struct {
-        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
+        timeout: stdx.Duration = .minutes(10),
     },
     comptime cmd: []const u8,
     cmd_args: anytype,
@@ -479,7 +479,7 @@ fn exec_inner(
         stdin_slice: ?[]const u8 = null,
         capture_stdout: ?*[]const u8 = null, // Optional out parameter.
         output_limit_bytes: usize = 128 * MiB,
-        timeout: stdx.Duration = .{ .ns = 10 * std.time.ns_per_min },
+        timeout: stdx.Duration = .minutes(10),
     },
 ) !void {
     const argv_formatted = try std.mem.join(shell.gpa, " ", argv);
