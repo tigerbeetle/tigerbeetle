@@ -108,7 +108,11 @@ pub fn main() !void {
             }
             if (args.statsd) |address| statsd_address = address;
         },
-        else => {},
+        .benchmark => {}, // Forwards trace and statsd argument to child tigerbeetle.
+        inline else => |args| comptime {
+            assert(!@hasField(@TypeOf(args), "trace"));
+            assert(!@hasField(@TypeOf(args), "statsd"));
+        },
     }
 
     var tracer = try Tracer.init(gpa, time, .unknown, .{
