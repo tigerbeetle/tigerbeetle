@@ -9,11 +9,17 @@ const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const schema = @import("schema.zig");
 
+const perf = @import("perf_event.zig");
+
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtrConst = @import("../vsr/grid.zig").BlockPtrConst;
 
 pub const ScopeCloseMode = enum { persist, discard };
+
+const Params = struct {
+    name: []const u8 = "sort",
+};
 
 /// We reserve maxInt(u64) to indicate that a table has not been deleted.
 /// Tables that have not been deleted have snapshot_max of maxInt(u64).
@@ -510,7 +516,7 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
 
             // Spreads sort+deduplication work between beats, to avoid a latency spike at the end of
             // each bar (or immediately prior to scans).
-            tree.table_mutable.sort_suffix();
+            //tree.table_mutable.sort_suffix();
         }
 
         /// Called after the last beat of a full compaction bar, by the compaction instance.
@@ -532,9 +538,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 // In addition, the immutable table is conceptually an output table of this
                 // compaction bar, and now its snapshot_min matches the snapshot_min of the
                 // Compactions' output tables.
+                // TODO perf erport
+                //var param = Params{};
+                //var p = perf.PerfEventBlockType(Params).init(&param, true);
+                //defer p.deinit();
+                //p.set_scale(tree.table_mutable.count());
+
                 tree.table_mutable.make_immutable(snapshot_min);
                 tree.table_immutable.make_mutable();
                 std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
+                // TODO: touch this first
+                // tree.table_immutable.merge(table_mutable, snapshot_min);
+                // tree.table_immutable.freeze();
+                // tree.table_mutable.reset();
             } else {
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
