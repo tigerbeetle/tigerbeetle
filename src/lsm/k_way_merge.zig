@@ -12,221 +12,280 @@ pub fn KWayMergeIteratorType(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime streams_max: u32,
-    /// Peek the next key in the stream identified by stream_index.
-    /// For example, peek(stream_index=2) returns user_streams[2][0].
-    /// Returns Drained if the stream was consumed and
-    /// must be refilled before calling peek() again.
-    /// Returns Empty if the stream was fully consumed and reached the end.
+    comptime sorted_runs_max: u32,
     comptime stream_peek: fn (
         context: *Context,
         stream_index: u32,
     ) error{ Empty, Drained }!Key,
     comptime stream_pop: fn (context: *Context, stream_index: u32) Value,
-    /// Returns true if stream A has higher precedence than stream B.
-    /// This is used to deduplicate values across streams.
     comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
+    comptime allow_duplicates: bool,
 ) type {
+    // Tree of losers is binary tree, so requires K to be power two.
+    comptime assert(sorted_runs_max >= 2);
+
+    const stream_max: u32 = std.math.ceilPowerOfTwoAssert(u32, sorted_runs_max);
+    //comptime assert(std.math.isPowerOfTwo(sorted_runs_max));
+
     return struct {
-        const KWayMergeIterator = @This();
+
+        // TODO: benchmark in which cases it is better, e.g., if there is implicit padding?
+        pub fn swap_struct(comptime T: type, a: *T, b: *T) void {
+            inline for (std.meta.fields(T)) |f| {
+                {
+                    const tmp_field = @field(a, f.name);
+                    @field(a, f.name) = @field(b, f.name);
+                    @field(b, f.name) = tmp_field;
+                }
+            }
+        }
+
+        const Self = @This();
+
+        // TODO: optimize sentinel encoding and handling with invalid sorted_run_id.
+        const Node = struct {
+            key: Key,
+            sorted_run_id: u32,
+            sentinel: bool = false,
+        };
+
+        const node_count_max = 2 * (stream_max / 2) - 1;
 
         context: *Context,
-        streams_count: u32,
-        direction: Direction,
+        height: u16,
+        node_count: u16,
+        streams_count: u16,
+        active_streams: u16,
+        challenger: Node,
+        nodes_loser: [node_count_max]Node = undefined,
         state: enum { loading, iterating },
 
-        /// Array of keys, with each key representing the next key in each stream.
-        ///
-        /// `keys` is *almost* structured as a binary heap — to become a heap, streams[0] must be
-        /// peeked and sifted (see pop_internal()).
-        ///
-        /// * When `direction=ascending`, keys are ordered low-to-high.
-        /// * When `direction=descending`, keys are ordered high-to-low.
-        /// * Equivalent keys are ordered from high precedence to low.
-        keys: [streams_max]Key = undefined,
+        direction: Direction,
+        key_popped: ?Key,
 
-        /// For each key in keys above, the corresponding index of the stream containing that key.
-        /// This decouples the order and storage of streams, the user being responsible for storage.
-        /// The user's streams array is never reordered while keys are swapped, only this mapping.
-        streams: [streams_max]u32 = undefined,
-
-        /// The number of streams remaining in the iterator.
-        k: u32 = 0,
-
-        key_popped: ?Key = null,
+        sentinel: Node,
 
         pub fn init(
             context: *Context,
-            streams_count: u32,
+            streams_count: u16,
             direction: Direction,
-        ) KWayMergeIterator {
-            assert(streams_count <= streams_max);
-            // Streams ZERO can be used to represent empty sets.
-            maybe(streams_count == 0);
+        ) Self {
+            const sentinel: Node = switch (direction) {
+                .ascending => .{
+                    .key = std.math.maxInt(Key),
+                    .sorted_run_id = std.math.maxInt(u8),
+                    .sentinel = true,
+                },
+                .descending => .{
+                    .key = std.math.minInt(Key),
+                    .sorted_run_id = std.math.maxInt(u8), // NOTE: what should we do here?
+                    .sentinel = true,
+                },
+            };
 
             return .{
                 .context = context,
-                .streams_count = streams_count,
+                .height = 0,
+                .node_count = 0,
+                .challenger = sentinel,
+                .nodes_loser = undefined,
+                .key_popped = null,
                 .direction = direction,
+                .active_streams = undefined,
+                .sentinel = sentinel,
+                .streams_count = streams_count,
                 .state = .loading,
             };
         }
-
-        pub fn empty(it: *const KWayMergeIterator) bool {
-            assert(it.state == .iterating);
-            return it.k == 0;
+        pub fn empty(self: *Self) bool {
+            return self.active_streams == 0;
         }
 
-        pub fn reset(it: *KWayMergeIterator) void {
-            it.* = .{
-                .context = it.context,
-                .streams_count = it.streams_count,
-                .direction = it.direction,
+        pub fn reset(self: *Self) void {
+            self.* = .{
+                .context = self.context,
+                .height = 0,
+                .node_count = 0,
+                .challenger = self.sentinel,
+                .nodes_loser = undefined,
+                .direction = self.direction,
+                .active_streams = self.active_streams,
+                .sentinel = self.sentinel,
+                .streams_count = self.streams_count,
                 .state = .loading,
-                .key_popped = it.key_popped,
+                .key_popped = self.key_popped,
             };
         }
 
-        fn load(it: *KWayMergeIterator) error{Drained}!void {
-            assert(it.state == .loading);
-            assert(it.k == 0);
+        fn loading(
+            self: *Self,
+        ) error{Drained}!void {
+            errdefer self.reset();
 
-            errdefer it.reset();
-
-            // We must loop on stream_index but assign at it.k, as k may be less than stream_index
-            // when there are empty streams.
-            // TODO Do we have test coverage for this edge case?
-            var stream_index: u32 = 0;
-            while (stream_index < it.streams_count) : (stream_index += 1) {
-                it.keys[it.k] = stream_peek(it.context, stream_index) catch |err| switch (err) {
-                    error.Drained => return error.Drained,
-                    error.Empty => continue,
+            // TODO: handle drained
+            // 1. Collect the non‑empty batches as initial “competitors”.
+            var competitors: [stream_max]Node = undefined;
+            var competitors_count: u16 = 0;
+            for (0..self.streams_count) |id| {
+                const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
+                    error.Drained => {
+                        return error.Drained;
+                    },
+                    error.Empty => {
+                        competitors[id] = self.sentinel;
+                        continue;
+                    },
                 };
-                it.streams[it.k] = stream_index;
-                it.up_heap(it.k);
-                it.k += 1;
+                competitors[id] = .{
+                    .key = key,
+                    .sorted_run_id = @intCast(id),
+                };
+                competitors_count += 1;
             }
-            it.state = .iterating;
-        }
+            if (competitors_count == 0) {
+                self.state = .iterating;
+                return;
+            }
 
-        pub fn pop(it: *KWayMergeIterator) error{Drained}!?Value {
-            if (it.state == .loading) try it.load();
-            assert(it.state == .iterating);
+            // 2. Round up to the next power‑of‑two so the loser tree is perfectly balanced.
+            // TODO: BUG FIX here if some streams are empty we do not correctly drain them with this logc!
+            const leaf_capacity = std.math.ceilPowerOfTwo(u16, self.streams_count) catch unreachable;
+            const height = std.math.log2(leaf_capacity);
+            const node_count: u16 = leaf_capacity - 1; // k leaves ⇒ k‑1 internal nodes.
 
-            while (try it.pop_heap()) |value| {
-                const key = key_from_value(&value);
-                if (it.key_popped) |previous| {
-                    switch (std.math.order(previous, key)) {
-                        .lt => assert(it.direction == .ascending),
-                        // Discard this value and pop the next one.
-                        .eq => continue,
-                        .gt => assert(it.direction == .descending),
+            // 3. Pad unused leaf slots with the sentinel so comparisons stay trivial.
+            for (self.streams_count..stream_max) |i| competitors[i] = self.sentinel;
+            for (0..node_count_max) |i| self.nodes_loser[i] = self.sentinel;
+
+            const ascending = if (self.direction == .ascending) true else false;
+            // 4. Build the tree of losers bottom‑up.
+            for (1..height + 1) |level| {
+                const level_min = (stream_max / (@as(usize, 1) << @as(u6, @intCast(level)))) - 1;
+                const level_max = (stream_max / (@as(usize, 1) << @as(u6, @intCast(level - 1)))) - 1;
+
+                for (level_min..level_max, 0..) |loser_index, competitor_index| {
+                    const competitor_a = competitors[competitor_index * 2];
+                    const competitor_b = competitors[competitor_index * 2 + 1];
+                    // TODO: do ordering here.
+                    // TODO: check sentinel
+                    //if (ordered(ascending, context, &competitor_a, &competitor_b)) {
+                    if (ordered(ascending, self.context, &competitor_b, &competitor_a)) {
+                        competitors[competitor_index] = competitor_a;
+                        self.nodes_loser[loser_index] = competitor_b;
+                    } else {
+                        competitors[competitor_index] = competitor_b;
+                        self.nodes_loser[loser_index] = competitor_a;
                     }
                 }
-                it.key_popped = key;
-                return value;
             }
 
+            self.challenger = competitors[0];
+            self.node_count = node_count;
+            self.active_streams = competitors_count;
+            self.height = height;
+            self.key_popped = self.key_popped;
+            self.state = .iterating;
+        }
+
+        // TODO: can we handle deduplication here.
+        //       Think about this tomorrow.
+        fn next_challenger(self: *Self, run_id: u32) error{Drained}!Node {
+            if (run_id == std.math.maxInt(u8)) {
+                return self.sentinel;
+            }
+            assert(run_id < sorted_runs_max);
+            if (stream_peek(self.context, run_id)) |key| {
+                // since this we have precedence it is fine.
+                return .{
+                    .key = key,
+                    .sorted_run_id = run_id,
+                };
+            } else |err| switch (err) {
+                error.Drained => {
+                    return error.Drained;
+                },
+                error.Empty => {
+                    self.active_streams -= 1;
+                    return self.sentinel;
+                },
+            }
+            return self.sentinel;
+        }
+
+        pub fn pop(self: *Self) error{Drained}!?Value {
+            if (self.state == .loading) try self.loading();
+            assert(self.state == .iterating);
+            // handle duplicates here.
+            while (self.active_streams > 0) {
+                if (try self.next()) |value| {
+                    if (allow_duplicates) {} else {
+                        if (self.key_popped) |previous| {
+                            if (key_from_value(&value) == previous) {
+                                continue;
+                            }
+                        }
+                    }
+                    self.key_popped = key_from_value(&value);
+                    return value;
+                } else return null;
+            }
             return null;
         }
 
-        fn pop_heap(it: *KWayMergeIterator) error{Drained}!?Value {
-            assert(it.state == .iterating);
-            if (it.k == 0) return null;
+        inline fn ordered(ascending: bool, ctx: *const Context, a: *const Node, b: *const Node) bool {
+            // a sentinel always loses
+            if (a.sentinel) return true;
+            if (b.sentinel) return false;
 
-            // We update the heap prior to removing the value from the stream. If we updated after
-            // stream_pop() instead, when stream_peek() returns Drained we would be unable to order
-            // the heap, and when the stream does buffer data it would be out of position.
-            if (stream_peek(it.context, it.streams[0])) |key| {
-                it.keys[0] = key;
-                it.down_heap();
-            } else |err| switch (err) {
-                error.Drained => return error.Drained,
-                error.Empty => {
-                    it.swap(0, it.k - 1);
-                    it.k -= 1;
-                    it.down_heap();
-                },
+            //const smaller = ascending ? b.key < a.key : b.key > a.key;
+            const smaller = if (ascending) b.key < a.key else b.key > a.key;
+            const stabler = (a.key == b.key) and
+                stream_precedence(ctx, b.sorted_run_id, a.sorted_run_id);
+            return smaller or stabler; // “true”  means  a  loses
+        }
+
+        inline fn choose(has_new_winner: bool, parent_ptr: *Node, winner: *Node) *Node {
+            // Note: The layout of the code coaxes the compiler to generate branchless code.
+            //       Best do not change it without verifying the generated code.
+            var p = winner;
+            if (has_new_winner) {
+                @branchHint(.unpredictable); // attaches to this branch
+                p = parent_ptr;
             }
-            if (it.k == 0) return null;
-
-            const root = it.streams[0];
-            const value = stream_pop(it.context, root);
-
-            return value;
+            return p;
         }
 
-        fn up_heap(it: *KWayMergeIterator, start: u32) void {
-            var i = start;
-            while (parent(i)) |p| : (i = p) {
-                if (it.ordered(p, i)) break;
-                it.swap(p, i);
+        fn next(self: *Self) error{Drained}!?Value {
+            if (self.challenger.sentinel) { // just became dry
+                return null;
             }
-        }
 
-        // Start at the root node.
-        // Compare the current node with its children, if the order is correct stop.
-        // If the order is incorrect, swap the current node with the appropriate child.
-        fn down_heap(it: *KWayMergeIterator) void {
-            if (it.k == 0) return;
-            var i: u32 = 0;
-            // A maximum of height iterations are required. After height iterations we are
-            // guaranteed to have reached a leaf node, in which case we are always done.
-            var safety_count: u32 = 0;
-            const binary_tree_height = math.log2_int(u32, it.k) + 1;
-            while (safety_count < binary_tree_height) : (safety_count += 1) {
-                const left = left_child(i, it.k);
-                const right = right_child(i, it.k);
+            const run_id = self.challenger.sorted_run_id;
+            assert(!self.challenger.sentinel);
+            assert(run_id < std.math.maxInt(u8));
+            // TODO: think about encoding here for run_id
 
-                if (it.ordered(i, left)) {
-                    if (it.ordered(i, right)) {
-                        break;
-                    } else {
-                        it.swap(i, right.?);
-                        i = right.?;
-                    }
-                } else if (it.ordered(i, right)) {
-                    it.swap(i, left.?);
-                    i = left.?;
-                } else if (it.ordered(left.?, right.?)) {
-                    it.swap(i, left.?);
-                    i = left.?;
-                } else {
-                    it.swap(i, right.?);
-                    i = right.?;
-                }
+            self.challenger = try self.next_challenger(run_id);
+
+            const ascending = if (self.direction == .ascending) true else false;
+
+            // TODO: implement and test fast path
+
+            // Start at our own id and find the first challenger in the loop.
+            var opponent_id = (self.nodes_loser.len + run_id);
+            for (0..self.height) |_| {
+                opponent_id = (opponent_id - 1) >> 1;
+                const opponent = &self.nodes_loser[opponent_id];
+                const new_challenger = ordered(ascending, self.context, &self.challenger, opponent);
+                const winner: *Node = choose(new_challenger, opponent, &self.challenger);
+                swap_struct(Node, winner, &self.challenger);
             }
-            assert(safety_count < binary_tree_height);
-        }
 
-        fn parent(node: u32) ?u32 {
-            if (node == 0) return null;
-            return (node - 1) / 2;
-        }
+            if (self.challenger.sentinel) {
+                return null;
+            }
 
-        fn left_child(node: u32, k: u32) ?u32 {
-            const child = 2 * node + 1;
-            return if (child < k) child else null;
-        }
-
-        fn right_child(node: u32, k: u32) ?u32 {
-            const child = 2 * node + 2;
-            return if (child < k) child else null;
-        }
-
-        fn swap(it: *KWayMergeIterator, a: u32, b: u32) void {
-            mem.swap(Key, &it.keys[a], &it.keys[b]);
-            mem.swap(u32, &it.streams[a], &it.streams[b]);
-        }
-
-        inline fn ordered(it: *const KWayMergeIterator, a: u32, b_maybe: ?u32) bool {
-            const b = b_maybe orelse return true;
-            return if (it.keys[a] == it.keys[b])
-                stream_precedence(it.context, it.streams[a], it.streams[b])
-            else if (it.keys[a] < it.keys[b])
-                it.direction == .ascending
-            else
-                it.direction == .descending;
+            return stream_pop(self.context, self.challenger.sorted_run_id);
         }
     };
 }
@@ -287,6 +346,7 @@ fn TestContextType(comptime streams_max: u32) type {
                 stream_peek,
                 stream_pop,
                 stream_precedence,
+                false,
             );
             var actual = std.ArrayList(Value).init(testing.allocator);
             defer actual.deinit();

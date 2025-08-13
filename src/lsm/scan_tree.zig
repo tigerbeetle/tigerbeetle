@@ -122,6 +122,7 @@ pub fn ScanTreeType(
                 stream.peek,
                 stream.pop,
                 stream.precedence,
+                false,
             );
         };
 

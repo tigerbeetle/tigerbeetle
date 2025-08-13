@@ -99,6 +99,7 @@ fn ScanMergeType(
             merge_stream_peek,
             merge_stream_pop,
             merge_stream_precedence,
+            false,
         );
 
         const ZigZagMergeIterator = ZigZagMergeIteratorType(
