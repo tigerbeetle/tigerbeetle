@@ -47,64 +47,56 @@ pub fn main(allocator: std.mem.Allocator) !void {
     std.process.exit(@intFromEnum(result));
 }
 
-/// Implementation of `unshare` equivalent to
+/// Implementation of `unshare` somewhat like
 ///
 /// ```
-///     unshare --net --pid --map-root-user --fork
+/// unshare --user --net --pid
 /// ```
 ///
-/// The fork is left to the caller.
+/// We're trying to accomplish two main things:
+///
+/// - creating a new pid namespace so that all subprocesses
+///   are automatically terminated when pid 1 (the forked
+///   vortex supervisor) is terminated.
+/// - creating a network sandbox
+///
+/// Note that on recent Ubuntu's this only works if AppArmour
+/// rules have been relaxed:
+///
+/// ```
+/// sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+/// sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+/// ```
 fn linux_unshare() !void {
-    // Get current uid/gid before creating namespaces so we can map them to root later
-    const uid = linux.getuid();
-    const gid = linux.getgid();
-
-    // Create user namespace first (required for --map-root-user)
-    const unshare_result = std.os.linux.unshare(linux.CLONE.NEWUSER);
-    if (unshare_result != 0) {
-        log.err("Failed to create user namespace: {}", .{unshare_result});
+    // Create user namespace first
+    const unshare_user_result = std.os.linux.unshare(linux.CLONE.NEWUSER);
+    const unshare_user_errno = std.posix.errno(unshare_user_result);
+    if (unshare_user_errno != .SUCCESS) {
+        log.err("Failed to create user namespace: {}", .{unshare_user_errno});
         return error.UnshareFailure;
     }
 
-    // Disable setgroups (required for unprivileged uid/gid mapping)
-    try write_to_file("/proc/self/setgroups", "deny");
-
-    // Map current user to root (uid 0) in the new namespace.
-    // This will allow the child supervisor's `--configure-namespace`
-    // flag to set up networking with `ip link`.
-    var uid_map_buf: [64]u8 = undefined;
-    const uid_map = try std.fmt.bufPrint(&uid_map_buf, "0 {d} 1", .{uid});
-    try write_to_file("/proc/self/uid_map", uid_map);
-
-    var gid_map_buf: [64]u8 = undefined;
-    const gid_map = try std.fmt.bufPrint(&gid_map_buf, "0 {d} 1", .{gid});
-    try write_to_file("/proc/self/gid_map", gid_map);
-
-    // Create network and PID namespaces
-    const unshare_net_pid_result = std.os.linux.unshare(linux.CLONE.NEWNET | linux.CLONE.NEWPID);
-    if (unshare_net_pid_result != 0) {
-        log.err("Failed to create net/pid namespaces: {}", .{unshare_net_pid_result});
+    // Create PID namespace
+    const unshare_pid_result = std.os.linux.unshare(linux.CLONE.NEWPID);
+    const unshare_pid_errno = std.posix.errno(unshare_pid_result);
+    if (unshare_pid_errno != .SUCCESS) {
+        log.err("Failed to create pid namespace: {}", .{unshare_pid_errno});
         return error.UnshareFailure;
     }
-}
 
-fn write_to_file(path: []const u8, content: []const u8) !void {
-    const file = std.fs.openFileAbsolute(path, .{ .mode = .write_only }) catch |err| {
-        log.err("Failed to open {s}: {}", .{ path, err });
-        return err;
-    };
-    defer file.close();
-
-    _ = file.writeAll(content) catch |err| {
-        log.err("Failed to write to {s}: {}", .{ path, err });
-        return err;
-    };
+    // Create network namespace
+    const unshare_net_result = std.os.linux.unshare(linux.CLONE.NEWNET);
+    const unshare_net_errno = std.posix.errno(unshare_net_result);
+    if (unshare_net_errno != .SUCCESS) {
+        log.err("Failed to create net namespace: {}", .{unshare_net_errno});
+        return error.UnshareFailure;
+    }
 }
 
 /// Implementation of `ip link` equivalent to
 ///
 /// ```
-///     ip link set up dev lo
+/// ip link set up dev lo
 /// ```
 ///
 /// This brings up the loopback device so that networking
