@@ -11590,10 +11590,10 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
     assert(message.header.size > @sizeOf(Header) + @sizeOf(vsr.CheckpointState));
 
     comptime assert(@sizeOf(vsr.CheckpointState) % @alignOf(vsr.Header) == 0);
-    const headers: []const vsr.Header.Prepare = @alignCast(std.mem.bytesAsSlice(
+    const headers: []const vsr.Header.Prepare = std.mem.bytesAsSlice(
         Header.Prepare,
         message.body_used()[@sizeOf(vsr.CheckpointState)..],
-    ));
+    );
     assert(headers.len > 0);
     vsr.Headers.ViewChangeSlice.verify(.{ .command = .start_view, .slice = headers });
     if (constants.verify) {
