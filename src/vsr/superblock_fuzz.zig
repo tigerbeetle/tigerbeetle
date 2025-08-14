@@ -184,7 +184,7 @@ const Environment = struct {
     /// Indexed by sequence.
     const SequenceStates = std.ArrayList(struct {
         vsr_state: VSRState,
-        vsr_headers: vsr.Headers.Array,
+        view_headers: vsr.Headers.Array,
     });
 
     sequence_states: SequenceStates,
@@ -294,8 +294,8 @@ const Environment = struct {
             .view = null,
         });
 
-        var vsr_headers = vsr.Headers.Array{};
-        vsr_headers.push(vsr.Header.Prepare.root(cluster));
+        var view_headers = vsr.Headers.Array{};
+        view_headers.push(vsr.Header.Prepare.root(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -308,7 +308,7 @@ const Environment = struct {
                 .replica_count = replica_count,
                 .view = 0,
             }),
-            .vsr_headers = vsr_headers,
+            .view_headers = view_headers,
         });
     }
 
@@ -343,7 +343,7 @@ const Environment = struct {
             .replica_count = replica_count,
         };
 
-        var vsr_headers = vsr.Headers.Array{};
+        var view_headers = vsr.Headers.Array{};
         var vsr_head = std.mem.zeroInit(vsr.Header.Prepare, .{
             .client = 1,
             .request = 1,
@@ -355,12 +355,12 @@ const Environment = struct {
         });
         vsr_head.set_checksum_body(&.{});
         vsr_head.set_checksum();
-        vsr_headers.push(vsr_head);
+        view_headers.push(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr_headers,
+            .view_headers = view_headers,
         });
 
         env.pending.insert(.view_change);
@@ -370,7 +370,7 @@ const Environment = struct {
             .view = vsr_state.view,
             .headers = &.{
                 .command = .do_view_change,
-                .array = vsr_headers,
+                .array = view_headers,
             },
             .sync_checkpoint = null,
         });
@@ -432,8 +432,8 @@ const Environment = struct {
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr.Headers.Array.from_slice(
-                env.superblock.staging.vsr_headers().slice,
+            .view_headers = vsr.Headers.Array.from_slice(
+                env.superblock.staging.view_headers().slice,
             ) catch unreachable,
         });
 

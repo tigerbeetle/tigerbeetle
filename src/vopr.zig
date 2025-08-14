@@ -247,6 +247,9 @@ pub fn main() !void {
     // without split-brain.
     var tick_total: u64 = 0;
     var tick: u64 = 0;
+    var requests_done: bool = false;
+    var upgrades_done: bool = false;
+
     while (tick < cli_args.ticks_max_requests) : (tick += 1) {
         const requests_replied_old = simulator.requests_replied;
         simulator.tick();
@@ -254,8 +257,8 @@ pub fn main() !void {
         if (simulator.requests_replied > requests_replied_old) {
             tick = 0;
         }
-        const requests_done = simulator.requests_replied == simulator.options.requests_max;
-        const upgrades_done =
+        requests_done = simulator.requests_replied == simulator.options.requests_max;
+        upgrades_done =
             for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
                 if (health != .up) continue;
                 const release_latest = releases[simulator.replica_releases_limit - 1].release;
@@ -265,50 +268,31 @@ pub fn main() !void {
             } else false;
 
         if (requests_done and upgrades_done) break;
-    } else {
-        if (cli_args.lite) return;
-
-        // Safety mode ran out of ticks without completing its requests, so now we check whether it
-        // was correct to do so.
-        //
-        // Heal current network partitions, disable future process, storage, and network faults
-        // on all replicas. Run this fully-connected core of replicas for 600_000 ticks, which
-        // should enough to ensure all faulty grid blocks, headers, or prepares that can be repaired
-        // are repaired. After this, all we must be left with are correlated faults.
-        {
-            var replica: u8 = 0;
-            var core: Core = .{};
-            while (replica < simulator.options.cluster.replica_count) : (replica += 1) {
-                core.set(replica);
-            }
-
-            simulator.transition_to_liveness_mode(core);
-
-            tick = 0;
-            while (tick < 600_000) : (tick += 1) simulator.tick();
-        }
-
-        log.info(
-            "no liveness, final cluster state (requests_max={} requests_replied={}):",
-            .{ simulator.options.requests_max, simulator.requests_replied },
-        );
-        simulator.cluster.log_cluster();
-        if (try simulator.cluster_recoverable(gpa)) {
-            log.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
-        } else return;
     }
 
     if (cli_args.lite or cli_args.performance) {
         // Don't care about convergence.
     } else {
-        // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
-        // crashed or partitioned permanently. The core should converge to the same state.
-        const core = random_core(
-            simulator.prng,
-            simulator.options.cluster.replica_count,
-            simulator.options.cluster.standby_count,
-        );
+        const core = if (requests_done and upgrades_done)
+            // Liveness: a core set of replicas is up and fully connected. The rest of the replicas
+            // might be crashed or partitioned permanently. The core should converge to the same
+            // state.
+            random_core(
+                simulator.prng,
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            )
+        else
+            // Safety mode ran out of ticks without completing its requests, so now we check whether
+            // it was correct to do so.
+            //
+            // Run a fully-connected core of replicas to repair all faulty grid blocks, headers, and
+            // prepares that can be repaired. Thereafter, only correlated faults should remain.
+            full_core(
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            );
+
         simulator.transition_to_liveness_mode(core);
 
         tick = 0;
@@ -545,11 +529,11 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = .{ .ns = 50 * std.time.ns_per_ms },
+        .one_way_delay_mean = .ms(50),
         .one_way_delay_min = .{ .ns = 0 },
         .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
-        .path_clog_duration_mean = .{ .ns = 2_000 * std.time.ns_per_ms },
+        .path_clog_duration_mean = .ms(2_000),
         .path_clog_probability = Ratio.zero(),
         .packet_replay_probability = Ratio.zero(),
 
@@ -754,19 +738,12 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled ==
+        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled <=
             simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client_maybe| {
             if (client_maybe.*) |client| {
-                if (client.request_inflight) |request| {
-                    // Registration and reformatting (noop's) aren't counted by requests_sent, so an
-                    // operation=register|noop may still be in-flight. Any other requests should
-                    // already be complete before done() is called.
-                    assert(request.message.header.operation == .register or
-                        request.message.header.operation == .noop);
-                    return "pending register request";
-                }
+                if (client.request_inflight) |_| return "pending request";
             }
         }
 
@@ -1026,9 +1003,9 @@ pub const Simulator = struct {
                             // (e.g. due to "quorum received, awaiting repair") then they may
                             // linger, so if we only looked at the journal headers it would appear
                             // as if the replicas disagreed about the uncommitted headers.
-                            const headers_count = replica.superblock.working.vsr_headers_count;
+                            const headers_count = replica.superblock.working.view_headers_count;
                             const headers =
-                                replica.superblock.working.vsr_headers_all[0..headers_count];
+                                replica.superblock.working.view_headers_all[0..headers_count];
                             for (headers) |*header| {
                                 if (header.op == op) {
                                     break :header switch (vsr.Headers.dvc_header_type(header)) {
@@ -1704,14 +1681,14 @@ fn random_core(prng: *stdx.PRNG, replica_count: u8, standby_count: u8) Core {
     const replica_core_count = prng.range_inclusive(u8, quorum_view_change, replica_count);
     const standby_core_count = prng.range_inclusive(u8, 0, standby_count);
 
-    var result: Core = .{};
+    var core: Core = .{};
 
     var combination = stdx.PRNG.Combination.init(.{
         .total = replica_count,
         .sample = replica_core_count,
     });
     for (0..replica_count) |replica| {
-        if (combination.take(prng)) result.set(replica);
+        if (combination.take(prng)) core.set(replica);
     }
     assert(combination.done());
 
@@ -1719,14 +1696,29 @@ fn random_core(prng: *stdx.PRNG, replica_count: u8, standby_count: u8) Core {
         .total = standby_count,
         .sample = standby_core_count,
     });
-    for (replica_count..replica_count + standby_count) |replica| {
-        if (combination.take(prng)) result.set(replica);
+    for (replica_count..replica_count + standby_count) |standby| {
+        if (combination.take(prng)) core.set(standby);
     }
     assert(combination.done());
 
-    assert(result.count() == replica_core_count + standby_core_count);
+    assert(core.count() == replica_core_count + standby_core_count);
 
-    return result;
+    return core;
+}
+
+/// Returns a random fully-connected subgraph which includes all replicas and standbys.
+fn full_core(replica_count: u8, standby_count: u8) Core {
+    assert(replica_count > 0);
+    assert(replica_count <= constants.replicas_max);
+    assert(standby_count <= constants.standbys_max);
+
+    var core: Core = .{};
+
+    for (0..replica_count + standby_count) |replica| core.set(replica);
+
+    assert(core.count() == replica_count + standby_count);
+
+    return core;
 }
 
 var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{

@@ -85,6 +85,9 @@ pub const Storage = struct {
 
         /// Accessed by the Grid for extra verification of grid coherence.
         grid_checker: ?*GridChecker = null,
+
+        iops_read_max: u64 = constants.iops_read_max,
+        iops_write_max: u64 = constants.iops_write_max,
     };
 
     /// See usage in Journal.write_sectors() for details.
@@ -219,13 +222,13 @@ pub const Storage = struct {
             .init(allocator, {});
         errdefer reads.deinit();
 
-        try reads.ensureTotalCapacity(constants.iops_read_max);
+        try reads.ensureTotalCapacity(options.iops_read_max);
 
         var writes = std.PriorityQueue(*Storage.Write, void, Storage.Write.less_than)
             .init(allocator, {});
         errdefer writes.deinit();
 
-        try writes.ensureTotalCapacity(constants.iops_write_max);
+        try writes.ensureTotalCapacity(options.iops_write_max);
 
         return Storage{
             .allocator = allocator,

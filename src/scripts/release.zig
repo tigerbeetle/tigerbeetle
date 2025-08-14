@@ -813,8 +813,7 @@ fn publish_java(shell: *Shell, info: VersionInfo) !void {
     // Retrying in case of timeout:
     const attempts_max = 5;
     for (0..attempts_max) |index| {
-        const timeout_ns: u64 = 5 * std.time.ns_per_min;
-        return shell.exec_options(.{ .timeout_ns = timeout_ns },
+        return shell.exec_options(.{ .timeout = .minutes(5) },
             \\mvn --batch-mode --quiet --file src/clients/java/pom.xml
             \\  -Dmaven.test.skip -Djacoco.skip
             \\  deploy
@@ -893,7 +892,7 @@ fn publish_docker(shell: *Shell, info: VersionInfo) !void {
             shell.project_root.deleteFile("tigerbeetle") catch {};
 
             const zip_path = try shell.fmt(
-                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}-{s}.zip",
+                "./zig-out/dist/tigerbeetle/tigerbeetle-{s}{s}.zip",
                 .{ triple, if (debug) "-debug" else "" },
             );
             try shell.unzip_executable(zip_path, "tigerbeetle");

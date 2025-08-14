@@ -96,6 +96,7 @@ pub fn StorageType(comptime IO: type) type {
 
         io: *IO,
         tracer: *Tracer,
+        dir_fd: IO.fd_t,
         fd: IO.fd_t,
 
         next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
@@ -104,10 +105,33 @@ pub fn StorageType(comptime IO: type) type {
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, tracer: *Tracer, fd: IO.fd_t) !Storage {
+        pub fn init(io: *IO, tracer: *Tracer, options: struct {
+            path: []const u8,
+            size_min: u64,
+            purpose: IO.OpenDataFilePurpose,
+            direct_io: vsr.io.DirectIO,
+        }) !Storage {
+            // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+            // TODO Handle physical volumes where there is no directory to fsync.
+            const dirname = std.fs.path.dirname(options.path) orelse ".";
+            const basename = std.fs.path.basename(options.path);
+
+            const dir_fd = try IO.open_dir(dirname);
+            errdefer std.posix.close(dir_fd);
+
+            const fd = try io.open_data_file(
+                dir_fd,
+                basename,
+                options.size_min,
+                options.purpose,
+                options.direct_io,
+            );
+            errdefer std.posix.close(fd);
+
             return .{
                 .io = io,
                 .tracer = tracer,
+                .dir_fd = dir_fd,
                 .fd = fd,
             };
         }
@@ -115,7 +139,13 @@ pub fn StorageType(comptime IO: type) type {
         pub fn deinit(storage: *Storage) void {
             assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
+            assert(storage.dir_fd != IO.INVALID_FILE);
+
+            std.posix.close(storage.fd);
             storage.fd = IO.INVALID_FILE;
+
+            std.posix.close(storage.dir_fd);
+            storage.dir_fd = IO.INVALID_FILE;
         }
 
         pub fn run(storage: *Storage) void {
@@ -362,7 +392,7 @@ pub fn StorageType(comptime IO: type) type {
             offset_in_zone: u64,
         ) void {
             zone.verify_iop(buffer, offset_in_zone);
-            maybe(zone == .grid_padding); // Padding is zeroed during format.
+            assert(zone != .grid_padding); // Padding is never touched.
 
             const offset_in_storage = zone.offset(offset_in_zone);
             write.* = .{

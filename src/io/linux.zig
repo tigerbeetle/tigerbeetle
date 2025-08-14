@@ -1410,6 +1410,7 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (if possible in development mode, but required in production mode).
@@ -1423,7 +1424,7 @@ pub const IO = struct {
         dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open, open_read_only },
+        purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
         _ = self;
@@ -1435,7 +1436,7 @@ pub const IO = struct {
 
         var flags: posix.O = .{
             .CLOEXEC = true,
-            .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
+            .ACCMODE = if (purpose == .inspect) .RDONLY else .RDWR,
             .DSYNC = true,
         };
         var mode: posix.mode_t = 0;
@@ -1447,7 +1448,7 @@ pub const IO = struct {
                 0,
             ) catch |err| switch (err) {
                 error.FileNotFound => {
-                    if (method == .create or method == .create_or_open) {
+                    if (purpose == .format) {
                         // It's impossible to distinguish creating a new file and opening a new
                         // block device with the current API. So if it's possible that we should
                         // create a file we try that instead of failing here.
@@ -1529,19 +1530,14 @@ pub const IO = struct {
                     }
                 }
 
-                switch (method) {
-                    .create => {
+                switch (purpose) {
+                    .format => {
                         flags.CREAT = true;
                         flags.EXCL = true;
                         mode = 0o666;
                         log.info("creating \"{s}\"...", .{relative_path});
                     },
-                    .create_or_open => {
-                        flags.CREAT = true;
-                        mode = 0o666;
-                        log.info("opening or creating \"{s}\"...", .{relative_path});
-                    },
-                    .open, .open_read_only => {
+                    .open, .inspect => {
                         log.info("opening \"{s}\"...", .{relative_path});
                     },
                 }
@@ -1594,7 +1590,7 @@ pub const IO = struct {
             }
         };
 
-        if (method == .open_read_only) {
+        if (purpose == .inspect) {
             assert(flags.ACCMODE == .RDONLY);
             maybe(lock_acquired);
 
@@ -1613,7 +1609,7 @@ pub const IO = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (method == .create and kind == .file) {
+        if (purpose == .format and kind == .file) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(fd, size) catch |err| switch (err) {
                 error.OperationNotSupported => {
@@ -1681,7 +1677,7 @@ pub const IO = struct {
                     );
                 }
 
-                if (method == .create or method == .create_or_open) {
+                if (purpose == .format) {
                     // Check that the first superblock_zone_size bytes are 0.
                     // - It'll ensure that the block device is not directly TigerBeetle.
                     // - It'll be very likely to catch any cases where there's an existing

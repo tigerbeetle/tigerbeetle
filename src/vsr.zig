@@ -63,7 +63,6 @@ pub const SuperBlockManifestReferences = superblock.ManifestReferences;
 pub const SuperBlockTrailerReference = superblock.TrailerReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
-pub const CheckpointStateOld = superblock.SuperBlockHeader.CheckpointStateOld;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
@@ -1252,7 +1251,7 @@ pub fn verify_release_list(releases: []const Release, release_included: Release)
 }
 
 pub const Headers = struct {
-    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
@@ -1311,7 +1310,7 @@ const ViewChangeHeadersSlice = struct {
 
     pub fn verify(headers: ViewChangeHeadersSlice) void {
         assert(headers.slice.len > 0);
-        assert(headers.slice.len <= constants.view_change_headers_max);
+        assert(headers.slice.len <= constants.view_headers_max);
 
         const head = &headers.slice[0];
         // A DVC's head op is never a gap or faulty.
@@ -1340,7 +1339,7 @@ const ViewChangeHeadersSlice = struct {
                     // superblock.checkpoint could make .do_view_change headers durable instead of
                     // .start_view headers when view == log_view (see `commit_checkpoint_superblock`
                     // in `replica.zig`). When these headers are loaded from the superblock on
-                    // startup, they are considered to be .start_view headers (see `vsr_headers` in
+                    // startup, they are considered to be .start_view headers (see `view_headers` in
                     // `superblock.zig`).
                     maybe(headers.command == .do_view_change);
                     maybe(headers.command == .start_view);

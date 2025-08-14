@@ -963,7 +963,7 @@ pub fn GridType(comptime Storage: type) type {
                     options.coherent and
                     grid.superblock.working.vsr_state.sync_op_max == 0)
                 {
-                    grid.verify_read(address, cache_block);
+                    grid.verify_read_from_cache(address, cache_block);
                 }
 
                 return cache_block;
@@ -1393,7 +1393,11 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        fn verify_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
+        fn verify_read_from_cache(
+            grid: *const Grid,
+            address: u64,
+            cached_block: BlockPtrConst,
+        ) void {
             comptime assert(constants.verify);
 
             const TestStorage = @import("../testing/storage.zig").Storage;

@@ -1177,18 +1177,18 @@ pub const IO = struct {
         self: *IO,
         dir_handle: fd_t,
         relative_path: []const u8,
-        method: enum { create, open, open_read_only },
+        purpose: enum { format, open, inspect },
     ) !fd_t {
         const path_w = try os.windows.sliceToPrefixedFileW(dir_handle, relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
         var creation_disposition: os.windows.DWORD = 0;
-        switch (method) {
-            .create => {
+        switch (purpose) {
+            .format => {
                 creation_disposition = os.windows.FILE_CREATE;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
-            .open, .open_read_only => {
+            .open, .inspect => {
                 creation_disposition = os.windows.OPEN_EXISTING;
                 log.info("opening \"{s}\"...", .{relative_path});
             },
@@ -1205,7 +1205,7 @@ pub const IO = struct {
         access_mask |= os.windows.SYNCHRONIZE;
         access_mask |= os.windows.GENERIC_READ;
 
-        if (method != .open_read_only) {
+        if (purpose != .inspect) {
             access_mask |= os.windows.GENERIC_WRITE;
         }
 
@@ -1250,6 +1250,7 @@ pub const IO = struct {
         return handle;
     }
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on windows).
@@ -1263,7 +1264,7 @@ pub const IO = struct {
         dir_handle: fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open, open_read_only },
+        purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
         assert(relative_path.len > 0);
@@ -1271,27 +1272,14 @@ pub const IO = struct {
         // On windows, assume that Direct IO is always available.
         _ = direct_io;
 
-        const handle = switch (method) {
+        const handle = switch (purpose) {
+            .format => try self.open_file_handle(dir_handle, relative_path, .format),
             .open => try self.open_file_handle(dir_handle, relative_path, .open),
-            .open_read_only => try self.open_file_handle(
+            .inspect => try self.open_file_handle(
                 dir_handle,
                 relative_path,
-                .open_read_only,
+                .inspect,
             ),
-            .create => try self.open_file_handle(dir_handle, relative_path, .create),
-            .create_or_open => open_file_handle(
-                self,
-                dir_handle,
-                relative_path,
-                .open,
-            ) catch |err| switch (err) {
-                error.FileNotFound => try self.open_file_handle(
-                    dir_handle,
-                    relative_path,
-                    .create,
-                ),
-                else => return err,
-            },
         };
         errdefer os.windows.CloseHandle(handle);
 
@@ -1299,7 +1287,7 @@ pub const IO = struct {
         // even when we haven't given shared access to other processes.
         fs_lock(handle, size) catch |err| switch (err) {
             error.WouldBlock => {
-                if (method == .open_read_only) {
+                if (purpose == .inspect) {
                     log.warn(
                         "another process holds the data file lock - results may be inconsistent",
                         .{},
@@ -1312,7 +1300,7 @@ pub const IO = struct {
         };
 
         // Ask the file system to allocate contiguous sectors for the file (if possible):
-        if (method == .create) {
+        if (purpose == .format) {
             log.info("allocating {}...", .{std.fmt.fmtIntSizeBin(size)});
             fs_allocate(handle, size) catch {
                 log.warn("file system failed to preallocate the file memory", .{});
@@ -1338,7 +1326,7 @@ pub const IO = struct {
         // making decisions on data that was never durably written by a previously crashed process.
         // We therefore always fsync when we open the path, also to wait for any pending O_DSYNC.
         // Thanks to Alex Miller from FoundationDB for diving into our source and pointing this out.
-        if (method != .open_read_only) {
+        if (purpose != .inspect) {
             try posix.fsync(handle);
         }
 

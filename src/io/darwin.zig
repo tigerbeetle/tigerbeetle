@@ -857,6 +857,7 @@ pub const IO = struct {
     pub const fd_t = posix.fd_t;
     pub const INVALID_FILE: fd_t = -1;
 
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
     /// Opens or creates a journal file:
     /// - For reading and writing.
     /// - For Direct I/O (required on darwin).
@@ -870,7 +871,7 @@ pub const IO = struct {
         dir_fd: fd_t,
         relative_path: []const u8,
         size: u64,
-        method: enum { create, create_or_open, open, open_read_only },
+        purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
         _ = self;
@@ -887,7 +888,7 @@ pub const IO = struct {
         // To work around this, fs_sync() is explicitly called after writing in do_operation.
         var flags: posix.O = .{
             .CLOEXEC = true,
-            .ACCMODE = if (method == .open_read_only) .RDONLY else .RDWR,
+            .ACCMODE = if (purpose == .inspect) .RDONLY else .RDWR,
             .DSYNC = true,
         };
         var mode: posix.mode_t = 0;
@@ -895,19 +896,14 @@ pub const IO = struct {
         // TODO Document this and investigate whether this is in fact correct to set here.
         if (@hasField(posix.O, "LARGEFILE")) flags.LARGEFILE = true;
 
-        switch (method) {
-            .create => {
+        switch (purpose) {
+            .format => {
                 flags.CREAT = true;
                 flags.EXCL = true;
                 mode = 0o666;
                 log.info("creating \"{s}\"...", .{relative_path});
             },
-            .create_or_open => {
-                flags.CREAT = true;
-                mode = 0o666;
-                log.info("opening or creating \"{s}\"...", .{relative_path});
-            },
-            .open, .open_read_only => {
+            .open, .inspect => {
                 log.info("opening \"{s}\"...", .{relative_path});
             },
         }
@@ -933,7 +929,7 @@ pub const IO = struct {
         // LOCK_NB means that we want to fail the lock without waiting if another process has it.
         posix.flock(fd, posix.LOCK.EX | posix.LOCK.NB) catch |err| switch (err) {
             error.WouldBlock => {
-                if (method == .open_read_only) {
+                if (purpose == .inspect) {
                     log.warn(
                         "another process holds the data file lock - results may be inconsistent",
                         .{},
@@ -948,7 +944,7 @@ pub const IO = struct {
         // Ask the file system to allocate contiguous sectors for the file (if possible):
         // If the file system does not support `fallocate()`, then this could mean more seeks or a
         // panic if we run out of disk space (ENOSPC).
-        if (method == .create) try fs_allocate(fd, size);
+        if (purpose == .format) try fs_allocate(fd, size);
 
         // The best fsync strategy is always to fsync before reading because this prevents us from
         // making decisions on data that was never durably written by a previously crashed process.
