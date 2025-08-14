@@ -325,7 +325,7 @@ fn command_start(
     // enabled even if the first version fails to load.
     if (multiversion != null) multiversion.?.open_sync() catch {};
 
-    var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .{};
+    var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .empty;
     releases_bundled_baseline.push(constants.config.process.release);
 
     const releases_bundled = if (multiversion != null)
@@ -335,7 +335,7 @@ fn command_start(
 
     log.info("release={}", .{config.process.release});
     log.info("release_client_min={}", .{config.process.release_client_min});
-    log.info("releases_bundled={any}", .{releases_bundled.const_slice()});
+    log.info("releases_bundled={any}", .{releases_bundled.slice()});
     log.info("git_commit={?s}", .{config.process.git_commit});
 
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
@@ -605,9 +605,7 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
     const multiversion: *vsr.multiversioning.Multiversion =
         @ptrCast(@alignCast(release_execute_context));
 
-    for (replica.releases_bundled.const_slice()) |release_bundled| {
-        if (release_bundled.value == release.value) break;
-    } else {
+    if (!replica.releases_bundled.contains(release)) {
         log.err("{}: release_execute: release {} is not available;" ++
             " upgrade (or downgrade) the binary", .{
             replica.replica,

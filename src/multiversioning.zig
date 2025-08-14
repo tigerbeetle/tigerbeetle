@@ -57,7 +57,57 @@ fn execveat(
 }
 
 /// A ReleaseList is ordered from lowest-to-highest.
-pub const ReleaseList = stdx.BoundedArrayType(Release, constants.vsr_releases_max);
+pub const ReleaseList = struct {
+    buffer: [constants.vsr_releases_max]Release,
+    count: u16,
+
+    pub const empty: ReleaseList = .{
+        .buffer = undefined,
+        .count = 0,
+    };
+
+    pub fn push(release_list: *ReleaseList, release: Release) void {
+        assert(release_list.count < constants.vsr_releases_max);
+        assert(release.value > 0);
+        if (release_list.count > 0) {
+            assert(release_list.last().value < release.value);
+        }
+        release_list.buffer[release_list.count] = release;
+        release_list.count += 1;
+    }
+
+    pub fn slice(release_list: *const ReleaseList) []const Release {
+        return release_list.buffer[0..release_list.count];
+    }
+
+    pub fn verify(release_list: *const ReleaseList) void {
+        assert(release_list.count > 0);
+        for (release_list.slice()) |a| assert(a.value > 0);
+        for (
+            release_list.slice()[0 .. release_list.count - 1],
+            release_list.slice()[1..],
+        ) |a, b| {
+            assert(a.value < b.value); // Sorted and unique.
+        }
+    }
+
+    pub fn contains(release_list: *const ReleaseList, release: Release) bool {
+        for (release_list.slice()) |r| {
+            if (r.value == release.value) return true;
+        }
+        return false;
+    }
+
+    pub fn first(release_list: *const ReleaseList) Release {
+        assert(release_list.count > 0);
+        return release_list.slice()[0];
+    }
+
+    pub fn last(release_list: *const ReleaseList) Release {
+        assert(release_list.count > 0);
+        return release_list.slice()[release_list.count - 1];
+    }
+};
 
 pub const Release = extern struct {
     value: u32,
@@ -419,7 +469,7 @@ pub const MultiversionHeader = extern struct {
     /// * Newer than the current from_release, up to and including a newer one with the `visits`
     ///   flag set.
     pub fn advertisable(self: *const MultiversionHeader, from_release: Release) ReleaseList {
-        var release_list: ReleaseList = .{};
+        var release_list: ReleaseList = .empty;
 
         for (0..self.past.count) |i| {
             release_list.push(Release{ .value = self.past.releases[i] });
@@ -434,17 +484,7 @@ pub const MultiversionHeader = extern struct {
 
         // These asserts should be impossible to reach barring a bug; they're checked in verify()
         // so there shouldn't be a way for a corrupt / malformed binary to get this far.
-        assert(release_list.count() > 0);
-        assert(std.sort.isSorted(
-            Release,
-            release_list.const_slice(),
-            {},
-            Release.less_than,
-        ));
-        for (
-            release_list.const_slice()[0 .. release_list.count() - 1],
-            release_list.const_slice()[1..],
-        ) |release, release_next| assert(release.value != release_next.value);
+        release_list.verify();
 
         return release_list;
     }
@@ -521,14 +561,14 @@ test "MultiversionHeader.advertisable" {
         try header.verify();
 
         const advertisable = header.advertisable(Release{ .value = t.from });
-        var expected: ReleaseList = .{};
+        var expected: ReleaseList = .empty;
         for (t.expected) |release| {
             expected.push(Release{ .value = release });
         }
         try std.testing.expectEqualSlices(
             Release,
-            expected.const_slice(),
-            advertisable.const_slice(),
+            expected.slice(),
+            advertisable.slice(),
         );
     }
 }
@@ -563,7 +603,7 @@ pub const Multiversion = struct {
     /// This list is referenced by `Replica.releases_bundled`.
     /// Note that this only contains the advertisable releases, which are a subset of the actual
     /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
-    releases_bundled: ReleaseList = .{},
+    releases_bundled: ReleaseList = .empty,
 
     completion: IO.Completion = undefined,
 
@@ -754,7 +794,7 @@ pub const Multiversion = struct {
         if (self.stage == .err) {
             // If there's been an error starting up multiversioning, don't disable it, but
             // advertise only the current version in memory.
-            self.releases_bundled.clear();
+            self.releases_bundled = .empty;
             self.releases_bundled.push(constants.config.process.release);
 
             return self.stage.err;
@@ -762,7 +802,7 @@ pub const Multiversion = struct {
 
         assert(self.stage == .ready);
         assert(self.target_header != null);
-        assert(self.releases_bundled.count() >= 1);
+        assert(self.releases_bundled.count >= 1);
 
         if (comptime builtin.target.os.tag == .linux) {
             assert(self.timeout_statx_previous != .none);
@@ -1035,43 +1075,25 @@ pub const Multiversion = struct {
         // 2. The existing releases_bundled, of any versions newer than current, is a subset
         //    of the new advertisable releases.
         const advertisable = header.advertisable(constants.config.process.release);
-        const advertisable_includes_running = blk: {
-            for (advertisable.const_slice()) |release| {
-                if (release.value == constants.config.process.release.value) {
-                    break :blk true;
-                }
-            }
-            break :blk false;
-        };
-        const advertisable_is_forward_superset = blk: {
-            for (self.releases_bundled.const_slice()) |existing_release| {
-                // It doesn't matter if older releases don't overlap.
-                if (existing_release.value < constants.config.process.release.value) continue;
+        if (!advertisable.contains(constants.config.process.release)) {
+            return error.RunningVersionNotIncluded;
+        }
 
-                for (advertisable.const_slice()) |release| {
-                    if (existing_release.value == release.value) {
-                        break;
-                    }
-                } else {
-                    break :blk false;
-                }
-            }
-            break :blk true;
-        };
+        for (self.releases_bundled.slice()) |existing_release| {
+            // It doesn't matter if older releases don't overlap.
+            if (existing_release.value < constants.config.process.release.value) continue;
 
-        if (!advertisable_includes_running) return error.RunningVersionNotIncluded;
-        if (!advertisable_is_forward_superset) return error.NotSuperset;
+            if (!advertisable.contains(existing_release)) return error.NotSuperset;
+        }
 
         // Log out the releases bundled; both old and new. Only if this was a change detection run
         // and not from startup.
-        if (self.timeout_statx_previous != .none)
-            log.info("releases_bundled old: {any}", .{
-                self.releases_bundled.const_slice(),
-            });
-        defer if (self.timeout_statx_previous != .none)
-            log.info("releases_bundled new: {any}", .{
-                self.releases_bundled.const_slice(),
-            });
+        if (self.timeout_statx_previous != .none) {
+            log.info("releases_bundled old: {any}", .{self.releases_bundled.slice()});
+        }
+        defer if (self.timeout_statx_previous != .none) {
+            log.info("releases_bundled new: {any}", .{self.releases_bundled.slice()});
+        };
 
         // The below flip needs to happen atomically:
         // * update the releases_bundled to be what's in the source,
@@ -1079,8 +1101,7 @@ pub const Multiversion = struct {
         //
         // Since target_fd points to a memfd on Linux, this is functionally a memcpy. On other
         // platforms, it's blocking IO - which is acceptable for development.
-        self.releases_bundled.clear();
-        self.releases_bundled.push_slice(advertisable.const_slice());
+        self.releases_bundled = advertisable;
 
         // While these look like blocking IO operations, on a memfd they're memory manipulation.
         // TODO: Would panic'ing be a better option? On Linux, these should never fail. On other
@@ -1164,8 +1185,7 @@ pub const Multiversion = struct {
         if (header.current_release == constants.config.process.release.value) {
             // Normally if we are downgrading, it means that we are running the newest release
             // in the list of bundled releases.
-            assert(constants.config.process.release.value ==
-                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+            assert(constants.config.process.release.value == self.releases_bundled.last().value);
         } else {
             // Scenario:
             // 1. Replica starts on release A.
@@ -1181,8 +1201,7 @@ pub const Multiversion = struct {
                 Release{ .value = header.current_release },
             });
 
-            assert(constants.config.process.release.value !=
-                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+            assert(constants.config.process.release.value != self.releases_bundled.last().value);
         }
 
         // It should never happen that index is null: the caller must (and does, in the case of
@@ -1819,7 +1838,7 @@ pub fn print_information(
 
     try output.print(
         "multiversioning.releases_bundled={any}\n",
-        .{multiversion.releases_bundled.const_slice()},
+        .{multiversion.releases_bundled.slice()},
     );
 
     inline for (comptime std.meta.fieldNames(MultiversionHeader)) |field| {
@@ -1852,14 +1871,14 @@ pub fn print_information(
         if ((comptime std.mem.eql(u8, field, "releases")) or
             (comptime std.mem.eql(u8, field, "release_client_mins")))
         {
-            var release_list: ReleaseList = .{};
+            var release_list: ReleaseList = .empty;
             for (@field(header.past, field)[0..header.past.count]) |release| {
                 release_list.push(Release{ .value = release });
             }
 
             try output.print("multiversioning.header.past.{s}={any}\n", .{
                 field,
-                release_list.const_slice(),
+                release_list.slice(),
             });
         } else if (comptime std.mem.eql(u8, field, "git_commits")) {
             for (@field(header.past, field)[0..header.past.count], 0..) |*git_commit, i| {

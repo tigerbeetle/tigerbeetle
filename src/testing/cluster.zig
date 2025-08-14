@@ -449,7 +449,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (cluster.replicas, 0..) |_, replica_index| {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
 
-                cluster.releases_bundled[replica_index].clear();
+                cluster.releases_bundled[replica_index] = .empty;
                 cluster.releases_bundled[replica_index].push(options.cluster.releases[0].release);
 
                 // Nonces are incremented on restart, so spread them out across 128 bit space
@@ -652,8 +652,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_upgrades[replica_index] == null);
 
-            const release = releases_bundled.get(0);
-            vsr.verify_release_list(releases_bundled.const_slice(), release);
+            releases_bundled.verify();
+            const release = releases_bundled.first();
 
             defer maybe(cluster.replica_health[replica_index] == .up);
             defer assert(cluster.replica_upgrades[replica_index] == null);
@@ -804,11 +804,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.replica_crash(replica_index);
 
-            const release_available = for (replica.releases_bundled.const_slice()) |r| {
-                if (r.value == release.value) break true;
-            } else false;
-
-            if (release_available) {
+            if (replica.releases_bundled.contains(release)) {
                 // Disable faults while restarting to ensure that the cluster doesn't get stuck due
                 // to too many replicas in status=recovering_head.
                 const faulty = cluster.storages[replica_index].faulty;
@@ -1143,9 +1139,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .release = replica.release.triple().patch,
-                    .release_max = replica.releases_bundled.get(
-                        replica.releases_bundled.count() - 1,
-                    ).triple().patch,
+                    .release_max = replica.releases_bundled.last().triple().patch,
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else
