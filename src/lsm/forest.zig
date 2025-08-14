@@ -7,6 +7,7 @@ const log = std.log.scoped(.forest);
 
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
+const perf = @import("perf_event.zig");
 
 const schema = @import("schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
@@ -26,6 +27,12 @@ const compaction_input_tables_max = @import("compaction.zig").compaction_tables_
 /// table_count_max of the forest is equal to the table_count_max of a single tree.
 /// In future, Forest.table_count_max could exceed Tree.table_count_max.
 pub const table_count_max = @import("tree.zig").table_count_max;
+
+const PerfParams = struct {
+    name: []const u8 = "swap_mutable_and_immutable_all",
+    count: u32,
+    bytes: u32,
+};
 
 pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
     const groove_count = std.meta.fields(@TypeOf(groove_cfg)).len;
@@ -526,8 +533,20 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                 // Swap the mutable and immutable tables; this must happen on the last beat,
                 // regardless of pacing.
                 if (last_beat) {
+                    // TODO: Profiling here.
+                    // get count and also size in bytes.
+
+                    var params = PerfParams{ .count = 0, .bytes = 0 };
+                    var tracer = perf.PerfEventBlockType(PerfParams).init(&params, true);
+                    defer tracer.deinit();
+
                     inline for (comptime std.enums.values(TreeID)) |tree_id| {
                         const tree = tree_for_id(forest, tree_id);
+
+                        const table_count = tree.table_mutable.count();
+                        const tree_info = Forest.tree_info_for_id(tree_id);
+                        params.bytes += @sizeOf(tree_info.Tree.Value) * table_count;
+                        params.count += table_count;
 
                         log.debug("swap_mutable_and_immutable({s})", .{tree.config.name});
                         tree.swap_mutable_and_immutable(
@@ -537,6 +556,8 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                         // Ensure tables haven't overflowed.
                         tree.manifest.assert_level_table_counts();
                     }
+                    // or per byte
+                    tracer.set_scale(params.count);
                 }
             }
 
