@@ -588,7 +588,7 @@ pub fn ReplicaType(
 
         /// The number of ticks before replenishing the command=request_blocks budget.
         /// (always running)
-        grid_repair_message_timeout: Timeout,
+        grid_repair_budget_timeout: Timeout,
 
         /// (always running)
         grid_scrub_timeout: Timeout,
@@ -1393,8 +1393,8 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 5_000 / constants.tick_ms,
                 },
-                .grid_repair_message_timeout = Timeout{
-                    .name = "grid_repair_message_timeout",
+                .grid_repair_budget_timeout = Timeout{
+                    .name = "grid_repair_budget_timeout",
                     .id = replica_index,
                     .after = options.timeout_grid_repair_message_ticks orelse
                         (500 / constants.tick_ms),
@@ -1534,7 +1534,7 @@ pub fn ReplicaType(
                 },
                 .{ &self.repair_timeout, on_repair_timeout },
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
-                .{ &self.grid_repair_message_timeout, on_grid_repair_message_timeout },
+                .{ &self.grid_repair_budget_timeout, on_grid_repair_message_timeout },
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
@@ -3770,10 +3770,10 @@ pub fn ReplicaType(
         }
 
         fn on_grid_repair_message_timeout(self: *Replica) void {
-            assert(self.grid_repair_message_timeout.ticking);
+            assert(self.grid_repair_budget_timeout.ticking);
             maybe(self.state_machine_opened);
 
-            self.grid_repair_message_timeout.reset();
+            self.grid_repair_budget_timeout.reset();
 
             const refill_amount = self.repair_messages_budget_grid.refill_max;
             self.repair_messages_budget_grid.refill(refill_amount);
@@ -9614,7 +9614,7 @@ pub fn ReplicaType(
             assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
 
             log.warn("{}: transition_to_recovering_head_from_recovering_status: " ++
@@ -9668,7 +9668,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
@@ -9691,7 +9691,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
             }
         }
@@ -9749,7 +9749,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.start();
             self.repair_timeout.start();
             self.repair_sync_timeout.start();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
         }
 
@@ -9795,7 +9795,7 @@ pub fn ReplicaType(
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
@@ -9842,7 +9842,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
             }
 
@@ -9930,7 +9930,7 @@ pub fn ReplicaType(
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
             self.pulse_timeout.stop();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
             self.upgrade_timeout.stop();
 
@@ -10835,7 +10835,6 @@ pub fn ReplicaType(
         }
 
         fn send_request_blocks(self: *Replica) void {
-            assert(self.grid_repair_message_timeout.ticking);
             assert(self.grid.callback != .cancel);
             assert(self.syncing != .updating_checkpoint);
             maybe(self.state_machine_opened);
