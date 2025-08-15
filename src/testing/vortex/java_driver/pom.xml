@@ -3,12 +3,12 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.tigerbeetle.vortex</groupId>
-  <artifactId>driver</artifactId>
+  <artifactId>vortex-driver-java</artifactId>
   <version>0.0.1-SNAPSHOT</version>
 
   <properties>
-    <maven.compiler.source>21</maven.compiler.source>
-    <maven.compiler.target>21</maven.compiler.target>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
   </properties>
 
   <build>

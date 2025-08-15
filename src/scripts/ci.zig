@@ -23,6 +23,11 @@ const LanguageCI = .{
     .python = @import("../clients/python/ci.zig"),
 };
 
+const LanguageCIVortex = .{
+    .rust = @import("../testing/vortex/rust_driver/ci.zig"),
+    .java = @import("../testing/vortex/java_driver/ci.zig"),
+};
+
 pub const CLIArgs = struct {
     language: ?Language = null,
     validate_release: bool = false,
@@ -51,15 +56,34 @@ fn generate_readmes(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
     inline for (comptime std.enums.values(Language)) |language| {
         if (language_requested == language or language_requested == null) {
-            const ci = @field(LanguageCI, @tagName(language));
-            var section = try shell.open_section(@tagName(language) ++ " ci");
-            defer section.close();
-
             {
-                try shell.pushd("./src/clients/" ++ @tagName(language));
-                defer shell.popd();
+                const ci = @field(LanguageCI, @tagName(language));
+                var section = try shell.open_section(@tagName(language) ++ " ci");
+                defer section.close();
 
-                try ci.tests(shell, gpa);
+                {
+                    try shell.pushd("./src/clients/" ++ @tagName(language));
+                    defer shell.popd();
+
+                    try ci.tests(shell, gpa);
+                }
+            }
+
+            // Test the vortex drivers.
+            // These may expect the above driver tests to have run,
+            // in order to build the driver.
+            // They expect the vortex and tigerbeetle drivers to be built.
+            if (@hasField(@TypeOf(LanguageCIVortex), @tagName(language))) {
+                const ci = @field(LanguageCIVortex, @tagName(language));
+                var section = try shell.open_section(@tagName(language) ++ " vortex ci");
+                defer section.close();
+
+                {
+                    try shell.pushd("./src/testing/vortex/" ++ @tagName(language) ++ "_driver");
+                    defer shell.popd();
+
+                    try ci.tests(shell, gpa);
+                }
             }
         }
     }

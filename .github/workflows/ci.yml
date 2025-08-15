@@ -95,6 +95,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - run: git config --global core.autocrlf false
+      - if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-latest-arm64'
+        run: | # Allow unshare for vortex.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_unconfined=0
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
       - uses: actions/checkout@v4
 
       - if: matrix.language == 'dotnet'
