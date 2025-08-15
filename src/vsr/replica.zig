@@ -1127,12 +1127,15 @@ pub fn ReplicaType(
                 (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_grid_refill =
                 @divFloor(repair_messages_budget_grid_max, 2);
-            self.repair_messages_budget_grid = vsr.RepairBudgetGrid.init(
+            self.repair_messages_budget_grid = try vsr.RepairBudgetGrid.init(
+                allocator,
                 .{
                     .capacity = repair_messages_budget_grid_max,
                     .refill_max = repair_messages_budget_grid_refill,
                 },
             );
+            errdefer self.repair_messages_budget_grid.deinit(allocator);
+
             assert(self.repair_messages_budget_grid.available ==
                 self.repair_messages_budget_grid.capacity);
 
@@ -1461,6 +1464,7 @@ pub fn ReplicaType(
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
             self.grid.deinit(allocator);
+            self.repair_messages_budget_grid.deinit(allocator);
             self.repair_messages_budget_journal.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
@@ -10842,6 +10846,7 @@ pub fn ReplicaType(
             assert(self.grid.callback != .cancel);
             assert(self.syncing != .updating_checkpoint);
             maybe(self.state_machine_opened);
+            assert(self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
@@ -10868,28 +10873,35 @@ pub fn ReplicaType(
             const requests_count: u32 = next_request: for (requests, 0..) |*request, i| {
                 if (i < request_faults_count_max) {
                     while (grid_faults.next()) |read_fault| {
-                        request.* = .{
-                            .block_address = read_fault.address,
-                            .block_checksum = read_fault.checksum,
-                        };
-                        continue :next_request;
+                        if (self.repair_messages_budget_grid.decrement(.{
+                            .address = read_fault.address,
+                            .checksum = read_fault.checksum,
+                        })) {
+                            request.* = .{
+                                .block_address = read_fault.address,
+                                .block_checksum = read_fault.checksum,
+                            };
+                            continue :next_request;
+                        }
                     }
                 }
 
                 while (grid_missing_index < grid_missing_count) {
                     grid_missing_index += 1;
                     if (self.grid.blocks_missing.next_request()) |missing_request| {
-                        request.* = missing_request;
-                        continue :next_request;
+                        if (self.repair_messages_budget_grid.decrement(.{
+                            .address = missing_request.block_address,
+                            .checksum = missing_request.block_checksum,
+                        })) {
+                            request.* = missing_request;
+                            continue :next_request;
+                        }
                     }
                 } else break @intCast(i);
             } else @intCast(requests.len);
 
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
-
-            assert(self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
-            assert(self.repair_messages_budget_grid.spend(requests_count));
 
             for (requests[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));

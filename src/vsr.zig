@@ -1843,33 +1843,67 @@ pub const RepairBudgetGrid = struct {
     capacity: u32,
     available: u32,
     refill_max: u32,
+    requested: std.AutoArrayHashMapUnmanaged(BlockIdentifier, void),
 
-    pub fn init(options: struct {
+    const BlockIdentifier = struct { address: u64, checksum: u128 };
+
+    pub fn init(gpa: std.mem.Allocator, options: struct {
         capacity: u32,
         refill_max: u32,
-    }) RepairBudgetGrid {
+    }) !RepairBudgetGrid {
         assert(options.refill_max <= options.capacity);
+
+        var requested: std.AutoArrayHashMapUnmanaged(BlockIdentifier, void) = .{};
+        try requested.ensureTotalCapacity(gpa, options.capacity);
+        errdefer requested.deinit();
+
         return RepairBudgetGrid{
             .capacity = options.capacity,
             .available = options.capacity,
             .refill_max = options.refill_max,
+            .requested = requested,
         };
     }
 
-    pub fn spend(budget: *RepairBudgetGrid, amount: u32) bool {
-        assert(budget.capacity > 0);
-        assert(budget.available <= budget.capacity);
-        assert(amount > 0);
+    pub fn deinit(budget: *RepairBudgetGrid, gpa: std.mem.Allocator) void {
+        budget.requested.deinit(gpa);
+    }
 
-        if (budget.available < amount) return false;
-        budget.available -= amount;
-        return true;
+    fn assert_internally_consistent(budget: *RepairBudgetGrid) void {
+        assert(budget.available <= budget.capacity);
+        assert(budget.available + budget.requested.count() <= budget.capacity);
+    }
+
+    pub fn decrement(budget: *RepairBudgetGrid, block_identifier: BlockIdentifier) bool {
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+        assert(budget.available > 0);
+        assert(block_identifier.address > 0);
+
+        const gop = budget.requested.getOrPutAssumeCapacity(block_identifier);
+        if (gop.found_existing) {
+            return false;
+        } else {
+            budget.available -= 1;
+            return true;
+        }
+    }
+
+    pub fn increment(budget: *RepairBudgetGrid, block_identifier: BlockIdentifier) void {
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
+
+        if (budget.requested.swapRemove(block_identifier)) {
+            budget.available = @min((budget.available + 1), budget.capacity);
+        }
     }
 
     pub fn refill(budget: *RepairBudgetGrid, amount: u32) void {
+        budget.assert_internally_consistent();
+        defer budget.assert_internally_consistent();
         assert(amount <= budget.refill_max);
-        assert(budget.available <= budget.capacity);
 
         budget.available = @min((budget.available + amount), budget.capacity);
+        budget.requested.clearRetainingCapacity();
     }
 };
