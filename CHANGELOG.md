@@ -3,6 +3,57 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.55
+
+Released: 2025-08-15
+
+### Safety And Performance
+
+- [#2863](https://github.com/tigerbeetle/tigerbeetle/pull/2863)
+
+  Make `tigerbeetle format` concurrent and only write essential data.
+  This speeds up the time to format considerably.
+
+- [#3145](https://github.com/tigerbeetle/tigerbeetle/pull/3145)
+
+  Cache prepares from the future, to help avoid needing to repair the WAL near checkpoints when a
+  backup is a little behind primary.
+
+### Features
+
+- [#3174](https://github.com/tigerbeetle/tigerbeetle/pull/3174)
+
+  Don't unlink data file on formatting failure.
+
+- [#3173](https://github.com/tigerbeetle/tigerbeetle/pull/3173)
+
+  Use correct default statsd port (8125).
+
+- [#3154](https://github.com/tigerbeetle/tigerbeetle/pull/3154)
+
+  Remove translation logic from old checkpoint state to new. Note that this means that
+  `tigerbeetle inspect` will no longer decode superblocks from 0.16.25 or older, until
+  they are upgraded to at least 0.16.26.
+
+### Internals
+
+- [#3150](https://github.com/tigerbeetle/tigerbeetle/pull/3150)
+
+  Use true quine to generate unit tests.
+
+- [#3160](https://github.com/tigerbeetle/tigerbeetle/pull/3160)
+
+  Drop `SigIllHandler`. This was supposed to print a nice error message on unsupported
+  architectures, but we hit `SigIll` in Zig's `_start`, before we get to our `main`.
+
+- [#3148](https://github.com/tigerbeetle/tigerbeetle/pull/3148)
+
+  Add constants for KiB thru PiB.
+
+### TigerTracks 🎧
+
+- [Heavyweight](https://www.youtube.com/watch?v=9Axg_e8astI)
+
 ## TigerBeetle 0.16.54
 
 Released: 2025-08-08
