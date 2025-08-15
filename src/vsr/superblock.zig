@@ -482,14 +482,14 @@ pub const SuperBlockHeader = extern struct {
         return true;
     }
 
-    pub fn view_headers(superblock: *const SuperBlockHeader) vsr.Headers.ViewChangeSlice {
-        return vsr.Headers.ViewChangeSlice.init(
-            if (superblock.vsr_state.log_view < superblock.vsr_state.view)
+    pub fn view_headers(superblock: *const SuperBlockHeader) vsr.ViewHeaders {
+        return .{
+            .headers = superblock.view_headers_all[0..superblock.view_headers_count],
+            .command = if (superblock.vsr_state.log_view < superblock.vsr_state.view)
                 .do_view_change
             else
                 .start_view,
-            superblock.view_headers_all[0..superblock.view_headers_count],
-        );
+        };
     }
 
     pub fn manifest_references(superblock: *const SuperBlockHeader) ManifestReferences {
@@ -666,8 +666,33 @@ pub fn SuperBlockType(comptime Storage: type) type {
             /// Used by format(), checkpoint(), view_change().
             vsr_state: ?SuperBlockHeader.VSRState = null,
             /// Used by format() and view_change().
-            view_headers: ?vsr.Headers.ViewChangeArray = null,
+            view_headers_buffer: [constants.view_headers_max]vsr.Header.Prepare = undefined,
+            view_headers_count: u32 = 0,
+            view_headers_command: ?vsr.ViewHeaders.Command = null,
             repairs: ?Quorums.RepairIterator = null, // Used by open().
+
+            fn view_headers(context: *const Context) ?vsr.ViewHeaders {
+                assert((context.view_headers_count == 0) == (context.view_headers_command == null));
+                return if (context.view_headers_command) |command|
+                    .{
+                        .headers = context.view_headers_buffer[0..context.view_headers_count],
+                        .command = command,
+                    }
+                else
+                    null;
+            }
+
+            fn view_headers_set(context: *Context, headers: vsr.ViewHeaders) void {
+                headers.verify();
+                stdx.copy_disjoint(
+                    .inexact,
+                    vsr.Header.Prepare,
+                    &context.view_headers_buffer,
+                    headers.headers,
+                );
+                context.view_headers_count = headers.count();
+                context.view_headers_command = headers.command;
+            }
         };
 
         storage: *Storage,
@@ -845,8 +870,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                     .replica_count = options.replica_count,
                     .view = options.view orelse 0,
                 }),
-                .view_headers = vsr.Headers.ViewChangeArray.root(options.cluster),
+                .view_headers_buffer = undefined,
+                .view_headers_count = undefined,
+                .view_headers_command = undefined,
             };
+            context.view_headers_buffer[0] = vsr.Header.Prepare.root(options.cluster);
+            context.view_headers_count = 1;
+            context.view_headers_command = .start_view;
 
             superblock.acquire(context);
         }
@@ -872,7 +902,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             view_attributes: ?struct {
                 log_view: u32,
                 view: u32,
-                headers: *const vsr.Headers.ViewChangeArray,
+                headers: vsr.ViewHeaders,
             },
             commit_max: u64,
             sync_op_min: u64,
@@ -974,14 +1004,13 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .checkpoint,
                 .vsr_state = vsr_state,
-                .view_headers = if (update.view_attributes) |*view_attributes|
-                    view_attributes.headers.*
-                else
-                    vsr.Headers.ViewChangeArray.init(
-                        superblock.staging.view_headers().command,
-                        superblock.staging.view_headers().slice,
-                    ),
             };
+            context.view_headers_set(
+                if (update.view_attributes) |*view_attributes|
+                    view_attributes.headers
+                else
+                    superblock.staging.view_headers(),
+            );
             superblock.log_context(context);
             superblock.acquire(context);
         }
@@ -990,7 +1019,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             commit_max: u64,
             log_view: u32,
             view: u32,
-            headers: *const vsr.Headers.ViewChangeArray,
+            headers: vsr.ViewHeaders,
             sync_checkpoint: ?struct {
                 checkpoint: *const vsr.CheckpointState,
                 sync_op_min: u64,
@@ -1023,7 +1052,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
             assert((update.headers.command == .start_view and update.log_view == update.view) or
                 (update.headers.command == .do_view_change and update.log_view < update.view));
             assert(
-                superblock.staging.vsr_state.checkpoint.header.op <= update.headers.array.get(0).op,
+                superblock.staging.vsr_state.checkpoint.header.op <= update.headers.headers[0].op,
             );
 
             update.headers.verify();
@@ -1061,8 +1090,8 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .callback = callback,
                 .caller = .view_change,
                 .vsr_state = vsr_state,
-                .view_headers = update.headers.*,
             };
+            context.view_headers_set(update.headers);
             superblock.log_context(context);
             superblock.acquire(context);
         }
@@ -1098,20 +1127,21 @@ pub fn SuperBlockType(comptime Storage: type) type {
             superblock.staging.parent = superblock.staging.checksum;
             superblock.staging.vsr_state = context.vsr_state.?;
 
-            if (context.view_headers) |*headers| {
+            if (context.view_headers()) |headers| {
                 assert(context.caller.updates_view_headers());
 
-                superblock.staging.view_headers_count = headers.array.count_as(u32);
+                superblock.staging.view_headers_count = headers.count();
                 stdx.copy_disjoint(
                     .exact,
                     vsr.Header.Prepare,
-                    superblock.staging.view_headers_all[0..headers.array.count()],
-                    headers.array.const_slice(),
+                    superblock.staging.view_headers_all[0..headers.count()],
+                    headers.headers,
                 );
                 @memset(
-                    superblock.staging.view_headers_all[headers.array.count()..],
+                    superblock.staging.view_headers_all[headers.count()..],
                     std.mem.zeroes(vsr.Header.Prepare),
                 );
+                // TODO: assert view_headers command is consistent with views.
             } else {
                 assert(!context.caller.updates_view_headers());
             }
@@ -1362,7 +1392,7 @@ pub fn SuperBlockType(comptime Storage: type) type {
                         .snapshots_block_address = working_checkpoint.snapshots_block_address,
                     },
                 );
-                for (superblock.working.view_headers().slice) |*header| {
+                for (superblock.working.view_headers().headers) |*header| {
                     log.debug("{?}: {s}: vsr_header: op={} checksum={}", .{
                         superblock.replica_index,
                         @tagName(context.caller),
@@ -1542,9 +1572,9 @@ pub fn SuperBlockType(comptime Storage: type) type {
                 .view_old = superblock.staging.vsr_state.view,
                 .view_new = context.vsr_state.?.view,
 
-                .head_old = superblock.staging.view_headers().slice[0].checksum,
-                .head_new = if (context.view_headers) |*headers|
-                    @as(?u128, headers.array.get(0).checksum)
+                .head_old = superblock.staging.view_headers().headers[0].checksum,
+                .head_new = if (context.view_headers()) |*headers|
+                    @as(?u128, headers.headers[0].checksum)
                 else
                     null,
             });
