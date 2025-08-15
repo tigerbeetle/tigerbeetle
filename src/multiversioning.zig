@@ -1796,26 +1796,26 @@ test parse_elf {
 }
 
 pub fn print_information(
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     exe_path: []const u8,
     output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);
     defer io.deinit();
 
-    const absolute_exe_path = try std.fs.cwd().realpathAlloc(allocator, exe_path);
-    defer allocator.free(absolute_exe_path);
+    const absolute_exe_path = try std.fs.cwd().realpathAlloc(gpa, exe_path);
+    defer gpa.free(absolute_exe_path);
 
-    const absolute_exe_path_z = try allocator.dupeZ(u8, absolute_exe_path);
-    defer allocator.free(absolute_exe_path_z);
+    const absolute_exe_path_z = try gpa.dupeZ(u8, absolute_exe_path);
+    defer gpa.free(absolute_exe_path_z);
 
     var multiversion = try Multiversion.init(
-        allocator,
+        gpa,
         &io,
         absolute_exe_path_z,
         .detect,
     );
-    defer multiversion.deinit(allocator);
+    defer multiversion.deinit(gpa);
 
     multiversion.open_sync() catch |err| {
         try output.print("multiversioning not enabled: {}\n", .{err});
