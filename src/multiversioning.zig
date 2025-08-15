@@ -1871,14 +1871,13 @@ pub fn print_information(
         if ((comptime std.mem.eql(u8, field, "releases")) or
             (comptime std.mem.eql(u8, field, "release_client_mins")))
         {
-            var release_list: ReleaseList = .empty;
-            for (@field(header.past, field)[0..header.past.count]) |release| {
-                release_list.push(Release{ .value = release });
-            }
+            comptime assert(@sizeOf(Release) == @sizeOf(@TypeOf(@field(header.past, field)[0])));
+            const release_list: []const Release =
+                @ptrCast(@field(header.past, field)[0..header.past.count]);
 
             try output.print("multiversioning.header.past.{s}={any}\n", .{
                 field,
-                release_list.slice(),
+                release_list,
             });
         } else if (comptime std.mem.eql(u8, field, "git_commits")) {
             for (@field(header.past, field)[0..header.past.count], 0..) |*git_commit, i| {
