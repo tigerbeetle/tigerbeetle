@@ -536,17 +536,17 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     // TODO: Profiling here.
                     // get count and also size in bytes.
 
-                    var params = PerfParams{ .count = 0, .bytes = 0 };
-                    var tracer = perf.PerfEventBlockType(PerfParams).init(&params, true);
-                    defer tracer.deinit();
+                    //var params = PerfParams{ .count = 0, .bytes = 0 };
+                    //var tracer = perf.PerfEventBlockType(PerfParams).init(&params, true);
+                    //defer tracer.deinit();
 
                     inline for (comptime std.enums.values(TreeID)) |tree_id| {
                         const tree = tree_for_id(forest, tree_id);
 
-                        const table_count = tree.table_mutable.count();
-                        const tree_info = Forest.tree_info_for_id(tree_id);
-                        params.bytes += @sizeOf(tree_info.Tree.Value) * table_count;
-                        params.count += table_count;
+                        //const table_count = tree.table_mutable.count();
+                        //const tree_info = Forest.tree_info_for_id(tree_id);
+                        //params.bytes += @sizeOf(tree_info.Tree.Value) * table_count;
+                        //params.count += table_count;
 
                         log.debug("swap_mutable_and_immutable({s})", .{tree.config.name});
                         tree.swap_mutable_and_immutable(
@@ -557,7 +557,7 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                         tree.manifest.assert_level_table_counts();
                     }
                     // or per byte
-                    tracer.set_scale(params.count);
+                    //tracer.set_scale(params.count);
                 }
             }
 
