@@ -68,6 +68,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
         try shell.exec("python3 main.py", .{});
     }
+
+    // We are checking type annotations of the entire package.
+    try shell.exec("python3 -m mypy . --strict", .{});
 }
 
 pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
