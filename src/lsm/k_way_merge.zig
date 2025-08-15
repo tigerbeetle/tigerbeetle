@@ -26,7 +26,6 @@ pub fn KWayMergeIteratorType(
 
     const stream_max: u32 = std.math.ceilPowerOfTwoAssert(u32, sorted_runs_max);
     //comptime assert(std.math.isPowerOfTwo(sorted_runs_max));
-
     return struct {
 
         // TODO: benchmark in which cases it is better, e.g., if there is implicit padding?

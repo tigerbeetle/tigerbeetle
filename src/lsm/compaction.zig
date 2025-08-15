@@ -270,12 +270,37 @@ pub fn CompactionType(
         const TableInfoReference = Manifest.TableInfoReference;
         const CompactionRange = Manifest.CompactionRange;
 
+        // Idea is that we can return here simply blocks.
+        const BatchIterator = struct {
+            immutable: []Value,
+            index: u32, // index into the output
+            const batch_max = 10; // table.count stack memory buffe the k-way iter result.
+            // size of a block -  buffer, block as a buffer max 512kb.
+            // block
+
+            pub fn values_used(iter: *const BatchIterator) []const Value {
+                const batch_size = @min(iter.immutable.len - iter.index, batch_max);
+                std.debug.print("values used from {} with length {} form total {} \n", .{ iter.index, batch_size, iter.count() });
+                return iter.immutable[0 .. iter.index + batch_size];
+            }
+
+            pub fn advance(iter: *BatchIterator) void {
+                const batch_size = @min(iter.immutable.len - iter.index, batch_max);
+                iter.index += batch_size;
+                std.debug.print("advance {} from {}\n", .{ iter.index, iter.count() });
+            }
+            pub fn count(iter: *const BatchIterator) u32 {
+                return @intCast(iter.immutable.len);
+            }
+        };
+
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
         const TableInfoA = union(enum) {
-            immutable: []Value,
+            //immutable: []Value, // TODO: replace this for now with some form of iterator that returns blocks but has a full count().
+            immutable: BatchIterator, // TODO: replace this for now with some form of iterator that returns blocks but has a full count().
             disk: TableInfoReference,
         };
 
@@ -499,7 +524,7 @@ pub fn CompactionType(
             if (compaction.table_info_a.? == .immutable) {
                 assert(compaction.level_a_value_block.empty());
                 if (compaction.level_a_immutable_stage != .exhausted) {
-                    values_in_flight += compaction.table_info_a.?.immutable.len;
+                    values_in_flight += compaction.table_info_a.?.immutable.count();
                 }
             }
 
@@ -620,7 +645,12 @@ pub fn CompactionType(
                 }
 
                 compaction.table_info_a = .{
-                    .immutable = compaction.tree.table_immutable.values_used(),
+                    .immutable = BatchIterator{
+                        .immutable = compaction.tree.table_immutable.values_used(),
+                        .index = 0,
+                        // should we use a block?
+                        // call release on block
+                    },
                 };
 
                 compaction.range_b = compaction.tree.manifest.immutable_table_compaction_range(
@@ -727,7 +757,7 @@ pub fn CompactionType(
                 return 0;
             } else {
                 if (compaction.table_info_a.? == .immutable) {
-                    compaction.counters.in += compaction.table_info_a.?.immutable.len;
+                    compaction.counters.in += compaction.table_info_a.?.immutable.count();
                 }
                 return compaction.quotas.bar;
             }
@@ -999,7 +1029,7 @@ pub fn CompactionType(
 
             assert(compaction.idle());
             assert(pool.idle());
-            log.debug("{s}:{}: beat_complete: quota_beat_done={} quota_beat={} " ++
+            log.info("{s}:{}: beat_complete: quota_beat_done={} quota_beat={} " ++
                 "quota_bar_done={} quota_bar={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
@@ -1551,6 +1581,17 @@ pub fn CompactionType(
             const values_target = compaction.table_builder
                 .value_block_values()[compaction.table_builder.value_count..];
 
+            switch (compaction.table_info_a.?) {
+                .immutable => {
+                    //why is this emtpy?
+                    if (values_source_a) |values| {
+                        std.debug.print("immutable table {} \n", .{values.len});
+                        assert(values.len > 0);
+                    }
+                },
+                .disk => {},
+            }
+
             inline for ([_]?[]const Value{
                 values_source_a,
                 values_source_b,
@@ -1636,8 +1677,10 @@ pub fn CompactionType(
                 switch (compaction.table_info_a.?) {
                     .immutable => {
                         if (compaction.level_a_immutable_stage == .merge) {
-                            break :values compaction.table_info_a.?.immutable;
+                            std.debug.print("hit the merge case {}\n", .{compaction.table_info_a.?.immutable.values_used().len});
+                            break :values compaction.table_info_a.?.immutable.values_used();
                         } else {
+                            std.debug.print("hit the exhauseted case \n", .{});
                             assert(compaction.level_a_immutable_stage == .exhausted);
                             break :values null;
                         }
@@ -1663,6 +1706,7 @@ pub fn CompactionType(
             };
             assert(!(level_a_values_used == null and level_b_values_used == null));
 
+            // this slices it already.
             const level_a_values = if (level_a_values_used) |values_used| values: {
                 const values_remaining = values_used[compaction.level_a_position.value..];
                 // Only consume one block at a time so that a beat never outputs past its quota
@@ -1686,10 +1730,11 @@ pub fn CompactionType(
         // advancing value_block and index_block. This is also the place where determine that the
         // beat's quota of work is done and begin to wind down the dispatch loop.
         fn merge_advance_position(compaction: *Compaction) void {
+            // TODO: maybe here advance it.
             if (compaction.table_info_a.? == .immutable) {
                 if (compaction.level_a_immutable_stage == .merge) {
                     if (compaction.level_a_position.value ==
-                        compaction.table_info_a.?.immutable.len)
+                        compaction.table_info_a.?.immutable.count())
                     {
                         compaction.level_a_position.value_block += 1;
                         assert(compaction.level_a_position.value_block == 1);
@@ -1697,6 +1742,8 @@ pub fn CompactionType(
                         compaction.level_a_immutable_stage = .exhausted;
                     } else {
                         compaction.level_a_immutable_stage = .ready;
+                        // this advances the batch iterator.
+                        compaction.table_info_a.?.immutable.advance();
                     }
                 } else {
                     assert(compaction.level_a_immutable_stage == .exhausted);

@@ -345,7 +345,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.merge(); // must be called before
             std.mem.swap([]Value, &table.values, &table.values_shadow);
-            table.sorted_runs.reset();
+            table.sorted_runs.reset(); // we should not reset it for now.
             table.value_context.sorted = true;
 
             // If we have no values, then we can consider ourselves flushed right away.
