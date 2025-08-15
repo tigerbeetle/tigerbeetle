@@ -10852,7 +10852,39 @@ pub fn ReplicaType(
             )[0..constants.grid_repair_request_max];
             assert(requests.len > 0);
 
-            const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue. We divide the buffer up between `read_global_queue` and
+            // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
+            // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
+            const request_faults_count_max = requests.len -
+                @min(@divFloor(requests.len, 2), self.grid.blocks_missing.faulty_blocks.count());
+            assert(request_faults_count_max > 0);
+            assert(request_faults_count_max <= requests.len);
+            assert(request_faults_count_max >= @divFloor(requests.len, 2));
+
+            const grid_missing_count = self.grid.blocks_missing.faulty_blocks.count();
+            var grid_missing_index: u32 = 0;
+            var grid_faults = self.grid.read_global_queue.iterate();
+            const requests_count: u32 = next_request: for (requests, 0..) |*request, i| {
+                if (i < request_faults_count_max) {
+                    while (grid_faults.next()) |read_fault| {
+                        request.* = .{
+                            .block_address = read_fault.address,
+                            .block_checksum = read_fault.checksum,
+                        };
+                        continue :next_request;
+                    }
+                }
+
+                while (grid_missing_index < grid_missing_count) {
+                    grid_missing_index += 1;
+                    if (self.grid.blocks_missing.next_request()) |missing_request| {
+                        request.* = missing_request;
+                        continue :next_request;
+                    }
+                } else break @intCast(i);
+            } else @intCast(requests.len);
+
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
 
