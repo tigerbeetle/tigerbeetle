@@ -1617,10 +1617,11 @@ pub const Simulator = struct {
 
     fn replica_release_list(simulator: *const Simulator, replica_index: u8) vsr.ReleaseList {
         const replica_releases_count = simulator.replica_releases[replica_index];
-        var release_list = vsr.ReleaseList{};
+        var release_list: vsr.ReleaseList = .empty;
         for (0..replica_releases_count) |i| {
             release_list.push(releases[i].release);
         }
+        release_list.verify();
         return release_list;
     }
 
