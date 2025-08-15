@@ -1841,69 +1841,72 @@ pub fn print_information(
         .{multiversion.releases_bundled.slice()},
     );
 
-    inline for (comptime std.meta.fieldNames(MultiversionHeader)) |field| {
-        if (std.mem.eql(u8, field, "current_git_commit")) {
-            try output.print("multiversioning.header.{s}={s}\n", .{
-                field,
-                std.fmt.fmtSliceHexLower(&header.current_git_commit),
-            });
-        } else if (!std.mem.eql(u8, field, "past") and
-            !std.mem.eql(u8, field, "current_flags_padding") and
-            !std.mem.eql(u8, field, "past_padding") and
-            !std.mem.eql(u8, field, "reserved"))
-        {
-            try output.print("multiversioning.header.{s}={any}\n", .{
-                field,
-                if (comptime std.mem.eql(u8, field, "current_release"))
-                    Release{ .value = @field(header, field) }
-                else
-                    @field(header, field),
-            });
+    inline for (
+        comptime std.enums.values(std.meta.FieldEnum(MultiversionHeader)),
+    ) |field| {
+        const field_name = @tagName(field);
+        switch (field) {
+            .past, .current_flags_padding, .past_padding, .reserved => continue,
+            .current_git_commit => {
+                try output.print("multiversioning.header.{s}={s}\n", .{
+                    field_name,
+                    std.fmt.fmtSliceHexLower(&header.current_git_commit),
+                });
+            },
+            .current_release, .current_release_client_min => {
+                try output.print("multiversioning.header.{s}={any}\n", .{
+                    field_name,
+                    Release{ .value = @field(header, field_name) },
+                });
+            },
+            .checksum_header,
+            .checksum_binary_without_header,
+            .current_checksum,
+            .schema_version,
+            .vsr_releases_max,
+            .current_flags,
+            => {
+                try output.print("multiversioning.header.{s}={any}\n", .{
+                    field_name,
+                    @field(header, field_name),
+                });
+            },
         }
     }
 
-    try std.fmt.format(
-        output,
-        "multiversioning.header.past.count={}\n",
-        .{header.past.count},
-    );
-    inline for (comptime std.meta.fieldNames(MultiversionHeader.PastReleases)) |field| {
-        if ((comptime std.mem.eql(u8, field, "releases")) or
-            (comptime std.mem.eql(u8, field, "release_client_mins")))
-        {
-            comptime assert(@sizeOf(Release) == @sizeOf(@TypeOf(@field(header.past, field)[0])));
-            const release_list: []const Release =
-                @ptrCast(@field(header.past, field)[0..header.past.count]);
+    try output.print("multiversioning.header.past.count={}\n", .{header.past.count});
+    inline for (
+        comptime std.enums.values(std.meta.FieldEnum(MultiversionHeader.PastReleases)),
+    ) |field| {
+        const field_name = @tagName(field);
+        switch (field) {
+            .count, .flags_padding => {},
+            .releases, .release_client_mins => {
+                comptime assert(@sizeOf(Release) ==
+                    @sizeOf(@TypeOf(@field(header.past, field_name)[0])));
+                const release_list: []const Release =
+                    @ptrCast(@field(header.past, field_name)[0..header.past.count]);
 
-            try output.print("multiversioning.header.past.{s}={any}\n", .{
-                field,
-                release_list,
-            });
-        } else if (comptime std.mem.eql(u8, field, "git_commits")) {
-            for (@field(header.past, field)[0..header.past.count], 0..) |*git_commit, i| {
-                try output.print("multiversioning.header.past.{s}.{}={}\n", .{
-                    field,
-                    Release{ .value = header.past.releases[i] },
-                    std.fmt.fmtSliceHexLower(git_commit),
+                try output.print("multiversioning.header.past.{s}={any}\n", .{
+                    field_name,
+                    release_list,
                 });
-            }
-        } else if ((comptime std.mem.eql(u8, field, "checksums")) or
-            (comptime std.mem.eql(u8, field, "flags")))
-        {
-            for (@field(header.past, field)[0..header.past.count], 0..) |value, i| {
-                try output.print("multiversioning.header.past.{s}.{}={}\n", .{
-                    field,
-                    Release{ .value = header.past.releases[i] },
-                    value,
+            },
+            .git_commits => {
+                for (@field(header.past, field_name)[0..header.past.count], 0..) |*git_commit, i| {
+                    try output.print("multiversioning.header.past.{s}.{}={}\n", .{
+                        field_name,
+                        Release{ .value = header.past.releases[i] },
+                        std.fmt.fmtSliceHexLower(git_commit),
+                    });
+                }
+            },
+            .checksums, .offsets, .sizes, .flags => {
+                try output.print("multiversioning.header.past.{s}={any}\n", .{
+                    field_name,
+                    @field(header.past, field_name)[0..header.past.count],
                 });
-            }
-        } else if (comptime (!std.mem.eql(u8, field, "count") and
-            !std.mem.eql(u8, field, "flags_padding")))
-        {
-            try output.print("multiversioning.header.past.{s}={any}\n", .{
-                field,
-                @field(header.past, field)[0..header.past.count],
-            });
+            },
         }
     }
 }
