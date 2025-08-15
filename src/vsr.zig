@@ -1250,75 +1250,23 @@ pub fn verify_release_list(releases: []const Release, release_included: Release)
     }
 }
 
-pub const Headers = struct {
-    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_headers_max);
-    /// The SuperBlock's persisted VSR headers.
-    /// One of the following:
-    ///
-    /// - SV headers (consecutive chain)
-    /// - DVC headers (disjoint chain)
-    pub const ViewChangeSlice = ViewChangeHeadersSlice;
-    pub const ViewChangeArray = ViewChangeHeadersArray;
+pub const ViewHeaders = struct {
+    headers: []const Header.Prepare,
+    command: ViewHeaders.Command,
 
-    fn dvc_blank(op: u64) Header.Prepare {
-        return .{
-            .command = .prepare,
-            .release = Release.zero,
-            .operation = .reserved,
-            .op = op,
-            .cluster = 0,
-            .view = 0,
-            .request_checksum = 0,
-            .checkpoint_id = 0,
-            .parent = 0,
-            .client = 0,
-            .commit = 0,
-            .timestamp = 0,
-            .request = 0,
-        };
-    }
+    pub const Command = enum { do_view_change, start_view };
 
-    pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
-        if (std.meta.eql(header.*, Headers.dvc_blank(header.op))) return .blank;
+    pub fn verify(view_headers: ViewHeaders) void {
+        assert(view_headers.headers.len > 0);
+        assert(view_headers.headers.len <= constants.view_headers_max);
 
-        if (constants.verify) assert(header.valid_checksum());
-        assert(header.command == .prepare);
-        assert(header.operation != .reserved);
-        assert(header.invalid() == null);
-        return .valid;
-    }
-};
-
-pub const ViewChangeCommand = enum { do_view_change, start_view };
-
-const ViewChangeHeadersSlice = struct {
-    command: ViewChangeCommand,
-    /// Headers are ordered from high-to-low op.
-    slice: []const Header.Prepare,
-
-    pub fn init(
-        command: ViewChangeCommand,
-        slice: []const Header.Prepare,
-    ) ViewChangeHeadersSlice {
-        const headers = ViewChangeHeadersSlice{
-            .command = command,
-            .slice = slice,
-        };
-        headers.verify();
-        return headers;
-    }
-
-    pub fn verify(headers: ViewChangeHeadersSlice) void {
-        assert(headers.slice.len > 0);
-        assert(headers.slice.len <= constants.view_headers_max);
-
-        const head = &headers.slice[0];
+        const head = &view_headers.headers[0];
         // A DVC's head op is never a gap or faulty.
         // A SV never includes gaps or faulty headers.
-        assert(Headers.dvc_header_type(head) == .valid);
+        assert(dvc_header_type(head) == .valid);
 
         var child = head;
-        for (headers.slice[1..], 0..) |*header, i| {
+        for (view_headers.headers[1..], 0..) |*header, i| {
             const index = i + 1;
             assert(header.command == .prepare);
             maybe(header.operation == .reserved);
@@ -1326,14 +1274,14 @@ const ViewChangeHeadersSlice = struct {
 
             // DVC: Ops are consecutive (with explicit blank headers).
             // SV: The first "pipeline + 1" ops of the SV are consecutive.
-            if (headers.command == .do_view_change or
-                (headers.command == .start_view and
+            if (view_headers.command == .do_view_change or
+                (view_headers.command == .start_view and
                     index < constants.pipeline_prepare_queue_max + 1))
             {
                 assert(header.op == head.op - index);
             }
 
-            switch (Headers.dvc_header_type(header)) {
+            switch (dvc_header_type(header)) {
                 .blank => {
                     // We can't verify that SV headers contain no gaps headers here:
                     // superblock.checkpoint could make .do_view_change headers durable instead of
@@ -1341,8 +1289,8 @@ const ViewChangeHeadersSlice = struct {
                     // in `replica.zig`). When these headers are loaded from the superblock on
                     // startup, they are considered to be .start_view headers (see `view_headers` in
                     // `superblock.zig`).
-                    maybe(headers.command == .do_view_change);
-                    maybe(headers.command == .start_view);
+                    maybe(view_headers.command == .do_view_change);
+                    maybe(view_headers.command == .start_view);
                     continue; // Don't update "child".
                 },
                 .valid => {
@@ -1355,6 +1303,10 @@ const ViewChangeHeadersSlice = struct {
             }
             child = header;
         }
+    }
+
+    pub fn count(view_headers: ViewHeaders) u32 {
+        return @intCast(view_headers.headers.len);
     }
 
     const ViewRange = struct {
@@ -1374,17 +1326,17 @@ const ViewChangeHeadersSlice = struct {
     /// - When these are SV headers for a log_view=V, we can continue to add to them (by preparing
     ///   more ops), but those ops will always be part of the log_view. If they were prepared during
     ///   a view prior to the log_view, they would already be part of the headers.
-    pub fn view_for_op(headers: ViewChangeHeadersSlice, op: u64, log_view: u32) ViewRange {
-        const header_newest = &headers.slice[0];
+    pub fn view_for_op(view_headers: ViewHeaders, op: u64, log_view: u32) ViewRange {
+        const header_newest = &view_headers.headers[0];
         const header_oldest = blk: {
             var oldest: ?usize = null;
-            for (headers.slice, 0..) |*header, i| {
-                switch (Headers.dvc_header_type(header)) {
+            for (view_headers.headers, 0..) |*header, i| {
+                switch (dvc_header_type(header)) {
                     .blank => assert(i > 0),
                     .valid => oldest = i,
                 }
             }
-            break :blk &headers.slice[oldest.?];
+            break :blk &view_headers.headers[oldest.?];
         };
         assert(header_newest.view <= log_view);
         assert(header_newest.view >= header_oldest.view);
@@ -1393,17 +1345,17 @@ const ViewChangeHeadersSlice = struct {
         if (op < header_oldest.op) return .{ .min = 0, .max = header_oldest.view };
         if (op > header_newest.op) return .{ .min = log_view, .max = log_view };
 
-        for (headers.slice) |*header| {
-            if (Headers.dvc_header_type(header) == .valid and header.op == op) {
+        for (view_headers.headers) |*header| {
+            if (dvc_header_type(header) == .valid and header.op == op) {
                 return .{ .min = header.view, .max = header.view };
             }
         }
 
-        var header_next = &headers.slice[0];
-        assert(Headers.dvc_header_type(header_next) == .valid);
+        var header_next = &view_headers.headers[0];
+        assert(dvc_header_type(header_next) == .valid);
 
-        for (headers.slice[1..]) |*header_prev| {
-            if (Headers.dvc_header_type(header_prev) == .valid) {
+        for (view_headers.headers[1..]) |*header_prev| {
+            if (dvc_header_type(header_prev) == .valid) {
                 if (header_prev.op < op and op < header_next.op) {
                     return .{ .min = header_prev.view, .max = header_next.view };
                 }
@@ -1411,6 +1363,34 @@ const ViewChangeHeadersSlice = struct {
             }
         }
         unreachable;
+    }
+
+    pub fn dvc_header_type(header: *const Header.Prepare) enum { blank, valid } {
+        if (std.meta.eql(header.*, dvc_blank(header.op))) return .blank;
+
+        if (constants.verify) assert(header.valid_checksum());
+        assert(header.command == .prepare);
+        assert(header.operation != .reserved);
+        assert(header.invalid() == null);
+        return .valid;
+    }
+
+    pub fn dvc_blank(op: u64) Header.Prepare {
+        return .{
+            .command = .prepare,
+            .release = Release.zero,
+            .operation = .reserved,
+            .op = op,
+            .cluster = 0,
+            .view = 0,
+            .request_checksum = 0,
+            .checkpoint_id = 0,
+            .parent = 0,
+            .client = 0,
+            .commit = 0,
+            .timestamp = 0,
+            .request = 0,
+        };
     }
 };
 
@@ -1427,8 +1407,8 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .view = 10,
             .timestamp = 11,
         }),
-        Headers.dvc_blank(8),
-        Headers.dvc_blank(7),
+        ViewHeaders.dvc_blank(8),
+        ViewHeaders.dvc_blank(7),
         std.mem.zeroInit(Header.Prepare, .{
             .checksum = undefined,
             .client = 3,
@@ -1440,13 +1420,16 @@ test "Headers.ViewChangeSlice.view_for_op" {
             .view = 7,
             .timestamp = 8,
         }),
-        Headers.dvc_blank(5),
+        ViewHeaders.dvc_blank(5),
     };
 
     headers_array[0].set_checksum();
     headers_array[3].set_checksum();
 
-    const headers = Headers.ViewChangeSlice.init(.do_view_change, &headers_array);
+    const headers: ViewHeaders = .{
+        .headers = &headers_array,
+        .command = .do_view_change,
+    };
     try std.testing.expect(std.meta.eql(headers.view_for_op(11, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(10, 12), .{ .min = 12, .max = 12 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(9, 12), .{ .min = 10, .max = 10 }));
@@ -1456,60 +1439,6 @@ test "Headers.ViewChangeSlice.view_for_op" {
     try std.testing.expect(std.meta.eql(headers.view_for_op(5, 12), .{ .min = 0, .max = 7 }));
     try std.testing.expect(std.meta.eql(headers.view_for_op(0, 12), .{ .min = 0, .max = 7 }));
 }
-
-/// The headers of a SV or DVC message.
-const ViewChangeHeadersArray = struct {
-    command: ViewChangeCommand,
-    array: Headers.Array,
-
-    pub fn root(cluster: u128) ViewChangeHeadersArray {
-        return ViewChangeHeadersArray.init(.start_view, &.{
-            Header.Prepare.root(cluster),
-        });
-    }
-
-    pub fn init(
-        command: ViewChangeCommand,
-        slice: []const Header.Prepare,
-    ) ViewChangeHeadersArray {
-        const headers = ViewChangeHeadersArray{
-            .command = command,
-            .array = Headers.Array.from_slice(slice) catch unreachable,
-        };
-        headers.verify();
-        return headers;
-    }
-
-    pub fn verify(headers: *const ViewChangeHeadersArray) void {
-        (ViewChangeHeadersSlice{
-            .command = headers.command,
-            .slice = headers.array.const_slice(),
-        }).verify();
-    }
-
-    pub fn replace(
-        headers: *ViewChangeHeadersArray,
-        command: ViewChangeCommand,
-        slice: []const Header.Prepare,
-    ) void {
-        headers.command = command;
-        headers.array.clear();
-        for (slice) |*header| headers.array.push(header.*);
-        headers.verify();
-    }
-
-    pub fn append(headers: *ViewChangeHeadersArray, header: *const Header.Prepare) void {
-        // We don't do comprehensive validation here — assume that verify() will be called
-        // after any series of appends.
-        headers.array.push(header.*);
-    }
-
-    pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
-        assert(headers.command == .do_view_change);
-        assert(headers.array.count() > 0);
-        headers.array.push(Headers.dvc_blank(op));
-    }
-};
 
 /// For a replica with journal_slot_count=10, lsm_compaction_ops=2, pipeline_prepare_queue_max=2,
 /// and checkpoint_interval=4, which can be computed as follows:
