@@ -3783,6 +3783,14 @@ pub fn ReplicaType(
 
             const refill_amount = self.repair_messages_budget_grid.refill_max;
             self.repair_messages_budget_grid.refill(refill_amount);
+
+            // Proactively send a block request, because:
+            // - we definitely have enough budget for it now, and
+            // - to ensure that view-changing backups still request blocks (even though they are not
+            //   repairing their WAL via repair()).
+            if (self.grid.callback != .cancel) {
+                self.send_request_blocks();
+            }
         }
 
         fn on_grid_scrub_timeout(self: *Replica) void {
@@ -10844,9 +10852,11 @@ pub fn ReplicaType(
         fn send_request_blocks(self: *Replica) void {
             assert(self.grid_repair_budget_timeout.ticking);
             assert(self.grid.callback != .cancel);
-            assert(self.syncing != .updating_checkpoint);
             maybe(self.state_machine_opened);
-            assert(self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
+            if (!self.solo()) {
+                assert(self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max);
+            }
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
