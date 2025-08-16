@@ -586,9 +586,9 @@ pub fn ReplicaType(
         /// (status=normal backup)
         repair_sync_timeout: Timeout,
 
-        /// The number of ticks before sending a command=request_blocks.
+        /// The number of ticks before replenishing the command=request_blocks budget.
         /// (always running)
-        grid_repair_message_timeout: Timeout,
+        grid_repair_budget_timeout: Timeout,
 
         /// (always running)
         grid_scrub_timeout: Timeout,
@@ -1126,12 +1126,15 @@ pub fn ReplicaType(
                 (replica_count - @intFromBool(!self.standby()));
             const repair_messages_budget_grid_refill =
                 @divFloor(repair_messages_budget_grid_max, 2);
-            self.repair_messages_budget_grid = vsr.RepairBudgetGrid.init(
+            self.repair_messages_budget_grid = try vsr.RepairBudgetGrid.init(
+                allocator,
                 .{
                     .capacity = repair_messages_budget_grid_max,
                     .refill_max = repair_messages_budget_grid_refill,
                 },
             );
+            errdefer self.repair_messages_budget_grid.deinit(allocator);
+
             assert(self.repair_messages_budget_grid.available ==
                 self.repair_messages_budget_grid.capacity);
 
@@ -1393,8 +1396,8 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 5_000 / constants.tick_ms,
                 },
-                .grid_repair_message_timeout = Timeout{
-                    .name = "grid_repair_message_timeout",
+                .grid_repair_budget_timeout = Timeout{
+                    .name = "grid_repair_budget_timeout",
                     .id = replica_index,
                     .after = options.timeout_grid_repair_message_ticks orelse
                         (500 / constants.tick_ms),
@@ -1460,6 +1463,7 @@ pub fn ReplicaType(
             self.state_machine.deinit(allocator);
             self.superblock.deinit(allocator);
             self.grid.deinit(allocator);
+            self.repair_messages_budget_grid.deinit(allocator);
             self.repair_messages_budget_journal.deinit(allocator);
             defer self.message_bus.deinit(allocator);
 
@@ -1534,7 +1538,7 @@ pub fn ReplicaType(
                 },
                 .{ &self.repair_timeout, on_repair_timeout },
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
-                .{ &self.grid_repair_message_timeout, on_grid_repair_message_timeout },
+                .{ &self.grid_repair_budget_timeout, on_grid_repair_message_timeout },
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
                 .{ &self.pulse_timeout, on_pulse_timeout },
                 .{ &self.grid_scrub_timeout, on_grid_scrub_timeout },
@@ -3770,13 +3774,18 @@ pub fn ReplicaType(
         }
 
         fn on_grid_repair_message_timeout(self: *Replica) void {
-            assert(self.grid_repair_message_timeout.ticking);
+            assert(self.grid_repair_budget_timeout.ticking);
             maybe(self.state_machine_opened);
 
-            self.grid_repair_message_timeout.reset();
+            self.grid_repair_budget_timeout.reset();
 
             const refill_amount = self.repair_messages_budget_grid.refill_max;
             self.repair_messages_budget_grid.refill(refill_amount);
+
+            // Proactively send a block request, because:
+            // - we definitely have enough budget for it now, and
+            // - to ensure that view-changing backups still request blocks (even though they are not
+            //   repairing their WAL via repair()).
             if (self.grid.callback != .cancel) {
                 self.send_request_blocks();
             }
@@ -7304,6 +7313,15 @@ pub fn ReplicaType(
 
             self.repair_timeout.reset();
             if (self.syncing == .updating_checkpoint) return;
+
+            if (self.grid.callback != .cancel) {
+                if (self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max)
+                {
+                    self.send_request_blocks();
+                }
+            }
+
             if (!self.state_machine_opened) return;
 
             assert(self.status == .normal or self.status == .view_change);
@@ -9610,7 +9628,7 @@ pub fn ReplicaType(
             assert(!self.upgrade_timeout.ticking);
 
             self.ping_timeout.start();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
 
             log.warn("{}: transition_to_recovering_head_from_recovering_status: " ++
@@ -9664,7 +9682,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
                 self.repair_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
@@ -9687,7 +9705,7 @@ pub fn ReplicaType(
                 self.start_view_change_message_timeout.start();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
             }
         }
@@ -9745,7 +9763,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.start();
             self.repair_timeout.start();
             self.repair_sync_timeout.start();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
         }
 
@@ -9791,7 +9809,7 @@ pub fn ReplicaType(
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
                 self.upgrade_timeout.start();
@@ -9838,7 +9856,7 @@ pub fn ReplicaType(
                 self.request_start_view_message_timeout.stop();
                 self.repair_timeout.start();
                 self.repair_sync_timeout.start();
-                self.grid_repair_message_timeout.start();
+                self.grid_repair_budget_timeout.start();
                 self.grid_scrub_timeout.start();
             }
 
@@ -9926,7 +9944,7 @@ pub fn ReplicaType(
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
             self.pulse_timeout.stop();
-            self.grid_repair_message_timeout.start();
+            self.grid_repair_budget_timeout.start();
             self.grid_scrub_timeout.start();
             self.upgrade_timeout.stop();
 
@@ -10831,11 +10849,12 @@ pub fn ReplicaType(
         }
 
         fn send_request_blocks(self: *Replica) void {
-            assert(self.grid_repair_message_timeout.ticking);
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
-
-            self.grid_repair_message_timeout.reset();
+            if (!self.solo()) {
+                assert(self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max);
+            }
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
@@ -10846,12 +10865,51 @@ pub fn ReplicaType(
             )[0..constants.grid_repair_request_max];
             assert(requests.len > 0);
 
-            const requests_count: u32 = @intCast(self.grid.next_batch_of_block_requests(requests));
+            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
+            // continue. We divide the buffer up between `read_global_queue` and
+            // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
+            // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
+            const request_faults_count_max = requests.len -
+                @min(@divFloor(requests.len, 2), self.grid.blocks_missing.faulty_blocks.count());
+            assert(request_faults_count_max > 0);
+            assert(request_faults_count_max <= requests.len);
+            assert(request_faults_count_max >= @divFloor(requests.len, 2));
+
+            const grid_missing_count = self.grid.blocks_missing.faulty_blocks.count();
+            var grid_missing_index: u32 = 0;
+            var grid_faults = self.grid.read_global_queue.iterate();
+            const requests_count: u32 = next_request: for (requests, 0..) |*request, i| {
+                if (i < request_faults_count_max) {
+                    while (grid_faults.next()) |read_fault| {
+                        if (self.repair_messages_budget_grid.decrement(.{
+                            .address = read_fault.address,
+                            .checksum = read_fault.checksum,
+                        })) {
+                            request.* = .{
+                                .block_address = read_fault.address,
+                                .block_checksum = read_fault.checksum,
+                            };
+                            continue :next_request;
+                        }
+                    }
+                }
+
+                while (grid_missing_index < grid_missing_count) {
+                    grid_missing_index += 1;
+                    if (self.grid.blocks_missing.next_request()) |missing_request| {
+                        if (self.repair_messages_budget_grid.decrement(.{
+                            .address = missing_request.block_address,
+                            .checksum = missing_request.block_checksum,
+                        })) {
+                            request.* = missing_request;
+                            continue :next_request;
+                        }
+                    }
+                } else break @intCast(i);
+            } else @intCast(requests.len);
+
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
-
-            assert(self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
-            assert(self.repair_messages_budget_grid.spend(requests_count));
 
             for (requests[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));
