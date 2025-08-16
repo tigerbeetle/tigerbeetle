@@ -12,6 +12,101 @@ const KWayMergeIteratorType = @import("./k_way_merge.zig").KWayMergeIteratorType
 // NOTE: High-level question, should we later on divide immutable table to mutable.
 //       Also is it really immutable or frozen.
 
+pub fn SortedRunsType(
+    comptime Key: type,
+    comptime Value: type,
+    comptime runs_max: u32,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+) type {
+    return struct {
+        const SortedRuns = @This();
+        runs_count: u16,
+        elements_covered: u32 = 0,
+        //remember the streams now and check overlap
+        runs: [runs_max][]const Value,
+
+        // We could pass here in a range it should cover
+        fn invariants(self: *SortedRuns, full_range: []const Value) void {
+            assert(self.runs_count <= runs_max);
+            assert(self.elements_covered == full_range.len);
+
+            // Quite heavy invariants for now!
+            if (self.runs_count > 0) {
+                // 1. Create a slice of runs that we can sort by start pointer
+                const sorted_runs = self.runs[0..self.runs_count];
+
+                std.mem.sort([]const Value, sorted_runs, {}, struct {
+                    fn lessThan(_: void, a: []const Value, b: []const Value) bool {
+                        return @intFromPtr(a.ptr) < @intFromPtr(b.ptr);
+                    }
+                }.lessThan);
+
+                // 3. Check no overlaps and no gaps
+                var covered_count: usize = 0;
+                for (sorted_runs, 0..) |run, i| {
+                    covered_count += run.len;
+
+                    if (i > 0) {
+                        const prev_run = sorted_runs[i - 1];
+                        const prev_end_ptr = prev_run.ptr + prev_run.len;
+                        assert(prev_end_ptr == run.ptr); // ensures no gap & no overlap
+                    }
+                }
+
+                assert(covered_count == self.elements_covered);
+                // 4. Ensure we covered exactly full_range
+                assert(covered_count == full_range.len);
+                assert(sorted_runs[0].ptr == full_range.ptr);
+                const last_run = sorted_runs[sorted_runs.len - 1];
+                assert(last_run.ptr + last_run.len == full_range.ptr + full_range.len);
+            }
+        }
+
+        // TODO: sorted runs
+        pub fn add(self: *SortedRuns, sorted_values: []const Value) void {
+            if (sorted_values.len == 0) return;
+
+            // add new run
+            assert(self.runs_count < runs_max);
+            self.runs[self.runs_count] = sorted_values;
+            self.runs_count += 1;
+            self.elements_covered += @intCast(sorted_values.len);
+        }
+
+        pub fn count(self: *const SortedRuns) u16 {
+            return self.runs_count;
+        }
+
+        pub fn reset(self: *SortedRuns) void {
+            self.runs_count = 0;
+            self.elements_covered = 0;
+        }
+
+        fn stream_peek(
+            context: *const SortedRuns,
+            stream_index: u32,
+        ) error{ Empty, Drained }!Key {
+            // TODO: test for Drained somehow as well.
+            const stream = context.runs[stream_index];
+            if (stream.len == 0) return error.Empty;
+            return key_from_value(&stream[0]);
+        }
+
+        fn stream_pop(context: *SortedRuns, stream_index: u32) Value {
+            const stream = context.runs[stream_index];
+            context.runs[stream_index] = stream[1..];
+            return stream[0];
+        }
+
+        fn stream_precedence(context: *const SortedRuns, a: u32, b: u32) bool {
+            _ = context;
+
+            // Higher streams have higher precedence.
+            return a < b;
+        }
+    };
+}
+
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -22,7 +117,8 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         const runs_max = constants.lsm_compaction_ops + 1;
 
-        const KWay = KWayMergeIteratorType(
+        pub const SortedRuns = SortedRunsType(Key, Value, runs_max, key_from_value);
+        pub const KWay = KWayMergeIteratorType(
             SortedRuns,
             Key,
             Value,
@@ -33,110 +129,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             SortedRuns.stream_precedence,
             true,
         );
-
-        const SortedRuns = struct {
-            // we can have one more sorted run here. this happens when we have a sort call for queries in the beginning
-            // and then have n compaction ops.
-            // e.g. that is why we have this.
-            // consider changing this to fixed steps e.g.
-            // I wonder why this is still the case since we advance the sorted run in the `sort` now as well?
-            // NOTE: maybe it would be better to make this not dependent on the lsm_compaction_ops, but rather on the size.
-
-            const runs_max = constants.lsm_compaction_ops + 1;
-            runs_count: u16,
-            elements_covered: u32 = 0,
-            //remember the streams now and check overlap
-            runs: [TableMemory.runs_max][]const Value,
-
-            // We could pass here in a range it should cover
-            fn invariants(self: *SortedRuns, full_range: []const Value) void {
-                assert(self.runs_count <= TableMemory.runs_max);
-                assert(self.elements_covered == full_range.len);
-
-                // Quite heavy invariants for now!
-                if (self.runs_count > 0) {
-                    // 1. Create a slice of runs that we can sort by start pointer
-                    const sorted_runs = self.runs[0..self.runs_count];
-
-                    std.mem.sort([]const Value, sorted_runs, {}, struct {
-                        fn lessThan(_: void, a: []const Value, b: []const Value) bool {
-                            return @intFromPtr(a.ptr) < @intFromPtr(b.ptr);
-                        }
-                    }.lessThan);
-
-                    // 3. Check no overlaps and no gaps
-                    var covered_count: usize = 0;
-                    for (sorted_runs, 0..) |run, i| {
-                        covered_count += run.len;
-
-                        if (i > 0) {
-                            const prev_run = sorted_runs[i - 1];
-                            const prev_end_ptr = prev_run.ptr + prev_run.len;
-                            assert(prev_end_ptr == run.ptr); // ensures no gap & no overlap
-                        }
-                    }
-
-                    assert(covered_count == self.elements_covered);
-                    // 4. Ensure we covered exactly full_range
-                    assert(covered_count == full_range.len);
-                    assert(sorted_runs[0].ptr == full_range.ptr);
-                    const last_run = sorted_runs[sorted_runs.len - 1];
-                    assert(last_run.ptr + last_run.len == full_range.ptr + full_range.len);
-                }
-            }
-
-            // TODO: sorted runs
-            pub fn add(self: *SortedRuns, sorted_values: []const Value) void {
-                if (sorted_values.len == 0) return;
-
-                // add new run
-                assert(self.runs_count < TableMemory.runs_max);
-                self.runs[self.runs_count] = sorted_values;
-                self.runs_count += 1;
-                self.elements_covered += @intCast(sorted_values.len);
-
-                if (constants.verify) {
-                    assert(std.sort.isSorted(
-                        Value,
-                        sorted_values,
-                        {},
-                        TableMemory.sort_values_by_key_in_ascending_order,
-                    ));
-                }
-            }
-
-            pub fn count(self: *const SortedRuns) u16 {
-                return self.runs_count;
-            }
-
-            pub fn reset(self: *SortedRuns) void {
-                self.runs_count = 0;
-                self.elements_covered = 0;
-            }
-
-            fn stream_peek(
-                context: *const SortedRuns,
-                stream_index: u32,
-            ) error{ Empty, Drained }!Key {
-                // TODO: test for Drained somehow as well.
-                const stream = context.runs[stream_index];
-                if (stream.len == 0) return error.Empty;
-                return key_from_value(&stream[0]);
-            }
-
-            fn stream_pop(context: *SortedRuns, stream_index: u32) Value {
-                const stream = context.runs[stream_index];
-                context.runs[stream_index] = stream[1..];
-                return stream[0];
-            }
-
-            fn stream_precedence(context: *const SortedRuns, a: u32, b: u32) bool {
-                _ = context;
-
-                // Higher streams have higher precedence.
-                return a < b;
-            }
-        };
 
         pub const ValueContext = struct {
             count: u32 = 0,

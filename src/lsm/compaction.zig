@@ -54,6 +54,8 @@ const ManifestType = @import("manifest.zig").ManifestType;
 const schema = @import("schema.zig");
 const RingBufferType = stdx.RingBufferType;
 
+const KWayMergeIteratorType = @import("./k_way_merge.zig").KWayMergeIteratorType;
+
 /// The upper-bound count of input tables to a single tree's compaction.
 ///
 /// - +1 from level A.
@@ -272,21 +274,39 @@ pub fn CompactionType(
 
         // Idea is that we can return here simply blocks.
         const BatchIterator = struct {
+            //pub const KWay = KWayMergeIteratorType(
+            //SortedRuns,
+            //Key,
+            //Value,
+            //key_from_value,
+            //runs_max,
+            //SortedRuns.stream_peek,
+            //SortedRuns.stream_pop,
+            //SortedRuns.stream_precedence,
+            //true,
+            //);
+
             immutable: []Value,
+
             index: u32, // index into the output
             const batch_max = 10; // table.count stack memory buffe the k-way iter result.
             // size of a block -  buffer, block as a buffer max 512kb.
             // block
 
+            // init(take immutable table: sorted runs!)
+            // if there is only one run, just take this one run.
+            // otherwise instatiate a k-way merge.
+            // TODO: fix this so that we only require
+
             pub fn values_used(iter: *const BatchIterator) []const Value {
                 const batch_size = @min(iter.immutable.len - iter.index, batch_max);
                 std.debug.print("values used from {} with length {} form total {} \n", .{ iter.index, batch_size, iter.count() });
-                return iter.immutable[0 .. iter.index + batch_size];
+                return iter.immutable[iter.index .. iter.index + batch_size];
             }
 
-            pub fn advance(iter: *BatchIterator) void {
-                const batch_size = @min(iter.immutable.len - iter.index, batch_max);
-                iter.index += batch_size;
+            pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
+                assert(iter.index <= consumer_position);
+                iter.index += (consumer_position - iter.index);
                 std.debug.print("advance {} from {}\n", .{ iter.index, iter.count() });
             }
             pub fn count(iter: *const BatchIterator) u32 {
@@ -294,6 +314,7 @@ pub fn CompactionType(
             }
         };
 
+        const Key = Table.Value;
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
@@ -1706,8 +1727,12 @@ pub fn CompactionType(
             };
             assert(!(level_a_values_used == null and level_b_values_used == null));
 
-            // this slices it already.
             const level_a_values = if (level_a_values_used) |values_used| values: {
+                // NOTE: Do not reslice for the immutable table as the iterator gives as much
+                //       as it has.
+                if (compaction.table_info_a.? == .immutable) {
+                    break :values values_used[0..];
+                }
                 const values_remaining = values_used[compaction.level_a_position.value..];
                 // Only consume one block at a time so that a beat never outputs past its quota
                 // by more than one value block.
@@ -1733,6 +1758,8 @@ pub fn CompactionType(
             // TODO: maybe here advance it.
             if (compaction.table_info_a.? == .immutable) {
                 if (compaction.level_a_immutable_stage == .merge) {
+                    std.debug.print("immutable position value {} \n", .{compaction.level_a_position.value});
+                    std.debug.print("immutable position value_block {} \n", .{compaction.level_a_position.value_block});
                     if (compaction.level_a_position.value ==
                         compaction.table_info_a.?.immutable.count())
                     {
@@ -1743,7 +1770,7 @@ pub fn CompactionType(
                     } else {
                         compaction.level_a_immutable_stage = .ready;
                         // this advances the batch iterator.
-                        compaction.table_info_a.?.immutable.advance();
+                        compaction.table_info_a.?.immutable.advance(compaction.level_a_position.value);
                     }
                 } else {
                     assert(compaction.level_a_immutable_stage == .exhausted);
