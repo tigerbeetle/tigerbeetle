@@ -574,9 +574,10 @@ pub fn ReplicaType(
         /// (status=view-change backup)
         request_start_view_message_timeout: Timeout,
 
-        /// The number of ticks before repairing missing/disconnected headers and/or dirty entries:
-        /// (status=normal or (status=view-change and primary))
-        repair_timeout: Timeout,
+        /// The number of ticks before repairing missing/disconnected headers, dirty/missing
+        /// prepares, and replenishing the repair budget.
+        /// (status=normal or (status=view-change and primary)).
+        repair_budget_timeout: Timeout,
 
         /// The number of ticks before checking whether state sync should be requested.
         /// This allows the replica to attempt WAL/grid repair before falling back, even if it
@@ -1383,7 +1384,7 @@ pub fn ReplicaType(
                     .id = replica_index,
                     .after = 1_000 / constants.tick_ms,
                 },
-                .repair_timeout = Timeout{
+                .repair_budget_timeout = Timeout{
                     .name = "repair_timeout",
                     .id = replica_index,
                     .after = 100 / constants.tick_ms,
@@ -1532,7 +1533,7 @@ pub fn ReplicaType(
                     &self.request_start_view_message_timeout,
                     on_request_start_view_message_timeout,
                 },
-                .{ &self.repair_timeout, on_repair_timeout },
+                .{ &self.repair_budget_timeout, on_repair_budget_timeout },
                 .{ &self.repair_sync_timeout, on_repair_sync_timeout },
                 .{ &self.grid_repair_message_timeout, on_grid_repair_message_timeout },
                 .{ &self.upgrade_timeout, on_upgrade_timeout },
@@ -2629,8 +2630,8 @@ pub fn ReplicaType(
                     self.journal.header_with_op(self.op).?.timestamp);
 
                 // Start repairs according to the CTRL protocol:
-                assert(!self.repair_timeout.ticking);
-                self.repair_timeout.start();
+                assert(!self.repair_budget_timeout.ticking);
+                self.repair_budget_timeout.start();
                 self.repair();
             }
         }
@@ -3724,11 +3725,12 @@ pub fn ReplicaType(
             );
         }
 
-        fn on_repair_timeout(self: *Replica) void {
+        fn on_repair_budget_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
 
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
+            self.repair_budget_timeout.reset();
 
             self.repair();
         }
@@ -7297,12 +7299,11 @@ pub fn ReplicaType(
         /// 5. Commit up to op_repair_max. If committing triggers a checkpoint, op_repair_max
         ///    increases, so go to step 1 and repeat.
         fn repair(self: *Replica) void {
-            if (!self.repair_timeout.ticking) {
+            if (!self.repair_budget_timeout.ticking) {
                 log.debug("{}: repair: ignoring (optimistic, not ticking)", .{self.log_prefix()});
                 return;
             }
 
-            self.repair_timeout.reset();
             if (self.syncing == .updating_checkpoint) return;
             if (!self.state_machine_opened) return;
 
@@ -9605,7 +9606,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
-            assert(!self.repair_timeout.ticking);
+            assert(!self.repair_budget_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
 
@@ -9646,7 +9647,7 @@ pub fn ReplicaType(
             assert(!self.do_view_change_message_timeout.ticking);
             assert(!self.request_start_view_message_timeout.ticking);
             assert(!self.repair_sync_timeout.ticking);
-            assert(!self.repair_timeout.ticking);
+            assert(!self.repair_budget_timeout.ticking);
             assert(!self.pulse_timeout.ticking);
             assert(!self.upgrade_timeout.ticking);
 
@@ -9663,7 +9664,7 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.start_view_change_message_timeout.start();
                 self.commit_message_timeout.start();
-                self.repair_timeout.start();
+                self.repair_budget_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
@@ -9685,7 +9686,7 @@ pub fn ReplicaType(
                 self.ping_timeout.start();
                 self.normal_heartbeat_timeout.start();
                 self.start_view_change_message_timeout.start();
-                self.repair_timeout.start();
+                self.repair_budget_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
@@ -9743,7 +9744,7 @@ pub fn ReplicaType(
             self.ping_timeout.start();
             self.normal_heartbeat_timeout.start();
             self.start_view_change_message_timeout.start();
-            self.repair_timeout.start();
+            self.repair_budget_timeout.start();
             self.repair_sync_timeout.start();
             self.grid_repair_message_timeout.start();
             self.grid_scrub_timeout.start();
@@ -9790,7 +9791,7 @@ pub fn ReplicaType(
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
-                self.repair_timeout.start();
+                self.repair_budget_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
                 if (!constants.aof_recovery) self.pulse_timeout.start();
@@ -9836,7 +9837,7 @@ pub fn ReplicaType(
                 self.view_change_status_timeout.stop();
                 self.do_view_change_message_timeout.stop();
                 self.request_start_view_message_timeout.stop();
-                self.repair_timeout.start();
+                self.repair_budget_timeout.start();
                 self.repair_sync_timeout.start();
                 self.grid_repair_message_timeout.start();
                 self.grid_scrub_timeout.start();
@@ -9921,7 +9922,7 @@ pub fn ReplicaType(
             self.start_view_change_message_timeout.start();
             self.view_change_status_timeout.start();
             self.do_view_change_message_timeout.start();
-            self.repair_timeout.stop();
+            self.repair_budget_timeout.stop();
             self.repair_sync_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
@@ -10255,7 +10256,7 @@ pub fn ReplicaType(
             const refill_amount = self.repair_messages_budget_journal.refill_max;
             self.repair_messages_budget_journal.refill(refill_amount);
 
-            if (self.repair_timeout.ticking) self.repair_timeout.reset();
+            if (self.repair_budget_timeout.ticking) self.repair_budget_timeout.reset();
 
             log.info("{}: sync: ops={}..{}", .{
                 self.log_prefix(),
