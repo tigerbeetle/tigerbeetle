@@ -25,6 +25,9 @@ pub fn SortedRunsType(
         //remember the streams now and check overlap
         runs: [runs_max][]const Value,
 
+        key_min: ?Key = null,
+        key_max: ?Key = null,
+
         // We could pass here in a range it should cover
         fn invariants(self: *SortedRuns, full_range: []const Value) void {
             assert(self.runs_count <= runs_max);
@@ -71,6 +74,15 @@ pub fn SortedRunsType(
             self.runs[self.runs_count] = sorted_values;
             self.runs_count += 1;
             self.elements_covered += @intCast(sorted_values.len);
+            // min or max key.
+            const key_min_run = key_from_value(&sorted_values[0]);
+            const key_max_run = key_from_value(&sorted_values[sorted_values.len - 1]);
+
+            if (self.key_min == null) self.key_min = key_min_run;
+            if (self.key_max == null) self.key_max = key_max_run;
+
+            self.key_min = @min(self.key_min.?, key_min_run);
+            self.key_max = @max(self.key_max.?, key_max_run);
         }
 
         pub fn count(self: *const SortedRuns) u16 {
@@ -250,7 +262,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.sorted);
             assert(table.value_context.count <= table.values.len);
 
-            return binary_search.binary_search_values(
+            const maybe_value_gold = binary_search.binary_search_values(
                 Key,
                 Value,
                 key_from_value,
@@ -258,6 +270,35 @@ pub fn TableMemoryType(comptime Table: type) type {
                 key,
                 .{ .mode = .upper_bound },
             );
+
+            // TODO(TZ): fix this and rewrite clean.
+            // on primary table we scan simply backwards the sorted_runs.
+            //if (Table.usage == .secondary_index) return maybe_value_gold;
+
+            // reverse binary search
+            // BUG(TZ): why does this work for .secondary_index?
+            var idx: usize = 1;
+            const length = table.sorted_runs.count();
+            while (idx <= length) : (idx += 1) {
+                const run = table.sorted_runs.runs[length - idx];
+                const maybe_value = binary_search.binary_search_values(
+                    Key,
+                    Value,
+                    key_from_value,
+                    run,
+                    key,
+                    .{ .mode = .upper_bound },
+                );
+
+                if (maybe_value) |value| {
+                    std.debug.print("key a {} key b {} \n", .{ key_from_value(value), key_from_value(maybe_value_gold.?) });
+                    std.debug.print(" a {}  b {} \n", .{ value, maybe_value_gold.? });
+                    assert(key_from_value(value) == key_from_value(maybe_value_gold.?));
+                    return value;
+                }
+            }
+            assert(maybe_value_gold == null);
+            return null;
         }
 
         fn merge(table: *TableMemory) void {
@@ -335,9 +376,30 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.count <= table.values.len);
             defer assert(table.value_context.sorted);
 
-            table.merge(); // must be called before
-            std.mem.swap([]Value, &table.values, &table.values_shadow);
-            table.sorted_runs.reset(); // we should not reset it for now.
+            if (table.value_context.sorted) {
+                // TODO(TZ): Fix again to normal values
+                @memcpy(table.values_shadow[0..table.count()], table.values_used());
+                table.sorted_runs.reset();
+                table.sorted_runs.add(table.values_shadow[0..table.count()]);
+            }
+
+            // BUG: Afaik this is only for the fuzzer currently.
+            //      So we should rather fix the fuzzer
+            if (table.mutability.mutable.suffix_offset != table.count()) {
+                table.sort_suffix();
+            }
+
+            std.debug.print("table.count {} covered {} \n", .{ table.count(), table.sorted_runs.elements_covered });
+            std.debug.print("sorted runs  {} \n", .{table.sorted_runs.count()});
+
+            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
+
+            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
+                assert(key_from_value(&a) == key_from_value(&b));
+            }
+
+            table.sort();
+
             table.value_context.sorted = true;
 
             // If we have no values, then we can consider ourselves flushed right away.
@@ -397,6 +459,17 @@ pub fn TableMemoryType(comptime Table: type) type {
                 sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
             assert(table_immutable.count() <= tables_combined_count);
 
+            // TODO(TZ) revert
+            @memcpy(table_immutable.values_shadow[0..table_immutable.count()], table_immutable.values_used());
+            table_immutable.sorted_runs.reset();
+            table_immutable.sorted_runs.add(table_immutable.values_shadow[0..table_immutable.count()]);
+
+            if (constants.verify) table_immutable.sorted_runs.invariants(table_immutable.values_shadow[0..table_immutable.count()]);
+
+            for (table_immutable.values_used(), table_immutable.values_shadow[0..table_immutable.count()]) |a, b| {
+                assert(key_from_value(&a) == key_from_value(&b));
+            }
+
             table_mutable.reset();
             table_immutable.mutability = .{ .immutable = .{
                 .flushed = table_immutable.value_context.count == 0,
@@ -416,10 +489,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Set suffix sort here to not create another run that overlaps with this one.
             table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
             // reset sorted runs here since there can only be one full run.
+            // TODO(TZ): revert
+            @memcpy(table.values_shadow[0..table.count()], table.values_used());
             table.sorted_runs.reset();
-            table.sorted_runs.add(table.values_used());
-
-            if (constants.verify) table.sorted_runs.invariants(table.values_used());
+            table.sorted_runs.add(table.values_shadow[0..table.count()]);
+            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
+            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
+                assert(key_from_value(&a) == key_from_value(&b));
+            }
 
             // can be empty when there is no data.
             assert(table.sorted_runs.count() == 1 or table.sorted_runs.count() == 0);
@@ -431,18 +508,30 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             // Sorted is a global property so we can form a single run.
             if (table.value_context.sorted) {
+                // TODO(TZ): Fix again to normal values
+                @memcpy(table.values_shadow[0..table.count()], table.values_used());
                 table.sorted_runs.reset();
-                table.sorted_runs.add(table.values_used());
-                if (constants.verify) table.sorted_runs.invariants(table.values_used());
+                table.sorted_runs.add(table.values_shadow[0..table.count()]);
+                if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
+                for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
+                    assert(key_from_value(&a) == key_from_value(&b));
+                }
 
                 table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
                 return;
             }
 
+            // TODO(TZ): Fix again to normal values
+            const begin = table.mutability.mutable.suffix_offset;
             const sorted_run = table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            @memcpy(table.values_shadow[begin .. begin + sorted_run.len], sorted_run);
 
-            table.sorted_runs.add(sorted_run);
-            if (constants.verify) table.sorted_runs.invariants(table.values_used());
+            table.sorted_runs.add(table.values_shadow[begin .. begin + sorted_run.len]);
+            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
+
+            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
+                assert(key_from_value(&a) == key_from_value(&b));
+            }
 
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
@@ -536,7 +625,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(values.len > 0);
             assert(table.mutability == .immutable);
 
-            return key_from_value(&values[0]);
+            // TODO(TZ): Change
+            const gold = key_from_value(&values[0]);
+            assert(table.sorted_runs.key_min.? == gold);
+            return table.sorted_runs.key_min.?;
         }
 
         pub fn key_max(table: *const TableMemory) Key {
@@ -544,8 +636,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             assert(values.len > 0);
             assert(table.mutability == .immutable);
+            // TODO(TZ): Change
 
-            return key_from_value(&values[values.len - 1]);
+            const gold = key_from_value(&values[values.len - 1]);
+            assert(table.sorted_runs.key_max.? == gold);
+            return table.sorted_runs.key_max.?;
         }
     };
 }
