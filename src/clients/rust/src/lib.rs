@@ -321,7 +321,7 @@ use futures_channel::oneshot::{channel, Receiver};
 use std::convert::Infallible;
 use std::future::Future;
 use std::os::raw::{c_char, c_void};
-use std::{mem, ptr};
+use std::{fmt, mem, ptr};
 
 // The generated bindings.
 // These are not part of the public API but are re-exported hidden
@@ -1019,6 +1019,12 @@ impl Drop for Client {
             }
             .close();
         }
+    }
+}
+
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        f.write_str("Client")
     }
 }
 
