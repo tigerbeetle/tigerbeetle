@@ -283,15 +283,45 @@ pub fn CompactionType(
 
         const BatchIterator = struct {
             pub const SortedRuns = SortedRunsType(Key, Value, runs_max, Table.key_from_value);
+
+            const Context = struct {
+                // own the [][]streams.
+                // expose the interface
+                runs: [runs_max][]const Value,
+
+                pub fn stream_peek(
+                    context: *const Context,
+                    stream_index: u32,
+                ) error{ Empty, Drained }!Key {
+                    // TODO: test for Drained somehow as well.
+                    const stream = context.runs[stream_index];
+                    if (stream.len == 0) return error.Empty;
+                    return key_from_value(&stream[0]);
+                }
+
+                pub fn stream_pop(context: *Context, stream_index: u32) Value {
+                    const stream = context.runs[stream_index];
+                    context.runs[stream_index] = stream[1..];
+                    return stream[0];
+                }
+
+                pub fn stream_precedence(context: *const Context, a: u32, b: u32) bool {
+                    _ = context;
+
+                    // Higher streams have higher precedence.
+                    return a < b;
+                }
+            };
+
             pub const KWay = KWayMergeIteratorType(
-                SortedRuns,
+                Context,
                 Key,
                 Value,
                 Table.key_from_value, // was `key_from_value`
                 runs_max,
-                SortedRuns.stream_peek,
-                SortedRuns.stream_pop,
-                SortedRuns.stream_precedence,
+                Context.stream_peek,
+                Context.stream_pop,
+                Context.stream_precedence,
                 true,
             );
 
@@ -299,6 +329,7 @@ pub fn CompactionType(
             // - `buffer[0..buffer_count)` holds committed, stable values (ready for the consumer).
             // - We expose at most `batch_max` values; the array is sized +1 so we can
             //   safely resolve a conflict with the last visible element before exposing it.
+            context: Context,
             iterator: KWay,
             table_count: u32,
             buffer: [batch_max + 1]Value, // keep one in reserve
@@ -309,9 +340,16 @@ pub fn CompactionType(
 
             const batch_max: u32 = 10;
 
-            pub fn init(kway: KWay, table_count: u32) BatchIterator {
-                var it = BatchIterator{
-                    .iterator = kway,
+            pub fn init(runs: [][]const Value, table_count: u32) BatchIterator {
+                var context: Context = .{ .runs = undefined };
+                // initializes all slices to empty
+
+                // copy the descriptors (safe: both source and destination are valid slice descriptors)
+                @memcpy(context.runs[0..runs.len], runs[0..]);
+                // create context
+                const it = BatchIterator{
+                    .context = context,
+                    .iterator = undefined,
                     .buffer = undefined,
                     .buffer_count = 0,
                     .consumed = 0,
@@ -319,8 +357,12 @@ pub fn CompactionType(
                     .previous_value = null,
                     .table_count = table_count,
                 };
-                it.refill(); // initial fill
                 return it;
+            }
+
+            pub fn initialize(iter: *BatchIterator) void {
+                iter.iterator = KWay.init(&iter.context, runs_max, .ascending);
+                iter.refill(); // initial fill
             }
 
             inline fn keysEqual(a: *const Value, b: *const Value) bool {
@@ -752,10 +794,12 @@ pub fn CompactionType(
 
                 compaction.table_info_a = .{
                     .immutable = BatchIterator.init(
-                        compaction.tree.table_immutable.iterator(),
+                        compaction.tree.table_immutable.runs(),
                         compaction.tree.table_immutable.sorted_runs.elements(),
                     ),
                 };
+
+                compaction.table_info_a.?.immutable.initialize();
 
                 compaction.range_b = compaction.tree.manifest.immutable_table_compaction_range(
                     compaction.tree.table_immutable.key_min(),
