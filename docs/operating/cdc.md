@@ -181,7 +181,7 @@ limitations for CDC processing:
 Transactions committed after version `0.16.29` are fully compatible with CDC and do not require
 the `history` flag.
 
-## Using CDC in Production
+## CDC to RabbitMQ (AMQP 0.9.1) in production
 
 ### High Availability
 
@@ -200,5 +200,5 @@ TigerBeetle and RabbitMQ.
 ### Event Replay
 
 By default, when the CDC job starts, it resumes from the timestamp of the last acknowledged event in
-RabbitMQ. This can be overriden to using `--timestamp-last`. For example, `--timestamp-last=0` will 
+RabbitMQ. This can be overridden to using `--timestamp-last`. For example, `--timestamp-last=0` will 
 replay all events.
