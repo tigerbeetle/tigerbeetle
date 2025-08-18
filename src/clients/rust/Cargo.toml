@@ -2,6 +2,22 @@
 name = "tigerbeetle"
 version = "0.1.0"
 edition = "2021"
+description = "TigerBeetle client for Rust"
+license = "Apache-2.0"
+authors = ["TigerBeetle, Inc"]
+homepage = "https://tigerbeetle.com"
+repository = "https://github.com/tigerbeetle/tigerbeetle"
+documentation = "https://docs.rs/tigerbeetle"
+keywords = ["finance", "accounting", "ledger", "database", "transactions"]
+categories = ["finance", "database"]
+rust-version = "1.63"
+# Need to do this to pick up the assets directory and exclude zig files
+include = [
+  "build.rs",
+  "src/*.rs",
+  "assets/tb_client.h",
+  "assets/lib/*/{*.a,*.lib}",
+]
 
 [dependencies]
 bitflags = "2.6.0"

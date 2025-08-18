@@ -787,6 +787,10 @@ test "tidy extensions" {
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
         .{"src/clients/rust/Cargo.lock"},
+        .{"src/clients/rust/samples/basic/Cargo.lock"},
+        .{"src/clients/rust/samples/two-phase/Cargo.lock"},
+        .{"src/clients/rust/samples/two-phase-many/Cargo.lock"},
+        .{"src/clients/rust/samples/walkthrough/Cargo.lock"},
         .{"src/testing/vortex/rust_driver/Cargo.lock"},
     });
 
