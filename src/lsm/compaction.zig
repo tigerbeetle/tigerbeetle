@@ -273,44 +273,60 @@ pub fn CompactionType(
         const CompactionRange = Manifest.CompactionRange;
 
         // Idea is that we can return here simply blocks.
-        const BatchIterator = struct {
-            //pub const KWay = KWayMergeIteratorType(
-            //SortedRuns,
-            //Key,
-            //Value,
-            //key_from_value,
-            //runs_max,
-            //SortedRuns.stream_peek,
-            //SortedRuns.stream_pop,
-            //SortedRuns.stream_precedence,
-            //true,
-            //);
 
+        const BatchIterator = struct {
             immutable: []Value,
 
-            index: u32, // index into the output
-            const batch_max = 10; // table.count stack memory buffe the k-way iter result.
-            // size of a block -  buffer, block as a buffer max 512kb.
-            // block
+            // physical index into immutable
+            index: u32,
 
-            // init(take immutable table: sorted runs!)
-            // if there is only one run, just take this one run.
-            // otherwise instatiate a k-way merge.
-            // TODO: fix this so that we only require
+            to_drop: u32,
+            gap: u32,
 
+            const batch_max: u32 = 10;
+
+            pub fn init(immutable: []Value) BatchIterator {
+                const diff: u32 =
+                    @as(u32, @intCast(Table.value_count_max)) - @as(u32, @intCast(immutable.len));
+
+                return .{
+                    .immutable = immutable,
+                    .index = 0,
+                    .to_drop = diff,
+                    .gap = diff,
+                };
+            }
+
+            /// Non-empty slice of physical values for this batch.
             pub fn values_used(iter: *const BatchIterator) []const Value {
-                const batch_size = @min(iter.immutable.len - iter.index, batch_max);
-                std.debug.print("values used from {} with length {} form total {} \n", .{ iter.index, batch_size, iter.count() });
-                return iter.immutable[iter.index .. iter.index + batch_size];
+                if (iter.index >= iter.immutable.len) unreachable; // caller must check done() first
+                const start: usize = @intCast(iter.index);
+                const remaining: usize = iter.immutable.len - start;
+                const take: usize = @min(remaining, @as(usize, batch_max));
+                return iter.immutable[start .. start + take];
             }
 
-            pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
-                assert(iter.index <= consumer_position);
-                iter.index += (consumer_position - iter.index);
-                std.debug.print("advance {} from {}\n", .{ iter.index, iter.count() });
+            /// Return the entire difference exactly once (first call). Afterwards: 0.
+            pub fn dropped(iter: *BatchIterator) u32 {
+                const d = iter.to_drop;
+                iter.to_drop = 0;
+                return d;
             }
+
+            /// Advance by the consumer's virtual position:
+            /// eat offset_left first, then advance physical index with the rest.
+            pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
+                assert(iter.to_drop == 0);
+
+                const delta: u32 = consumer_position - (iter.index + iter.gap);
+
+                iter.index += delta;
+                assert(iter.index <= iter.immutable.len);
+            }
+
             pub fn count(iter: *const BatchIterator) u32 {
-                return @intCast(iter.immutable.len);
+                _ = iter;
+                return Table.value_count_max;
             }
         };
 
@@ -553,6 +569,8 @@ pub fn CompactionType(
             while (level_a_value_block_iterator.next()) |block| {
                 values_in_flight += Table.value_block_values_used(block.ptr).len;
             }
+            // here this is strange
+            // here we should also reduce the dropped ones.
             values_in_flight -= compaction.level_a_position.value;
 
             var level_b_value_block_iterator = compaction.level_b_value_block.iterator();
@@ -562,6 +580,12 @@ pub fn CompactionType(
 
             values_in_flight -= compaction.level_b_position.value;
 
+            std.debug.print("values_cout {} values_in_flight {} values_in {} values_dropped {}", .{
+                values_out,
+                values_in_flight,
+                values_in,
+                values_dropped,
+            });
             assert(values_out + values_in_flight == values_in - values_dropped);
         }
 
@@ -623,6 +647,7 @@ pub fn CompactionType(
                     return 0;
                 }
 
+                // TODO(TZ): should we change this too?
                 const table_value_count_limit = Table.value_count_max;
                 assert(compaction.tree.table_immutable.count() > 0);
                 assert(compaction.tree.table_immutable.count() <= table_value_count_limit);
@@ -665,19 +690,12 @@ pub fn CompactionType(
                     }
                 }
 
-                compaction.table_info_a = .{
-                    .immutable = BatchIterator{
-                        .immutable = compaction.tree.table_immutable.values_used(),
-                        .index = 0,
-                        // should we use a block?
-                        // call release on block
-                    },
-                };
+                compaction.table_info_a = .{ .immutable = BatchIterator.init(compaction.tree.table_immutable.values_used()) };
 
                 compaction.range_b = compaction.tree.manifest.immutable_table_compaction_range(
                     compaction.tree.table_immutable.key_min(),
                     compaction.tree.table_immutable.key_max(),
-                    .{ .value_count = compaction.tree.table_immutable.count() },
+                    .{ .value_count = compaction.table_info_a.?.immutable.count() }, // TODO(TZ) Here we need to pass the worst case.
                 );
 
                 // +1 to count the immutable table (level A).
@@ -722,8 +740,10 @@ pub fn CompactionType(
                 assert(!compaction.grid.free_set.is_free(table.table_info.address));
             }
 
+            // NOTE(TZ): This should be already fine, if we call it on the table_immutable.
+            //           but now we need to make it so that consumed fits?
             var quota_bar = switch (compaction.table_info_a.?) {
-                .immutable => compaction.tree.table_immutable.count(),
+                .immutable => compaction.table_info_a.?.immutable.count(), // TODO(TZ) here we need to give the worst case estimate.
                 .disk => |table| table.table_info.value_count,
             };
             for (compaction.range_b.?.tables.const_slice()) |*table| {
@@ -872,7 +892,7 @@ pub fn CompactionType(
                 // references to modify the ManifestLevel in-place.
                 switch (compaction.table_info_a.?) {
                     .immutable => {
-                        manifest_removed_value_count = compaction.tree.table_immutable.count();
+                        manifest_removed_value_count = compaction.table_info_a.?.immutable.count(); // TODO (TZ): Not sure if this is correct
                     },
                     .disk => |table_info| {
                         manifest_removed_value_count += table_info.table_info.value_count;
@@ -1273,6 +1293,8 @@ pub fn CompactionType(
                     compaction.level_b_value_block.count == 0;
                 const levels_exhausted = level_a_exhausted and level_b_exhausted;
 
+                std.debug.print("level_a_exhausted_immutable {} \n", .{level_a_exhausted_immutable});
+
                 assert(levels_exhausted == compaction.quotas.bar_exhausted());
 
                 if (compaction.table_builder.state == .index_and_value_block) {
@@ -1625,7 +1647,7 @@ pub fn CompactionType(
             }
 
             // Do the actual merge from inputs to the output (table builder).
-            const merge_result: MergeResult = if (values_source_a == null) blk: {
+            var merge_result: MergeResult = if (values_source_a == null) blk: {
                 const consumed = values_copy(values_target, values_source_b.?);
                 break :blk .{
                     .consumed_a = 0,
@@ -1660,6 +1682,12 @@ pub fn CompactionType(
                 values_source_b.?,
                 compaction.drop_tombstones,
             );
+
+            if (compaction.table_info_a.? == .immutable) {
+                const dropped = compaction.table_info_a.?.immutable.dropped();
+                merge_result.consumed_a += dropped;
+                merge_result.dropped += dropped;
+            }
 
             compaction.level_a_position.value += merge_result.consumed_a;
             compaction.level_b_position.value += merge_result.consumed_b;
@@ -1860,6 +1888,7 @@ pub fn CompactionType(
                 assert(compaction.level_b_position.value == 0); // Level B exhausted.
             }
 
+            std.debug.print("quotas {} \n", .{compaction.quotas});
             if (compaction.quotas.beat_exhausted()) {
                 assert(compaction.stage == .beat);
                 compaction.stage = .beat_quota_done;
