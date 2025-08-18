@@ -343,7 +343,7 @@ pub fn CompactionType(
 
             polled: u32 = 0, // debug.
 
-            const batch_max: u32 = 10;
+            const batch_max: u32 = 1024;
 
             pub fn init(runs: [][]const Value, table_count: u32) BatchIterator {
                 var context: Context = .{

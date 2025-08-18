@@ -282,7 +282,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             // BUG: Afaik this is only for the fuzzer currently.
             //      So we should rather fix the fuzzer
             if (table.mutability.mutable.suffix_offset != table.count()) {
-                table.sort_suffix();
+                table.sort_suffix_inner();
             }
 
             if (constants.verify) table.sorted_runs.invariants(table.values_used());
@@ -378,7 +378,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.sorted_runs.count() == 1 or table.sorted_runs.count() == 0);
         }
 
-        pub fn sort_suffix(table: *TableMemory) void {
+        fn sort_suffix_inner(table: *TableMemory) void {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
 
@@ -398,6 +398,13 @@ pub fn TableMemoryType(comptime Table: type) type {
             if (constants.verify) table.sorted_runs.invariants(table.values_used());
 
             assert(table.mutability.mutable.suffix_offset == table.count());
+        }
+        pub fn sort_suffix(table: *TableMemory) void {
+            const sort_limit = Table.value_count_max / constants.lsm_compaction_ops;
+            if (table.count() - table.mutability.mutable.suffix_offset < sort_limit) {
+                return;
+            }
+            table.sort_suffix_inner();
         }
 
         // Returns the sorted slice, e.g. the new sorted run.
