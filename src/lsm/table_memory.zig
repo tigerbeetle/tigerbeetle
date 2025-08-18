@@ -143,7 +143,6 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         values: []Value,
-        values_shadow: []Value,
 
         value_context: ValueContext,
         mutability: Mutability,
@@ -174,16 +173,12 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .runs = undefined,
                 },
                 .values = undefined,
-                .values_shadow = undefined,
             };
 
             // TODO This would ideally be value_count_limit, but needs to be value_count_max to
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
-
-            table.values_shadow = try allocator.alloc(Value, Table.value_count_max);
-            errdefer allocator.free(table.values_shadow);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -198,7 +193,6 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
-                .values_shadow = table.values_shadow,
                 .value_context = .{},
                 .mutability = mutability,
                 .sorted_runs = SortedRuns{
@@ -234,17 +228,17 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
-            assert(table.value_context.sorted);
+            //assert(table.value_context.sorted);
             assert(table.value_context.count <= table.values.len);
 
-            const maybe_value_gold = binary_search.binary_search_values(
-                Key,
-                Value,
-                key_from_value,
-                table.values_used(),
-                key,
-                .{ .mode = .upper_bound },
-            );
+            //const maybe_value_gold = binary_search.binary_search_values(
+            //Key,
+            //Value,
+            //key_from_value,
+            //table.values_used(),
+            //key,
+            //.{ .mode = .upper_bound },
+            //);
             // TODO(TZ): fix this and rewrite clean.
             // on primary table we scan simply backwards the sorted_runs.
             //if (Table.usage == .secondary_index) return maybe_value_gold;
@@ -265,85 +259,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 );
 
                 if (maybe_value) |value| {
-                    std.debug.print("key a {} key b {} \n", .{ key_from_value(value), key_from_value(maybe_value_gold.?) });
-                    std.debug.print(" a {}  b {} \n", .{ value, maybe_value_gold.? });
-                    assert(key_from_value(value) == key_from_value(maybe_value_gold.?));
                     return value;
                 }
             }
-            assert(maybe_value_gold == null);
             return null;
         }
-
-        //fn merge(table: *TableMemory) void {
-        //if (table.value_context.sorted) {
-        //assert(table.sorted_runs.count() == 0 or table.sorted_runs.count() == 1);
-        //std.mem.swap([]Value, &table.values, &table.values_shadow);
-        //return;
-        //}
-
-        //// BUG: Afaik this is only for the fuzzer currently.
-        ////      So we should rather fix the fuzzer
-        //if (table.mutability.mutable.suffix_offset != table.count()) {
-        //table.sort_suffix();
-        //}
-
-        //var iter = KWay.init(&table.sorted_runs, table.sorted_runs.count(), .ascending);
-
-        //var target_index: usize = 0;
-
-        //const output = table.values_shadow;
-        //const maybe_value = iter.pop() catch unreachable;
-        //output[target_index] = maybe_value.?;
-        //target_index += 1;
-        //// deduplicate merging based.
-
-        //while (iter.pop() catch unreachable) |value_next| {
-        //// TODO: we could do the dedupclication logic here
-        //// could we push the deduplication logic in the tree?
-        //// We could either push the deduplication logic in the tree.
-        //// or rather only the precedence. But does not matter for now.
-
-        //const value_next_equal = target_index > 0 and
-        //key_from_value(&output[target_index - 1]) ==
-        //key_from_value(&value_next);
-
-        //if (value_next_equal) {
-        //if (Table.usage == .secondary_index) {
-        //assert(Table.tombstone(&output[target_index - 1]) !=
-        //Table.tombstone(&value_next));
-        //// annihilate both
-        //target_index -= 1;
-        //} else {
-        //// overwrite old value - last writer wins
-        //output[target_index - 1] = value_next;
-        //}
-        //} else {
-        //output[target_index] = value_next;
-        //target_index += 1;
-        //}
-        //}
-
-        //// At this point, source_index and target_index are actually counts.
-        //// source_index will always be incremented after the final iteration as part of the
-        //// continue expression.
-        //// target_index will always be incremented, since either source_index runs out first
-        //// so value_next_equal is false, or a new value is hit, which will increment it.
-        //const target_count = target_index;
-
-        //if (constants.verify) {
-        //if (0 < target_count) {
-        //for (
-        //output[0 .. target_count - 1],
-        //output[1..target_count],
-        //) |*value, *value_next| {
-        //assert(key_from_value(value) < key_from_value(value_next));
-        //}
-        //}
-        //}
-        //// we need to finally set the new target count
-        //table.value_context.count = @intCast(target_count);
-        //}
 
         pub fn runs(table: *TableMemory) [][]const Value {
             return table.sorted_runs.runs_used();
@@ -352,13 +272,11 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= table.values.len);
-            defer assert(table.value_context.sorted);
+            //defer assert(table.value_context.sorted);
 
             if (table.value_context.sorted) {
-                // TODO(TZ): Fix again to normal values
-                @memcpy(table.values_shadow[0..table.count()], table.values_used());
                 table.sorted_runs.reset();
-                table.sorted_runs.add(table.values_shadow[0..table.count()]);
+                table.sorted_runs.add(table.values_used());
             }
 
             // BUG: Afaik this is only for the fuzzer currently.
@@ -367,18 +285,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 table.sort_suffix();
             }
 
-            std.debug.print("table.count {} covered {} \n", .{ table.count(), table.sorted_runs.elements_covered });
-            std.debug.print("sorted runs  {} \n", .{table.sorted_runs.count()});
+            if (constants.verify) table.sorted_runs.invariants(table.values_used());
 
-            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
+            //table.sort();
 
-            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
-                assert(key_from_value(&a) == key_from_value(&b));
-            }
-
-            table.sort();
-
-            table.value_context.sorted = true;
+            //table.value_context.sorted = true;
 
             // If we have no values, then we can consider ourselves flushed right away.
             table.mutability = .{ .immutable = .{
@@ -391,7 +302,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
             assert(table.value_context.count <= table.values.len);
-            assert(table.value_context.sorted);
 
             table.* = .{
                 .sorted_runs = SortedRuns{
@@ -399,7 +309,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .runs = undefined,
                 },
                 .values = table.values,
-                .values_shadow = table.values_shadow,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
                 .name = table.name,
@@ -415,7 +324,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         ) void {
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
-            assert(table_immutable.value_context.sorted);
+            //assert(table_immutable.value_context.sorted);
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.value_context.sorted);
 
@@ -437,16 +346,10 @@ pub fn TableMemoryType(comptime Table: type) type {
                 sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
             assert(table_immutable.count() <= tables_combined_count);
 
-            // TODO(TZ) revert
-            @memcpy(table_immutable.values_shadow[0..table_immutable.count()], table_immutable.values_used());
             table_immutable.sorted_runs.reset();
-            table_immutable.sorted_runs.add(table_immutable.values_shadow[0..table_immutable.count()]);
+            table_immutable.sorted_runs.add(table_immutable.values_used());
 
-            if (constants.verify) table_immutable.sorted_runs.invariants(table_immutable.values_shadow[0..table_immutable.count()]);
-
-            for (table_immutable.values_used(), table_immutable.values_shadow[0..table_immutable.count()]) |a, b| {
-                assert(key_from_value(&a) == key_from_value(&b));
-            }
+            if (constants.verify) table_immutable.sorted_runs.invariants(table_immutable.values_used());
 
             table_mutable.reset();
             table_immutable.mutability = .{ .immutable = .{
@@ -467,14 +370,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Set suffix sort here to not create another run that overlaps with this one.
             table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
             // reset sorted runs here since there can only be one full run.
-            // TODO(TZ): revert
-            @memcpy(table.values_shadow[0..table.count()], table.values_used());
             table.sorted_runs.reset();
-            table.sorted_runs.add(table.values_shadow[0..table.count()]);
-            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
-            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
-                assert(key_from_value(&a) == key_from_value(&b));
-            }
+            table.sorted_runs.add(table.values_used());
+            if (constants.verify) table.sorted_runs.invariants(table.values_used());
 
             // can be empty when there is no data.
             assert(table.sorted_runs.count() == 1 or table.sorted_runs.count() == 0);
@@ -486,30 +384,18 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             // Sorted is a global property so we can form a single run.
             if (table.value_context.sorted) {
-                // TODO(TZ): Fix again to normal values
-                @memcpy(table.values_shadow[0..table.count()], table.values_used());
                 table.sorted_runs.reset();
-                table.sorted_runs.add(table.values_shadow[0..table.count()]);
-                if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
-                for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
-                    assert(key_from_value(&a) == key_from_value(&b));
-                }
+                table.sorted_runs.add(table.values_used());
+                if (constants.verify) table.sorted_runs.invariants(table.values_used());
 
                 table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
                 return;
             }
 
-            // TODO(TZ): Fix again to normal values
-            const begin = table.mutability.mutable.suffix_offset;
             const sorted_run = table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
-            @memcpy(table.values_shadow[begin .. begin + sorted_run.len], sorted_run);
 
-            table.sorted_runs.add(table.values_shadow[begin .. begin + sorted_run.len]);
-            if (constants.verify) table.sorted_runs.invariants(table.values_shadow[0..table.count()]);
-
-            for (table.values_used(), table.values_shadow[0..table.count()]) |a, b| {
-                assert(key_from_value(&a) == key_from_value(&b));
-            }
+            table.sorted_runs.add(sorted_run);
+            if (constants.verify) table.sorted_runs.invariants(table.values_used());
 
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
@@ -603,9 +489,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(values.len > 0);
             assert(table.mutability == .immutable);
 
-            // TODO(TZ): Change
-            const gold = key_from_value(&values[0]);
-            assert(table.sorted_runs.key_min.? == gold);
             return table.sorted_runs.key_min.?;
         }
 
@@ -614,10 +497,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             assert(values.len > 0);
             assert(table.mutability == .immutable);
-            // TODO(TZ): Change
 
-            const gold = key_from_value(&values[values.len - 1]);
-            assert(table.sorted_runs.key_max.? == gold);
             return table.sorted_runs.key_max.?;
         }
     };

@@ -1676,7 +1676,7 @@ fn build_clients_c_sample(
 }
 
 fn strip_root_module(root_module: *std.Build.Module) void {
-    root_module.strip = true;
+    root_module.strip = false;
     // Ensure that we get stack traces even in release builds.
     root_module.omit_frame_pointer = false;
     root_module.unwind_tables = .none;

@@ -288,11 +288,13 @@ pub fn CompactionType(
                 // own the [][]streams.
                 // expose the interface
                 runs: [runs_max][]const Value,
+                run_count: u16,
 
                 pub fn stream_peek(
                     context: *const Context,
                     stream_index: u32,
                 ) error{ Empty, Drained }!Key {
+                    assert(stream_index < context.run_count);
                     // TODO: test for Drained somehow as well.
                     const stream = context.runs[stream_index];
                     if (stream.len == 0) return error.Empty;
@@ -300,6 +302,7 @@ pub fn CompactionType(
                 }
 
                 pub fn stream_pop(context: *Context, stream_index: u32) Value {
+                    assert(stream_index < context.run_count);
                     const stream = context.runs[stream_index];
                     context.runs[stream_index] = stream[1..];
                     return stream[0];
@@ -338,10 +341,15 @@ pub fn CompactionType(
             dropped_round: u32, // number of physical values dropped by dedup in last refill
             previous_value: ?Value, // last committed value (optional; informational)
 
+            polled: u32 = 0, // debug.
+
             const batch_max: u32 = 10;
 
             pub fn init(runs: [][]const Value, table_count: u32) BatchIterator {
-                var context: Context = .{ .runs = undefined };
+                var context: Context = .{
+                    .runs = undefined,
+                    .run_count = @intCast(runs.len),
+                };
                 // initializes all slices to empty
 
                 // copy the descriptors (safe: both source and destination are valid slice descriptors)
@@ -361,7 +369,7 @@ pub fn CompactionType(
             }
 
             pub fn initialize(iter: *BatchIterator) void {
-                iter.iterator = KWay.init(&iter.context, runs_max, .ascending);
+                iter.iterator = KWay.init(&iter.context, iter.context.run_count, .ascending);
                 iter.refill(); // initial fill
             }
 
@@ -373,7 +381,11 @@ pub fn CompactionType(
                 // Build up to capacity (batch_max + 1). While refilling we deduplicate
                 // against the last committed element in the buffer.
                 while (iter.buffer_count < iter.buffer.len) {
-                    const next_val = iter.iterator.pop() catch unreachable orelse break; // NOTE: KWay should provide next(); if not, wrap peek+pop.
+                    const next_val = iter.iterator.pop() catch unreachable orelse {
+                        assert(iter.polled == iter.count());
+                        break;
+                    }; // NOTE: KWay should provide next(); if not, wrap peek+pop.
+                    iter.polled += 1;
                     if (iter.buffer_count > 0) {
                         const last_idx: usize = @intCast(iter.buffer_count - 1);
                         if (keysEqual(&iter.buffer[last_idx], &next_val)) {
@@ -399,33 +411,38 @@ pub fn CompactionType(
             /// Slice of values exposed this round (≤ batch_max).
             pub fn values_used(iter: *const BatchIterator) []const Value {
                 const batch_size: usize = @intCast(@min(iter.buffer_count, batch_max));
+                assert(batch_size > 0);
                 return iter.buffer[0..batch_size];
             }
 
             /// Return the number of physical values dropped by dedup during the *last* refill,
             /// and reset the counter so it’s reported exactly once.
             pub fn dropped(iter: *BatchIterator) u32 {
-                const d = iter.dropped_round;
-                iter.dropped_round = 0;
-                return d;
+                return iter.dropped_round;
             }
 
             /// Advance the iterator by the consumer’s virtual position.
             /// We drop up to the visible portion (≤ batch_max), shift the buffer, then refill.
             pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
-                var delta = consumer_position - iter.consumed;
-                const visible: u32 = @min(iter.buffer_count, batch_max);
-                if (delta > visible) delta = visible;
+                assert(consumer_position >= iter.consumed);
 
-                if (delta > 0) {
-                    const old_count = iter.buffer_count;
-                    var i: usize = 0;
-                    while (i + delta < old_count) : (i += 1) {
-                        iter.buffer[i] = iter.buffer[i + delta];
-                    }
-                    iter.buffer_count = old_count - delta;
-                    iter.consumed += delta;
+                // what is the goal here.
+                // we want to have one element in reserve that we do not hand out.
+                // we copy it at the front.
+                // consumer_position is from the outside.
+                // we want to know how much it consumed from the one we gave them.
+                // every time we advance we adjust iter.consumed
+
+                // adjust by droppped
+                const consumed = consumer_position - iter.dropped_round - iter.consumed;
+                const possible = iter.buffer_count; // here we copy simply what is not consumed.
+                assert(possible >= consumed);
+
+                for (iter.buffer[consumed..possible], 0..) |value, i| {
+                    iter.buffer[i] = value;
                 }
+                iter.buffer_count = possible - consumed;
+                iter.consumed = consumer_position;
 
                 // Begin a fresh round for dropped counting and refill.
                 iter.dropped_round = 0;
@@ -682,12 +699,6 @@ pub fn CompactionType(
 
             values_in_flight -= compaction.level_b_position.value;
 
-            std.debug.print("values_cout {} values_in_flight {} values_in {} values_dropped {}", .{
-                values_out,
-                values_in_flight,
-                values_in,
-                values_dropped,
-            });
             assert(values_out + values_in_flight == values_in - values_dropped);
         }
 
@@ -1179,7 +1190,7 @@ pub fn CompactionType(
 
             assert(compaction.idle());
             assert(pool.idle());
-            log.info("{s}:{}: beat_complete: quota_beat_done={} quota_beat={} " ++
+            log.debug("{s}:{}: beat_complete: quota_beat_done={} quota_beat={} " ++
                 "quota_bar_done={} quota_bar={}", .{
                 compaction.tree.config.name,
                 compaction.level_b,
@@ -1401,8 +1412,6 @@ pub fn CompactionType(
                     compaction.level_b_index_block.count == 0 and
                     compaction.level_b_value_block.count == 0;
                 const levels_exhausted = level_a_exhausted and level_b_exhausted;
-
-                std.debug.print("level_a_exhausted_immutable {} \n", .{level_a_exhausted_immutable});
 
                 assert(levels_exhausted == compaction.quotas.bar_exhausted());
 
@@ -1734,13 +1743,7 @@ pub fn CompactionType(
                 .value_block_values()[compaction.table_builder.value_count..];
 
             switch (compaction.table_info_a.?) {
-                .immutable => {
-                    //why is this emtpy?
-                    if (values_source_a) |values| {
-                        std.debug.print("immutable table {} \n", .{values.len});
-                        assert(values.len > 0);
-                    }
-                },
+                .immutable => {},
                 .disk => {},
             }
 
@@ -1835,10 +1838,8 @@ pub fn CompactionType(
                 switch (compaction.table_info_a.?) {
                     .immutable => {
                         if (compaction.level_a_immutable_stage == .merge) {
-                            std.debug.print("hit the merge case {}\n", .{compaction.table_info_a.?.immutable.values_used().len});
                             break :values compaction.table_info_a.?.immutable.values_used();
                         } else {
-                            std.debug.print("hit the exhauseted case \n", .{});
                             assert(compaction.level_a_immutable_stage == .exhausted);
                             break :values null;
                         }
@@ -1895,8 +1896,6 @@ pub fn CompactionType(
             // TODO: maybe here advance it.
             if (compaction.table_info_a.? == .immutable) {
                 if (compaction.level_a_immutable_stage == .merge) {
-                    std.debug.print("immutable position value {} \n", .{compaction.level_a_position.value});
-                    std.debug.print("immutable position value_block {} \n", .{compaction.level_a_position.value_block});
                     if (compaction.level_a_position.value ==
                         compaction.table_info_a.?.immutable.count())
                     {
@@ -1997,7 +1996,6 @@ pub fn CompactionType(
                 assert(compaction.level_b_position.value == 0); // Level B exhausted.
             }
 
-            std.debug.print("quotas {} \n", .{compaction.quotas});
             if (compaction.quotas.beat_exhausted()) {
                 assert(compaction.stage == .beat);
                 compaction.stage = .beat_quota_done;
