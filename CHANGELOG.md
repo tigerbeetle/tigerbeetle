@@ -9,6 +9,10 @@ Released: 2025-08-15
 
 ### Safety And Performance
 
+- [3187](https://github.com/tigerbeetle/tigerbeetle/pull/3187)
+
+  Make repair timeout reliably fire in a loaded cluster processing small batches.
+
 - [#2863](https://github.com/tigerbeetle/tigerbeetle/pull/2863)
 
   Make `tigerbeetle format` concurrent and only write essential data.
@@ -36,6 +40,10 @@ Released: 2025-08-15
   they are upgraded to at least 0.16.26.
 
 ### Internals
+
+- [#3186](https://github.com/tigerbeetle/tigerbeetle/pull/3186)
+
+  Improvements to the balance bounds, rate limiting, and two phase transfers recipes. Thanks @snth!
 
 - [#3150](https://github.com/tigerbeetle/tigerbeetle/pull/3150)
 
