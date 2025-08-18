@@ -10853,67 +10853,64 @@ pub fn ReplicaType(
             assert(self.grid_repair_budget_timeout.ticking);
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
-            if (!self.solo()) {
-                assert(self.repair_messages_budget_grid.available >=
-                    constants.grid_repair_request_max);
-            }
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
 
-            const requests = std.mem.bytesAsSlice(
+            const requests_buffer = std.mem.bytesAsSlice(
                 vsr.BlockRequest,
                 message.buffer[@sizeOf(Header)..],
             )[0..constants.grid_repair_request_max];
-            assert(requests.len > 0);
+            assert(requests_buffer.len > 0);
+            var requests_count: u32 = 0;
 
             // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
             // continue. We divide the buffer up between `read_global_queue` and
             // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
             // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
-            const request_faults_count_max = requests.len -
-                @min(@divFloor(requests.len, 2), self.grid.blocks_missing.faulty_blocks.count());
+            const request_faults_count_max = requests_buffer.len - @min(
+                @divFloor(requests_buffer.len, 2),
+                self.grid.blocks_missing.faulty_blocks.count(),
+            );
             assert(request_faults_count_max > 0);
-            assert(request_faults_count_max <= requests.len);
-            assert(request_faults_count_max >= @divFloor(requests.len, 2));
+            assert(request_faults_count_max <= requests_buffer.len);
+            assert(request_faults_count_max >= @divFloor(requests_buffer.len, 2));
 
-            const grid_missing_count = self.grid.blocks_missing.faulty_blocks.count();
-            var grid_missing_index: u32 = 0;
             var grid_faults = self.grid.read_global_queue.iterate();
-            const requests_count: u32 = next_request: for (requests, 0..) |*request, i| {
-                if (i < request_faults_count_max) {
-                    while (grid_faults.next()) |read_fault| {
-                        if (self.repair_messages_budget_grid.decrement(.{
-                            .address = read_fault.address,
-                            .checksum = read_fault.checksum,
-                        })) {
-                            request.* = .{
-                                .block_address = read_fault.address,
-                                .block_checksum = read_fault.checksum,
-                            };
-                            continue :next_request;
-                        }
+            while (grid_faults.next()) |read_fault| {
+                if (requests_count >= request_faults_count_max) break;
+
+                if (self.repair_messages_budget_grid.decrement(.{
+                    .address = read_fault.address,
+                    .checksum = read_fault.checksum,
+                })) {
+                    requests_buffer[requests_count] = .{
+                        .block_address = read_fault.address,
+                        .block_checksum = read_fault.checksum,
+                    };
+                    requests_count += 1;
+                }
+            }
+
+            for (0..self.grid.blocks_missing.faulty_blocks.count()) |_| {
+                if (requests_count >= requests_buffer.len) break;
+
+                if (self.grid.blocks_missing.next_request()) |missing_request| {
+                    if (self.repair_messages_budget_grid.decrement(.{
+                        .address = missing_request.block_address,
+                        .checksum = missing_request.block_checksum,
+                    })) {
+                        requests_buffer[requests_count] = missing_request;
+                        requests_count += 1;
                     }
                 }
-
-                while (grid_missing_index < grid_missing_count) {
-                    grid_missing_index += 1;
-                    if (self.grid.blocks_missing.next_request()) |missing_request| {
-                        if (self.repair_messages_budget_grid.decrement(.{
-                            .address = missing_request.block_address,
-                            .checksum = missing_request.block_checksum,
-                        })) {
-                            request.* = missing_request;
-                            continue :next_request;
-                        }
-                    }
-                } else break @intCast(i);
-            } else @intCast(requests.len);
+            }
 
             assert(requests_count <= constants.grid_repair_request_max);
             if (requests_count == 0) return;
+            assert(!self.solo());
 
-            for (requests[0..requests_count]) |*request| {
+            for (requests_buffer[0..requests_count]) |*request| {
                 assert(!self.grid.free_set.is_free(request.block_address));
 
                 log.debug("{}: send_request_blocks: request address={} checksum={}", .{
