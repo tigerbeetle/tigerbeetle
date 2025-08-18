@@ -1816,12 +1816,11 @@ pub const RepairBudgetJournal = struct {
         budget.available = @min((budget.available + 1), budget.capacity - budget_spent_total);
     }
 
-    pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
-        assert(amount <= budget.refill_max);
+    pub fn refill(budget: *RepairBudgetJournal) void {
         budget.assert_invariants();
         defer budget.assert_invariants();
 
-        budget.available = @min((budget.available + amount), budget.capacity);
+        budget.available = @min((budget.available + budget.refill_max), budget.capacity);
 
         budget.requested_prepares.clearRetainingCapacity();
         budget.requested_headers = 0;

@@ -3735,8 +3735,7 @@ pub fn ReplicaType(
         fn on_repair_budget_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
 
-            const refill_amount = self.repair_messages_budget_journal.refill_max;
-            self.repair_messages_budget_journal.refill(refill_amount);
+            self.repair_messages_budget_journal.refill();
             self.repair_budget_timeout.reset();
 
             self.repair();
@@ -10272,8 +10271,7 @@ pub fn ReplicaType(
             // We just replaced our superblock, so any outstanding request_prepares are probably not
             // useful, and we are likely to need to repair soon (and quickly) in order to start
             // committing again.
-            const refill_amount = self.repair_messages_budget_journal.refill_max;
-            self.repair_messages_budget_journal.refill(refill_amount);
+            self.repair_messages_budget_journal.refill();
 
             if (self.repair_budget_timeout.ticking) self.repair_budget_timeout.reset();
 
