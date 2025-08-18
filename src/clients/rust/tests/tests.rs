@@ -1,10 +1,11 @@
+use std::cell::UnsafeCell;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier, OnceLock};
+use std::sync::{Arc, Barrier, Once};
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -13,10 +14,29 @@ use futures::{Stream, StreamExt};
 use tigerbeetle as tb;
 
 // Singleton test database.
-static TEST_DB: OnceLock<TestDb> = OnceLock::new();
-
+// This can be a OnceLock in Rust 1.70+, and LazyLock in 1.80.
 fn get_test_db() -> &'static TestDb {
-    TEST_DB.get_or_init(|| TestDb::new().expect("couldn't start test database"))
+    struct OnceLock {
+        once: Once,
+        value: UnsafeCell<Option<TestDb>>,
+    }
+
+    unsafe impl Sync for OnceLock {}
+
+    static TEST_DB: OnceLock = OnceLock {
+        once: Once::new(),
+        value: UnsafeCell::new(None),
+    };
+
+    let error_msg = "couldn't start test database";
+
+    unsafe {
+        TEST_DB.once.call_once(|| {
+            *(&mut *TEST_DB.value.get()) = Some(TestDb::new().expect(error_msg));
+        });
+
+        (&*TEST_DB.value.get()).as_ref().expect(error_msg)
+    }
 }
 
 struct TestDb {
@@ -552,7 +572,7 @@ fn multithread() -> anyhow::Result<()> {
     }
 
     block_on(async {
-        let client = Arc::into_inner(client).expect("arc");
+        let client = Arc::try_unwrap(client).expect("arc");
 
         client.close().await;
 

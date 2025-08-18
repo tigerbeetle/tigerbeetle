@@ -9,7 +9,8 @@ futures-channel = "0.3.31"
 
 [build-dependencies]
 anyhow = "1.0.93"
-ignore = "0.4.23"
+# Newer versions prohibit Rust <1.70 due to use of OnceLock
+ignore = "0.4.20"
 
 [dev-dependencies]
 anyhow = "1.0.93"
