@@ -12,15 +12,15 @@ For each type of resource we want to limit, we will have a ledger specifically f
 that ledger, we have an operator account and an account for each user. Each user's account will have
 a balance limit applied.
 
-To set up the rate limiting system, we will first transfer the resource limit amount to each of the
+To set up the rate limiting system, we will first credit the resource limit amount to each of the
 users. For each user request, we will then create a
 [pending transfer](../two-phase-transfers.md#reserve-funds-pending-transfer) with a
 [timeout](../two-phase-transfers.md#expire-pending-transfer). We will never post or void these
 transfers, but will instead let them expire.
 
-Since each account's "balance" is limited, we cannot create pending transfers that would exceed the
-rate limit. However, when each pending transfer expires, it automatically replenishes the user's
-balance.
+Since each account's credit "balance" is limited, requesting a pending transfer that would exceed the
+rate limit will fail. However, when each pending transfer expires, the pending amounts are automatically restored to 
+the available balance.
 
 ## Request Rate Limiting
 
@@ -44,7 +44,7 @@ from the user:
 
 | Transfer |       Ledger | Debit Account | Credit Account | Amount | Timeout |                                                 Flags |
 | -------- | -----------: | ------------: | -------------: | -----: | ------- | ----------------------------------------------------: |
-| 2-N      | Request Rate |          User |       Operator |      1 | 60      | [`pending`](../../reference/transfer.md#flagspending) |
+| 2...N      | Request Rate |          User |       Operator |      1 | 60      | [`pending`](../../reference/transfer.md#flagspending) |
 
 Note that we use a timeout of 60 (seconds), because we wanted to limit each user to 10 requests _per
 minute_.
@@ -77,7 +77,7 @@ size:
 
 | Transfer |    Ledger | Debit Account | Credit Account |       Amount | Timeout |                                                 Flags |
 | -------- | --------: | ------------: | -------------: | -----------: | ------- | ----------------------------------------------------: |
-| 2-N      | Bandwidth |          User |       Operator | Request Size | 60      | [`pending`](../../reference/transfer.md#flagspending) |
+| 2...N      | Bandwidth |          User |       Operator | Request Size | 60      | [`pending`](../../reference/transfer.md#flagspending) |
 
 We're again using a timeout of 60 seconds, but you could adjust this to be whatever time window you
 want to use to limit requests.
