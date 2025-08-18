@@ -55,6 +55,7 @@ const schema = @import("schema.zig");
 const RingBufferType = stdx.RingBufferType;
 
 const KWayMergeIteratorType = @import("./k_way_merge.zig").KWayMergeIteratorType;
+const SortedRunsType = @import("./table_memory.zig").SortedRunsType;
 
 /// The upper-bound count of input tables to a single tree's compaction.
 ///
@@ -273,68 +274,127 @@ pub fn CompactionType(
         const CompactionRange = Manifest.CompactionRange;
 
         // Idea is that we can return here simply blocks.
-
-        const BatchIterator = struct {
-            immutable: []Value,
-
-            // physical index into immutable
-            index: u32,
-
-            to_drop: u32,
-            gap: u32,
-
-            const batch_max: u32 = 10;
-
-            pub fn init(immutable: []Value) BatchIterator {
-                const diff: u32 =
-                    @as(u32, @intCast(Table.value_count_max)) - @as(u32, @intCast(immutable.len));
-
-                return .{
-                    .immutable = immutable,
-                    .index = 0,
-                    .to_drop = diff,
-                    .gap = diff,
-                };
-            }
-
-            /// Non-empty slice of physical values for this batch.
-            pub fn values_used(iter: *const BatchIterator) []const Value {
-                if (iter.index >= iter.immutable.len) unreachable; // caller must check done() first
-                const start: usize = @intCast(iter.index);
-                const remaining: usize = iter.immutable.len - start;
-                const take: usize = @min(remaining, @as(usize, batch_max));
-                return iter.immutable[start .. start + take];
-            }
-
-            /// Return the entire difference exactly once (first call). Afterwards: 0.
-            pub fn dropped(iter: *BatchIterator) u32 {
-                const d = iter.to_drop;
-                iter.to_drop = 0;
-                return d;
-            }
-
-            /// Advance by the consumer's virtual position:
-            /// eat offset_left first, then advance physical index with the rest.
-            pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
-                assert(iter.to_drop == 0);
-
-                const delta: u32 = consumer_position - (iter.index + iter.gap);
-
-                iter.index += delta;
-                assert(iter.index <= iter.immutable.len);
-            }
-
-            pub fn count(iter: *const BatchIterator) u32 {
-                _ = iter;
-                return Table.value_count_max;
-            }
-        };
-
-        const Key = Table.Value;
+        const Key = Table.Key;
         const Value = Table.Value;
         const key_from_value = Table.key_from_value;
         const tombstone = Table.tombstone;
 
+        const runs_max = constants.lsm_compaction_ops + 1;
+
+        const BatchIterator = struct {
+            pub const SortedRuns = SortedRunsType(Key, Value, runs_max, Table.key_from_value);
+            pub const KWay = KWayMergeIteratorType(
+                SortedRuns,
+                Key,
+                Value,
+                Table.key_from_value, // was `key_from_value`
+                runs_max,
+                SortedRuns.stream_peek,
+                SortedRuns.stream_pop,
+                SortedRuns.stream_precedence,
+                true,
+            );
+
+            // Invariants:
+            // - `buffer[0..buffer_count)` holds committed, stable values (ready for the consumer).
+            // - We expose at most `batch_max` values; the array is sized +1 so we can
+            //   safely resolve a conflict with the last visible element before exposing it.
+            iterator: KWay,
+            table_count: u32,
+            buffer: [batch_max + 1]Value, // keep one in reserve
+            buffer_count: u32,
+            consumed: u32, // consumer’s absolute virtual position we’ve matched
+            dropped_round: u32, // number of physical values dropped by dedup in last refill
+            previous_value: ?Value, // last committed value (optional; informational)
+
+            const batch_max: u32 = 10;
+
+            pub fn init(kway: KWay, table_count: u32) BatchIterator {
+                var it = BatchIterator{
+                    .iterator = kway,
+                    .buffer = undefined,
+                    .buffer_count = 0,
+                    .consumed = 0,
+                    .dropped_round = 0,
+                    .previous_value = null,
+                    .table_count = table_count,
+                };
+                it.refill(); // initial fill
+                return it;
+            }
+
+            inline fn keysEqual(a: *const Value, b: *const Value) bool {
+                return Table.key_from_value(a) == Table.key_from_value(b);
+            }
+
+            fn refill(iter: *BatchIterator) void {
+                // Build up to capacity (batch_max + 1). While refilling we deduplicate
+                // against the last committed element in the buffer.
+                while (iter.buffer_count < iter.buffer.len) {
+                    const next_val = iter.iterator.pop() catch unreachable orelse break; // NOTE: KWay should provide next(); if not, wrap peek+pop.
+                    if (iter.buffer_count > 0) {
+                        const last_idx: usize = @intCast(iter.buffer_count - 1);
+                        if (keysEqual(&iter.buffer[last_idx], &next_val)) {
+                            if (Table.usage == .secondary_index) {
+                                // Annihilate both: drop the last committed and skip current.
+                                iter.buffer_count -= 1;
+                                iter.dropped_round += 2;
+                                continue;
+                            } else {
+                                // Primary (or non-secondary) index: last writer wins.
+                                iter.buffer[last_idx] = next_val;
+                                iter.dropped_round += 1;
+                                continue;
+                            }
+                        }
+                    }
+                    // New key or buffer was empty: append.
+                    iter.buffer[@intCast(iter.buffer_count)] = next_val;
+                    iter.buffer_count += 1;
+                }
+            }
+
+            /// Slice of values exposed this round (≤ batch_max).
+            pub fn values_used(iter: *const BatchIterator) []const Value {
+                const batch_size: usize = @intCast(@min(iter.buffer_count, batch_max));
+                return iter.buffer[0..batch_size];
+            }
+
+            /// Return the number of physical values dropped by dedup during the *last* refill,
+            /// and reset the counter so it’s reported exactly once.
+            pub fn dropped(iter: *BatchIterator) u32 {
+                const d = iter.dropped_round;
+                iter.dropped_round = 0;
+                return d;
+            }
+
+            /// Advance the iterator by the consumer’s virtual position.
+            /// We drop up to the visible portion (≤ batch_max), shift the buffer, then refill.
+            pub fn advance(iter: *BatchIterator, consumer_position: u32) void {
+                var delta = consumer_position - iter.consumed;
+                const visible: u32 = @min(iter.buffer_count, batch_max);
+                if (delta > visible) delta = visible;
+
+                if (delta > 0) {
+                    const old_count = iter.buffer_count;
+                    var i: usize = 0;
+                    while (i + delta < old_count) : (i += 1) {
+                        iter.buffer[i] = iter.buffer[i + delta];
+                    }
+                    iter.buffer_count = old_count - delta;
+                    iter.consumed += delta;
+                }
+
+                // Begin a fresh round for dropped counting and refill.
+                iter.dropped_round = 0;
+                iter.refill();
+            }
+
+            /// Number of values currently available to the consumer this round.
+            pub fn count(iter: *const BatchIterator) u32 {
+                return iter.table_count;
+            }
+        };
         const TableInfoA = union(enum) {
             //immutable: []Value, // TODO: replace this for now with some form of iterator that returns blocks but has a full count().
             immutable: BatchIterator, // TODO: replace this for now with some form of iterator that returns blocks but has a full count().
@@ -690,7 +750,12 @@ pub fn CompactionType(
                     }
                 }
 
-                compaction.table_info_a = .{ .immutable = BatchIterator.init(compaction.tree.table_immutable.values_used()) };
+                compaction.table_info_a = .{
+                    .immutable = BatchIterator.init(
+                        compaction.tree.table_immutable.iterator(),
+                        compaction.tree.table_immutable.sorted_runs.elements(),
+                    ),
+                };
 
                 compaction.range_b = compaction.tree.manifest.immutable_table_compaction_range(
                     compaction.tree.table_immutable.key_min(),

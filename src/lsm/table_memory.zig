@@ -88,13 +88,16 @@ pub fn SortedRunsType(
         pub fn count(self: *const SortedRuns) u16 {
             return self.runs_count;
         }
+        pub fn elements(self: *const SortedRuns) u32 {
+            return self.elements_covered;
+        }
 
         pub fn reset(self: *SortedRuns) void {
             self.runs_count = 0;
             self.elements_covered = 0;
         }
 
-        fn stream_peek(
+        pub fn stream_peek(
             context: *const SortedRuns,
             stream_index: u32,
         ) error{ Empty, Drained }!Key {
@@ -104,13 +107,13 @@ pub fn SortedRunsType(
             return key_from_value(&stream[0]);
         }
 
-        fn stream_pop(context: *SortedRuns, stream_index: u32) Value {
+        pub fn stream_pop(context: *SortedRuns, stream_index: u32) Value {
             const stream = context.runs[stream_index];
             context.runs[stream_index] = stream[1..];
             return stream[0];
         }
 
-        fn stream_precedence(context: *const SortedRuns, a: u32, b: u32) bool {
+        pub fn stream_precedence(context: *const SortedRuns, a: u32, b: u32) bool {
             _ = context;
 
             // Higher streams have higher precedence.
@@ -271,34 +274,35 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .{ .mode = .upper_bound },
             );
 
-            // TODO(TZ): fix this and rewrite clean.
-            // on primary table we scan simply backwards the sorted_runs.
-            //if (Table.usage == .secondary_index) return maybe_value_gold;
+            return maybe_value_gold;
+            //// TODO(TZ): fix this and rewrite clean.
+            //// on primary table we scan simply backwards the sorted_runs.
+            ////if (Table.usage == .secondary_index) return maybe_value_gold;
 
-            // reverse binary search
-            // BUG(TZ): why does this work for .secondary_index?
-            var idx: usize = 1;
-            const length = table.sorted_runs.count();
-            while (idx <= length) : (idx += 1) {
-                const run = table.sorted_runs.runs[length - idx];
-                const maybe_value = binary_search.binary_search_values(
-                    Key,
-                    Value,
-                    key_from_value,
-                    run,
-                    key,
-                    .{ .mode = .upper_bound },
-                );
+            //// reverse binary search
+            //// BUG(TZ): why does this work for .secondary_index?
+            //var idx: usize = 1;
+            //const length = table.sorted_runs.count();
+            //while (idx <= length) : (idx += 1) {
+            //const run = table.sorted_runs.runs[length - idx];
+            //const maybe_value = binary_search.binary_search_values(
+            //Key,
+            //Value,
+            //key_from_value,
+            //run,
+            //key,
+            //.{ .mode = .upper_bound },
+            //);
 
-                if (maybe_value) |value| {
-                    std.debug.print("key a {} key b {} \n", .{ key_from_value(value), key_from_value(maybe_value_gold.?) });
-                    std.debug.print(" a {}  b {} \n", .{ value, maybe_value_gold.? });
-                    assert(key_from_value(value) == key_from_value(maybe_value_gold.?));
-                    return value;
-                }
-            }
-            assert(maybe_value_gold == null);
-            return null;
+            //if (maybe_value) |value| {
+            //std.debug.print("key a {} key b {} \n", .{ key_from_value(value), key_from_value(maybe_value_gold.?) });
+            //std.debug.print(" a {}  b {} \n", .{ value, maybe_value_gold.? });
+            //assert(key_from_value(value) == key_from_value(maybe_value_gold.?));
+            //return value;
+            //}
+            //}
+            //assert(maybe_value_gold == null);
+            //return null;
         }
 
         fn merge(table: *TableMemory) void {
@@ -314,17 +318,17 @@ pub fn TableMemoryType(comptime Table: type) type {
                 table.sort_suffix();
             }
 
-            var iterator = KWay.init(&table.sorted_runs, table.sorted_runs.count(), .ascending);
+            var iter = KWay.init(&table.sorted_runs, table.sorted_runs.count(), .ascending);
 
             var target_index: usize = 0;
 
             const output = table.values_shadow;
-            const maybe_value = iterator.pop() catch unreachable;
+            const maybe_value = iter.pop() catch unreachable;
             output[target_index] = maybe_value.?;
             target_index += 1;
             // deduplicate merging based.
 
-            while (iterator.pop() catch unreachable) |value_next| {
+            while (iter.pop() catch unreachable) |value_next| {
                 // TODO: we could do the dedupclication logic here
                 // could we push the deduplication logic in the tree?
                 // We could either push the deduplication logic in the tree.
@@ -369,6 +373,11 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
             // we need to finally set the new target count
             table.value_context.count = @intCast(target_count);
+        }
+
+        pub fn iterator(table: *TableMemory) KWay {
+            const iter = KWay.init(&table.sorted_runs, table.sorted_runs.count(), .ascending);
+            return iter;
         }
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
