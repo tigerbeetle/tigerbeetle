@@ -542,7 +542,6 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{info.tag}),
     );
 }
-
 fn publish(
     shell: *Shell,
     languages: LanguageSet,

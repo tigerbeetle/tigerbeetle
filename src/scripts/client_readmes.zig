@@ -117,8 +117,10 @@ fn readme_root(ctx: *Context) !void {
             ctx.code(project_file_language, ctx.docs.project_file);
         }
 
-        ctx.paragraph("Then, install the TigerBeetle client:");
-        ctx.commands(ctx.docs.install_commands);
+        if (ctx.docs.install_commands.len > 0) {
+            ctx.paragraph("Then, install the TigerBeetle client:");
+            ctx.commands(ctx.docs.install_commands);
+        }
 
         ctx.print("Now, create `{s}{s}.{s}` and copy this into it:\n\n", .{
             ctx.docs.test_source_path,

@@ -68,7 +68,11 @@ fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
 
         Ok(())
     } else {
-        todo!()
+        // This is probably a published tigerbeetle crate outside of the
+        // tigerbeetle source tree. Sanity check that we have the pre-built
+        // assets.
+        assert!(Path::new(&format!("{manifest_dir}/assets/tb_client.h")).try_exists()?);
+        Ok(())
     }
 }
 
