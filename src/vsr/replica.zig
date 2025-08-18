@@ -3411,8 +3411,13 @@ pub fn ReplicaType(
 
                 write.* = .{ .replica = self };
                 self.grid.repair_block(grid_repair_block_callback, &write.write, write_block);
+            }
 
-                self.repair_messages_budget_grid.refill(1);
+            if (grid_fulfill or grid_repair) {
+                self.repair_messages_budget_grid.increment(.{
+                    .address = message.header.address,
+                    .checksum = message.header.checksum,
+                });
 
                 // Attempt to send full batches to amortize the network cost of fetching blocks.
                 if (self.repair_messages_budget_grid.available >=
@@ -3420,9 +3425,7 @@ pub fn ReplicaType(
                 {
                     self.send_request_blocks();
                 }
-            }
-
-            if (!grid_fulfill and !grid_repair) {
+            } else {
                 log.debug("{}: on_block: ignoring; block not needed (address={} checksum={})", .{
                     self.log_prefix(),
                     message.header.address,
@@ -3780,9 +3783,7 @@ pub fn ReplicaType(
             maybe(self.state_machine_opened);
 
             self.grid_repair_budget_timeout.reset();
-
-            const refill_amount = self.repair_messages_budget_grid.refill_max;
-            self.repair_messages_budget_grid.refill(refill_amount);
+            self.repair_messages_budget_grid.refill();
 
             // Proactively send a block request, because:
             // - we definitely have enough budget for it now, and

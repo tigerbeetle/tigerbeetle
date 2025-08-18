@@ -1898,12 +1898,11 @@ pub const RepairBudgetGrid = struct {
         }
     }
 
-    pub fn refill(budget: *RepairBudgetGrid, amount: u32) void {
+    pub fn refill(budget: *RepairBudgetGrid) void {
         budget.assert_invariants();
         defer budget.assert_invariants();
-        assert(amount <= budget.refill_max);
 
-        budget.available = @min((budget.available + amount), budget.capacity);
+        budget.available = @min((budget.available + budget.refill_max), budget.capacity);
         budget.requested.clearRetainingCapacity();
     }
 };
