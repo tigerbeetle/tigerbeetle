@@ -1755,8 +1755,8 @@ pub const RepairBudgetJournal = struct {
         start_view: u32,
     }) bool {
         assert(budget.capacity > 0);
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
 
         if (budget.available == 0) return false;
 
@@ -1787,8 +1787,8 @@ pub const RepairBudgetJournal = struct {
         headers,
         start_view: u32,
     }) void {
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
 
         switch (repair_type) {
             .headers => budget.requested_headers -|= 1,
@@ -1818,8 +1818,8 @@ pub const RepairBudgetJournal = struct {
 
     pub fn refill(budget: *RepairBudgetJournal, amount: u32) void {
         assert(amount <= budget.refill_max);
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
 
         budget.available = @min((budget.available + amount), budget.capacity);
 
@@ -1828,7 +1828,7 @@ pub const RepairBudgetJournal = struct {
         budget.requested_start_view = null;
     }
 
-    fn assert_internally_consistent(budget: *const RepairBudgetJournal) void {
+    fn assert_invariants(budget: *const RepairBudgetJournal) void {
         const requested_start_views: u32 = @intFromBool(budget.requested_start_view != null);
         const requested_prepares: u32 = @as(u32, @intCast(budget.requested_prepares.count()));
         const requested_headers: u32 = budget.requested_headers;
@@ -1869,14 +1869,14 @@ pub const RepairBudgetGrid = struct {
         budget.requested.deinit(gpa);
     }
 
-    fn assert_internally_consistent(budget: *RepairBudgetGrid) void {
+    fn assert_invariants(budget: *RepairBudgetGrid) void {
         assert(budget.available <= budget.capacity);
         assert(budget.available + budget.requested.count() <= budget.capacity);
     }
 
     pub fn decrement(budget: *RepairBudgetGrid, block_identifier: BlockIdentifier) bool {
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
         assert(budget.available > 0);
         assert(block_identifier.address > 0);
 
@@ -1890,8 +1890,8 @@ pub const RepairBudgetGrid = struct {
     }
 
     pub fn increment(budget: *RepairBudgetGrid, block_identifier: BlockIdentifier) void {
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
 
         if (budget.requested.swapRemove(block_identifier)) {
             budget.available = @min((budget.available + 1), budget.capacity);
@@ -1899,8 +1899,8 @@ pub const RepairBudgetGrid = struct {
     }
 
     pub fn refill(budget: *RepairBudgetGrid, amount: u32) void {
-        budget.assert_internally_consistent();
-        defer budget.assert_internally_consistent();
+        budget.assert_invariants();
+        defer budget.assert_invariants();
         assert(amount <= budget.refill_max);
 
         budget.available = @min((budget.available + amount), budget.capacity);
