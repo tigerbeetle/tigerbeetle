@@ -57,6 +57,7 @@ jobs:
         include:
           - { os: 'ubuntu-latest',  language: 'dotnet',  language_version: '8.0.x' }
           - { os: 'ubuntu-latest',  language: 'go',      language_version: '1.21'  }
+          - { os: 'ubuntu-latest',  language: 'rust',    language_version: '1.78'  }
           - { os: 'ubuntu-latest',  language: 'rust',    language_version: '1.84'  }
           - { os: 'ubuntu-latest',  language: 'java',    language_version: '11'    }
           - { os: 'ubuntu-latest',  language: 'java',    language_version: '21'    }
