@@ -184,8 +184,8 @@ pub const GridBlocksMissing = struct {
     pub fn next_request(queue: *GridBlocksMissing) ?vsr.BlockRequest {
         assert(queue.faulty_blocks.count() > 0);
 
-        const fault_addresses = queue.faulty_blocks.entries.items(.key);
-        const fault_data = queue.faulty_blocks.entries.items(.value);
+        const fault_addresses = queue.faulty_blocks.keys();
+        const fault_data = queue.faulty_blocks.values();
         const fault_index = queue.faulty_blocks_repair_index;
 
         queue.faulty_blocks_repair_index = (fault_index + 1) % queue.faulty_blocks.count();
@@ -330,7 +330,7 @@ pub const GridBlocksMissing = struct {
 
     pub fn repair_waiting(queue: *const GridBlocksMissing, address: u64, checksum: u128) bool {
         const fault_index = queue.faulty_blocks.getIndex(address) orelse return false;
-        const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
+        const fault = &queue.faulty_blocks.values()[fault_index];
         return fault.checksum == checksum and fault.state == .waiting;
     }
 
@@ -338,7 +338,7 @@ pub const GridBlocksMissing = struct {
         assert(queue.repair_waiting(address, checksum));
 
         const fault_index = queue.faulty_blocks.getIndex(address).?;
-        const fault = &queue.faulty_blocks.entries.items(.value)[fault_index];
+        const fault = &queue.faulty_blocks.values()[fault_index];
         assert(fault.checksum == checksum);
         assert(fault.state == .waiting);
 
@@ -356,8 +356,8 @@ pub const GridBlocksMissing = struct {
     pub fn repair_complete(queue: *GridBlocksMissing, block: BlockPtrConst) void {
         const block_header = schema.header_from_block(block);
         const fault_index = queue.faulty_blocks.getIndex(block_header.address).?;
-        const fault_address = queue.faulty_blocks.entries.items(.key)[fault_index];
-        const fault: FaultyBlock = queue.faulty_blocks.entries.items(.value)[fault_index];
+        const fault_address = queue.faulty_blocks.keys()[fault_index];
+        const fault: FaultyBlock = queue.faulty_blocks.values()[fault_index];
         assert(fault_address == block_header.address);
         assert(fault.checksum == block_header.checksum);
         assert(fault.state == .aborting or fault.state == .writing);
@@ -444,7 +444,7 @@ pub const GridBlocksMissing = struct {
     fn release_fault(queue: *GridBlocksMissing, fault_index: usize) void {
         assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
-        switch (queue.faulty_blocks.entries.items(.value)[fault_index].progress) {
+        switch (queue.faulty_blocks.values()[fault_index].progress) {
             .block => queue.enqueued_blocks_single -= 1,
             .table_index => queue.enqueued_blocks_table -= 1,
             .table_value => queue.enqueued_blocks_table -= 1,
