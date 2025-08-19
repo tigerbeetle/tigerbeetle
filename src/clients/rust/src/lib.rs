@@ -340,6 +340,26 @@ pub use time_based_id::id;
 /// This is just a magic number to jump out of logs.
 const COMPLETION_CONTEXT: usize = 0xAB;
 
+// Thread-sendable wrapper for the owned packet.
+pub struct Packet(Box<tbc::tb_packet_t>);
+
+// Safety: after completion, zig no longer touches the packet; we own it exclusively.
+unsafe impl Send for Packet {}
+
+impl std::ops::Deref for Packet {
+    type Target = tbc::tb_packet_t;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Packet {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 /// The TigerBeetle client.
 pub struct Client {
     client: *mut tbc::tb_client_t,
@@ -1719,7 +1739,7 @@ where
             let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
             (*packet).data = ptr::null_mut();
 
-            let packet = Box::from_raw(packet);
+            let packet = Packet(Box::from_raw(packet));
 
             let result = if result_len != 0 {
                 std::slice::from_raw_parts(result_ptr, result_len as usize)
@@ -1787,7 +1807,7 @@ fn handle_message<CEvent, CResult>(
 
 struct CompletionMessage<E> {
     _context: usize,
-    packet: Box<tbc::tb_packet_t>,
+    packet: Packet,
     _timestamp: u64,
     result: Vec<u8>,
     _events: Vec<E>,
