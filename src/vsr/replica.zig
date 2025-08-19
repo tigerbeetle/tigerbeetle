@@ -3783,6 +3783,8 @@ pub fn ReplicaType(
 
             self.grid_repair_budget_timeout.reset();
             self.repair_messages_budget_grid.refill();
+            assert(self.solo() or
+                self.repair_messages_budget_grid.available >= constants.grid_repair_request_max);
 
             // Proactively send a block request, because:
             // - we definitely have enough budget for it now, and
