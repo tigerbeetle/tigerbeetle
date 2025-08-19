@@ -10852,6 +10852,10 @@ pub fn ReplicaType(
             assert(self.grid_repair_budget_timeout.ticking);
             assert(self.grid.callback != .cancel);
             maybe(self.state_machine_opened);
+            if (!self.solo()) {
+                assert(self.repair_messages_budget_grid.available >=
+                    constants.grid_repair_request_max);
+            }
 
             var message = self.message_bus.get_message(.request_blocks);
             defer self.message_bus.unref(message);
