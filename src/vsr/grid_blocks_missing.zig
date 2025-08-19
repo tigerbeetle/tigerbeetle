@@ -535,9 +535,8 @@ pub const GridBlocksMissing = struct {
         if (queue.checkpoint_durable.?.aborting == 0) {
             queue.checkpoint_durable = null;
 
-            var faulty_blocks = queue.faulty_blocks.iterator();
-            while (faulty_blocks.next()) |fault_entry| {
-                assert(fault_entry.value_ptr.state != .aborting);
+            for (queue.faulty_blocks.values()) |*faulty_block| {
+                assert(faulty_block.state != .aborting);
             }
 
             return true;
