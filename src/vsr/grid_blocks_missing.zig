@@ -183,6 +183,7 @@ pub const GridBlocksMissing = struct {
     /// Note that returning `null` doesn't necessarily indicate that there are no more blocks.
     pub fn next_request(queue: *GridBlocksMissing) ?vsr.BlockRequest {
         assert(queue.faulty_blocks.count() > 0);
+        assert(queue.faulty_blocks_repair_index < queue.faulty_blocks.count());
 
         const fault_addresses = queue.faulty_blocks.keys();
         const fault_data = queue.faulty_blocks.values();
