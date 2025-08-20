@@ -1232,24 +1232,6 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
     } else return null;
 }
 
-pub fn verify_release_list(releases: []const Release, release_included: Release) void {
-    assert(releases.len >= 1);
-    assert(releases.len <= constants.vsr_releases_max);
-
-    for (
-        releases[0 .. releases.len - 1],
-        releases[1..],
-    ) |release_a, release_b| {
-        assert(release_a.value < release_b.value);
-    }
-
-    for (releases) |release| {
-        if (release.value == release_included.value) return;
-    } else {
-        @panic("verify_release_list_contains: release not found");
-    }
-}
-
 pub const Headers = struct {
     pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_headers_max);
     /// The SuperBlock's persisted VSR headers.

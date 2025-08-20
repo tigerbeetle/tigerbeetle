@@ -1178,7 +1178,8 @@ pub fn ReplicaType(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            vsr.verify_release_list(options.releases_bundled.const_slice(), options.release);
+            options.releases_bundled.verify();
+            assert(options.releases_bundled.contains(options.release));
 
             const request_size_limit =
                 @sizeOf(Header) + options.state_machine_options.batch_size_limit;
@@ -1786,19 +1787,19 @@ pub fn ReplicaType(
                     upgrade_targets.* = .{
                         .checkpoint = message.header.checkpoint_op,
                         .view = message.header.view,
-                        .releases = .{},
+                        .releases = .empty,
                     };
 
-                    const releases_all = std.mem.bytesAsSlice(vsr.Release, message.body_used());
-                    const releases = releases_all[0..message.header.release_count];
-                    assert(releases.len == message.header.release_count);
-                    vsr.verify_release_list(releases, message.header.release);
-                    for (releases_all[message.header.release_count..]) |r| assert(r.value == 0);
+                    const releases = ping_message_release_list(message);
+                    assert(releases.contains(message.header.release));
 
-                    for (releases) |release| {
+                    for (releases.slice()) |release| {
                         if (release.value > self.release.value) {
                             upgrade_targets.*.?.releases.push(release);
                         }
+                    }
+                    if (upgrade_targets.*.?.releases.count > 0) {
+                        upgrade_targets.*.?.releases.verify();
                     }
                 }
             }
@@ -3477,21 +3478,22 @@ pub fn ReplicaType(
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic(),
                 .route = ping_route,
-                .release_count = self.releases_bundled.count_as(u16),
+                .release_count = self.releases_bundled.count,
             };
 
             // self.releases_bundled is usually pointer into Multiversion, which might update in
             // place if a new binary is available on disk.
-            vsr.verify_release_list(self.releases_bundled.const_slice(), self.release);
+            self.releases_bundled.verify();
+            assert(self.releases_bundled.contains(self.release));
 
             const ping_versions = std.mem.bytesAsSlice(vsr.Release, message.body_used());
             stdx.copy_disjoint(
                 .inexact,
                 vsr.Release,
                 ping_versions,
-                self.releases_bundled.const_slice(),
+                self.releases_bundled.slice(),
             );
-            @memset(ping_versions[self.releases_bundled.count()..], vsr.Release.zero);
+            @memset(ping_versions[self.releases_bundled.count..], vsr.Release.zero);
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
@@ -3940,8 +3942,8 @@ pub fn ReplicaType(
 
             const release_target: ?vsr.Release = release: {
                 var release_target: ?vsr.Release = null;
-                for (self.releases_bundled.const_slice(), 0..) |release, i| {
-                    if (i > 0) assert(release.value > self.releases_bundled.get(i - 1).value);
+                for (self.releases_bundled.slice(), 0..) |release, i| {
+                    if (i > 0) assert(release.value > self.releases_bundled.slice()[i - 1].value);
                     // Ignore old releases.
                     if (release.value <= self.release.value) continue;
 
@@ -3950,14 +3952,7 @@ pub fn ReplicaType(
                         const targets = targets_or_null orelse continue;
                         assert(replica != self.replica);
 
-                        for (targets.releases.const_slice()) |target_release| {
-                            assert(target_release.value > self.release.value);
-
-                            if (target_release.value == release.value) {
-                                release_replicas += 1;
-                                break;
-                            }
-                        }
+                        release_replicas += @intFromBool(targets.releases.contains(release));
                     }
 
                     if (release_replicas >= vsr.quorums(self.replica_count).upgrade) {
@@ -10491,7 +10486,7 @@ pub fn ReplicaType(
                 //
                 // Even though we are upgrading, our target version is not necessarily available in
                 // our binary. (In this case, release_execute() is responsible for error-ing out.)
-                maybe(self.release.value == self.releases_bundled.get(0).value);
+                maybe(self.release.value == self.releases_bundled.first().value);
                 assert(self.commit_min == self.op_checkpoint() or
                     self.commit_min == vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()));
                 maybe(self.journal.status == .init);
@@ -11666,6 +11661,22 @@ fn start_view_message_headers(message: *const Message.StartView) []const Header.
         }
     }
     return headers;
+}
+
+fn ping_message_release_list(message: *const Message.Ping) vsr.ReleaseList {
+    assert(message.header.release_count <= constants.vsr_releases_max);
+
+    const releases_all = std.mem.bytesAsSlice(vsr.Release, message.body_used());
+    for (releases_all[message.header.release_count..]) |r| assert(r.value == 0);
+    const releases = releases_all[0..message.header.release_count];
+    assert(releases.len == message.header.release_count);
+
+    var result: vsr.ReleaseList = .empty;
+    for (releases) |release| result.push(release);
+
+    result.verify();
+    assert(result.contains(message.header.release));
+    return result;
 }
 
 /// The PipelineQueue belongs to a normal-status primary. It consists of two queues:

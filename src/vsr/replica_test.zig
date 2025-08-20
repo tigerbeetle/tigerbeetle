@@ -2235,7 +2235,7 @@ const TestReplicas = struct {
     }
 
     pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
-        var releases_bundled = vsr.ReleaseList{};
+        var releases_bundled: vsr.ReleaseList = .empty;
         for (releases_bundled_patch) |patch| {
             releases_bundled.push(vsr.Release.from(.{
                 .major = 0,
@@ -2243,6 +2243,7 @@ const TestReplicas = struct {
                 .patch = patch,
             }));
         }
+        releases_bundled.verify();
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
