@@ -6,10 +6,21 @@ from __future__ import annotations
 
 import ctypes
 import enum
+import sys
+from dataclasses import dataclass
 from collections.abc import Callable # noqa: TCH003
 from typing import Any
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
-from .lib import c_uint128, dataclass, tbclient, validate_uint
+from .lib import c_uint128, tbclient, validate_uint
+
+# Use slots=True if the version of Python is new enough (3.10+) to support it.
+if sys.version_info >= (3, 10):
+    # mypy: ignore assignment (3.10+) and unused-ignore (pre 3.10)
+    dataclass = dataclass(slots=True) # type: ignore[assignment, unused-ignore]
 
 
 class Operation(enum.IntEnum):
@@ -236,13 +247,13 @@ class Transfer:
 @dataclass
 class CreateAccountsResult:
     index: int = 0
-    result: CreateAccountResult = 0
+    result: CreateAccountResult = CreateAccountResult.OK
 
 
 @dataclass
 class CreateTransfersResult:
     index: int = 0
-    result: CreateTransferResult = 0
+    result: CreateTransferResult = CreateTransferResult.OK
 
 
 @dataclass
@@ -282,7 +293,7 @@ class QueryFilter:
 
 class CPacket(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=32, name="data_size", number=obj.data_size)
         validate_uint(bits=16, name="user_tag", number=obj.user_tag)
         validate_uint(bits=8, name="operation", number=obj.operation)
@@ -309,7 +320,7 @@ CPacket._fields_ = [ # noqa: SLF001
 
 class CClient(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         return cls(
             opaque=obj.opaque,
         )
@@ -321,7 +332,7 @@ CClient._fields_ = [ # noqa: SLF001
 
 class CAccount(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=128, name="id", number=obj.id)
         validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
         validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
@@ -349,7 +360,7 @@ class CAccount(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> Account:
         return Account(
             id=self.id.to_python(),
             debits_pending=self.debits_pending.to_python(),
@@ -384,7 +395,7 @@ CAccount._fields_ = [ # noqa: SLF001
 
 class CTransfer(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=128, name="id", number=obj.id)
         validate_uint(bits=128, name="debit_account_id", number=obj.debit_account_id)
         validate_uint(bits=128, name="credit_account_id", number=obj.credit_account_id)
@@ -414,7 +425,7 @@ class CTransfer(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> Transfer:
         return Transfer(
             id=self.id.to_python(),
             debit_account_id=self.debit_account_id.to_python(),
@@ -450,7 +461,7 @@ CTransfer._fields_ = [ # noqa: SLF001
 
 class CCreateAccountsResult(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=32, name="index", number=obj.index)
         return cls(
             index=obj.index,
@@ -458,7 +469,7 @@ class CCreateAccountsResult(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> CreateAccountsResult:
         return CreateAccountsResult(
             index=self.index,
             result=CreateAccountResult(self.result),
@@ -472,7 +483,7 @@ CCreateAccountsResult._fields_ = [ # noqa: SLF001
 
 class CCreateTransfersResult(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=32, name="index", number=obj.index)
         return cls(
             index=obj.index,
@@ -480,7 +491,7 @@ class CCreateTransfersResult(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> CreateTransfersResult:
         return CreateTransfersResult(
             index=self.index,
             result=CreateTransferResult(self.result),
@@ -494,7 +505,7 @@ CCreateTransfersResult._fields_ = [ # noqa: SLF001
 
 class CAccountFilter(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=128, name="account_id", number=obj.account_id)
         validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
@@ -516,7 +527,7 @@ class CAccountFilter(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> AccountFilter:
         return AccountFilter(
             account_id=self.account_id.to_python(),
             user_data_128=self.user_data_128.to_python(),
@@ -545,7 +556,7 @@ CAccountFilter._fields_ = [ # noqa: SLF001
 
 class CAccountBalance(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=128, name="debits_pending", number=obj.debits_pending)
         validate_uint(bits=128, name="debits_posted", number=obj.debits_posted)
         validate_uint(bits=128, name="credits_pending", number=obj.credits_pending)
@@ -560,7 +571,7 @@ class CAccountBalance(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> AccountBalance:
         return AccountBalance(
             debits_pending=self.debits_pending.to_python(),
             debits_posted=self.debits_posted.to_python(),
@@ -581,7 +592,7 @@ CAccountBalance._fields_ = [ # noqa: SLF001
 
 class CQueryFilter(ctypes.Structure):
     @classmethod
-    def from_param(cls, obj):
+    def from_param(cls, obj: Any) -> Self:
         validate_uint(bits=128, name="user_data_128", number=obj.user_data_128)
         validate_uint(bits=64, name="user_data_64", number=obj.user_data_64)
         validate_uint(bits=32, name="user_data_32", number=obj.user_data_32)
@@ -603,7 +614,7 @@ class CQueryFilter(ctypes.Structure):
         )
 
 
-    def to_python(self):
+    def to_python(self) -> QueryFilter:
         return QueryFilter(
             user_data_128=self.user_data_128.to_python(),
             user_data_64=self.user_data_64,
@@ -678,13 +689,13 @@ tb_client_submit.argtypes = [ctypes.POINTER(CClient), ctypes.POINTER(CPacket)]
 tb_client_register_log_callback = tbclient.tb_client_register_log_callback
 tb_client_register_log_callback.restype = RegisterLogCallbackStatus
 # Need to pass in None to clear - ctypes will error if argtypes is set.
-#tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
+# tb_client_register_log_callback.argtypes = [LogHandler, ctypes.c_bool]
 
 
 class AsyncStateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
@@ -692,7 +703,7 @@ class AsyncStateMachineMixin:
         )
 
     async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
@@ -700,7 +711,7 @@ class AsyncStateMachineMixin:
         )
 
     async def lookup_accounts(self, accounts: list[int]) -> list[Account]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.LOOKUP_ACCOUNTS,
             accounts,
             c_uint128,
@@ -708,7 +719,7 @@ class AsyncStateMachineMixin:
         )
 
     async def lookup_transfers(self, transfers: list[int]) -> list[Transfer]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.LOOKUP_TRANSFERS,
             transfers,
             c_uint128,
@@ -716,7 +727,7 @@ class AsyncStateMachineMixin:
         )
 
     async def get_account_transfers(self, filter: AccountFilter) -> list[Transfer]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.GET_ACCOUNT_TRANSFERS,
             [filter],
             CAccountFilter,
@@ -724,7 +735,7 @@ class AsyncStateMachineMixin:
         )
 
     async def get_account_balances(self, filter: AccountFilter) -> list[AccountBalance]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.GET_ACCOUNT_BALANCES,
             [filter],
             CAccountFilter,
@@ -732,7 +743,7 @@ class AsyncStateMachineMixin:
         )
 
     async def query_accounts(self, query_filter: QueryFilter) -> list[Account]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.QUERY_ACCOUNTS,
             [query_filter],
             CQueryFilter,
@@ -740,7 +751,7 @@ class AsyncStateMachineMixin:
         )
 
     async def query_transfers(self, query_filter: QueryFilter) -> list[Transfer]:
-        return await self._submit(
+        return await self._submit(  # type: ignore[no-any-return]
             Operation.QUERY_TRANSFERS,
             [query_filter],
             CQueryFilter,
@@ -752,7 +763,7 @@ class AsyncStateMachineMixin:
 class StateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_ACCOUNTS,
             accounts,
             CAccount,
@@ -760,7 +771,7 @@ class StateMachineMixin:
         )
 
     def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.CREATE_TRANSFERS,
             transfers,
             CTransfer,
@@ -768,7 +779,7 @@ class StateMachineMixin:
         )
 
     def lookup_accounts(self, accounts: list[int]) -> list[Account]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.LOOKUP_ACCOUNTS,
             accounts,
             c_uint128,
@@ -776,7 +787,7 @@ class StateMachineMixin:
         )
 
     def lookup_transfers(self, transfers: list[int]) -> list[Transfer]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.LOOKUP_TRANSFERS,
             transfers,
             c_uint128,
@@ -784,7 +795,7 @@ class StateMachineMixin:
         )
 
     def get_account_transfers(self, filter: AccountFilter) -> list[Transfer]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.GET_ACCOUNT_TRANSFERS,
             [filter],
             CAccountFilter,
@@ -792,7 +803,7 @@ class StateMachineMixin:
         )
 
     def get_account_balances(self, filter: AccountFilter) -> list[AccountBalance]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.GET_ACCOUNT_BALANCES,
             [filter],
             CAccountFilter,
@@ -800,7 +811,7 @@ class StateMachineMixin:
         )
 
     def query_accounts(self, query_filter: QueryFilter) -> list[Account]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.QUERY_ACCOUNTS,
             [query_filter],
             CQueryFilter,
@@ -808,7 +819,7 @@ class StateMachineMixin:
         )
 
     def query_transfers(self, query_filter: QueryFilter) -> list[Transfer]:
-        return self._submit(
+        return self._submit(  # type: ignore[no-any-return]
             Operation.QUERY_TRANSFERS,
             [query_filter],
             CQueryFilter,

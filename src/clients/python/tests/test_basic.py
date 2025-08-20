@@ -1389,3 +1389,15 @@ def test_uint128(client):
         capture_output=True
     )
     assert json.loads(repl_output.stdout) == expected_repl_response
+
+
+def test_ids_random():
+    """IDs are different from repeated invocations of the function."""
+    samples = [tb.id() for _ in range(10_000)]
+    assert len(samples) == len(set(samples))
+
+def test_ids_sortable():
+    """IDs are expected to be sortable, with at least 1 millisecond between calls."""
+    id1 = tb.id()
+    time.sleep(0.001)
+    assert tb.id() > id1
