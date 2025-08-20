@@ -11,12 +11,9 @@ Run the following to test with this driver:
 (cd src/clients/java && mvn package)
 (cd src/testing/vortex/java_driver && mvn package)
 CLASS_PATH="src/clients/java/target/tigerbeetle-java-0.0.1-SNAPSHOT.jar"
-CLASS_PATH="${CLASS_PATH}:src/testing/vortex/java_driver/target/driver-0.0.1-SNAPSHOT.jar"
-unshare --net --fork --map-root-user --pid bash -c "
-    ip link set up dev lo ; 
-    zig-out/bin/vortex supervisor \
+CLASS_PATH="${CLASS_PATH}:src/testing/vortex/java_driver/target/vortex-driver-java-0.0.1-SNAPSHOT.jar"
+    zig-out/bin/vortex run \
         --tigerbeetle-executable=./zig-out/bin/tigerbeetle \
         --test-duration-seconds=60 \
         --driver-command=java\ -cp\ $CLASS_PATH\ Main
-    "
 ```
