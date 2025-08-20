@@ -13,7 +13,6 @@ const std = @import("std");
 const stdx = @import("stdx");
 const builtin = @import("builtin");
 
-const Run = @import("testing/vortex/run.zig");
 const Supervisor = @import("testing/vortex/supervisor.zig");
 const ZigDriver = @import("testing/vortex/zig_driver.zig");
 const Workload = @import("testing/vortex/workload.zig");
@@ -28,7 +27,6 @@ pub const std_options: std.Options = .{
 };
 
 pub const CLIArgs = union(enum) {
-    run: Supervisor.CLIArgs,
     supervisor: Supervisor.CLIArgs,
     driver: ZigDriver.CLIArgs,
     workload: DriverArgs,
@@ -60,10 +58,6 @@ pub fn main() !void {
     defer args.deinit();
 
     switch (stdx.flags(&args, CLIArgs)) {
-        .run => |run_args| {
-            _ = run_args; // We're going to pass these through directly to `vortex supervisor`
-            try Run.main(allocator);
-        },
         .supervisor => |supervisor_args| try Supervisor.main(allocator, supervisor_args),
         .driver => |driver_args| try ZigDriver.main(allocator, driver_args),
         .workload => |driver_args| {

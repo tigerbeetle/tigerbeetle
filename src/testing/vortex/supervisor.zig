@@ -127,8 +127,18 @@ pub const CLIArgs = struct {
 
 pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
-        log.err("vortex is not supported for Windows", .{});
+        log.err("vortex is not supported on Windows", .{});
         return error.NotSupported;
+    }
+
+    if (builtin.os.tag == .linux) {
+        // Relaunch in fresh pid / network namespaces.
+        try stdx.unshare.maybe_unshare_and_relaunch(allocator, .{
+            .pid = true,
+            .network = true,
+        });
+    } else {
+        log.warn("vortex may spawn runaway processes when run on a non-Linux OS", .{});
     }
 
     var io = try IO.init(128, 0);

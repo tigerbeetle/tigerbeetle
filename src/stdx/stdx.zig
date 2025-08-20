@@ -17,6 +17,7 @@ pub const dbg = @import("debug.zig").dbg;
 pub const flags = @import("flags.zig").parse;
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
+pub const unshare = @import("unshare.zig");
 
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
@@ -1223,4 +1224,5 @@ comptime {
     _ = @import("stdx.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("zipfian.zig");
+    _ = @import("unshare.zig");
 }

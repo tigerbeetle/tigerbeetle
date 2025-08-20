@@ -25,9 +25,7 @@
 //!
 //! Note that the budget/refresh timers do not count time spent cloning or compiling code.
 //!
-//! It is important that the caller arranges for CFO's descendants to be reaped when CFO exits.
-//! It is not possible to reliably wait for (grand) children with POSIX, so its on the call-site to
-//! cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to arrange that.
+//! The CFO uses Linux's process namespaces to ensure that all descendant processes are reaped.
 //!
 //! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
@@ -141,7 +139,18 @@ const Fuzzer = enum {
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
+        log.err("cfo is not supported on Windows", .{});
         return error.NotSupported;
+    }
+
+    if (builtin.os.tag == .linux) {
+        // Relaunch in a fresh pid namespace.
+        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{
+            .pid = true,
+            .network = false,
+        });
+    } else {
+        log.warn("cfo may spawn runaway processes when run on a non-Linux OS", .{});
     }
 
     if (cli_args.budget_minutes == 0) fatal("--budget-minutes: must be greater than zero", .{});

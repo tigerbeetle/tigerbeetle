@@ -24,8 +24,6 @@ do
         git fetch
         git switch --discard-changes --detach origin/main
         ./zig/download.sh
-        # `unshare --pid` ensures that, if the parent process dies, all children die as well.
-        # `unshare --user` is needed to make `--pid` work without root.
-        unshare --user -f --pid ./zig/zig build -Drelease scripts -- cfo
+        ./zig/zig build -Drelease scripts -- cfo
     ) || sleep 10 # Be resilient to cfo bugs and network errors, but avoid busy-loop retries.
 done
