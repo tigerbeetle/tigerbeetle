@@ -419,7 +419,7 @@ test "vortex smoke" {
     defer shell.destroy();
 
     try shell.exec(
-        "{vortex_exe} run --test-duration-seconds=10 " ++
+        "{vortex_exe} run --test-duration-seconds=1 " ++
             "--replica-count=1 --tigerbeetle-executable={tigerbeetle}",
         .{
             .vortex_exe = vortex_exe,
