@@ -31,9 +31,9 @@ pub fn main(allocator: std.mem.Allocator) !void {
         try argv.append(allocator, arg);
     }
 
-    // Set up new net, pid, and user namespaces
+    // Set up new net, pid, and user namespaces.
     try linux_unshare();
-    // Set up loopback networking
+    // Set up loopback networking.
     try linux_ip_link_loopback();
 
     // Run the supervisor
