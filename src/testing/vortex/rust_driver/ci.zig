@@ -21,13 +21,14 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         const vortex_out_dir = try shell.create_tmp_dir();
         defer shell.cwd.deleteTree(vortex_out_dir) catch {};
         try shell.exec(
-            vortex_bin ++ " " ++
+            "{vortex_bin} " ++
                 "run --driver-command={driver_command} " ++
                 "--tigerbeetle-executable={tigerbeetle_bin} " ++
                 "--output-directory={vortex_out_dir} " ++
                 "--disable-faults " ++
                 "--test-duration-seconds=10",
             .{
+                .vortex_bin = vortex_bin,
                 .driver_command = driver_command,
                 .tigerbeetle_bin = tigerbeetle_bin,
                 .vortex_out_dir = vortex_out_dir,
