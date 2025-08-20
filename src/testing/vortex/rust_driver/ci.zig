@@ -34,6 +34,6 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
             },
         );
     } else {
-        log.warn("Not testing vortex java on OS {}", .{builtin.target.os.tag});
+        log.warn("Not testing vortex rust driver on OS {}", .{builtin.target.os.tag});
     }
 }
