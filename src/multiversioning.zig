@@ -248,20 +248,20 @@ pub const MultiversionHeader = extern struct {
 
         count: u32 = 0,
 
-        releases: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
-        checksums: [past_releases_max]u128 = std.mem.zeroes([past_releases_max]u128),
+        releases: [past_releases_max]u32 = @splat(0),
+        checksums: [past_releases_max]u128 = @splat(0),
 
         /// Offsets are relative to the start of the body (`.tb_mvb`) offset.
-        offsets: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        offsets: [past_releases_max]u32 = @splat(0),
 
-        sizes: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        sizes: [past_releases_max]u32 = @splat(0),
 
-        flags: [past_releases_max]Flags = std.mem.zeroes([past_releases_max]Flags),
-        flags_padding: [1]u8 = std.mem.zeroes([1]u8),
+        flags: [past_releases_max]Flags = @splat(.{ .visit = false, .debug = false }),
+        flags_padding: [1]u8 = @splat(0),
 
         // Extra metadata. Not used by any current upgrade processes directly, but useful to know:
-        git_commits: [past_releases_max][20]u8 = std.mem.zeroes([past_releases_max][20]u8),
-        release_client_mins: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        git_commits: [past_releases_max][20]u8 = @splat(@splat(0)),
+        release_client_mins: [past_releases_max]u32 = @splat(0),
 
         pub fn add(self: *PastReleases, next: struct {
             release: u32,
@@ -401,10 +401,10 @@ pub const MultiversionHeader = extern struct {
     current_release: u32,
 
     current_flags: Flags,
-    current_flags_padding: [3]u8 = std.mem.zeroes([3]u8),
+    current_flags_padding: [3]u8 = @splat(0),
 
     past: PastReleases = .{},
-    past_padding: [16]u8 = std.mem.zeroes([16]u8),
+    past_padding: [16]u8 = @splat(0),
 
     current_git_commit: [20]u8,
     current_release_client_min: u32,
@@ -413,7 +413,7 @@ pub const MultiversionHeader = extern struct {
     /// which are required to be zeroed, this is not. This allows adding whole new fields in a
     /// backwards compatible way, while preventing the temptation of changing the meaning of
     /// existing fields without bumping the schema version entirely.
-    reserved: [4744]u8 = std.mem.zeroes([4744]u8),
+    reserved: [4744]u8 = @splat(0),
 
     /// Parses an instance from a slice of bytes and validates its checksum. Returns a copy.
     pub fn init_from_bytes(bytes: *const [@sizeOf(MultiversionHeader)]u8) !MultiversionHeader {
@@ -553,7 +553,7 @@ test "MultiversionHeader.advertisable" {
             .current_checksum = 0,
             .current_flags = .{ .visit = true, .debug = false },
             .checksum_binary_without_header = 1,
-            .current_git_commit = std.mem.zeroes([20]u8),
+            .current_git_commit = @splat(0),
             .current_release_client_min = 0,
         };
         header.checksum_header = header.calculate_header_checksum();
