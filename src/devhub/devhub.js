@@ -343,6 +343,8 @@ function plot_series(series_list, root_node, batch_count) {
         text: series.name,
       },
       chart: {
+        id: series.name,
+        group: "devhub",
         type: "line",
         height: "400px",
         animations: {
