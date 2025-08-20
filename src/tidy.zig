@@ -773,6 +773,7 @@ test "tidy extensions" {
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
         .{"src/clients/rust/Cargo.lock"},
+        .{"src/testing/vortex/rust_driver/Cargo.lock"},
     });
 
     const allocator = std.testing.allocator;

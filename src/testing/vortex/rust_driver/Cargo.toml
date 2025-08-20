@@ -1,0 +1,9 @@
+[package]
+name = "vortex-driver-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tigerbeetle.path = "../../../clients/rust"
+futures = "0.3.31"
+anyhow = "1.0.93"
