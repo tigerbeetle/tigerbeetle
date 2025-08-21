@@ -41,6 +41,11 @@ pub const GridBlocksMissing = struct {
 
     const FaultProgress = union(enum) {
         /// Repair a single block.
+        ///
+        /// Originates from one of:
+        /// - the grid scrubber
+        /// - a grid read during prefetch/compaction
+        /// - a grid read while opening the grid/forest
         block,
         /// Repair the table and all of its content. Awaiting table index block.
         table_index: TableIndex,
@@ -54,6 +59,7 @@ pub const GridBlocksMissing = struct {
     pub const RepairTable = struct {
         index_address: u64,
         index_checksum: u128,
+        table_info: schema.ManifestNode.TableInfo,
         /// Invariants:
         /// - value_blocks_received.count < table_blocks_total
         /// - value_blocks_received.capacity = constants.lsm_table_value_blocks_max
@@ -100,6 +106,9 @@ pub const GridBlocksMissing = struct {
 
     /// Invariants:
     /// - For every index address in faulty_tables: ¬free_set.is_free(address).
+    /// - A given RepairTable is never in both `faulty_tables` and `faulty_tables_free`.
+    /// - `faulty_tables` does not contain multiple items with the same underlying table
+    ///   (address/checksum).
     faulty_tables: QueueType(RepairTable) = QueueType(RepairTable).init(.{
         .name = "grid_missing_blocks_tables",
     }),
@@ -237,14 +246,16 @@ pub const GridBlocksMissing = struct {
         queue: *GridBlocksMissing,
         table: *RepairTable,
         table_bitset: *std.DynamicBitSetUnmanaged,
-        address: u64,
-        checksum: u128,
+        table_info: *const schema.ManifestNode.TableInfo,
     ) enum { insert, duplicate } {
         assert(queue.faulty_tables.count() < queue.options.tables_max);
         assert(queue.faulty_blocks.count() ==
             queue.enqueued_blocks_single + queue.enqueued_blocks_table);
         assert(table_bitset.capacity() == constants.lsm_table_value_blocks_max);
         assert(table_bitset.count() == 0);
+
+        const address = table_info.address;
+        const checksum = table_info.checksum;
 
         var tables = queue.faulty_tables.iterate();
         while (tables.next()) |queue_table| {
@@ -263,6 +274,7 @@ pub const GridBlocksMissing = struct {
         table.* = .{
             .index_address = address,
             .index_checksum = checksum,
+            .table_info = table_info.*,
             .value_blocks_received = table_bitset,
         };
         queue.faulty_tables.push(table);

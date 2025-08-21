@@ -10381,12 +10381,8 @@ pub fn ReplicaType(
                     const table_bitset: *std.DynamicBitSetUnmanaged =
                         &self.grid_repair_table_bitsets[self.grid_repair_tables.index(table)];
 
-                    const enqueue_result = self.grid.blocks_missing.enqueue_table(
-                        table,
-                        table_bitset,
-                        table_info.address,
-                        table_info.checksum,
-                    );
+                    const enqueue_result =
+                        self.grid.blocks_missing.enqueue_table(table, table_bitset, &table_info);
 
                     switch (enqueue_result) {
                         .insert => self.trace.start(.{ .replica_sync_table = .{
