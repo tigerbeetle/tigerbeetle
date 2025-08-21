@@ -5,7 +5,11 @@ const maybe = stdx.maybe;
 const SourceLocation = std.builtin.SourceLocation;
 
 const constants = @import("../constants.zig");
+
 const stdx = @import("stdx");
+const RingBufferType = stdx.RingBufferType;
+const Ratio = stdx.PRNG.Ratio;
+const Duration = stdx.Duration;
 
 const StaticAllocator = @import("../static_allocator.zig");
 const allocate_block = @import("grid.zig").allocate_block;
@@ -15,14 +19,14 @@ const IOPSType = @import("../iops.zig").IOPSType;
 const MessagePool = @import("../message_pool.zig").MessagePool;
 const Message = @import("../message_pool.zig").MessagePool.Message;
 const MessageBuffer = @import("../message_buffer.zig").MessageBuffer;
-const RingBufferType = stdx.RingBufferType;
 const ForestTableIteratorType =
     @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
 const Time = @import("../time.zig").Time;
-const Duration = stdx.Duration;
+const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
+const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
+
 const marks = @import("../testing/marks.zig");
-const Ratio = stdx.PRNG.Ratio;
 
 const vsr = @import("../vsr.zig");
 const Header = vsr.Header;
@@ -575,7 +579,7 @@ pub fn ReplicaType(
         /// prepares, and replenishing the repair budget.
         /// (status=normal or (status=view-change and primary)).
         journal_repair_budget_timeout: Timeout,
-        journal_repair_message_budget: vsr.RepairBudgetJournal,
+        journal_repair_message_budget: RepairBudgetJournal,
 
         /// The number of ticks before checking whether state sync should be requested.
         /// This allows the replica to attempt WAL/grid repair before falling back, even if it
@@ -588,7 +592,7 @@ pub fn ReplicaType(
         /// The number of ticks before replenishing the command=request_blocks budget.
         /// (always running)
         grid_repair_budget_timeout: Timeout,
-        grid_repair_message_budget: vsr.RepairBudgetGrid,
+        grid_repair_message_budget: RepairBudgetGrid,
 
         /// (always running)
         grid_scrub_timeout: Timeout,
@@ -1104,7 +1108,7 @@ pub fn ReplicaType(
                 2 * (replica_count - @intFromBool(!self.standby()));
             const journal_repair_message_budget_refill =
                 @divFloor(journal_repair_message_budget_max, 2);
-            self.journal_repair_message_budget = try vsr.RepairBudgetJournal.init(
+            self.journal_repair_message_budget = try RepairBudgetJournal.init(
                 allocator,
                 .{
                     .capacity = journal_repair_message_budget_max,
@@ -1126,7 +1130,7 @@ pub fn ReplicaType(
                 (replica_count - @intFromBool(!self.standby()));
             const grid_repair_message_budget_refill =
                 @divFloor(grid_repair_message_budget_max, 2);
-            self.grid_repair_message_budget = try vsr.RepairBudgetGrid.init(
+            self.grid_repair_message_budget = try RepairBudgetGrid.init(
                 allocator,
                 .{
                     .capacity = grid_repair_message_budget_max,
@@ -2420,10 +2424,10 @@ pub fn ReplicaType(
                 const write_initiated = self.write_prepare(message, .repair);
 
                 if (write_initiated) {
-                    self.journal_repair_message_budget.increment(.{ .prepare = .{
+                    self.journal_repair_message_budget.increment(.{
                         .view = message.header.view,
                         .op = message.header.op,
-                    } });
+                    });
 
                     // Write prepare adds it synchronously to in-memory pipeline cache.
                     // Optimistically start committing without waiting for the disk write to finish.
@@ -2718,7 +2722,6 @@ pub fn ReplicaType(
                 }
             }
             assert(self.view == message.header.view);
-            self.journal_repair_message_budget.increment(.{ .start_view = self.view });
 
             // Logically, SV atomically updates both the checkpoint state and the log suffix.
             // Physically, updating the checkpoint is an asynchronous operation: it requires waiting
@@ -3191,25 +3194,13 @@ pub fn ReplicaType(
 
             var op_min: ?u64 = null;
             var op_max: ?u64 = null;
-            var header_repaired = false;
             for (message_body_as_prepare_headers(message.base_const())) |*h| {
                 if (op_min == null or h.op < op_min.?) op_min = h.op;
                 if (op_max == null or h.op > op_max.?) op_max = h.op;
 
-                const header_present = self.journal.has_header(h);
-                const header_correct = self.repair_header(h);
-                if (!header_present and header_correct) {
-                    header_repaired = true;
-                }
+                _ = self.repair_header(h);
             }
             assert(op_max.? >= op_min.?);
-
-            // Ensure we only replenish the repair budget if we use this message to repair at least
-            // one header. This guards us against double incrementing the budget in case of
-            // duplicate headers messages.
-            if (header_repaired) {
-                self.journal_repair_message_budget.increment(.headers);
-            }
 
             self.repair();
         }
@@ -7362,20 +7353,16 @@ pub fn ReplicaType(
                         self.view_headers.array.get(0).op,
                     },
                 );
-                if (self.journal_repair_message_budget.decrement(.{
-                    .start_view = self.view,
-                })) {
-                    self.send_header_to_replica(
-                        self.primary_index(self.view),
-                        @bitCast(Header.RequestStartView{
-                            .command = .request_start_view,
-                            .cluster = self.cluster,
-                            .replica = self.replica,
-                            .view = self.view,
-                            .nonce = self.nonce,
-                        }),
-                    );
-                }
+                self.send_header_to_replica(
+                    self.primary_index(self.view),
+                    @bitCast(Header.RequestStartView{
+                        .command = .request_start_view,
+                        .cluster = self.cluster,
+                        .replica = self.replica,
+                        .view = self.view,
+                        .nonce = self.nonce,
+                    }),
+                );
             }
 
             if (self.op < self.op_repair_max()) {
@@ -7415,23 +7402,20 @@ pub fn ReplicaType(
                     },
                 );
 
-                if (self.journal_repair_message_budget.decrement(.headers)) {
-                    self.send_header_to_replica(
-                        self.choose_any_other_replica(),
-                        @bitCast(Header.RequestHeaders{
-                            .command = .request_headers,
-                            .cluster = self.cluster,
-                            .replica = self.replica,
-                            // Pessimistically request extra headers. Requesting/sending extra
-                            // headers is inexpensive, and it may save us extra round-trips to
-                            // repair earlier breaks.
-                            .op_min = @min(range.op_min, self.repair_header_op_next),
-                            .op_max = range.op_max,
-                        }),
-                    );
-
-                    self.repair_header_op_next = @max(self.repair_header_op_next, range.op_max + 1);
-                }
+                self.send_header_to_replica(
+                    self.choose_any_other_replica(),
+                    @bitCast(Header.RequestHeaders{
+                        .command = .request_headers,
+                        .cluster = self.cluster,
+                        .replica = self.replica,
+                        // Pessimistically request extra headers. Requesting/sending extra
+                        // headers is inexpensive, and it may save us extra round-trips to
+                        // repair earlier breaks.
+                        .op_min = @min(range.op_min, self.repair_header_op_next),
+                        .op_max = range.op_max,
+                    }),
+                );
+                self.repair_header_op_next = @max(self.repair_header_op_next, range.op_max + 1);
             }
 
             // Request and repair any missing, dirty, or faulty prepares.
@@ -8164,10 +8148,9 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.journal_repair_message_budget.decrement(.{ .prepare = .{
-                .view = self.view,
-                .op = op,
-            } })) {
+            if (self.journal_repair_message_budget.decrement(
+                .{ .view = self.view, .op = op },
+            )) {
                 const request_prepare = Header.RequestPrepare{
                     .command = .request_prepare,
                     .cluster = self.cluster,
