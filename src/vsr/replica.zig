@@ -6318,7 +6318,7 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
 
             assert(message.header.command == .request);
-            assert(message.header.view <= self.view); // See ignore_request_message_backup().
+            assert(message.header.view <= self.view);
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
 
@@ -6452,7 +6452,7 @@ pub fn ReplicaType(
 
             assert(message.header.command == .request);
             assert(message.header.client > 0);
-            assert(message.header.view <= self.view); // See ignore_request_message_backup().
+            assert(message.header.view <= self.view);
             assert(message.header.session == 0 or message.header.operation != .register);
             assert(message.header.request == 0 or message.header.operation != .register);
             assert(message.header.checksum == entry.header.request_checksum);
@@ -6501,6 +6501,11 @@ pub fn ReplicaType(
             assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
 
+            // Only allow the primary to reply, to avoid externalizing a view for which view change
+            // hasn't yet completed.
+            if (self.status != .normal) return;
+            if (!self.primary()) return;
+
             const reply = reply_ orelse {
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
                     self.client_replies.faulty.set(slot.index);
@@ -6527,7 +6532,7 @@ pub fn ReplicaType(
             assert(self.primary());
 
             assert(message.header.command == .request);
-            assert(message.header.view <= self.view); // See ignore_request_message_backup().
+            assert(message.header.view <= self.view);
 
             if (self.pipeline.queue.message_by_client(message.header.client)) |pipeline_message| {
                 assert(pipeline_message.header.command == .request or
