@@ -392,8 +392,7 @@ pub fn GridType(comptime Storage: type) type {
         ///   4. Write the free set blocks to disk.
         ///   5. Mark the free set's own blocks as released (but not yet free).
         ///
-        /// This function handles step 1, and calls CheckpointTrailer.checkpoint, which handles
-        /// 2-4.
+        /// This function handles step 1, and calls CheckpointTrailer.checkpoint, which handles 2-4.
         /// The caller is responsible for calling Grid.mark_checkpoint_not_durable, which handles 5.
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.callback == .none);
@@ -726,6 +725,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn fulfill_block(grid: *Grid, block: BlockPtrConst) bool {
+            assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
 
             const block_header = schema.header_from_block(block);
