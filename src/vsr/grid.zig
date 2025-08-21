@@ -485,7 +485,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.callback = .{ .checkpoint_durable = callback };
 
             grid.blocks_missing.checkpoint_durable_commence(&grid.free_set);
-            if (grid.blocks_missing.checkpoint_durable.?.aborting == 0) {
+            if (grid.blocks_missing.state.checkpoint_durable.aborting == 0) {
                 grid.checkpoint_durable_join();
             }
         }
