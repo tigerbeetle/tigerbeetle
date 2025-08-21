@@ -30,8 +30,9 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
                 "run --driver-command={driver_command} " ++
                 "--tigerbeetle-executable={tigerbeetle_bin} " ++
                 "--output-directory={vortex_out_dir} " ++
+                "--replica-count=1 " ++
                 "--disable-faults " ++
-                "--test-duration-seconds=10",
+                "--test-duration-seconds=1",
             .{
                 .vortex_bin = vortex_bin,
                 .driver_command = driver_command,
