@@ -1754,8 +1754,11 @@ fn log_override(
         // Always print a message for vsr.fatal.
     } else {
         if (vsr_vopr_options.log == .short) {
-            if (scope != .cluster and scope != .simulator) return;
-            if (log_performance_mode and scope != .simulator) return;
+            if (log_performance_mode) {
+                if (scope != .simulator) return;
+            } else {
+                if (scope != .simulator and scope != .cluster) return;
+            }
         }
     }
 
