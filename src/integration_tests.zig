@@ -318,9 +318,8 @@ test "in-place upgrade" {
     //
     // To spice things up, replicas are periodically killed and restarted.
 
-    if (builtin.target.os.tag != .linux) {
-        // For now, test in-place upgrades only on Linux.
-        return error.SkipZigTest;
+    if (builtin.target.os.tag == .windows) {
+        return error.SkipZigTest; // Coming soon!
     }
 
     const replica_count = TmpCluster.replica_count;
@@ -550,9 +549,24 @@ const TmpCluster = struct {
 
     fn replica_upgrade(cluster: *TmpCluster, replica_index: usize) !void {
         assert(!cluster.replica_upgraded[replica_index]);
+
+        const upgrade_requires_restart = builtin.os.tag != .linux;
+        if (upgrade_requires_restart) {
+            if (cluster.replicas[replica_index] != null) {
+                try cluster.replica_kill(replica_index);
+            }
+            assert(cluster.replicas[replica_index] == null);
+        }
+
         cluster.shell.cwd.deleteFile(cluster.replica_exe[replica_index]) catch {};
         try cluster.replica_install(replica_index, .current);
         cluster.replica_upgraded[replica_index] = true;
+
+        if (upgrade_requires_restart) {
+            assert(cluster.replicas[replica_index] == null);
+            try cluster.replica_spawn(replica_index);
+            assert(cluster.replicas[replica_index] != null);
+        }
     }
 
     fn replica_spawn(cluster: *TmpCluster, replica_index: usize) !void {
