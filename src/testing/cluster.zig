@@ -32,7 +32,7 @@ const MiB = stdx.MiB;
 pub const ReplicaHealth = union(enum) {
     up: struct { paused: bool },
     down,
-    reformatting: struct { releases: vsr.ReleaseList },
+    reformatting,
 };
 
 pub const Release = struct {
@@ -135,6 +135,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         replica_health: []ReplicaHealth,
         replica_upgrades: []?vsr.Release,
         replica_reformats: []?ReplicaReformat,
+        replica_releases_bundled: []vsr.ReleaseList,
         replica_pipeline_requests_limit: u32,
         replica_count: u8,
         standby_count: u8,
@@ -154,8 +155,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         storage_checker: StorageChecker,
         grid_checker: *GridChecker,
         manifest_checker: ManifestChecker,
-
-        releases_bundled: []vsr.ReleaseList,
 
         context: ?*anyopaque = null,
 
@@ -368,8 +367,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 );
             }
 
-            const releases_bundled = try allocator.alloc(vsr.ReleaseList, node_count);
-            errdefer allocator.free(releases_bundled);
+            const replica_releases_bundled = try allocator.alloc(vsr.ReleaseList, node_count);
+            errdefer allocator.free(replica_releases_bundled);
 
             // We must heap-allocate the cluster since its pointer will be attached to the replica.
             // TODO(Zig) @returnAddress().
@@ -432,6 +431,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .replica_upgrades = replica_upgrades,
                 .replica_reformats = replica_reformats,
                 .replica_pipeline_requests_limit = pipeline_requests_limit,
+                .replica_releases_bundled = replica_releases_bundled,
                 .replica_count = options.cluster.replica_count,
                 .standby_count = options.cluster.standby_count,
                 .clients = clients,
@@ -443,14 +443,15 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .storage_checker = storage_checker,
                 .grid_checker = grid_checker,
                 .manifest_checker = manifest_checker,
-                .releases_bundled = releases_bundled,
             };
 
             for (cluster.replicas, 0..) |_, replica_index| {
                 errdefer for (replicas[0..replica_index]) |*r| r.deinit(allocator);
 
-                cluster.releases_bundled[replica_index] = .empty;
-                cluster.releases_bundled[replica_index].push(options.cluster.releases[0].release);
+                cluster.replica_releases_bundled[replica_index] = .empty;
+                cluster.replica_releases_bundled[replica_index].push(
+                    options.cluster.releases[0].release,
+                );
 
                 // Nonces are incremented on restart, so spread them out across 128 bit space
                 // to avoid collisions.
@@ -458,7 +459,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 try cluster.replica_open(@intCast(replica_index), .{
                     .nonce = nonce,
                     .release = options.cluster.releases[0].release,
-                    .releases_bundled = &cluster.releases_bundled[replica_index],
                 });
             }
             errdefer for (cluster.replicas) |*replica| replica.deinit(allocator);
@@ -522,7 +522,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.allocator.free(cluster.replica_pools);
             cluster.allocator.free(cluster.storages);
             cluster.allocator.free(cluster.aofs);
-            cluster.allocator.free(cluster.releases_bundled);
+            cluster.allocator.free(cluster.replica_releases_bundled);
             cluster.allocator.destroy(cluster.grid_checker);
             cluster.allocator.destroy(cluster.storage_fault_atlas);
             cluster.allocator.destroy(cluster.network);
@@ -623,12 +623,19 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             const result = reformat.done() orelse return;
             assert(result == .ok);
 
-            const releases = cluster.replica_health[replica_index].reformatting.releases;
             reformat.deinit(cluster.allocator);
             cluster.replica_reformats[replica_index] = null;
             cluster.replica_health[replica_index] = .down;
-            cluster.replica_restart(replica_index, &releases) catch unreachable;
+            cluster.replica_restart(replica_index) catch unreachable;
             cluster.state_checker.reformat(replica_index);
+        }
+
+        pub fn replica_set_releases(
+            cluster: *Cluster,
+            replica_index: u8,
+            releases: *const vsr.ReleaseList,
+        ) void {
+            cluster.replica_releases_bundled[replica_index] = releases.*;
         }
 
         pub fn replica_pause(cluster: *Cluster, replica_index: u8) void {
@@ -647,21 +654,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn replica_restart(
             cluster: *Cluster,
             replica_index: u8,
-            releases_bundled: *const vsr.ReleaseList,
         ) !void {
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_upgrades[replica_index] == null);
-
-            releases_bundled.verify();
-            const release = releases_bundled.first();
 
             defer maybe(cluster.replica_health[replica_index] == .up);
             defer assert(cluster.replica_upgrades[replica_index] == null);
 
             try cluster.replica_open(replica_index, .{
                 .nonce = cluster.replicas[replica_index].nonce + 1,
-                .release = release,
-                .releases_bundled = releases_bundled,
+                .release = cluster.replica_releases_bundled[replica_index].last(),
             });
             cluster.replica_enable(replica_index);
 
@@ -702,7 +704,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         fn replica_open(cluster: *Cluster, replica_index: u8, options: struct {
             nonce: u128,
             release: vsr.Release,
-            releases_bundled: *const vsr.ReleaseList,
         }) !void {
             const release_client_min = for (cluster.options.releases) |release| {
                 if (release.release.value == options.release.value) {
@@ -722,7 +723,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 .{},
             );
 
-            cluster.releases_bundled[replica_index] = options.releases_bundled.*;
             cluster.aofs[replica_index].reset();
             cluster.aof_ios[replica_index].reset();
             var replica = &cluster.replicas[replica_index];
@@ -742,7 +742,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .message_bus_options = .{ .network = cluster.network },
                     .release = options.release,
                     .release_client_min = release_client_min,
-                    .releases_bundled = &cluster.releases_bundled[replica_index],
+                    .releases_bundled = &cluster.replica_releases_bundled[replica_index],
                     .release_execute = replica_release_execute_soon,
                     .release_execute_context = null,
                     .test_context = cluster,
@@ -814,7 +814,6 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 cluster.replica_open(replica_index, .{
                     .nonce = cluster.replicas[replica_index].nonce + 1,
                     .release = release,
-                    .releases_bundled = replica.releases_bundled,
                 }) catch |err| {
                     log.err("{}: release_execute failed: error={}", .{ replica_index, err });
                     @panic("release_execute failed");
@@ -831,16 +830,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
         pub fn replica_reformat(
             cluster: *Cluster,
             replica_index: u8,
-            releases_bundled: *const vsr.ReleaseList,
         ) !void {
             assert(cluster.reformat_count < cluster.options.reformats_max);
             assert(cluster.replica_health[replica_index] == .down);
             assert(cluster.replica_reformats[replica_index] == null);
             assert(replica_index < cluster.options.replica_count);
 
-            cluster.replica_health[replica_index] = .{
-                .reformatting = .{ .releases = releases_bundled.* },
-            };
+            cluster.replica_health[replica_index] = .reformatting;
             cluster.log_replica(.reformat, replica_index);
 
             const storage = &cluster.storages[replica_index];
