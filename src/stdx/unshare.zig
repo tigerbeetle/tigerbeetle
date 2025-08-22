@@ -42,15 +42,9 @@ pub fn maybe_unshare_and_relaunch(
         network: bool,
     },
 ) !void {
-    assert(builtin.os.tag == .linux);
+    comptime assert(builtin.os.tag == .linux);
 
-    const should_unshare_and_fork = blk: {
-        const unshared = std.process.getEnvVarOwned(gpa, "TB_UNSHARED") catch {
-            break :blk true;
-        };
-        gpa.free(unshared);
-        break :blk false;
-    };
+    const should_unshare_and_fork = std.posix.getenv("TB_UNSHARED") == null;
 
     if (should_unshare_and_fork) {
         try linux_unshare(.{
@@ -88,30 +82,30 @@ pub fn linux_unshare(options: struct {
     pid: bool,
     network: bool,
 }) !void {
-    assert(builtin.os.tag == .linux);
+    comptime assert(builtin.os.tag == .linux);
 
-    // Create user namespace first
+    // Create user namespace first.
     const unshare_user_result = std.os.linux.unshare(linux.CLONE.NEWUSER);
-    const unshare_user_errno = std.posix.errno(unshare_user_result);
+    const unshare_user_errno = std.os.linux.E.init(unshare_user_result);
     if (unshare_user_errno != .SUCCESS) {
         log.err("Failed to create user namespace: {}", .{unshare_user_errno});
         return error.UnshareFailure;
     }
 
-    // Create PID namespace
+    // Create PID namespace.
     if (options.pid) {
         const unshare_pid_result = std.os.linux.unshare(linux.CLONE.NEWPID);
-        const unshare_pid_errno = std.posix.errno(unshare_pid_result);
+        const unshare_pid_errno = std.os.linux.E.init(unshare_pid_result);
         if (unshare_pid_errno != .SUCCESS) {
             log.err("Failed to create pid namespace: {}", .{unshare_pid_errno});
             return error.UnshareFailure;
         }
     }
 
-    // Create network namespace
+    // Create network namespace.
     if (options.network) {
         const unshare_net_result = std.os.linux.unshare(linux.CLONE.NEWNET);
-        const unshare_net_errno = std.posix.errno(unshare_net_result);
+        const unshare_net_errno = std.os.linux.E.init(unshare_net_result);
         if (unshare_net_errno != .SUCCESS) {
             log.err("Failed to create net namespace: {}", .{unshare_net_errno});
             return error.UnshareFailure;
@@ -128,7 +122,7 @@ pub fn linux_unshare(options: struct {
 /// This brings up the loopback device so that networking
 /// over 127.0.0.1 works.
 pub fn linux_ip_link_loopback() !void {
-    assert(builtin.os.tag == .linux);
+    comptime assert(builtin.os.tag == .linux);
 
     // Open a netlink socket with the NETLINK.ROUTE protocol.
     const sock = std.posix.socket(
@@ -151,70 +145,84 @@ pub fn linux_ip_link_loopback() !void {
         return error.IpLink;
     };
 
-    // Prepare netlink message to set up loopback interface.
+    // Netlink definitions.
     const nlmsghdr = linux.nlmsghdr;
     const ifinfomsg = linux.ifinfomsg;
 
+    const nlmsgerr = extern struct {
+        @"error": c_int,
+        msg: nlmsghdr,
+    };
+
     const IFF_UP = 0x1;
 
-    var msg_buf: [1024]u8 align(4) = std.mem.zeroes([1024]u8);
-    const hdr = @as(*nlmsghdr, @ptrCast(@alignCast(&msg_buf[0])));
-    const ifi = @as(*ifinfomsg, @ptrCast(@alignCast(&msg_buf[@sizeOf(nlmsghdr)])));
+    // Our message to the kernel - header plus interface info.
+    const Message = extern struct {
+        hdr: nlmsghdr,
+        ifi: ifinfomsg,
 
-    hdr.* = .{
-        .len = @sizeOf(nlmsghdr) + @sizeOf(ifinfomsg),
-        .type = .RTM_NEWLINK,
-        .flags = linux.NLM_F_REQUEST | linux.NLM_F_ACK,
-        .seq = 0,
-        .pid = 0,
+        comptime {
+            assert(@sizeOf(@This()) == @sizeOf(nlmsghdr) + @sizeOf(ifinfomsg));
+        }
     };
 
-    ifi.* = .{
-        .family = linux.AF.UNSPEC,
-        .type = 0,
-        // Seems to be the loopback device, not sure how
-        // to find this value the correct way.
-        .index = 1,
-        .flags = IFF_UP,
-        // man pages say use this value.
-        .change = 0xFFFFFFFF,
+    // Kernel's message to us - header plus error info.
+    const Response = extern struct {
+        hdr: nlmsghdr,
+        err: nlmsgerr,
+
+        comptime {
+            assert(@sizeOf(@This()) == @sizeOf(nlmsghdr) + @sizeOf(nlmsgerr));
+        }
     };
 
-    _ = std.posix.send(sock, msg_buf[0..hdr.len], 0) catch |err| {
+    var msg: Message = .{
+        .hdr = .{
+            .len = @sizeOf(nlmsghdr) + @sizeOf(ifinfomsg),
+            .type = .RTM_NEWLINK,
+            // ACK says to always send a response, even on success.
+            .flags = linux.NLM_F_REQUEST | linux.NLM_F_ACK,
+            .seq = 0,
+            .pid = 0,
+        },
+        .ifi = .{
+            .family = linux.AF.UNSPEC,
+            .type = 0,
+            // Seems to be the loopback device, not sure how
+            // to find this value the correct way.
+            .index = 1,
+            .flags = IFF_UP,
+            // man pages say use this value.
+            .change = 0xFFFFFFFF,
+        },
+    };
+
+    const msg_buf = std.mem.asBytes(&msg);
+    const sent_len = std.posix.send(sock, msg_buf, 0) catch |err| {
         log.err("failed to send netlink message: {}", .{err});
         return error.IpLink;
     };
+    assert(sent_len == msg.hdr.len);
 
-    // Receive acknowledgment
-    var ack_buf: [1024]u8 = undefined;
-    const ack_len = std.posix.recv(sock, &ack_buf, 0) catch |err| {
+    var ack: Response = undefined;
+    const ack_buf = std.mem.asBytes(&ack);
+    const ack_len = std.posix.recv(sock, ack_buf, 0) catch |err| {
         log.err("failed to receive netlink ack: {}", .{err});
         return error.IpLink;
     };
 
-    if (ack_len < @sizeOf(nlmsghdr)) {
-        log.err("netlink ack too short", .{});
-        return error.IpLink;
-    }
+    assert(ack_len == @sizeOf(Response));
+    assert(ack.hdr.type == .ERROR);
+    assert(ack.err.msg.pid == msg.hdr.pid);
 
-    const ack_hdr = @as(*const nlmsghdr, @ptrCast(@alignCast(&ack_buf[0])));
-    if (ack_hdr.type == .ERROR) {
-        if (ack_len >= @sizeOf(nlmsghdr) + @sizeOf(i32)) {
-            const errno = @as(*const i32, @ptrCast(@alignCast(&ack_buf[@sizeOf(nlmsghdr)]))).*;
-            if (errno != 0) {
-                log.err("netlink operation failed with errno: {}", .{-errno});
-                return error.IpLink;
-            }
-        }
+    if (ack.err.@"error" != 0) {
+        log.err("netlink operation failed with errno: {}", .{-ack.err.@"error"});
+        return error.IpLink;
     }
 }
 
 fn fork_and_exit(gpa: std.mem.Allocator) !void {
-    var args_ours = try std.process.argsWithAllocator(gpa);
-    defer args_ours.deinit();
-
-    var args_new: std.ArrayListUnmanaged([]const u8) = .{};
-    defer args_new.deinit(gpa);
+    const args_ours = std.os.argv;
 
     // We get a fresh path to the exe instead of using the original
     // first argument so that the exe path will be correct even if
@@ -222,14 +230,13 @@ fn fork_and_exit(gpa: std.mem.Allocator) !void {
     var exe_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
     const exe_path = try std.fs.selfExePath(&exe_path_buffer);
 
-    // Skip old exe argument.
-    _ = args_ours.next();
+    const args_new = try gpa.alloc([]const u8, args_ours.len);
+    defer gpa.free(args_new);
 
-    // Add new exe argument.
-    try args_new.append(gpa, exe_path);
+    args_new[0] = exe_path;
 
-    while (args_ours.next()) |arg| {
-        try args_new.append(gpa, arg);
+    for (1..args_ours.len) |arg_index| {
+        args_new[arg_index] = std.mem.span(args_ours[arg_index]);
     }
 
     var env_map = try std.process.getEnvMap(gpa);
@@ -237,7 +244,7 @@ fn fork_and_exit(gpa: std.mem.Allocator) !void {
 
     try env_map.put("TB_UNSHARED", "1");
 
-    var child = std.process.Child.init(args_new.items, gpa);
+    var child = std.process.Child.init(args_new, gpa);
 
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
