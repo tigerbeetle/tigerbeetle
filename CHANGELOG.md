@@ -3,6 +3,48 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.56
+
+Released: 2025-08-22
+
+### Safety And Performance
+
+- [#3185](https://github.com/tigerbeetle/tigerbeetle/pull/3185)
+
+  Improve the speed of trailer repairs by initiating repair requests more proactively.
+
+- [#3017](https://github.com/tigerbeetle/tigerbeetle/pull/3017)
+
+  Add [Vortex](https://tigerbeetle.com/blog/2025-02-13-a-descent-into-the-vortex/) to CI to test clients (Java, Zig, Rust).
+
+- [#3193](https://github.com/tigerbeetle/tigerbeetle/pull/3193)
+
+  Ensure only the primary responds to VSR repeat requests.
+
+### Features
+
+- [#3014](https://github.com/tigerbeetle/tigerbeetle/pull/3014)
+
+  Add a typed Python client (thanks @stenczelt).
+
+### Internals
+
+- [#3195](https://github.com/tigerbeetle/tigerbeetle/pull/3195)
+
+  Simplify budgeting for VSR repairs.
+
+- [#3181](https://github.com/tigerbeetle/tigerbeetle/pull/3181)
+
+  Refactor `ReleaseList` to contain the release logic.
+
+- [#3190](https://github.com/tigerbeetle/tigerbeetle/pull/3190)
+
+  Improve naming for journal and grid message budgets.
+
+### TigerTracks 🎧
+
+- [Boiler Room](https://www.youtube.com/watch?v=bk6Xst6euQk)
+
 ## TigerBeetle 0.16.55
 
 Released: 2025-08-15
