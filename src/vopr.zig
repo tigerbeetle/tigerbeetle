@@ -806,6 +806,7 @@ pub const Simulator = struct {
 
         simulator.cluster.tick();
         simulator.tick_requests();
+        simulator.tick_upgrade();
         simulator.tick_crash();
         simulator.tick_pause();
     }
@@ -1446,6 +1447,15 @@ pub const Simulator = struct {
             simulator.options.requests_max);
     }
 
+    fn tick_upgrade(simulator: *Simulator) void {
+        for (simulator.cluster.replicas) |*replica| {
+            const upgrade =
+                simulator.replica_releases[replica.replica] < releases.len and
+                simulator.prng.chance(simulator.options.replica_release_advance_probability);
+            if (upgrade) simulator.replica_upgrade(replica.replica);
+        }
+    }
+
     fn tick_crash(simulator: *Simulator) void {
         for (simulator.cluster.replicas) |*replica| {
             simulator.replica_crash_stability[replica.replica] -|= 1;
@@ -1465,17 +1475,12 @@ pub const Simulator = struct {
         const replica_storage = &simulator.cluster.storages[replica.replica];
         const replica_writes = replica_storage.writes.count();
 
-        const crash_upgrade =
-            simulator.replica_releases[replica.replica] < releases.len and
-            simulator.prng.chance(simulator.options.replica_release_advance_probability);
-        if (crash_upgrade) simulator.replica_upgrade(replica.replica);
-
         var crash_probability = simulator.options.replica_crash_probability;
         if (replica_writes > 0) crash_probability.numerator *= 10;
 
         const crash_random = simulator.prng.chance(crash_probability);
 
-        if (!crash_upgrade and !crash_random) return;
+        if (!crash_random) return;
 
         log.debug("{}: crash replica", .{replica.replica});
         simulator.cluster.replica_crash(replica.replica);
@@ -1522,12 +1527,8 @@ pub const Simulator = struct {
             if (reformat_random) {
                 log.debug("{}: reformat replica", .{replica.replica});
 
-                const replica_releases = simulator.replica_release_list(replica.replica);
                 simulator.replica_reformats.set(replica.replica);
-                simulator.cluster.replica_reformat(
-                    replica.replica,
-                    &replica_releases,
-                ) catch unreachable;
+                simulator.cluster.replica_reformat(replica.replica) catch unreachable;
                 return;
             }
         }
@@ -1590,13 +1591,8 @@ pub const Simulator = struct {
             simulator.replica_releases[replica_index],
         });
 
-        const replica_releases = simulator.replica_release_list(replica_index);
-
         replica_storage.faulty = fault;
-        simulator.cluster.replica_restart(
-            replica_index,
-            &replica_releases,
-        ) catch unreachable;
+        simulator.cluster.replica_restart(replica_index) catch unreachable;
 
         if (replica.status == .recovering_head) {
             // Even with faults disabled, a replica may wind up in status=recovering_head.
@@ -1613,6 +1609,9 @@ pub const Simulator = struct {
             @min(simulator.replica_releases[replica_index] + 1, releases.len);
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
+
+        const replica_releases = simulator.replica_release_list(replica_index);
+        simulator.cluster.replica_set_releases(replica_index, &replica_releases);
     }
 
     fn replica_release_list(simulator: *const Simulator, replica_index: u8) vsr.ReleaseList {

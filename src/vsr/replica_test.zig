@@ -2220,10 +2220,7 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.replica_restart(
-                r,
-                t.cluster.replicas[r].releases_bundled,
-            ) catch |err| {
+            t.cluster.replica_restart(r) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -2247,7 +2244,8 @@ const TestReplicas = struct {
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.replica_restart(r, &releases_bundled) catch |err| {
+            t.cluster.replica_set_releases(r, &releases_bundled);
+            t.cluster.replica_restart(r) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -2261,7 +2259,7 @@ const TestReplicas = struct {
     pub fn open_reformat(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: recover replica", .{r});
-            try t.cluster.replica_reformat(r, t.cluster.replicas[r].releases_bundled);
+            try t.cluster.replica_reformat(r);
         }
     }
 
