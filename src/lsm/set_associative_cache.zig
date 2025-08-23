@@ -392,11 +392,18 @@ pub fn SetAssociativeCacheType(
             }
         };
 
+        inline fn fastrange64(word: u64, p: u64) u64 {
+            const lword: u128 = @intCast(word);
+            const lp: u128 = @intCast(p);
+            const ln: u128 = lword *% lp;
+            return @truncate(ln >> 64);
+        }
+
         inline fn associate(self: *const SetAssociativeCache, key: Key) Set {
             const entropy = hash(key);
 
-            const tag = @as(Tag, @truncate(entropy >> math.log2_int(u64, self.sets)));
-            const index = entropy % self.sets;
+            const tag = @as(Tag, @truncate(entropy));
+            const index = fastrange64(entropy, self.sets);
             const offset = index * layout.ways;
 
             return .{

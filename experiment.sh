@@ -37,9 +37,9 @@ run_block() {
 }
 
 for i in $(seq 1 "$RUNS"); do
-  run_block "normal baseline (run $i)"
+  run_block "normal associate (run $i)"
 done
 
 for i in $(seq 1 "$RUNS"); do
-  run_block "zipfian baseline (run $i)" "--account-distribution=zipfian"
+  run_block "zipfian associate (run $i)" "--account-distribution=zipfian"
 done
