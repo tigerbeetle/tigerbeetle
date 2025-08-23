@@ -266,22 +266,6 @@ pub fn SetAssociativeCacheType(
             self.counts.set(set.offset + way, 1);
         }
 
-        /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?usize {
-            const ways = search_tags(set.tags, set.tag);
-
-            var it = BitIteratorType(Ways){ .bits = ways };
-            while (it.next()) |way| {
-                const count = self.counts.get(set.offset + way);
-                if (count > 0 and key_from_value(&set.values[way]) == key) {
-                    return way;
-                }
-            }
-
-            return null;
-        }
-
-        /// Where each set bit represents the index of a way that has the same tag.
         const Ways = meta.Int(.unsigned, layout.ways);
 
         inline fn search_tags(tags: *const [layout.ways]Tag, tag: Tag) Ways {
@@ -289,7 +273,22 @@ pub fn SetAssociativeCacheType(
             const y: @Vector(layout.ways, Tag) = @splat(tag);
 
             const result: @Vector(layout.ways, bool) = x == y;
-            return @as(*const Ways, @ptrCast(&result)).*;
+            return @bitCast(result);
+        }
+
+        inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?u16 {
+            var ways: u16 = search_tags(set.tags, set.tag);
+            if (ways == 0) return null;
+
+            for (0..layout.ways) |way| {
+                if (ways & 1 == 1 and self.counts.get(set.offset + way) > 0) {
+                    if (key_from_value(&set.values[way]) == key) {
+                        return @intCast(way);
+                    }
+                }
+                ways >>= 1;
+            }
+            return null;
         }
 
         /// Upsert a value, evicting an older entry if needed. The evicted value, if an update or
@@ -775,37 +774,6 @@ test "PackedUnsignedIntegerArray: fuzz" {
 
         try context.run();
     }
-}
-
-fn BitIteratorType(comptime Bits: type) type {
-    return struct {
-        const BitIterator = @This();
-        const BitIndex = math.Log2Int(Bits);
-
-        bits: Bits,
-
-        /// Iterates over the bits, consuming them.
-        /// Returns the bit index of each set bit until there are no more set bits, then null.
-        inline fn next(it: *BitIterator) ?BitIndex {
-            if (it.bits == 0) return null;
-            // This @intCast() is safe since we never pass 0 to @ctz().
-            const index: BitIndex = @intCast(@ctz(it.bits));
-            // Zero the lowest set bit.
-            it.bits &= it.bits - 1;
-            return index;
-        }
-    };
-}
-
-test "BitIterator" {
-    const expectEqual = @import("std").testing.expectEqual;
-
-    var it = BitIteratorType(u16){ .bits = 0b1000_0000_0100_0101 };
-
-    for ([_]u4{ 0, 2, 6, 15 }) |e| {
-        try expectEqual(@as(?u4, e), it.next());
-    }
-    try expectEqual(it.next(), null);
 }
 
 fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: Layout) type {
