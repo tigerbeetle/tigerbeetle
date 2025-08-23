@@ -36,10 +36,10 @@ run_block() {
   } 2>&1 | tee -a "$LOGFILE"
 }
 
-for i in $(seq 1 "$RUNS"); do
-  run_block "normal simd (run $i)"
+for i in {1..10}; do
+  run_block "normal scalar (run $i)"
 done
 
 for i in $(seq 1 "$RUNS"); do
-  run_block "zipfian simd (run $i)" "--account-distribution=zipfian"
+  run_block "zipfian scalar (run $i)" "--account-distribution=zipfian"
 done

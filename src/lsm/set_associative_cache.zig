@@ -276,17 +276,15 @@ pub fn SetAssociativeCacheType(
             return @bitCast(result);
         }
 
+        /// If the key is present in the set, returns the way. Otherwise returns null.
         inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?u16 {
-            var ways: u16 = search_tags(set.tags, set.tag);
-            if (ways == 0) return null;
-
-            for (0..layout.ways) |way| {
-                if (ways & 1 == 1 and self.counts.get(set.offset + way) > 0) {
-                    if (key_from_value(&set.values[way]) == key) {
-                        return @intCast(way);
-                    }
+            for (set.tags, 0..) |tag, way| {
+                if (tag == set.tag and
+                    self.counts.get(set.offset + way) > 0 and
+                    key_from_value(&set.values[way]) == key)
+                {
+                    return @intCast(way);
                 }
-                ways >>= 1;
             }
             return null;
         }
