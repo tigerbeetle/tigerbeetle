@@ -10,6 +10,9 @@ const constants = @import("../constants.zig");
 const verify = constants.verify;
 
 const stdx = @import("stdx");
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src/lsm");
+
 const div_ceil = stdx.div_ceil;
 const maybe = stdx.maybe;
 
@@ -267,17 +270,19 @@ pub fn SetAssociativeCacheType(
         }
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
-        inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?usize {
-            const ways = search_tags(set.tags, set.tag);
+        inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?u16 {
+            var ways: u16 = search_tags(set.tags, set.tag);
+            if (ways == 0) return null;
 
-            var it = BitIteratorType(Ways){ .bits = ways };
-            while (it.next()) |way| {
-                const count = self.counts.get(set.offset + way);
-                if (count > 0 and key_from_value(&set.values[way]) == key) {
-                    return way;
+            // Iterate over all ways to help the OOO execution.
+            for (0..layout.ways) |way| {
+                if (ways & 1 == 1 and self.counts.get(set.offset + way) > 0) {
+                    if (key_from_value(&set.values[way]) == key) {
+                        return @intCast(way);
+                    }
                 }
+                ways >>= 1;
             }
-
             return null;
         }
 
@@ -289,7 +294,7 @@ pub fn SetAssociativeCacheType(
             const y: @Vector(layout.ways, Tag) = @splat(tag);
 
             const result: @Vector(layout.ways, bool) = x == y;
-            return @as(*const Ways, @ptrCast(&result)).*;
+            return @bitCast(result);
         }
 
         /// Upsert a value, evicting an older entry if needed. The evicted value, if an update or
@@ -395,8 +400,8 @@ pub fn SetAssociativeCacheType(
         inline fn associate(self: *const SetAssociativeCache, key: Key) Set {
             const entropy = hash(key);
 
-            const tag = @as(Tag, @truncate(entropy >> math.log2_int(u64, self.sets)));
-            const index = entropy % self.sets;
+            const tag = @as(Tag, @truncate(entropy));
+            const index = fastrange(entropy, self.sets);
             const offset = index * layout.ways;
 
             return .{
@@ -426,6 +431,27 @@ pub fn SetAssociativeCacheType(
 }
 
 pub const UpdateOrInsert = enum { update, insert };
+
+// Fast alternative to modulo reduction (Note, it is not the same as modulo).
+// See https://github.com/lemire/fastrange/ and
+// https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+inline fn fastrange(word: u64, p: u64) u64 {
+    const lword: u128 = @intCast(word);
+    const lp: u128 = @intCast(p);
+    const ln: u128 = lword *% lp;
+    return @truncate(ln >> 64);
+}
+test fastrange {
+    var prng = stdx.PRNG.from_seed(42);
+    var distribution: [8]u32 = @splat(0);
+    for (0..10000) |_| {
+        const key = prng.int(u64);
+        distribution[fastrange(key, 8)] += 1;
+    }
+    try snap(@src(),
+        \\{ 1263, 1273, 1244, 1226, 1228, 1276, 1169, 1321 }
+    ).diff_fmt("{d}", .{distribution});
+}
 
 fn set_associative_cache_test(
     comptime Key: type,
@@ -768,37 +794,6 @@ test "PackedUnsignedIntegerArray: fuzz" {
 
         try context.run();
     }
-}
-
-fn BitIteratorType(comptime Bits: type) type {
-    return struct {
-        const BitIterator = @This();
-        const BitIndex = math.Log2Int(Bits);
-
-        bits: Bits,
-
-        /// Iterates over the bits, consuming them.
-        /// Returns the bit index of each set bit until there are no more set bits, then null.
-        inline fn next(it: *BitIterator) ?BitIndex {
-            if (it.bits == 0) return null;
-            // This @intCast() is safe since we never pass 0 to @ctz().
-            const index: BitIndex = @intCast(@ctz(it.bits));
-            // Zero the lowest set bit.
-            it.bits &= it.bits - 1;
-            return index;
-        }
-    };
-}
-
-test "BitIterator" {
-    const expectEqual = @import("std").testing.expectEqual;
-
-    var it = BitIteratorType(u16){ .bits = 0b1000_0000_0100_0101 };
-
-    for ([_]u4{ 0, 2, 6, 15 }) |e| {
-        try expectEqual(@as(?u4, e), it.next());
-    }
-    try expectEqual(it.next(), null);
 }
 
 fn search_tags_test(comptime Key: type, comptime Value: type, comptime layout: Layout) type {
