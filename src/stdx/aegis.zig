@@ -47,15 +47,22 @@ const State128L = struct {
     }
 
     inline fn update(state: *State128L, d1: AesBlock, d2: AesBlock) void {
-        const blocks = &state.blocks;
+        comptime assert(state.blocks.len == 8);
+
+        // Hoist lanes; this keeps the blocks in registers (see #3201).
+        var blocks: [8]AesBlock = state.blocks;
         const tmp = blocks[7];
-        comptime var i: usize = 7;
-        inline while (i > 0) : (i -= 1) {
+
+        inline for ([_]usize{ 7, 6, 5, 4, 3, 2, 1 }) |i| {
             blocks[i] = blocks[i - 1].encrypt(blocks[i]);
         }
+
         blocks[0] = tmp.encrypt(blocks[0]);
         blocks[0] = blocks[0].xorBlocks(d1);
         blocks[4] = blocks[4].xorBlocks(d2);
+
+        // Single spill at the end.
+        state.blocks = blocks;
     }
 
     fn absorb(state: *State128L, src: *const [32]u8) void {
