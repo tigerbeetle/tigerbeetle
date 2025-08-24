@@ -444,7 +444,7 @@ inline fn fastrange(word: u64, p: u64) u64 {
 test fastrange {
     var prng = stdx.PRNG.from_seed(42);
     var distribution: [8]u32 = @splat(0);
-    for (0..10000) |_| {
+    for (0..10_000) |_| {
         const key = prng.int(u64);
         distribution[fastrange(key, 8)] += 1;
     }
