@@ -400,7 +400,7 @@ pub fn SetAssociativeCacheType(
         inline fn associate(self: *const SetAssociativeCache, key: Key) Set {
             const entropy = hash(key);
 
-            const tag = @as(Tag, @truncate(entropy));
+            const tag: Tag = @truncate(entropy);
             const index = fastrange(entropy, self.sets);
             const offset = index * layout.ways;
 
