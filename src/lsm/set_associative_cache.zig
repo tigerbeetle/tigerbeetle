@@ -10,11 +10,10 @@ const constants = @import("../constants.zig");
 const verify = constants.verify;
 
 const stdx = @import("stdx");
-const Snap = stdx.Snap;
-const snap = Snap.snap_fn("src/lsm");
 
 const div_ceil = stdx.div_ceil;
 const maybe = stdx.maybe;
+const fastrange = stdx.fastrange;
 
 pub const Layout = struct {
     ways: u64 = 16,
@@ -271,17 +270,18 @@ pub fn SetAssociativeCacheType(
 
         /// If the key is present in the set, returns the way. Otherwise returns null.
         inline fn search(self: *const SetAssociativeCache, set: Set, key: Key) ?u16 {
-            var ways: u16 = search_tags(set.tags, set.tag);
+            const ways: u16 = search_tags(set.tags, set.tag);
             if (ways == 0) return null;
 
             // Iterate over all ways to help the OOO execution.
             for (0..layout.ways) |way| {
-                if (ways & 1 == 1 and self.counts.get(set.offset + way) > 0) {
+                if ((ways >> @as(u4, @intCast(way)) & 1) == 1 and
+                    self.counts.get(set.offset + way) > 0)
+                {
                     if (key_from_value(&set.values[way]) == key) {
                         return @intCast(way);
                     }
                 }
-                ways >>= 1;
             }
             return null;
         }
@@ -431,27 +431,6 @@ pub fn SetAssociativeCacheType(
 }
 
 pub const UpdateOrInsert = enum { update, insert };
-
-// Fast alternative to modulo reduction (Note, it is not the same as modulo).
-// See https://github.com/lemire/fastrange/ and
-// https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
-inline fn fastrange(word: u64, p: u64) u64 {
-    const lword: u128 = @intCast(word);
-    const lp: u128 = @intCast(p);
-    const ln: u128 = lword *% lp;
-    return @truncate(ln >> 64);
-}
-test fastrange {
-    var prng = stdx.PRNG.from_seed(42);
-    var distribution: [8]u32 = @splat(0);
-    for (0..10_000) |_| {
-        const key = prng.int(u64);
-        distribution[fastrange(key, 8)] += 1;
-    }
-    try snap(@src(),
-        \\{ 1263, 1273, 1244, 1226, 1228, 1276, 1169, 1321 }
-    ).diff_fmt("{d}", .{distribution});
-}
 
 fn set_associative_cache_test(
     comptime Key: type,

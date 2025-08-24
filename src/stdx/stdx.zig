@@ -1212,6 +1212,42 @@ test "ByteSize.parse_flag_value" {
     }
 }
 
+// Fast alternative to modulo reduction (Note, it is not the same as modulo).
+// See https://github.com/lemire/fastrange/ and
+// https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+pub inline fn fastrange(word: u64, p: u64) u64 {
+    const lword: u128 = @intCast(word);
+    const lp: u128 = @intCast(p);
+    const ln: u128 = lword *% lp;
+    return @truncate(ln >> 64);
+}
+
+const snap = Snap.snap_fn("src/stdx");
+
+test fastrange {
+    var prng = PRNG.from_seed(42);
+    var distribution: [8]u32 = @splat(0);
+    for (0..10_000) |_| {
+        const key = prng.int(u64);
+        distribution[fastrange(key, 8)] += 1;
+    }
+    try snap(@src(),
+        \\{ 1263, 1273, 1244, 1226, 1228, 1276, 1169, 1321 }
+    ).diff_fmt("{d}", .{distribution});
+}
+
+// This test shows that fastrange is not equivalent to modulo, but rather an alternative method.
+// It is best used uniformly distributed hashes or random numbers across the full range.
+test "fastrange not modulo" {
+    var distribution: [8]u32 = @splat(0);
+    for (0..10_000) |key| {
+        distribution[fastrange(key, 8)] += 1;
+    }
+    try snap(@src(),
+        \\{ 10000, 0, 0, 0, 0, 0, 0, 0 }
+    ).diff_fmt("{d}", .{distribution});
+}
+
 comptime {
     _ = @import("aegis.zig");
     _ = @import("bit_set.zig");
