@@ -45,6 +45,12 @@ different cloud providers (two replicas per provider). Because TigerBeetle uses
 to tolerate a complete outage of any cloud provider and will likely survive even if one extra
 replica fails.
 
+TigerBeetle detects and overcomes
+[Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
+automatically. If a replica's disk becomes slow or the network interface starts dropping packets,
+TigerBeetle automatically adjusts replication topology to ensure that the slow replica doesn't
+affect user-visible latencies, while still guaranteeing cluster-wide durability.
+
 ## Storage Fault Tolerance
 
 Traditionally, databases assume that disks do not fail, or at least fail politely with a clear error
