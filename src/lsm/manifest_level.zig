@@ -538,7 +538,7 @@ pub fn ManifestLevelType(
         }
 
         /// Returns a table which matches the given table *except possibly the snapshot_max*.
-        fn find(level: ManifestLevel, table: *const TableInfo) ?TableInfoReference {
+        pub fn find(level: ManifestLevel, table: *const TableInfo) ?TableInfoReference {
             const table_key =
                 KeyMaxSnapshotMin{ .key_max = table.key_max, .snapshot_min = table.snapshot_min };
             const table_cursor = level.tables.search(table_key.key_from_value());
