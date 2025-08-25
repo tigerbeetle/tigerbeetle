@@ -47,7 +47,7 @@ replica fails.
 
 TigerBeetle detects and overcomes
 [Gray Failure](https://www.microsoft.com/en-us/research/wp-content/uploads/2017/06/paper-1.pdf)
-automatically. If a replica's disk becomes slow or network interface starts dropping some packets,
+automatically. If a replica's disk becomes slow or the network interface starts dropping packets,
 TigerBeetle automatically adjusts replication topology to ensure that the slow replica doesn't
 affect user-visible latencies, while still guaranteeing cluster-wide durability.
 
