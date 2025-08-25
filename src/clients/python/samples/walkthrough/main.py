@@ -10,11 +10,18 @@ print("Import OK!")
 # tb.configure_logging(debug=True)
 # endsection:imports
 
-# section:client
-with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
-    # Use the client.
-    pass
-# endsection:client
+# Need to wrap in an async function for the async with to be valid Python.
+async def example_init():
+    # section:client
+    with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
+        # Use the client.
+        pass
+
+    # Alternatively:
+    async with tb.ClientAsync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
+        # Use the client, async!
+        pass
+    # endsection:client
 
 # The examples currently throws because the batch is actually invalid (most of fields are
 # undefined). Ideally, we prepare a correct batch here while keeping the syntax compact,
