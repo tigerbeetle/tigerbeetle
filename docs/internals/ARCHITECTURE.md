@@ -334,9 +334,9 @@ In the context of TigerBeetle, mechanical sympathy spans all four primary colors
 - CPU
 
 **Network** has limited bandwidth. This means that if one node in the network requires much higher
-bandwidth than the rest, the network will be underutilized. When the primary needs to replicate a
-prepare across the cluster, a ring topology is used: the primary doesn't broadcast the prepare to every
-other replica. It sends it to just one other replica, relying on that replica to forward on the prepare.
+bandwidth than the rest, the network will be underutilized. For this reason the primary doesn't
+broadcast prepares to all backups. Instead, it sends each prepare to just two backups, relying on
+the backups to forward it further.
 
 **Storage** is typically capable of sustaining several parallel IO operations and TigerBeetle tries to
 keep it saturated. For example, when compaction needs to read a table from disk it enqueues writes
@@ -578,6 +578,19 @@ the hash chain.
 these checksums are not as crucial for data validation, they provide a strong proof that the proper
 ordering of requests is observed.
 
+### Adaptive Routing
+
+As per
+[8 fallacies of distributed computing](https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing)
+network topology changes over time. For this reason, replication algorithm must dynamically adapt to
+the changes in the environment. Following the insight from
+[Performance-oriented Congestion Control](https://www.usenix.org/system/files/conference/nsdi15/nsdi15-paper-dong.pdf),
+a robust adaptive routing algorithm is based on direct observation of outcomes, rather than on
+indirect modeling. Instead of inferring topology information based on measuring individual
+ping-pong roundtrips, TigerBeetle dedicates small fraction bandwidth for running experiments,
+sending an individual prepare over a random alternative replication path. If an experimental route
+proves to be more efficient, primary changes replication path for subsequent prepares.
+
 ## Conclusion
 
 TigerBeetle is designed to deliver mission-critical safety and 1000x performance, and power the
@@ -660,3 +673,5 @@ The collection of logical and magical art behind TigerBeetle:
   history!
 
 - [Swarm Testing](https://users.cs.utah.edu/~regehr/papers/swarm12.pdf)
+
+- [PCC: Re-architecting Congestion Control for Consistent High Performance](https://www.usenix.org/system/files/conference/nsdi15/nsdi15-paper-dong.pdf)
