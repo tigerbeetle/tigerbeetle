@@ -155,12 +155,6 @@ class Client:
             c_event_type=c_event_type,
             c_result_type=c_result_type)
 
-    def close(self) -> None:
-        bindings.tb_client_deinit(ctypes.byref(self._client))
-        tb_assert(self._client is not None)
-        tb_assert(len(self._inflight_packets) == 0)
-        del Client._clients[self._client_key]
-
     @staticmethod
     @bindings.OnCompletion  # type: ignore[misc]
     def _c_on_completion(completion_ctx: int, packet: Any, timestamp: int, bytes_ptr: Any, len_: int) -> None:
@@ -200,12 +194,6 @@ class Client:
 
         inflight_packet.on_completion(inflight_packet)
 
-    def __enter__(self) -> Self:
-        return self
-
-    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
-        self.close()
-
 
 class ClientSync(Client, bindings.StateMachineMixin):
     def _on_completion(self, inflight_packet: InflightPacket) -> None:
@@ -234,6 +222,19 @@ class ClientSync(Client, bindings.StateMachineMixin):
             raise inflight_packet.response
 
         return inflight_packet.response
+
+    def close(self) -> None:
+        tb_assert(self._client is not None)
+        bindings.tb_client_deinit(ctypes.byref(self._client))
+
+        tb_assert(len(self._inflight_packets) == 0)
+        del Client._clients[self._client_key]
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
 
 
 class ClientAsync(Client, bindings.AsyncStateMachineMixin):
@@ -279,6 +280,32 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
             raise inflight_packet.response
 
         return inflight_packet.response
+
+    async def close(self) -> None:
+        tb_assert(self._client is not None)
+        bindings.tb_client_deinit(ctypes.byref(self._client))
+
+        # tb_client_deinit internally clears any inflight requests, and calls their callbacks, so
+        # the client needs to stick around until that's done.
+        #
+        # This isn't a problem for ClientSync, but ClientAsync invokes the callbacks using
+        # call_soon_threadsafe(), so wait for the event to fire on all pending packets.
+        all_events = []
+        for packet in self._inflight_packets.values():
+            if not isinstance(packet.on_completion_context, CompletionContextAsync):
+                raise AssertionError()
+            all_events.append(packet.on_completion_context.event.wait())
+
+        await asyncio.gather(*all_events)
+
+        tb_assert(len(self._inflight_packets) == 0)
+        del Client._clients[self._client_key]
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
 
 
 @bindings.LogHandler  # type: ignore[misc]

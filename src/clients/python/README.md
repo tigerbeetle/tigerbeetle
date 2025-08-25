@@ -75,6 +75,11 @@ environment variable and defaults to port `3000`.
 with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
     # Use the client.
     pass
+
+# Alternatively:
+async with tb.ClientAsync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
+    # Use the client, async!
+    pass
 ```
 
 The following are valid addresses:
