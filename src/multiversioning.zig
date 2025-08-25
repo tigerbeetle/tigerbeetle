@@ -1305,23 +1305,55 @@ pub const Multiversion = struct {
                 );
                 const cmd_line_w = get_command_line_w();
 
-                var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
-                lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
-
                 var lp_process_information: std.os.windows.PROCESS_INFORMATION = undefined;
 
                 // Close the handle before trying to execute.
                 posix.close(self.target_fd);
 
-                // If bInheritHandles is FALSE, and dwFlags inside STARTUPINFOW doesn't have
-                // STARTF_USESTDHANDLES set, the stdin/stdout/stderr handles of the parent will
-                // be passed through to the child.
+                // Pass a pipe to the child to let them know when we will have exited.
+                // See `wait_for_parent_to_exit`.
+                var pipe_read: std.os.windows.HANDLE = undefined;
+                var pipe_write: std.os.windows.HANDLE = undefined;
+                try std.os.windows.CreatePipe(&pipe_read, &pipe_write, &.{
+                    .nLength = @sizeOf(std.os.windows.SECURITY_ATTRIBUTES),
+                    .lpSecurityDescriptor = null,
+                    .bInheritHandle = std.os.windows.TRUE,
+                });
+                errdefer std.os.windows.CloseHandle(pipe_read);
+                errdefer std.os.windows.CloseHandle(pipe_write);
+
+                try std.os.windows.SetHandleInformation(
+                    pipe_write,
+                    std.os.windows.HANDLE_FLAG_INHERIT,
+                    std.os.windows.FALSE,
+                );
+
+                var pipe_buffer: [32]u16 = undefined;
+                const pipe_read_w = pipe_print(&pipe_buffer, pipe_read);
+
+                assert(
+                    std.os.windows.kernel32.SetEnvironmentVariableW(
+                        TB_MULTIVERSION_PIPE,
+                        pipe_read_w,
+                    ) != 0,
+                );
+
+                var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
+                lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
+                lp_startup_info.dwFlags |= std.os.windows.STARTF_USESTDHANDLES;
+                lp_startup_info.hStdInput =
+                    try std.os.windows.GetStdHandle(std.os.windows.STD_INPUT_HANDLE);
+                lp_startup_info.hStdOutput =
+                    try std.os.windows.GetStdHandle(std.os.windows.STD_OUTPUT_HANDLE);
+                lp_startup_info.hStdError =
+                    try std.os.windows.GetStdHandle(std.os.windows.STD_ERROR_HANDLE);
+
                 std.os.windows.CreateProcessW(
                     target_path_w,
                     cmd_line_w,
                     null,
                     null,
-                    std.os.windows.FALSE,
+                    std.os.windows.TRUE, // bInheritHandles
                     std.os.windows.CREATE_UNICODE_ENVIRONMENT,
                     null,
                     null,
@@ -1384,6 +1416,71 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
         // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
         return try allocator.dupeZ(u8, native_self_exe_path);
     }
+}
+
+pub fn pipe_print(buffer: *[32]u16, pipe: std.os.windows.HANDLE) [:0]const u16 {
+    var buffer_utf8: [31]u8 = undefined;
+    const pipe_utf8 = stdx.array_print(31, &buffer_utf8, "{d}", .{@intFromPtr(pipe)});
+
+    var fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(buffer));
+    return std.unicode.utf8ToUtf16LeAllocZ(fba.allocator(), pipe_utf8) catch |err| switch (err) {
+        error.InvalidUtf8, error.OutOfMemory => unreachable,
+    };
+}
+
+pub fn pipe_parse(buffer: []const u16) !std.os.windows.HANDLE {
+    var utf8_buffer: [31]u8 = undefined;
+    const ut8_size = try std.unicode.utf16LeToUtf8(&utf8_buffer, buffer);
+    const pipe_usize = try std.fmt.parseInt(usize, utf8_buffer[0..ut8_size], 10);
+    const pipe: std.os.windows.HANDLE = @ptrFromInt(pipe_usize);
+    return pipe;
+}
+
+test pipe_parse {
+    const T = struct {
+        fn check(pipe: usize) !void {
+            const handle: std.os.windows.HANDLE = @ptrFromInt(pipe);
+            var buffer: [32]u16 = undefined;
+            try std.testing.expectEqual(
+                pipe,
+                @intFromPtr(try pipe_parse(pipe_print(&buffer, handle))),
+            );
+        }
+    };
+
+    try T.check(1);
+    try T.check(92);
+    try T.check(std.math.maxInt(usize));
+}
+
+// During upgrades, tigerbeetle dynamically re-executed itself at a different version.
+// There can be only one tigerbeetle instance running at a time, due to any of:
+// - data file lock,
+// - incoming port,
+// - available RAM.
+// On POSIX, execve semantics of replacing the parent process gives us this for free.
+// On Windows, parent and child cooperate, with the child blocking until the parent exit.
+// Blocking is achieved by passing down an anonymous pipe, a-la
+// <https://matklad.github.io/2023/10/11/unix-structured-concurrency.html>
+const TB_MULTIVERSION_PIPE = std.unicode.utf8ToUtf16LeStringLiteral("TB_MULTIVERSION_PIPE");
+pub fn wait_for_parent_to_exit() !void {
+    comptime assert(builtin.os.tag == .windows);
+
+    var buffer: [32]u16 = undefined;
+    const count = std.os.windows.kernel32.GetEnvironmentVariableW(
+        TB_MULTIVERSION_PIPE,
+        &buffer,
+        buffer.len,
+    );
+    if (count == 0) return;
+    assert(count <= 31); // Sic, trailing null not included in count.
+
+    const pipe: std.os.windows.HANDLE = try pipe_parse(buffer[0..count]);
+    defer std.os.windows.CloseHandle(pipe);
+
+    var read_buffer: [32]u8 = undefined;
+    const size = try std.os.windows.ReadFile(pipe, &read_buffer, null);
+    assert(size == 0);
 }
 
 const HeaderBodyOffsets = struct {

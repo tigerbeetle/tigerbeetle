@@ -62,6 +62,8 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main() !void {
+    if (builtin.os.tag == .windows) try vsr.multiversioning.wait_for_parent_to_exit();
+
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
 
@@ -612,22 +614,6 @@ fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
             release,
         });
         @panic("release not available");
-    }
-
-    if (builtin.os.tag == .windows) {
-        // Unlike on Linux / macOS which use `execve{at,z}` for multiversion binaries,
-        // Windows has to use CreateProcess. This is a problem, because it's a race between
-        // the parent process exiting and the new process starting. Work around this by
-        // deinit'ing Replica and storage before continuing.
-        // We don't need to clean up all resources here, since the process will be terminated
-        // in any case; only the resources that would block a new process from starting up.
-        const storage = replica.superblock.storage;
-        const fd = storage.fd;
-        replica.deinit(replica.static_allocator.parent_allocator);
-        storage.deinit();
-
-        // FD is managed by Command, normally. Shut it down explicitly.
-        std.posix.close(fd);
     }
 
     // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading
