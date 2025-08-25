@@ -580,16 +580,16 @@ ordering of requests is observed.
 
 ### Adaptive Routing
 
-As per
-[8 fallacies of distributed computing](https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing)
-network topology changes over time. For this reason, replication algorithm must dynamically adapt to
-the changes in the environment. Following the insight from
-[Performance-oriented Congestion Control](https://www.usenix.org/system/files/conference/nsdi15/nsdi15-paper-dong.pdf),
+As per the
+[8 Fallacies of Distributed Computing](https://en.wikipedia.org/wiki/Fallacies_of_distributed_computing)
+the network topology may change over time. Therefore, replication must dynamically adapt to
+changes in the environment. Following the insight from
+[Performance-Oriented Congestion Control](https://www.usenix.org/system/files/conference/nsdi15/nsdi15-paper-dong.pdf),
 a robust adaptive routing algorithm is based on direct observation of outcomes, rather than on
 indirect modeling. Instead of inferring topology information based on measuring individual
-ping-pong roundtrips, TigerBeetle dedicates small fraction bandwidth for running experiments,
+ping-pong roundtrips, TigerBeetle dedicates a fraction of bandwidth for running experiments,
 sending an individual prepare over a random alternative replication path. If an experimental route
-proves to be more efficient, primary changes replication path for subsequent prepares.
+proves more efficient, the primary changes the replication path for subsequent prepares.
 
 ## Conclusion
 
