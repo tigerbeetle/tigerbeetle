@@ -22,7 +22,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         defer shell.cwd.deleteTree(vortex_out_dir) catch {};
         try shell.exec(
             "{vortex_bin} " ++
-                "run --driver-command={driver_command} " ++
+                "supervisor --driver-command={driver_command} " ++
                 "--tigerbeetle-executable={tigerbeetle_bin} " ++
                 "--output-directory={vortex_out_dir} " ++
                 "--replica-count=1 " ++
