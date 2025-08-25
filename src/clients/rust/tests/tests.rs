@@ -81,6 +81,10 @@ fn test_client() -> anyhow::Result<tb::Client> {
     Ok(client)
 }
 
+fn assert_send<T: Send>(t: T) -> T {
+    t
+}
+
 const TEST_LEDGER: u32 = 10;
 const TEST_CODE: u16 = 20;
 
@@ -97,40 +101,39 @@ fn smoke() -> anyhow::Result<()> {
         let client = test_client()?;
 
         {
-            let result = client
-                .create_accounts(&[
-                    tb::Account {
-                        id: account_id1,
-                        debits_pending: 0,
-                        debits_posted: 0,
-                        credits_pending: 0,
-                        credits_posted: 0,
-                        user_data_128: 0,
-                        user_data_64: 0,
-                        user_data_32: 0,
-                        reserved: tb::Reserved::default(),
-                        ledger: TEST_LEDGER,
-                        code: TEST_CODE,
-                        flags: tb::AccountFlags::History,
-                        timestamp: 0,
-                    },
-                    tb::Account {
-                        id: account_id2,
-                        debits_pending: 0,
-                        debits_posted: 0,
-                        credits_pending: 0,
-                        credits_posted: 0,
-                        user_data_128: account_id2_user_data_128,
-                        user_data_64: 0,
-                        user_data_32: 0,
-                        reserved: tb::Reserved::default(),
-                        ledger: TEST_LEDGER,
-                        code: TEST_CODE,
-                        flags: tb::AccountFlags::History,
-                        timestamp: 0,
-                    },
-                ])
-                .await?;
+            let fut = client.create_accounts(&[
+                tb::Account {
+                    id: account_id1,
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: 0,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+                tb::Account {
+                    id: account_id2,
+                    debits_pending: 0,
+                    debits_posted: 0,
+                    credits_pending: 0,
+                    credits_posted: 0,
+                    user_data_128: account_id2_user_data_128,
+                    user_data_64: 0,
+                    user_data_32: 0,
+                    reserved: tb::Reserved::default(),
+                    ledger: TEST_LEDGER,
+                    code: TEST_CODE,
+                    flags: tb::AccountFlags::History,
+                    timestamp: 0,
+                },
+            ]);
+            let result = assert_send(fut).await?;
 
             assert_eq!(result.len(), 0);
         }
