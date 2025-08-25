@@ -358,6 +358,9 @@ pub fn ReplicaType(
         /// Invariants:
         /// - If syncing≠idle then sync_tables=null.
         sync_tables: ?ForestTableIterator = null,
+        /// Invariants:
+        /// - sync_tables_op_range=null ↔ sync_tables=null.
+        sync_tables_op_range: ?struct { min: u64, max: u64 } = null,
         /// Tracks wal repair progress to decide when to switch to state sync.
         /// Updated on repair_sync_timeout.
         sync_wal_repair_progress: struct {
@@ -904,6 +907,12 @@ pub fn ReplicaType(
                     self.superblock.working.vsr_state.sync_op_min,
                     self.superblock.working.vsr_state.sync_op_max,
                 });
+
+                self.sync_tables = .{};
+                self.sync_tables_op_range = .{
+                    .min = self.superblock.working.vsr_state.sync_op_min,
+                    .max = self.superblock.working.vsr_state.sync_op_max,
+                };
             }
 
             // Asynchronously open the free set and then the (Forest inside) StateMachine so that we
@@ -932,9 +941,7 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
-            assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
-
+            assert(!self.grid.blocks_missing.repairing_tables());
             assert(std.meta.eql(
                 grid.free_set_checkpoint_blocks_acquired.checkpoint_reference(),
                 self.superblock.working.free_set_reference(.blocks_acquired),
@@ -959,8 +966,7 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
-            assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
+            assert(!self.grid.blocks_missing.repairing_tables());
             assert(self.client_sessions.entries_present.empty());
             assert(std.meta.eql(
                 self.client_sessions_checkpoint.checkpoint_reference(),
@@ -1010,8 +1016,7 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.commit_stage == .idle);
             assert(self.syncing == .idle);
-            assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
+            assert(!self.grid.blocks_missing.repairing_tables());
             self.assert_free_set_consistent();
 
             log.debug("{}: state_machine_open_callback: sync_ops={}..{}", .{
@@ -1024,9 +1029,7 @@ pub fn ReplicaType(
             if (self.event_callback) |hook| hook(self, .state_machine_opened);
 
             self.grid_scrubber.open(&self.prng);
-            if (self.superblock.working.vsr_state.sync_op_max > 0) {
-                self.sync_content();
-            }
+            if (self.sync_tables) |_| self.sync_content();
 
             if (self.solo()) {
                 if (self.commit_min < self.op) {
@@ -1504,6 +1507,7 @@ pub fn ReplicaType(
         pub fn invariants(self: *const Replica) void {
             assert(self.journal.header_with_op(self.op) != null);
             assert(self.view == self.routing.view);
+            assert((self.sync_tables == null) == (self.sync_tables_op_range == null));
         }
 
         /// Time is measured in logical ticks that are incremented on every call to tick().
@@ -1520,7 +1524,8 @@ pub fn ReplicaType(
             if (self.message_bus.resume_needed()) {
                 // See fn suspend_message conditions.
                 assert(self.journal.writes.available() == 0 or
-                    self.grid_repair_writes.available() == 0);
+                    self.grid_repair_writes.available() == 0 or
+                    self.syncing == .updating_checkpoint);
             }
 
             // TODO Replica owns Time; should it tick() here instead of Clock?
@@ -1636,14 +1641,18 @@ pub fn ReplicaType(
                     });
                     return true;
                 },
-                .block => |header_block| if (self.grid_repair_writes.available() == 0) {
-                    log.warn("{}: on_messages: suspending command=block " ++
-                        "address={} checksum={}", .{
-                        self.log_prefix(),
-                        header_block.address,
-                        header_block.checksum,
-                    });
-                    return true;
+                .block => |header_block| {
+                    if (self.grid_repair_writes.available() == 0 or
+                        self.syncing == .updating_checkpoint)
+                    {
+                        log.warn("{}: on_messages: suspending command=block " ++
+                            "address={} checksum={}", .{
+                            self.log_prefix(),
+                            header_block.address,
+                            header_block.checksum,
+                        });
+                        return true;
+                    }
                 },
                 else => {},
             }
@@ -10057,8 +10066,6 @@ pub fn ReplicaType(
                 self.superblock.staging.checkpoint_id(),
             });
 
-            self.sync_tables = null;
-
             // Abort grid operations.
             // Wait for non-grid operations to finish.
             switch (self.commit_stage) {
@@ -10086,6 +10093,7 @@ pub fn ReplicaType(
         /// sync_dispatch() is called between every sync-state transition.
         fn sync_dispatch(self: *Replica, state_new: SyncStage) void {
             assert(!self.solo());
+            assert((self.sync_tables == null) == (self.sync_tables_op_range == null));
             assert(SyncStage.valid_transition(self.syncing, state_new));
             if (self.op < self.commit_min) assert(self.status == .recovering_head);
 
@@ -10105,9 +10113,9 @@ pub fn ReplicaType(
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
                     self.grid.cancel(sync_cancel_grid_callback);
-                    self.sync_reclaim_tables();
+                    self.grid.blocks_missing.sync_commence();
 
-                    assert(self.grid_repair_tables.executing() == 0);
+                    assert(!self.grid.blocks_missing.repairing_tables());
                     assert(self.grid.read_global_queue.empty());
                 },
                 .updating_checkpoint => self.sync_superblock_update_start(),
@@ -10118,9 +10126,7 @@ pub fn ReplicaType(
             const self: *Replica = @alignCast(@fieldParentPtr("grid", grid));
             assert(self.syncing == .canceling_grid);
             assert(self.sync_start_view != null);
-            assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
-            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
+            assert(!self.grid.blocks_missing.repairing_blocks());
             assert(self.grid.read_queue.empty());
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
@@ -10163,13 +10169,11 @@ pub fn ReplicaType(
             assert(self.syncing == .updating_checkpoint);
             assert(self.superblock.working.vsr_state.checkpoint.header.op <
                 self.syncing.updating_checkpoint.header.op);
-            assert(self.sync_tables == null);
             assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
-            assert(self.grid_repair_tables.executing() == 0);
+            assert(!self.grid.blocks_missing.repairing_blocks());
             assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             maybe(self.state_machine_opened);
             maybe(self.view_durable_updating());
 
@@ -10188,16 +10192,42 @@ pub fn ReplicaType(
             while (self.client_replies.faulty.first_set()) |slot| {
                 self.client_replies.faulty.unset(slot);
             }
+
+            const sync_op_max =
+                vsr.Checkpoint.trigger_for_checkpoint(self.syncing.updating_checkpoint.header.op).?;
+
+            assert((self.sync_tables == null) == (self.sync_tables_op_range == null));
+            if (self.sync_tables_op_range) |op_range| {
+                // We were already syncing tables.
+                // We continue syncing the prior range until its done, to avoid redoing work.
+                assert(op_range.min >= self.superblock.working.vsr_state.sync_op_min);
+                assert(op_range.max < sync_op_max);
+            } else {
+                // Even though we didn't have a table sync in progress, there still may be a state
+                // sync that has not been marked complete. Thus, to avoid needing to re-sync any
+                // ops, we set the table sync range now, rather than after writing the superblock.
+                maybe(self.superblock.working.vsr_state.sync_op_max > 0);
+
+                self.sync_tables = .{};
+                self.sync_tables_op_range = .{
+                    .min = min: {
+                        if (vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint())) |trigger| {
+                            break :min trigger + 1;
+                        } else {
+                            break :min 0;
+                        }
+                    },
+                    .max = sync_op_max,
+                };
+            }
         }
 
         fn sync_superblock_update_finish(self: *Replica) void {
-            assert(self.sync_tables == null);
             assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
             assert(self.grid.write_queue.empty());
-            assert(self.grid_repair_tables.executing() == 0);
+            assert(!self.grid.blocks_missing.repairing_blocks());
             assert(self.grid_repair_writes.executing() == 0);
-            assert(self.grid.blocks_missing.faulty_blocks.count() == 0);
             assert(self.syncing == .updating_checkpoint);
             assert(!self.state_machine_opened);
             assert(self.release.value <=
@@ -10252,22 +10282,27 @@ pub fn ReplicaType(
             // checkpoint header and the Journal.
             assert(self.op >= self.op_checkpoint());
 
-            // We just replaced our superblock, so any outstanding request_prepares are probably not
-            // useful, and we are likely to need to repair soon (and quickly) in order to start
-            // committing again.
+            // We just replaced our superblock, so many outstanding request_prepares/request_blocks
+            // are probably not useful, and we are likely to need to repair soon (and quickly) in
+            // order to start committing again.
             self.journal_repair_message_budget.refill();
+            self.grid_repair_message_budget.refill();
 
             if (self.journal_repair_budget_timeout.ticking) {
                 self.journal_repair_budget_timeout.reset();
             }
+            self.grid_repair_budget_timeout.reset();
 
-            log.info("{}: sync: ops={}..{}", .{
+            log.info("{}: sync: ops={}..{}/{}..{}", .{
                 self.log_prefix(),
+                self.sync_tables_op_range.?.min,
+                self.sync_tables_op_range.?.max,
                 self.superblock.working.vsr_state.sync_op_min,
                 self.superblock.working.vsr_state.sync_op_max,
             });
 
             self.grid.open(grid_open_callback);
+            self.message_bus.resume_receive();
             assert(self.op <= self.op_prepare_max());
         }
 
@@ -10282,16 +10317,21 @@ pub fn ReplicaType(
             assert(self.syncing == .idle);
             assert(self.state_machine_opened);
             assert(self.superblock.working.vsr_state.sync_op_max > 0);
-            assert(self.sync_tables == null);
-            assert(self.grid_repair_tables.executing() == 0);
+            assert(self.sync_tables != null);
+            assert(self.sync_tables_op_range != null);
+            assert(!self.grid.blocks_missing.repairing_tables());
+            maybe(self.grid_repair_tables.executing() == 0);
 
             {
                 // Log an approximation of how much sync work there is to do.
                 // Note that this isn't completely accurate:
                 // - It doesn't consider that tables might be added/removed by local compaction.
+                // - It counts tables already synced in the current sync_tables_op_range.
                 const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
-                const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
                 const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
+                const sync_op_min = self.sync_tables_op_range.?.min;
+                assert(sync_op_min >= self.superblock.working.vsr_state.sync_op_min);
+
                 var tables = ForestTableIterator{};
                 var table_count: u32 = 0;
                 var table_count_by_level: [constants.lsm_levels]u32 = @splat(0);
@@ -10309,9 +10349,21 @@ pub fn ReplicaType(
                 );
             }
 
-            self.sync_tables = .{};
-            if (self.grid_repair_tables.available() > 0) {
-                self.sync_enqueue_tables();
+            if (self.grid.blocks_missing.state == .syncing) {
+                // Cancel sync for any tables that don't belong in this new checkpoint.
+                var repair_tables = self.grid_repair_tables.iterate();
+                while (repair_tables.next()) |table| {
+                    if (!self.state_machine.forest.contains_table(&table.table_info)) {
+                        self.grid.blocks_missing.sync_table_cancel(table);
+                    }
+                }
+                self.grid.blocks_missing.sync_complete(&self.grid.free_set);
+                self.sync_reclaim_tables();
+            } else {
+                // We are starting table-sync right out of recovery.
+                assert(self.grid_repair_tables.executing() == 0);
+                assert(self.sync_tables_op_range.?.max ==
+                    self.superblock.working.vsr_state.sync_op_max);
             }
             // Client replies are synced in lockstep with client sessions in
             // `client_sessions_open_callback`.
@@ -10352,13 +10404,17 @@ pub fn ReplicaType(
         fn sync_enqueue_tables(self: *Replica) void {
             assert(self.syncing == .idle);
             assert(self.sync_tables != null);
+            assert(self.sync_tables_op_range != null);
             assert(self.state_machine_opened);
             assert(self.superblock.working.vsr_state.sync_op_max > 0);
             assert(self.grid_repair_tables.available() > 0);
 
             const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
-            const sync_op_min = self.superblock.working.vsr_state.sync_op_min;
-            const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
+            const sync_op_max_next = self.superblock.working.vsr_state.sync_op_max;
+            const sync_op_max = self.sync_tables_op_range.?.max;
+            const sync_op_min = self.sync_tables_op_range.?.min;
+            assert(sync_op_min >= self.superblock.working.vsr_state.sync_op_min);
+
             while (self.sync_tables.?.next(&self.state_machine.forest)) |table_info| {
                 assert(self.grid_repair_tables.available() > 0);
                 assert(table_info.label.event == .reserved);
@@ -10399,10 +10455,15 @@ pub fn ReplicaType(
                     if (self.grid_repair_tables.available() == 0) break;
                 } else {
                     if (Forest.Storage == TestStorage) {
-                        self.superblock.storage.verify_table(
-                            table_info.address,
-                            table_info.checksum,
-                        );
+                        // Verify that we already have any table that is not within the sync range.
+                        if (table_info.snapshot_min < snapshot_from_commit(sync_op_min) or
+                            table_info.snapshot_min > snapshot_from_commit(sync_op_max_next))
+                        {
+                            self.superblock.storage.verify_table(
+                                table_info.address,
+                                table_info.checksum,
+                            );
+                        }
                     }
                 }
             }
@@ -10410,23 +10471,41 @@ pub fn ReplicaType(
             if (self.grid_repair_tables.executing() == 0) {
                 assert(self.sync_tables.?.next(&self.state_machine.forest) == null);
 
-                log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{})", .{
+                log.info("{}: sync_enqueue_tables: all tables synced (commit={}..{}/{})", .{
                     self.log_prefix(),
                     sync_op_min,
                     sync_op_max,
+                    self.superblock.working.vsr_state.sync_op_max,
                 });
 
-                self.sync_tables = null;
+                assert(sync_op_max <= self.superblock.working.vsr_state.sync_op_max);
+                if (sync_op_max < self.superblock.working.vsr_state.sync_op_max) {
+                    // We completed a previous state sync, but have since replaced our superblock
+                    // again, so there is still more table sync to be done.
+                    self.sync_tables = .{};
+                    self.sync_tables_op_range = .{
+                        .min = self.sync_tables_op_range.?.max + 1,
+                        .max = self.superblock.working.vsr_state.sync_op_max,
+                    };
+                    self.sync_enqueue_tables(); // Recursion depth never exceeds one.
+                } else {
+                    self.sync_tables = null;
+                    self.sync_tables_op_range = null;
 
-                // Send prepare_oks that may have been withheld by virtue of `op_prepare_ok_max`.
-                self.send_prepare_oks_after_syncing_tables();
+                    // Send prepare_oks that may have been withheld by virtue of
+                    // `op_prepare_ok_max`.
+                    self.send_prepare_oks_after_syncing_tables();
+                }
             }
         }
 
         fn sync_reclaim_tables(self: *Replica) void {
+            assert((self.sync_tables == null) == (self.sync_tables_op_range == null));
+
             while (self.grid.blocks_missing.reclaim_table()) |table| {
                 log.info(
-                    "{}: sync_reclaim_tables: table synced: address={} checksum={} wrote={}/{?}",
+                    "{}: sync_reclaim_tables: table synced or canceled: " ++
+                        "address={} checksum={} wrote={}/{?}",
                     .{
                         self.log_prefix(),
                         table.index_address,
@@ -10443,8 +10522,10 @@ pub fn ReplicaType(
             }
             assert(self.grid_repair_tables.available() <= constants.grid_missing_tables_max);
 
-            if (self.sync_tables) |_| {
-                assert(self.syncing == .idle);
+            if (self.syncing == .idle and
+                self.state_machine_opened and
+                self.sync_tables != null)
+            {
                 assert(self.grid.callback != .cancel);
 
                 if (self.grid_repair_tables.available() > 0) {
