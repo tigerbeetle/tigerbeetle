@@ -5,8 +5,8 @@ const log = std.log.scoped(.validate);
 const assert = std.debug.assert;
 
 const file_size_max = 166 * 1024;
-const search_index_size_max = 970 * 1024;
-const single_page_size_max = 970 * 1024;
+const search_index_size_max = 1024 * 1024;
+const single_page_size_max = 1024 * 1024;
 
 // If this is set to true, we check if we get a 200 response for any external links.
 const check_links_external: bool = false;
