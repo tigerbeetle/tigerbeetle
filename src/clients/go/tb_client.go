@@ -2,11 +2,11 @@ package tigerbeetle_go
 
 /*
 #cgo CFLAGS: -g -Wall
-#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/pkg/native/aarch64-macos/libtb_client.a -ldl -lm
-#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-macos/libtb_client.a -ldl -lm
-#cgo linux,arm64 LDFLAGS: ${SRCDIR}/pkg/native/aarch64-linux/libtb_client.a -ldl -lm
-#cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/native/x86_64-linux/libtb_client.a -ldl -lm
-#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/pkg/native/x86_64-windows -ltb_client -lws2_32 -lntdll
+#cgo darwin,arm64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_aarch64-macos.a -ldl -lm
+#cgo darwin,amd64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_x86_64-macos.a -ldl -lm
+#cgo linux,arm64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_aarch64-linux.a -ldl -lm
+#cgo linux,amd64 LDFLAGS: ${SRCDIR}/pkg/native/libtb_client_x86_64-linux.a -ldl -lm
+#cgo windows,amd64 LDFLAGS: -L${SRCDIR}/pkg/native -ltb_client_x86_64-windows -lws2_32 -lntdll
 
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +34,7 @@ import (
 	"unsafe"
 
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/errors"
+	_ "github.com/tigerbeetle/tigerbeetle-go/pkg/native"
 	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
