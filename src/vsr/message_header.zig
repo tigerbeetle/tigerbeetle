@@ -197,22 +197,17 @@ pub const Header = extern struct {
     pub fn peer_type(self: *const Header) vsr.Peer {
         switch (self.into_any()) {
             .reserved => unreachable,
-            // TODO: replicas used to forward requests. They no longer do, and can always return
-            // request.client starting with the next release.
-            .request => |request| {
-                switch (request.operation) {
-                    // However, we do not forward the first .register request sent by a client:
-                    .register => return .{ .client = request.client },
-                    else => return .unknown,
-                }
-            },
-            .prepare => return .unknown,
-            .block => return .unknown,
-            .reply => return .unknown,
-            .deprecated_12 => return .unknown,
-            .deprecated_21 => return .unknown,
-            .deprecated_22 => return .unknown,
-            .deprecated_23 => return .unknown,
+
+            .request,
+            .reply,
+            .prepare,
+            .block,
+            .deprecated_12,
+            .deprecated_21,
+            .deprecated_22,
+            .deprecated_23,
+            => return .unknown,
+
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
             // All other messages identify the peer as a replica:
