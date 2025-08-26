@@ -5,6 +5,7 @@ const Query = std.Target.Query;
 const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
+const stdx = @import("./src/stdx/stdx.zig");
 
 const VoprStateMachine = enum { testing, accounting };
 const VoprLog = enum { short, full };
@@ -1266,7 +1267,7 @@ fn build_go_client(
         // We don't need the linux-gnu builds.
         if (comptime std.mem.indexOf(u8, platform[0], "linux-gnu") != null) continue;
 
-        const name = if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-musl"))
+        const platform_name = if (comptime std.mem.eql(u8, platform[0], "x86_64-linux-musl"))
             "x86_64-linux"
         else if (comptime std.mem.eql(u8, platform[0], "aarch64-linux-musl"))
             "aarch64-linux"
@@ -1274,7 +1275,7 @@ fn build_go_client(
             platform[0];
 
         const query = Query.parse(.{
-            .arch_os_abi = name,
+            .arch_os_abi = platform_name,
             .cpu_features = platform[2],
         }) catch unreachable;
         const resolved_target = b.resolveTargetQuery(query);
@@ -1298,10 +1299,20 @@ fn build_go_client(
         lib.bundle_compiler_rt = true;
         lib.step.dependOn(&bindings.step);
 
+        assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
+        const file_name: []const u8, const extension: []const u8 = stdx.cut(
+            lib.out_lib_filename,
+            ".",
+        ).?;
+
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         step_clients_go.dependOn(&b.addInstallFile(
             lib.getEmittedBin(),
-            b.pathJoin(&.{ "../src/clients/go/pkg/native/", name, lib.out_filename }),
+            std.fmt.allocPrint(b.allocator, "../src/clients/go/pkg/native/{s}_{s}.{s}", .{
+                file_name,
+                platform_name,
+                extension,
+            }) catch @panic("OOM"),
         ).step);
     }
 }

@@ -8,8 +8,5 @@ zigcc*
 main
 main.exe
 
-pkg/native/aarch64-linux/
-pkg/native/aarch64-macos/
-pkg/native/x86_64-linux/
-pkg/native/x86_64-macos/
-pkg/native/x86_64-windows/
+pkg/native/*.a
+pkg/native/*.lib
