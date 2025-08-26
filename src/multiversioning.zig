@@ -1296,14 +1296,7 @@ pub const Multiversion = struct {
                 // That said, with how CreateProcessW is called, this should _never_ happen, since
                 // its both provided a full lpApplicationName, and because GetCommandLineW actually
                 // points to a copy of memory from the PEB.
-                const get_command_line_w = @extern(
-                    *const fn () callconv(.C) std.os.windows.LPWSTR,
-                    .{
-                        .library_name = "kernel32",
-                        .name = "GetCommandLineW",
-                    },
-                );
-                const cmd_line_w = get_command_line_w();
+                const cmd_line_w = stdx.windows.GetCommandLineW();
 
                 var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
                 lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);

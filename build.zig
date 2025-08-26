@@ -1688,28 +1688,20 @@ fn strip_root_module(root_module: *std.Build.Module) void {
 fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     comptime assert(builtin.os.tag == .windows);
 
-    // Declaring the function with an alternative name because `CamelCase` functions are
-    // by convention, used for building generic types.
-    const set_dll_directory = @extern(
-        *const fn (path: [*:0]const u8) callconv(.C) std.os.windows.BOOL,
-        .{
-            .library_name = "kernel32",
-            .name = "SetDllDirectoryA",
-        },
-    );
-
     const java_bin_path = std.fs.path.joinZ(
         allocator,
         &.{ java_home, "\\bin" },
     ) catch unreachable;
-    _ = set_dll_directory(java_bin_path);
+    _ = SetDllDirectoryA(java_bin_path);
 
     const java_bin_server_path = std.fs.path.joinZ(
         allocator,
         &.{ java_home, "\\bin\\server" },
     ) catch unreachable;
-    _ = set_dll_directory(java_bin_server_path);
+    _ = SetDllDirectoryA(java_bin_server_path);
 }
+
+extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
 
 fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool) *std.Build.Step {
     const PrintStep = struct {

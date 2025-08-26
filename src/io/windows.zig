@@ -1,4 +1,5 @@
 const std = @import("std");
+const stdx = @import("stdx");
 const os = std.os;
 const posix = std.posix;
 const assert = std.debug.assert;
@@ -1345,37 +1346,16 @@ pub const IO = struct {
         // TODO: Look into using SetFileIoOverlappedRange() for better unbuffered async IO perf
         // NOTE: Requires SeLockMemoryPrivilege.
 
-        const kernel32 = struct {
-            const LOCKFILE_EXCLUSIVE_LOCK = 0x2;
-            const LOCKFILE_FAIL_IMMEDIATELY = 0x1;
-
-            // Declaring the function with an alternative name because `CamelCase` functions are
-            // by convention, used for building generic types.
-            const lock_file_ex = @extern(
-                *const fn (
-                    hFile: os.windows.HANDLE,
-                    dwFlags: os.windows.DWORD,
-                    dwReserved: os.windows.DWORD,
-                    nNumberOfBytesToLockLow: os.windows.DWORD,
-                    nNumberOfBytesToLockHigh: os.windows.DWORD,
-                    lpOverlapped: ?*os.windows.OVERLAPPED,
-                ) callconv(os.windows.WINAPI) os.windows.BOOL,
-                .{
-                    .library_name = "kernel32",
-                    .name = "LockFileEx",
-                },
-            );
-        };
         // hEvent = null
         // Offset & OffsetHigh = 0
         var lock_overlapped = std.mem.zeroes(os.windows.OVERLAPPED);
 
         // LOCK_EX | LOCK_NB
         var lock_flags: os.windows.DWORD = 0;
-        lock_flags |= kernel32.LOCKFILE_EXCLUSIVE_LOCK;
-        lock_flags |= kernel32.LOCKFILE_FAIL_IMMEDIATELY;
+        lock_flags |= stdx.windows.LOCKFILE_EXCLUSIVE_LOCK;
+        lock_flags |= stdx.windows.LOCKFILE_FAIL_IMMEDIATELY;
 
-        const locked = kernel32.lock_file_ex(
+        const locked = stdx.windows.LockFileEx(
             handle,
             lock_flags,
             0, // Reserved param is always zero.
@@ -1412,17 +1392,8 @@ pub const IO = struct {
             };
         }
 
-        const set_end_of_file = @extern(
-            *const fn (
-                hFile: os.windows.HANDLE,
-            ) callconv(os.windows.WINAPI) std.os.windows.BOOL,
-            .{
-                .library_name = "kernel32",
-                .name = "SetEndOfFile",
-            },
-        );
         // Mark the moved file pointer (start + size) as the physical EOF.
-        const allocated = set_end_of_file(handle);
+        const allocated = stdx.windows.SetEndOfFile(handle);
         if (allocated == os.windows.FALSE) {
             const err = os.windows.kernel32.GetLastError();
             return os.windows.unexpectedError(err);
