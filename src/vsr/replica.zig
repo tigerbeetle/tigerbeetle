@@ -6116,17 +6116,48 @@ pub fn ReplicaType(
             // This check must precede any send_eviction_message_to_client(), since only the primary
             // should send evictions.
             if (self.backup()) {
-                // Clients only send requests to the primary. Either the client's view is outdated,
-                // or a message was misdirected. Intentionally don't try to forward the message to
-                // the primary, to avoid amplifying the network load.
-                log.debug("{}: on_request: ignoring (backup view={} header.view={})", .{
+                // Backups may respond directly to the client with a reply, if it exists in the
+                // client table. Otherwise, they simply forward the request to the most recent
+                // primary, based on the maximum of the request's view and the backup's view.
+                if (self.client_sessions.get(message.header.client)) |entry| {
+                    assert(entry.header.command == .reply);
+                    assert(entry.header.client == message.header.client);
+                    assert(entry.header.client != 0);
+
+                    if (entry.header.request == message.header.request and
+                        entry.header.request_checksum == message.header.checksum)
+                    {
+                        log.debug("{}: on_request: replying to duplicate request", .{
+                            self.log_prefix(),
+                        });
+                        self.on_request_repeat_reply(message, entry);
+                        return true;
+                    }
+                }
+
+                log.debug("{}: on_request: forwarding to primary (view={} header.view={})", .{
                     self.log_prefix(),
                     self.view,
                     message.header.view,
                 });
+                self.send_message_to_replica(
+                    self.primary_index(@max(self.view, message.header.view)),
+                    message,
+                );
                 return true;
             }
+
             assert(self.primary());
+
+            if (message.header.view > self.view) {
+                log.debug("{}: on_request: forwarding to primary (view={} header.view={})", .{
+                    self.log_prefix(),
+                    self.view,
+                    message.header.view,
+                });
+                self.send_message_to_replica(self.primary_index(message.header.view), message);
+                return true;
+            }
 
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_request: ignoring unsupported client version; too low" ++
@@ -6439,7 +6470,6 @@ pub fn ReplicaType(
             entry: *const ClientSessions.Entry,
         ) void {
             assert(self.status == .normal);
-            assert(self.primary());
 
             assert(message.header.command == .request);
             assert(message.header.client > 0);
@@ -6495,7 +6525,6 @@ pub fn ReplicaType(
             // Only allow the primary to reply, to avoid externalizing a view for which view change
             // hasn't yet completed.
             if (self.status != .normal) return;
-            if (!self.primary()) return;
 
             const reply = reply_ orelse {
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
@@ -8891,7 +8920,6 @@ pub fn ReplicaType(
                     assert(!self.standby());
                     // Do not assert message.header.replica because we forward .request messages.
                     assert(self.status == .normal);
-                    assert(message.header.view <= self.view);
                 },
                 .prepare => |header| {
                     maybe(self.standby());
