@@ -59,8 +59,6 @@ pub const GridBlocksMissing = struct {
     };
 
     pub const RepairTable = struct {
-        index_address: u64,
-        index_checksum: u128,
         table_info: schema.ManifestNode.TableInfo,
         /// Invariants:
         /// - value_blocks_received.count < table_blocks_total
@@ -133,7 +131,7 @@ pub const GridBlocksMissing = struct {
         syncing,
         checkpoint_durable: struct {
             /// The number of faulty_blocks with state=aborting.
-            aborting: usize,
+            aborting: u64,
         },
     } = .repairing,
 
@@ -310,18 +308,16 @@ pub const GridBlocksMissing = struct {
             assert(queue_table != table);
             assert(queue_table.value_blocks_received != table_bitset);
 
-            if (queue_table.index_address == address) {
+            if (queue_table.table_info.address == address) {
                 // The ForestTableIterator does not repeat tables *except* when the table was first
                 // encountered at level L, and then it was re-encountered having moved to a deeper
                 // level (L+1, etc).
-                assert(queue_table.index_checksum == checksum);
+                assert(queue_table.table_info.checksum == checksum);
                 return .duplicate;
             }
         }
 
         table.* = .{
-            .index_address = address,
-            .index_checksum = checksum,
             .table_info = table_info.*,
             .value_blocks_received = table_bitset,
         };
@@ -492,8 +488,8 @@ pub const GridBlocksMissing = struct {
 
         const index_schema = schema.TableIndex.from(index_block);
         const index_block_header = schema.header_from_block(index_block);
-        assert(index_block_header.address == table.index_address);
-        assert(index_block_header.checksum == table.index_checksum);
+        assert(index_block_header.address == table.table_info.address);
+        assert(index_block_header.checksum == table.table_info.checksum);
         assert(index_block_header.block_type == .index);
 
         table.table_blocks_total = index_schema.value_blocks_used(index_block) + 1;
@@ -704,9 +700,9 @@ pub const GridBlocksMissing = struct {
             .name = queue.faulty_tables.any.name,
         });
         while (queue.faulty_tables.pop()) |table| {
-            assert(!free_set.is_free(table.index_address));
+            assert(!free_set.is_free(table.table_info.address));
 
-            if (free_set.to_be_freed_at_checkpoint_durability(table.index_address)) {
+            if (free_set.to_be_freed_at_checkpoint_durability(table.table_info.address)) {
                 queue.faulty_tables_free.push(table);
             } else {
                 tables.push(table);

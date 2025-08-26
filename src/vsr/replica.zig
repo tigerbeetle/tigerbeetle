@@ -10508,8 +10508,8 @@ pub fn ReplicaType(
                         "address={} checksum={} wrote={}/{?}",
                     .{
                         self.log_prefix(),
-                        table.index_address,
-                        table.index_checksum,
+                        table.table_info.address,
+                        table.table_info.checksum,
                         table.table_blocks_written,
                         table.table_blocks_total,
                     },
