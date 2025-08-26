@@ -363,7 +363,7 @@ fn tidy_dead_declarations(
                     }
                 } else {
                     switch (context_tag) {
-                        .keyword_inline => {},
+                        .keyword_inline, .keyword_extern, .string_literal => {},
                         // Public declaration can be used in a different file.
                         .keyword_pub, .keyword_export => continue :next_token,
                         // []const u8 or *const u8, not a declaration.
@@ -515,6 +515,9 @@ fn tidy_generic_functions(
                 const end = std.mem.indexOf(u8, line[begin..], "(") orelse continue;
                 if (end == 0) continue;
 
+                if (std.mem.indexOf(u8, line, "extern \"kernel32\"") != null) {
+                    continue; // Windows use CamelCase functions.
+                }
                 assert(begin + end < line.len);
                 break :function_name line[begin..][0..end];
             }

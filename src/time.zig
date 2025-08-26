@@ -157,18 +157,8 @@ pub const TimeOS = struct {
         // TODO(zig): Maybe use `std.time.nanoTimestamp()`.
         // https://github.com/ziglang/zig/pull/22871
         assert(is_windows);
-        const get_system_time_precise_as_file_time = @extern(
-            *const fn (
-                lpFileTime: *os.windows.FILETIME,
-            ) callconv(os.windows.WINAPI) void,
-            .{
-                .library_name = "kernel32",
-                .name = "GetSystemTimePreciseAsFileTime",
-            },
-        );
-
         var ft: os.windows.FILETIME = undefined;
-        get_system_time_precise_as_file_time(&ft);
+        stdx.windows.GetSystemTimePreciseAsFileTime(&ft);
         const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 
         // FileTime is in units of 100 nanoseconds

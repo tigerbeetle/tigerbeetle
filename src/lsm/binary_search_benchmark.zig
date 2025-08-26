@@ -170,21 +170,7 @@ const Benchmark = struct {
             var kernel_time: std.os.windows.FILETIME = undefined;
             var user_time: std.os.windows.FILETIME = undefined;
 
-            const get_process_times = @extern(
-                *const fn (
-                    in_hProcess: std.os.windows.HANDLE,
-                    out_lpCreationTime: *std.os.windows.FILETIME,
-                    out_lpExitTime: *std.os.windows.FILETIME,
-                    out_lpKernelTime: *std.os.windows.FILETIME,
-                    out_lpUserTime: *std.os.windows.FILETIME,
-                ) callconv(std.os.windows.WINAPI) std.os.windows.BOOL,
-                .{
-                    .library_name = "kernel32",
-                    .name = "GetProcessTimes",
-                },
-            );
-
-            if (get_process_times(
+            if (stdx.windows.GetProcessTimes(
                 std.os.windows.kernel32.GetCurrentProcess(),
                 &creation_time,
                 &exit_time,
