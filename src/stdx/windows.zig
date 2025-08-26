@@ -5,7 +5,7 @@ pub extern "kernel32" fn GetSystemTimePreciseAsFileTime(
     lpFileTime: *windows.FILETIME,
 ) callconv(.winapi) void;
 
-pub extern "kernel32" fn GetCommandLineW() callconv(.C) windows.LPWSTR;
+pub extern "kernel32" fn GetCommandLineW() callconv(.winapi) windows.LPWSTR;
 
 pub extern "kernel32" fn GetProcessTimes(
     in_hProcess: windows.HANDLE,
