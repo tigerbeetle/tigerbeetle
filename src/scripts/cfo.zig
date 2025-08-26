@@ -726,9 +726,18 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
             }
         }
 
+        // When the release was recently pushed (i.e. usually on Friday), give it extra fuzzing
+        // weight for the next few days (i.e. until Monday).
+        const release_soon = for (tasks.list.items) |*task| {
+            if (task.seed_template.branch == .release) {
+                break std.time.timestamp() <
+                    task.seed_template.commit_timestamp + 2 * std.time.s_per_day;
+            }
+        } else false;
+
         const weight_main = 1_000_000;
         const weight_pull = 1_000_000;
-        const weight_release = 500_000;
+        const weight_release = 500_000 * (if (release_soon) @as(u32, 3) else 1);
 
         for (tasks.list.items) |*task| {
             if (task.generation == tasks.generation) {
