@@ -363,7 +363,7 @@ fn tidy_dead_declarations(
                     }
                 } else {
                     switch (context_tag) {
-                        .keyword_inline => {},
+                        .keyword_inline, .keyword_extern, .string_literal => {},
                         // Public declaration can be used in a different file.
                         .keyword_pub, .keyword_export => continue :next_token,
                         // []const u8 or *const u8, not a declaration.
