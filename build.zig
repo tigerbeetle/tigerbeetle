@@ -5,7 +5,6 @@ const Query = std.Target.Query;
 const Mode = std.builtin.Mode;
 
 const config = @import("./src/config.zig");
-const stdx = @import("./src/stdx/stdx.zig");
 
 const VoprStateMachine = enum { testing, accounting };
 const VoprLog = enum { short, full };
@@ -1299,20 +1298,21 @@ fn build_go_client(
         lib.bundle_compiler_rt = true;
         lib.step.dependOn(&bindings.step);
 
-        assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
-        const file_name: []const u8, const extension: []const u8 = stdx.cut(
-            lib.out_lib_filename,
-            ".",
-        ).?;
+        const file_name: []const u8, const extension: []const u8 = cut: {
+            assert(std.mem.count(u8, lib.out_lib_filename, ".") == 1);
+            var it = std.mem.splitScalar(u8, lib.out_lib_filename, '.');
+            defer assert(it.next() == null);
+            break :cut .{ it.next().?, it.next().? };
+        };
 
         // NB: New way to do lib.setOutputDir(). The ../ is important to escape zig-cache/.
         step_clients_go.dependOn(&b.addInstallFile(
             lib.getEmittedBin(),
-            std.fmt.allocPrint(b.allocator, "../src/clients/go/pkg/native/{s}_{s}.{s}", .{
+            b.fmt("../src/clients/go/pkg/native/{s}_{s}.{s}", .{
                 file_name,
                 platform_name,
                 extension,
-            }) catch @panic("OOM"),
+            }),
         ).step);
     }
 }
