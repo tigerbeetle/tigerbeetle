@@ -515,6 +515,9 @@ fn tidy_generic_functions(
                 const end = std.mem.indexOf(u8, line[begin..], "(") orelse continue;
                 if (end == 0) continue;
 
+                if (std.mem.indexOf(u8, line, "extern \"kernel32\"") != null) {
+                    continue; // Windows use CamelCase functions.
+                }
                 assert(begin + end < line.len);
                 break :function_name line[begin..][0..end];
             }
