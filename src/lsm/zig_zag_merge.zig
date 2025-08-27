@@ -201,7 +201,12 @@ pub fn ZigZagMergeIteratorType(
                     // Probing the drained stream will update the key range for the next read.
                     stream_probe(it.context, @intCast(stream_index), probe_key);
                     // The stream must remain drained after probed.
-                    assert(stream_peek(it.context, @intCast(stream_index)) == error.Drained);
+                    if (stream_peek(it.context, @intCast(stream_index))) |_| {
+                        unreachable;
+                    } else |err| switch (err) {
+                        error.Drained => {},
+                        error.Empty => unreachable,
+                    }
                 } else {
                     // At this point, all the buffered streams must have produced a matching key.
                     assert(stream_peek(it.context, @intCast(stream_index)) catch {
