@@ -239,11 +239,12 @@ pub const StatsD = struct {
                     format_metric(send_writer, stat, .{
                         .cluster = cluster,
                         .replica = replica,
-                    }) catch |err| {
+                    }) catch |err| switch (err) {
                         // This shouldn't ever happen, but don't allow metrics to kill the system.
-                        assert(err == error.NoSpaceLeft);
-                        log.err("{}: insufficient buffer space", .{self.process_id});
-                        break;
+                        error.NoSpaceLeft => {
+                            log.err("{}: insufficient buffer space", .{self.process_id});
+                            break;
+                        },
                     };
 
                     const send_position_after = send_stream.getPos() catch unreachable;

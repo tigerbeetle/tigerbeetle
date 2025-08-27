@@ -3136,12 +3136,12 @@ pub fn ReplicaType(
                     entry,
                     on_request_reply_read_callback,
                     message.header.replica,
-                ) catch |err| {
-                    assert(err == error.Busy);
-
-                    log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
-                        self.log_prefix(),
-                    });
+                ) catch |err| switch (err) {
+                    error.Busy => {
+                        log.debug("{}: on_request_reply: ignoring, client_replies busy", .{
+                            self.log_prefix(),
+                        });
+                    },
                 };
             }
         }
@@ -6472,12 +6472,12 @@ pub fn ReplicaType(
                     entry,
                     on_request_repeat_reply_callback,
                     null,
-                ) catch |err| {
-                    assert(err == error.Busy);
-
-                    log.debug("{}: on_request: ignoring (client_replies busy)", .{
-                        self.log_prefix(),
-                    });
+                ) catch |err| switch (err) {
+                    error.Busy => {
+                        log.debug("{}: on_request: ignoring (client_replies busy)", .{
+                            self.log_prefix(),
+                        });
+                    },
                 };
             }
         }
