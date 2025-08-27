@@ -645,8 +645,13 @@ pub fn ForestType(comptime _Storage: type, comptime groove_cfg: anytype) type {
                     const tree_table = Tree.Manifest.TreeTableInfo.decode(table);
                     for (&tree.manifest.levels) |manifest_level| {
                         if (manifest_level.find(&tree_table)) |level_table| {
-                            assert(table.checksum == level_table.table_info.checksum);
-                            assert(table.snapshot_max <= level_table.table_info.snapshot_max);
+                            assert(tree_table.checksum == level_table.table_info.checksum);
+                            assert(tree_table.address == level_table.table_info.address);
+                            assert(tree_table.key_min == level_table.table_info.key_min);
+                            assert(tree_table.key_max == level_table.table_info.key_max);
+                            assert(tree_table.snapshot_min == level_table.table_info.snapshot_min);
+
+                            assert(tree_table.snapshot_max <= level_table.table_info.snapshot_max);
                             return true;
                         }
                     }

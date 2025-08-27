@@ -73,7 +73,10 @@ Checkpoints:
 
 If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step _4_.
 
-If we receive a new sync target while we were still syncing the old one, `replica.sync_tables_op_range` is not updated immediately. We don't start syncing the tables from the new sync range until all the tables from the old sync range are completed. (This is the "state sync ratchet").
+If we receive a new sync target while we were still syncing the old one,
+`replica.sync_tables_op_range` is not updated immediately. We don't start syncing the tables from
+the new sync range until all the tables from the old sync range are completed. (This is the "state
+sync ratchet").
 
 ### 0: Scenarios
 

@@ -10326,38 +10326,69 @@ pub fn ReplicaType(
                 // Log an approximation of how much sync work there is to do.
                 // Note that this isn't completely accurate:
                 // - It doesn't consider that tables might be added/removed by local compaction.
-                // - It counts tables already synced in the current sync_tables_op_range.
+                // - It counts any tables which are already queued in GridBlocksMissing as complete.
                 const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
-                const sync_op_max = self.superblock.working.vsr_state.sync_op_max;
-                const sync_op_min = self.sync_tables_op_range.?.min;
-                assert(sync_op_min >= self.superblock.working.vsr_state.sync_op_min);
 
-                var tables = ForestTableIterator{};
+                const sections = [_]struct {
+                    tables: ForestTableIterator,
+                    sync_op_min: u64,
+                    sync_op_max: u64,
+                }{
+                    .{
+                        .tables = self.sync_tables.?,
+                        .sync_op_min = self.sync_tables_op_range.?.min,
+                        .sync_op_max = self.sync_tables_op_range.?.max,
+                    },
+                    .{
+                        .tables = ForestTableIterator{},
+                        .sync_op_min = self.sync_tables_op_range.?.max + 1,
+                        .sync_op_max = self.superblock.working.vsr_state.sync_op_max,
+                    },
+                };
+                const sections_count = @as(u32, 1) +
+                    @intFromBool(sections[0].sync_op_max != sections[1].sync_op_max);
+
                 var table_count: u32 = 0;
                 var table_count_by_level: [constants.lsm_levels]u32 = @splat(0);
-                while (tables.next(&self.state_machine.forest)) |table_info| {
-                    if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
-                        table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
-                    {
-                        table_count += 1;
-                        table_count_by_level[table_info.label.level] += 1;
+                for (sections[0..sections_count]) |section| {
+                    const sync_op_max = section.sync_op_max;
+                    const sync_op_min = section.sync_op_min;
+                    assert(sync_op_min >= self.superblock.working.vsr_state.sync_op_min);
+
+                    var tables = section.tables;
+                    while (tables.next(&self.state_machine.forest)) |table_info| {
+                        if (table_info.snapshot_min >= snapshot_from_commit(sync_op_min) and
+                            table_info.snapshot_min <= snapshot_from_commit(sync_op_max))
+                        {
+                            table_count += 1;
+                            table_count_by_level[table_info.label.level] += 1;
+                        }
                     }
                 }
+
                 log.info(
                     "{}: sync: {} tables (by level: {any})",
                     .{ self.log_prefix(), table_count, table_count_by_level },
                 );
             }
 
-            if (self.grid.blocks_missing.state == .syncing) {
+            if (self.grid.blocks_missing.state == .sync_jump) {
+                var grid_repair_tables: [constants.grid_missing_tables_max]*Grid.RepairTable =
+                    @splat(undefined);
+                var grid_repair_tables_count: u32 = 0;
+
                 // Cancel sync for any tables that don't belong in this new checkpoint.
                 var repair_tables = self.grid_repair_tables.iterate();
                 while (repair_tables.next()) |table| {
                     if (!self.state_machine.forest.contains_table(&table.table_info)) {
-                        self.grid.blocks_missing.sync_table_cancel(table);
+                        grid_repair_tables[grid_repair_tables_count] = table;
+                        grid_repair_tables_count += 1;
                     }
                 }
-                self.grid.blocks_missing.sync_complete(&self.grid.free_set);
+                self.grid.blocks_missing.sync_tables_cancel(
+                    grid_repair_tables[0..grid_repair_tables_count],
+                    &self.grid.free_set,
+                );
                 self.sync_reclaim_tables();
             } else {
                 // We are starting table-sync right out of recovery.
