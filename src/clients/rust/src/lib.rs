@@ -1724,7 +1724,7 @@ where
             let events = Vec::from_raw_parts((*packet).data as *mut Event, events_len, events_len);
             (*packet).data = ptr::null_mut();
 
-            let packet = Box::from_raw(packet);
+            let packet = Packet(Box::from_raw(packet));
 
             let result = if result_len != 0 {
                 std::slice::from_raw_parts(result_ptr, result_len as usize)
@@ -1766,7 +1766,7 @@ where
 fn handle_message<CEvent, CResult>(
     msg: &CompletionMessage<CEvent>,
 ) -> Result<&[CResult], PacketStatus> {
-    let packet = &msg.packet;
+    let packet = &msg.packet.0;
     let result = &msg.result;
 
     if packet.status != tbc::TB_PACKET_STATUS_TB_PACKET_OK {
@@ -1790,9 +1790,15 @@ fn handle_message<CEvent, CResult>(
     Ok(result)
 }
 
+// Thread-sendable wrapper for the owned packet.
+struct Packet(Box<tbc::tb_packet_t>);
+
+// Safety: after completion, zig no longer touches the packet; we own it exclusively.
+unsafe impl Send for Packet {}
+
 struct CompletionMessage<E> {
     _context: usize,
-    packet: Box<tbc::tb_packet_t>,
+    packet: Packet,
     _timestamp: u64,
     result: Vec<u8>,
     _events: Vec<E>,
