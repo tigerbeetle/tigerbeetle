@@ -98,7 +98,7 @@ pub const GridBlocksMissing = struct {
     /// - faulty_blocks.count() = 0 implies faulty_blocks_repair_index = faulty_blocks.count()
     faulty_blocks_repair_index: usize = 0,
 
-    /// On `sync_commence()` and `sync_complete()`, swap this with `faulty_blocks` so that the
+    /// On `sync_jump_commence()` and `sync_complete()`, swap this with `faulty_blocks` so that the
     /// (possibly invalid) table blocks don't interfere.
     ///
     /// See state.sync_jump for more information.
@@ -546,10 +546,8 @@ pub const GridBlocksMissing = struct {
         defer queue.verify();
 
         for (queue.faulty_blocks.values()) |*fault| {
-            assert(fault.state != .aborting);
-
             switch (fault.state) {
-                .aborting => {},
+                .aborting => unreachable,
                 .waiting => {},
                 .writing => {
                     // Due to Grid.cancel() this write may not actually take place.
@@ -570,11 +568,11 @@ pub const GridBlocksMissing = struct {
     ///    faults.
     /// 2. Later (in sync_complete()), after the state machine is opened with the new checkpoint, we
     ///    clean up any tables which did not survive into the new checkpoint.
-    pub fn sync_commence(queue: *GridBlocksMissing) void {
+    pub fn sync_jump_commence(queue: *GridBlocksMissing) void {
         queue.verify();
         defer if (constants.verify) queue.verify();
-        // The replica may call sync_commence() without ever calling sync_complete() if it syncs
-        // multiple checkpoints without successfully opening the state machine.
+        // The replica may call sync_jump_commence() without ever calling sync_complete() if it
+        // syncs multiple checkpoints without successfully opening the state machine.
         assert(queue.state == .repairing or queue.state == .sync_jump);
 
         // Release the "single" blocks since when we finish syncing we have no easy way of checking
@@ -660,8 +658,8 @@ pub const GridBlocksMissing = struct {
         queue.state = .repairing;
         std.mem.swap(FaultyBlocks, &queue.faulty_blocks, &queue.syncing_faulty_blocks);
 
-        // Move any leftover block repairs (from faults incurred during since `sync_commence()`)
-        // back to `faulty_blocks`.
+        // Move any leftover block repairs (from faults incurred during since
+        // `sync_jump_commence()`) back to `faulty_blocks`.
         while (queue.syncing_faulty_blocks.pop()) |fault_entry| {
             assert(fault_entry.value.progress == .block);
 

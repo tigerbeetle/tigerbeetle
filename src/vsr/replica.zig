@@ -10113,7 +10113,7 @@ pub fn ReplicaType(
                 .canceling_commit => {}, // Waiting for an uninterruptible commit step.
                 .canceling_grid => {
                     self.grid.cancel(sync_cancel_grid_callback);
-                    self.grid.blocks_missing.sync_commence();
+                    self.grid.blocks_missing.sync_jump_commence();
 
                     assert(!self.grid.blocks_missing.repairing_tables());
                     assert(self.grid.read_global_queue.empty());
@@ -10232,6 +10232,8 @@ pub fn ReplicaType(
             assert(!self.state_machine_opened);
             assert(self.release.value <=
                 self.superblock.working.vsr_state.checkpoint.release.value);
+            assert(self.sync_tables != null);
+            assert(self.sync_tables_op_range != null);
 
             const checkpoint_state: *const vsr.CheckpointState = &self.syncing.updating_checkpoint;
 
@@ -10322,13 +10324,12 @@ pub fn ReplicaType(
             assert(!self.grid.blocks_missing.repairing_tables());
             maybe(self.grid_repair_tables.executing() == 0);
 
+            const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
             {
                 // Log an approximation of how much sync work there is to do.
                 // Note that this isn't completely accurate:
                 // - It doesn't consider that tables might be added/removed by local compaction.
                 // - It counts any tables which are already queued in GridBlocksMissing as complete.
-                const snapshot_from_commit = vsr.Snapshot.readable_at_commit;
-
                 const sections = [_]struct {
                     tables: ForestTableIterator,
                     sync_op_min: u64,
@@ -10380,6 +10381,11 @@ pub fn ReplicaType(
                 // Cancel sync for any tables that don't belong in this new checkpoint.
                 var repair_tables = self.grid_repair_tables.iterate();
                 while (repair_tables.next()) |table| {
+                    assert(table.table_info.snapshot_min >=
+                        snapshot_from_commit(self.sync_tables_op_range.?.min));
+                    assert(table.table_info.snapshot_min <=
+                        snapshot_from_commit(self.sync_tables_op_range.?.max));
+
                     if (!self.state_machine.forest.contains_table(&table.table_info)) {
                         grid_repair_tables[grid_repair_tables_count] = table;
                         grid_repair_tables_count += 1;
@@ -10396,6 +10402,7 @@ pub fn ReplicaType(
                 assert(self.sync_tables_op_range.?.max ==
                     self.superblock.working.vsr_state.sync_op_max);
             }
+            assert(self.grid.blocks_missing.state == .repairing);
             // Client replies are synced in lockstep with client sessions in
             // `client_sessions_open_callback`.
         }
