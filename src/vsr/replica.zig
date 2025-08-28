@@ -5365,7 +5365,7 @@ pub fn ReplicaType(
             // backup directly replies to client requests (see `ignore_request_message`).
             const reply_to_client = blk: {
                 if (self.replica_count > 1) {
-                    var prng = stdx.PRNG.from_seed(prepare.header.op | 1);
+                    var prng = stdx.PRNG.from_seed(prepare.header.op);
                     const offset_random = prng.range_inclusive(u8, 1, self.replica_count - 1);
                     const backup_random = (primary_ + offset_random) % self.replica_count;
                     assert(backup_random != primary_);
@@ -8282,7 +8282,7 @@ pub fn ReplicaType(
             if (self.release.value < message.header.release.value and
                 self.replica == message.header.replica)
             {
-                // Don't replica messages on a newer release than us if we were the one who
+                // Don't replicate messages on a newer release than us if we were the one who
                 // originally sent it. This can happen if our release backtracked due to being
                 // reformatted.
                 log.warn("{}: replicate: ignoring prepare from newer release", .{
@@ -8789,6 +8789,52 @@ pub fn ReplicaType(
                 },
             }
 
+            switch (message.header.into_any()) {
+                .eviction => |header| {
+                    assert(self.primary());
+                    assert(header.view == self.view);
+                    assert(header.release.value <= self.release.value);
+                },
+                .reply => |header| {
+                    assert(!self.standby());
+                    assert(header.view <= self.view);
+                    assert(header.op <= self.op_checkpoint_next_trigger());
+                    assert(header.release.value <= self.release.value);
+                },
+                .pong_client => |header| {
+                    assert(!self.standby());
+                    assert(header.view == self.view);
+                    assert(header.release.value == self.release.value);
+                },
+
+                .reserved,
+
+                // Deprecated messages are always `invalid()`.
+                .deprecated_12,
+                .deprecated_21,
+                .deprecated_22,
+                .deprecated_23,
+
+                .request,
+                .prepare,
+                .prepare_ok,
+                .start_view_change,
+                .do_view_change,
+                .start_view,
+                .headers,
+                .ping,
+                .pong,
+                .ping_client,
+                .commit,
+                .request_start_view,
+                .request_headers,
+                .request_prepare,
+                .request_reply,
+                .request_blocks,
+                .block,
+                => unreachable,
+            }
+
             self.trace.count(.{ .replica_messages_out = .{
                 .command = message.header.command,
             } }, 1);
@@ -8886,11 +8932,6 @@ pub fn ReplicaType(
 
             assert(message.header.cluster == self.cluster);
 
-            // Compare the release in this message to ours only if we authored the message.
-            if (message.header.replica == self.replica) {
-                assert(message.header.release.value <= self.release.value);
-            }
-
             if (message.header.command == .block) {
                 assert(message.header.protocol <= vsr.Version);
             } else {
@@ -8899,22 +8940,31 @@ pub fn ReplicaType(
 
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.into_any()) {
-                .reserved => unreachable,
+                .eviction,
+                .reserved,
                 // Deprecated messages are always `invalid()`.
-                .deprecated_12 => unreachable,
-                .deprecated_21 => unreachable,
-                .deprecated_22 => unreachable,
-                .deprecated_23 => unreachable,
+                .deprecated_12,
+                .deprecated_21,
+                .deprecated_22,
+                .deprecated_23,
+                => unreachable,
+
                 .request => {
                     assert(!self.standby());
                     // Do not assert message.header.replica because we forward .request messages.
                     assert(self.status == .normal);
+                    // Backups forwarding .request may have a smaller release than the client.
+                    maybe(message.header.release.value > self.release.value);
                 },
                 .prepare => |header| {
                     maybe(self.standby());
                     assert(self.replica != replica);
                     // Do not assert message.header.replica because we forward .prepare messages.
-                    if (header.replica == self.replica) assert(message.header.view <= self.view);
+                    // Backups replicating .prepare may have a smaller release than the primary.
+                    if (header.replica == self.replica) {
+                        assert(header.release.value <= self.release.value);
+                        assert(message.header.view <= self.view);
+                    }
                     assert(header.operation != .reserved);
                 },
                 .prepare_ok => |header| {
@@ -8928,17 +8978,20 @@ pub fn ReplicaType(
                     // Otherwise, we would be enabling a partitioned primary to commit.
                     assert(replica == self.primary_index(self.view));
                     assert(header.replica == self.replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .reply => |header| {
                     assert(!self.standby());
                     assert(header.view <= self.view);
                     assert(header.op <= self.op_checkpoint_next_trigger());
+                    assert(header.release.value <= self.release.value);
                 },
-                .start_view_change => {
+                .start_view_change => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .do_view_change => |header| {
                     assert(!self.standby());
@@ -8952,6 +9005,7 @@ pub fn ReplicaType(
                     assert(header.commit_min == self.commit_min);
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .start_view => |header| {
                     assert(!self.standby());
@@ -8963,70 +9017,74 @@ pub fn ReplicaType(
                     assert(header.replica != replica);
                     assert(header.commit_max == self.commit_max);
                     assert(header.checkpoint_op == self.op_checkpoint());
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .headers => {
+                .headers => |header| {
                     assert(!self.standby());
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .ping => {
+                .ping => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == self.release.value);
                 },
-                .pong => {
+                .pong => |header| {
                     maybe(self.standby());
                     assert(self.status == .normal or self.status == .view_change);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == self.release.value);
                 },
                 .ping_client => unreachable,
                 .pong_client => unreachable,
-                .commit => {
+                .commit => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(self.primary());
                     assert(self.syncing == .idle);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_start_view => {
+                .request_start_view => |header| {
                     maybe(self.standby());
-                    assert(message.header.view >= self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view >= self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
                     assert(self.primary_index(message.header.view) == replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_headers => {
+                .request_headers => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_prepare => {
+                .request_prepare => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_reply => {
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                .request_reply => |header| {
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .eviction => {
+                .request_blocks => |header| {
+                    maybe(self.standby());
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
+                },
+                .block => |header| {
                     assert(!self.standby());
-                    assert(self.status == .normal);
-                    assert(self.primary());
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                },
-                .request_blocks => {
-                    maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                },
-                .block => {
-                    assert(!self.standby());
+                    assert(header.release.value <= self.release.value);
                 },
             }
             // Critical:
