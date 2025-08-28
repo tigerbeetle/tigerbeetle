@@ -61,15 +61,22 @@ Checkpoints:
    - Bump `replica.commit_min`.
    - Set `vsr_state.sync_op_min` to the minimum op which has not been repaired.
    - Set `vsr_state.sync_op_max` to the maximum op which has not been repaired.
-4. Repair [replies](./vsr.md#protocol-sync-client-replies),
-   [free set, client sessions, and manifest blocks](./vsr.md#protocol-repair-grid), and
-   [table blocks](./vsr.md#protocol-sync-forest) that were created within the `sync_op_{min,max}`
-   range.
+   - Set `replica.sync_tables_op_range` if it is not already set. (See below).
+4. Repair [replies](./vsr.md#protocol-sync-client-replies) and
+   [free set, client sessions, and manifest blocks](./vsr.md#protocol-repair-grid)
+   that were created within the `vsr_state.sync_op_{min,max}` range.
+   Repair [table blocks](./vsr.md#protocol-sync-forest) that were created within
+   `replica.sync_tables_op_range`.
 5. As part of the [*next checkpoint*](#5-conclusion), update the superblock with:
     - Set `vsr_state.sync_op_min = 0`
     - Set `vsr_state.sync_op_max = 0`
 
 If the replica starts up with `vsr_state.sync_op_max ≠ 0`, go to step _4_.
+
+If we receive a new sync target while we were still syncing the old one,
+`replica.sync_tables_op_range` is not updated immediately. We don't start syncing the tables from
+the new sync range until all the tables from the old sync range are completed. (This is the "state
+sync ratchet").
 
 ### 0: Scenarios
 
