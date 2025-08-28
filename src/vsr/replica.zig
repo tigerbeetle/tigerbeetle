@@ -10162,7 +10162,7 @@ pub fn ReplicaType(
             assert(!self.solo());
             assert(self.syncing == .updating_checkpoint);
             assert(self.superblock.working.vsr_state.checkpoint.header.op <
-                self.syncing.updating_checkpoint.header.checksum);
+                self.syncing.updating_checkpoint.header.op);
             assert(self.sync_tables == null);
             assert(self.commit_stage == .idle);
             assert(self.grid.read_global_queue.empty());
