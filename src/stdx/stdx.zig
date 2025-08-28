@@ -341,8 +341,6 @@ pub fn log_with_timestamp(
     var buffered_writer = std.io.bufferedWriter(stderr);
     const writer = buffered_writer.writer();
 
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
     nosuspend {
         date_time.format("", .{}, writer) catch return;
         writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
