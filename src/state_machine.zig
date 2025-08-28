@@ -791,6 +791,7 @@ pub fn StateMachineType(
             cache_entries_accounts: u32,
             cache_entries_transfers: u32,
             cache_entries_transfers_pending: u32,
+            log_trace: bool,
         };
 
         /// Since prefetch contexts are used one at a time, it's safe to access
@@ -1007,6 +1008,7 @@ pub fn StateMachineType(
 
         /// Temporary metrics, until proper ones are merged.
         metrics: Metrics,
+        log_trace: bool,
 
         pub fn init(
             self: *StateMachine,
@@ -1033,6 +1035,8 @@ pub fn StateMachineType(
                 .metrics = .{
                     .timer = .init(time),
                 },
+
+                .log_trace = options.log_trace,
             };
 
             try self.forest.init(
@@ -1138,6 +1142,8 @@ pub fn StateMachineType(
                 .metrics = .{
                     .timer = self.metrics.timer,
                 },
+
+                .log_trace = self.log_trace,
             };
         }
 
@@ -3189,14 +3195,16 @@ pub fn StateMachineType(
                         else => comptime unreachable,
                     };
                 };
-                log.debug("{?}: {s} {}/{}: {}: {}", .{
-                    self.forest.grid.superblock.replica_index,
-                    @tagName(operation),
-                    index + 1,
-                    events.len,
-                    result,
-                    event,
-                });
+                if (self.log_trace) {
+                    log.debug("{?}: {s} {}/{}: {}: {}", .{
+                        self.forest.grid.superblock.replica_index,
+                        @tagName(operation),
+                        index + 1,
+                        events.len,
+                        result,
+                        event,
+                    });
+                }
                 if (result != .ok) {
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {

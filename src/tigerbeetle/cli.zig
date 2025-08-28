@@ -82,6 +82,7 @@ const CLIArgs = union(enum) {
         memory_lsm_compaction: ?ByteSize = null,
         trace: ?[]const u8 = null,
         log_debug: bool = false,
+        log_trace: bool = false,
         timeout_prepare_ms: ?u64 = null,
         timeout_grid_repair_message_ms: ?u64 = null,
         commit_stall_probability: ?Ratio = null,
@@ -503,6 +504,7 @@ pub const Command = union(enum) {
         aof_file: ?Path,
         path: []const u8,
         log_debug: bool,
+        log_trace: bool,
         statsd: ?std.net.Address,
     };
 
@@ -1010,6 +1012,7 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .aof_file = aof_file,
         .path = start.positional.path,
         .log_debug = start.log_debug,
+        .log_trace = start.log_trace,
         .statsd = if (start.statsd) |statsd_address|
             parse_address_and_port(statsd_address, "--statsd", 8125)
         else
