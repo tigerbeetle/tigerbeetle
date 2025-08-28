@@ -55,6 +55,9 @@ type Client interface {
 	QueryAccounts(filter types.QueryFilter) ([]types.Account, error)
 	QueryTransfers(filter types.QueryFilter) ([]types.Transfer, error)
 
+	// Experimental: GetChangeEvents API is undocumented.
+	GetChangeEvents(filter types.ChangeEventsFilter) ([]types.ChangeEvent, error)
+
 	Nop() error
 	Close()
 }
@@ -137,6 +140,8 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.QueryFilter{})
 	case C.TB_OPERATION_QUERY_TRANSFERS:
 		return unsafe.Sizeof(types.QueryFilter{})
+	case C.TB_OPERATION_GET_CHANGE_EVENTS:
+		return unsafe.Sizeof(types.ChangeEventsFilter{})
 	default:
 		return 0
 	}
@@ -160,6 +165,8 @@ func getResultSize(op C.TB_OPERATION) uintptr {
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_QUERY_TRANSFERS:
 		return unsafe.Sizeof(types.Transfer{})
+	case C.TB_OPERATION_GET_CHANGE_EVENTS:
+		return unsafe.Sizeof(types.ChangeEvent{})
 	default:
 		return 0
 	}
@@ -254,7 +261,8 @@ func onGoPacketCompletion(
 		if op != C.TB_OPERATION_GET_ACCOUNT_TRANSFERS &&
 			op != C.TB_OPERATION_GET_ACCOUNT_BALANCES &&
 			op != C.TB_OPERATION_QUERY_ACCOUNTS &&
-			op != C.TB_OPERATION_QUERY_TRANSFERS {
+			op != C.TB_OPERATION_QUERY_TRANSFERS &&
+			op != C.TB_OPERATION_GET_CHANGE_EVENTS {
 			// Make sure the amount of results at least matches the amount of requests.
 			count := packet.data_size / C.uint32_t(getEventSize(op))
 			if count*resultSize < result_len {
@@ -460,6 +468,26 @@ func (c *c_client) QueryTransfers(filter types.QueryFilter) ([]types.Transfer, e
 
 	resultsCount := len(reply) / int(unsafe.Sizeof(types.Transfer{}))
 	results := unsafe.Slice((*types.Transfer)(unsafe.Pointer(&reply[0])), resultsCount)
+	return results, nil
+}
+
+func (c *c_client) GetChangeEvents(filter types.ChangeEventsFilter) ([]types.ChangeEvent, error) {
+	reply, err := c.doRequest(
+		C.TB_OPERATION_GET_CHANGE_EVENTS,
+		1,
+		unsafe.Pointer(&filter),
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if reply == nil {
+		return make([]types.ChangeEvent, 0), nil
+	}
+
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.ChangeEvent{}))
+	results := unsafe.Slice((*types.ChangeEvent)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 

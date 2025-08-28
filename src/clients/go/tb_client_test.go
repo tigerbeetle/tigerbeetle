@@ -1530,6 +1530,20 @@ func doTestClient(t *testing.T, client Client) {
 		}
 		assert.Len(t, query, 0)
 	})
+
+	t.Run("get change events", func(t *testing.T) {
+		t.Parallel()
+		filter := types.ChangeEventsFilter{
+			TimestampMin: 0,
+			TimestampMax: 0,
+			Limit:        10,
+		}
+		events, err := client.GetChangeEvents(filter)
+		if err != nil {
+			t.Fatal(err)
+		}
+		assert.Len(t, events, int(filter.Limit))
+	})
 }
 
 func doTestImportedFlag(t *testing.T, client Client) {
