@@ -37,7 +37,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const MiB = stdx.MiB;
 
-const log_level = std.log.Level.err;
+const log_level = std.log.Level.debug;
 
 const releases = [_]Release{
     .{
@@ -484,9 +484,7 @@ test "Cluster: network: partition client-primary (symmetric)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
@@ -497,9 +495,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .incoming);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
@@ -510,9 +506,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .outgoing);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition flexible quorum" {
