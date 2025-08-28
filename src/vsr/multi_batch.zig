@@ -482,12 +482,11 @@ pub const MultiBatchEncoder = struct {
             bytes_written % self.options.element_size == 0);
 
         if (constants.verify) {
-            assert(MultiBatchDecoder.init(
-                buffer[0..bytes_written],
-                .{
-                    .element_size = self.options.element_size,
-                },
-            ) != error.MultiBatchInvalid);
+            _ = MultiBatchDecoder.init(buffer[0..bytes_written], .{
+                .element_size = self.options.element_size,
+            }) catch |err| switch (err) {
+                error.MultiBatchInvalid => unreachable,
+            };
         }
 
         return bytes_written;
@@ -602,10 +601,10 @@ test "batch: invalid format" {
     try testing.expect(encoder.batch_count == batch_count);
     try testing.expect(bytes_written == (element_size * event_total_count) + trailer_size);
 
-    try testing.expect(MultiBatchDecoder.init(
+    _ = try MultiBatchDecoder.init(
         buffer[0..bytes_written],
         .{ .element_size = element_size },
-    ) != error.MultiBatchInvalid);
+    );
 
     try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
         buffer[0 .. bytes_written - element_size],

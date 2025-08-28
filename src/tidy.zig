@@ -203,7 +203,9 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use unqualified assert()";
     }
 
-    if (std.mem.indexOf(u8, source, "== error" ++ ".") != null) {
+    if (std.mem.indexOf(u8, source, "== error" ++ ".") != null or
+        std.mem.indexOf(u8, source, "!= error" ++ ".") != null)
+    {
         return "switch on error to avoid silent anyerror upcast";
     }
 

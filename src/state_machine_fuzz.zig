@@ -99,9 +99,11 @@ pub fn main(allocator: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             stdx.maybe(reply_size == 0);
             if (TestContext.StateMachine.operation_is_multi_batch(operation)) {
                 assert(reply_size > 0);
-                assert(vsr.multi_batch.MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
+                _ = vsr.multi_batch.MultiBatchDecoder.init(reply_buffer[0..reply_size], .{
                     .element_size = TestContext.StateMachine.result_size_bytes(operation),
-                }) != error.MultiBatchInvalid);
+                }) catch |err| switch (err) {
+                    error.MultiBatchInvalid => unreachable,
+                };
             }
         }
         op += 1;
