@@ -564,3 +564,75 @@ func (o QueryFilter) QueryFilterFlags() QueryFilterFlags {
 	f.Reversed = ((o.Flags >> 0) & 0x1) == 1
 	return f
 }
+
+type ChangeEvent struct {
+	TransferID                  Uint128
+	TransferAmount              Uint128
+	TransferPendingID           Uint128
+	TransferUserData128         Uint128
+	TransferUserData64          uint64
+	TransferUserData32          uint32
+	TransferTimeout             uint32
+	TransferCode                uint16
+	TransferFlags               uint16
+	Ledger                      uint32
+	Type                        ChangeEventType
+	Reserved                    [39]uint8
+	DebitAccountID              Uint128
+	DebitAccountDebitsPending   Uint128
+	DebitAccountDebitsPosted    Uint128
+	DebitAccountCreditsPending  Uint128
+	DebitAccountCreditsPosted   Uint128
+	DebitAccountUserData128     Uint128
+	DebitAccountUserData64      uint64
+	DebitAccountUserData32      uint32
+	DebitAccountCode            uint16
+	DebitAccountFlags           uint16
+	CreditAccountID             Uint128
+	CreditAccountDebitsPending  Uint128
+	CreditAccountDebitsPosted   Uint128
+	CreditAccountCreditsPending Uint128
+	CreditAccountCreditsPosted  Uint128
+	CreditAccountUserData128    Uint128
+	CreditAccountUserData64     uint64
+	CreditAccountUserData32     uint32
+	CreditAccountCode           uint16
+	CreditAccountFlags          uint16
+	Timestamp                   uint64
+	TransferTimestamp           uint64
+	DebitAccountTimestamp       uint64
+	CreditAccountTimestamp      uint64
+}
+
+type ChangeEventType uint8
+
+const (
+	ChangeEventSinglePhase     ChangeEventType = 0
+	ChangeEventTwoPhasePending ChangeEventType = 1
+	ChangeEventTwoPhasePosted  ChangeEventType = 2
+	ChangeEventTwoPhaseVoided  ChangeEventType = 3
+	ChangeEventTwoPhaseExpired ChangeEventType = 4
+)
+
+func (i ChangeEventType) String() string {
+	switch i {
+	case ChangeEventSinglePhase:
+		return "ChangeEventSinglePhase"
+	case ChangeEventTwoPhasePending:
+		return "ChangeEventTwoPhasePending"
+	case ChangeEventTwoPhasePosted:
+		return "ChangeEventTwoPhasePosted"
+	case ChangeEventTwoPhaseVoided:
+		return "ChangeEventTwoPhaseVoided"
+	case ChangeEventTwoPhaseExpired:
+		return "ChangeEventTwoPhaseExpired"
+	}
+	return "ChangeEventType(" + strconv.FormatInt(int64(i+1), 10) + ")"
+}
+
+type ChangeEventsFilter struct {
+	TimestampMin uint64
+	TimestampMax uint64
+	Limit        uint32
+	Reserved     [44]uint8
+}

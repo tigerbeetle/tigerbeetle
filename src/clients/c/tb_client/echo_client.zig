@@ -210,6 +210,7 @@ fn EchoStateMachineType(comptime StateMachine: type) type {
         pub const operation_event_max = StateMachine.operation_event_max;
         pub const operation_result_max = StateMachine.operation_result_max;
         pub const operation_result_count_expected = StateMachine.operation_result_count_expected;
+        pub const operation_is_multi_batch = StateMachine.operation_is_multi_batch;
 
         // Re-exporting functions where results are equal to events.
         pub const ResultType = StateMachine.EventType;

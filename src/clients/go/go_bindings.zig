@@ -19,6 +19,9 @@ const type_mappings = .{
     .{ tb.AccountFilter, "AccountFilter" },
     .{ tb.AccountBalance, "AccountBalance" },
     .{ tb.QueryFilter, "QueryFilter" },
+    .{ tb.ChangeEvent, "ChangeEvent" },
+    .{ tb.ChangeEventType, "ChangeEventType", "ChangeEvent" },
+    .{ tb.ChangeEventsFilter, "ChangeEventsFilter" },
 };
 
 fn go_type(comptime Type: type) []const u8 {
