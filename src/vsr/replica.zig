@@ -6109,7 +6109,6 @@ pub fn ReplicaType(
                     message.header.client,
                     .client_release_too_low,
                 );
-
                 return true;
             }
 
@@ -6125,7 +6124,6 @@ pub fn ReplicaType(
                     message.header.client,
                     .client_release_too_high,
                 );
-
                 return true;
             }
 
@@ -6218,10 +6216,10 @@ pub fn ReplicaType(
             return false;
         }
 
-        // If backups recognize a client, they reply directly if it is a duplicate request, while
-        // newer requests are forwarded to the primary. Older requests are dropped. If they don't
+        // If backups recognize a client, they reply directly to duplicate requests, while newer
+        // requests are forwarded to the primary. Older requests are dropped. If they don't
         // recognize a client (or the client may have been evicted), only register requests are
-        // qforwarded to the primary.
+        // forwarded to the primary.
         // The key motivation here is to only forward requests to the primary if there is a positive
         // reason to do so, otherwise we risk flooding the network with spurious request messages.
         fn ignore_request_message_backup(self: *Replica, message: *Message.Request) void {

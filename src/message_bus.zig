@@ -745,7 +745,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         // If there is a connection to this replica, terminate and replace it.
                         // Otherwise, this connection was misclassified to a client due to a
                         // forwarded request message (see `peer_type` in message_header.zig), map it
-                        // to the the correct replica. Allowed transitions:
+                        // to the correct replica. Allowed transitions:
                         // * unknown → replica
                         // * client  → replica
                         if (bus.replicas[replica_index]) |old| {
