@@ -6076,40 +6076,22 @@ pub fn ReplicaType(
                 return true;
             }
 
-            // This check must precede any send_eviction_message_to_client(), since only the primary
-            // should send evictions. We must explicitly check for partitioned primaries as well.
-            if (self.backup() or (self.primary() and message.header.view > self.view)) {
-                // Backups may respond directly to the client with a reply, if it exists in the
-                // client table. Otherwise, they simply forward the request to the most recent
-                // primary, based on the maximum of the request's view and the backup's view.
-                if (self.client_sessions.get(message.header.client)) |entry| {
-                    assert(entry.header.command == .reply);
-                    assert(entry.header.client == message.header.client);
-                    assert(entry.header.client != 0);
-
-                    if (entry.header.request > message.header.request) {
-                        log.debug("{}: on_request: ignoring older request", .{self.log_prefix()});
-                        return true;
-                    } else if (entry.header.request == message.header.request and
-                        entry.header.request_checksum == message.header.checksum)
-                    {
-                        log.debug("{}: on_request: replying to duplicate request", .{
-                            self.log_prefix(),
-                        });
-                        self.on_request_repeat_reply(message, entry);
-                        return true;
-                    }
-                }
-
-                log.debug("{}: on_request: forwarding to primary (view={} header.view={})", .{
+            // We only externalize views for which view change is complete (see
+            // `send_message_to_client_base`), but a buggy client may still send a view higher
+            // than one the cluster has seen. Err on the side of safety and drop such requests.
+            if (message.header.view > self.view) {
+                log.debug("{}: on_request: ignoring (view={} header.view={})", .{
                     self.log_prefix(),
                     self.view,
                     message.header.view,
                 });
-                self.send_message_to_replica(
-                    self.primary_index(@max(self.view, message.header.view)),
-                    message,
-                );
+                return true;
+            }
+
+            // This check must precede any send_eviction_message_to_client(), since only the primary
+            // should send evictions.
+            if (self.backup()) {
+                self.ignore_request_message_backup(message);
                 return true;
             }
 
@@ -6234,6 +6216,53 @@ pub fn ReplicaType(
             if (self.ignore_request_message_preparing(message)) return true;
 
             return false;
+        }
+
+        // If backups recognize a client, they reply directly if it is a duplicate request, while
+        // newer requests are forwarded to the primary. Older requests are dropped. If they don't
+        // recognize a client (or the client may have been evicted), only register requests are
+        // qforwarded to the primary.
+        // The key motivation here is to only forward requests to the primary if there is a positive
+        // reason to do so, otherwise we risk flooding the network with spurious request messages.
+        fn ignore_request_message_backup(self: *Replica, message: *Message.Request) void {
+            assert(self.status == .normal);
+            assert(self.backup());
+            assert(message.header.command == .request);
+
+            if (self.client_sessions.get(message.header.client)) |entry| {
+                assert(entry.header.command == .reply);
+                assert(entry.header.client == message.header.client);
+                assert(entry.header.client != 0);
+
+                if (entry.header.request < message.header.request) {
+                    log.debug("{}: on_request: forwarding new request to primary (view={})", .{
+                        self.log_prefix(),
+                        self.view,
+                    });
+                    self.send_message_to_replica(self.primary_index(self.view), message);
+                } else if (entry.header.request == message.header.request) {
+                    if (entry.header.request_checksum == message.header.checksum) {
+                        log.debug("{}: on_request: replying to duplicate request", .{
+                            self.log_prefix(),
+                        });
+                        self.on_request_repeat_reply(message, entry);
+                    } else {
+                        log.err("{}: on_request: request collision (client bug)", .{
+                            self.log_prefix(),
+                        });
+                    }
+                } else {
+                    log.debug("{}: on_request: ignoring older request", .{self.log_prefix()});
+                }
+            } else {
+                if (message.header.operation == .register) {
+                    log.debug("{}: on_request: forwarding register to primary (view={})", .{
+                        self.log_prefix(),
+                        self.view,
+                    });
+                    self.send_message_to_replica(self.primary_index(self.view), message);
+                }
+            }
         }
 
         fn ignore_request_message_upgrade(self: *Replica, message: *const Message.Request) bool {
