@@ -425,7 +425,7 @@ pub const IO = struct {
                     );
                 },
                 .recv => |op| {
-                    sqe.prep_recv(op.socket, op.buffer, posix.MSG.NOSIGNAL);
+                    sqe.prep_recv(op.socket, op.buffer, 0);
                 },
                 .send => |op| {
                     sqe.prep_send(op.socket, op.buffer, posix.MSG.NOSIGNAL);
@@ -1159,7 +1159,11 @@ pub const IO = struct {
     /// Best effort to synchronously transfer bytes to the kernel.
     pub fn send_now(self: *IO, socket: socket_t, buffer: []const u8) ?usize {
         _ = self;
-        return posix.send(socket, buffer, posix.MSG.DONTWAIT) catch |err| switch (err) {
+        return posix.send(
+            socket,
+            buffer,
+            posix.MSG.DONTWAIT | posix.MSG.NOSIGNAL,
+        ) catch |err| switch (err) {
             error.WouldBlock => return null,
             // To avoid duplicating error handling, force the caller to fallback to normal send.
             else => return null,
