@@ -72,11 +72,6 @@ pub fn KWayMergeIteratorType(
             };
         }
 
-        pub fn empty(it: *const KWayMergeIterator) bool {
-            assert(it.state == .iterating);
-            return it.k == 0;
-        }
-
         pub fn reset(it: *KWayMergeIterator) void {
             it.* = .{
                 .context = it.context,
