@@ -743,11 +743,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .replica => |replica_index| {
                         assert(replica_index < bus.configuration.len);
                         // If there is a connection to this replica, terminate and replace it.
-                        // Otherwise, the connection is now misclassified (to a client or a
-                        // different replica), map it to the new replica. Allowed transitions:
+                        // Otherwise, this connection was misclassified to a client due to a
+                        // forwarded request message (see `peer_type` in message_header.zig), map it
+                        // to the the correct replica. Allowed transitions:
                         // * unknown → replica
-                        // * replica → replica
-                        // * client  →  replica
+                        // * client  → replica
                         if (bus.replicas[replica_index]) |old| {
                             assert(old != connection);
                             assert(old.peer == .replica);
@@ -758,9 +758,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                         switch (connection.peer) {
                             .client => |existing| assert(bus.process.clients.remove(existing)),
-                            .replica => |existing| bus.replicas[existing] = null,
                             .unknown => {},
-                            .none => unreachable,
+                            .none, .replica => unreachable,
                         }
 
                         bus.replicas[replica_index] = connection;
@@ -774,10 +773,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         const result = bus.process.clients.getOrPutAssumeCapacity(client_id);
 
                         // If there is a connection to this client, terminate and replace it.
-                        // Otherwise, this connection is now misclassified (to another client),
-                        // map it to the new client. Allowed transitions:
+                        // Allowed transitions:
                         // * unknown → client
-                        // * client  → client
                         if (result.found_existing) {
                             const old = result.value_ptr.*;
 
@@ -788,9 +785,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         } else {
                             switch (connection.peer) {
-                                .client => |existing| assert(bus.process.clients.remove(existing)),
                                 .unknown => {},
-                                .replica, .none => unreachable,
+                                .client, .replica, .none => unreachable,
                             }
                         }
 
