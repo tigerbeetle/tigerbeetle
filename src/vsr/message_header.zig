@@ -198,7 +198,6 @@ pub const Header = extern struct {
         switch (self.into_any()) {
             .reserved => unreachable,
 
-            .request,
             .reply,
             .prepare,
             .block,
@@ -210,6 +209,7 @@ pub const Header = extern struct {
 
             // These messages identify the peer as either a replica or a client:
             .ping_client => |ping| return .{ .client = ping.client },
+            .request => |request| return .{ .client = request.client },
             // All other messages identify the peer as a replica:
             .ping,
             .pong,
