@@ -37,7 +37,7 @@ const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_pr
 
 const MiB = stdx.MiB;
 
-const log_level = std.log.Level.debug;
+const log_level: std.log.Level = .err;
 
 const releases = [_]Release{
     .{

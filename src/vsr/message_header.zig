@@ -195,22 +195,24 @@ pub const Header = extern struct {
     /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
     /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
     pub fn peer_type(self: *const Header) vsr.Peer {
-        switch (self.into_any()) {
+        return switch (self.into_any()) {
             .reserved => unreachable,
 
             .reply,
             .prepare,
             .block,
-            .deprecated_12,
-            .deprecated_21,
-            .deprecated_22,
-            .deprecated_23,
-            => return .unknown,
+            => .unknown,
 
-            // These messages identify the peer as either a replica or a client:
-            .ping_client => |ping| return .{ .client = ping.client },
-            .request => |request| return .{ .client = request.client },
-            // All other messages identify the peer as a replica:
+            // The peer may be a replica or a client, since replicas forward request messages.
+            // However, we return the client ID, as it is useful for the MessageBus. Specifically,
+            // a replica that receives a request from a client can immediately cache the connection
+            // in its client map, instead of waiting for an infrequent PingClient message to do so.
+            .request => |request| .{ .client = request.client },
+
+            // The peer is certainly a client:
+            .ping_client => |ping| .{ .client = ping.client },
+
+            // The peer is certainly a replica:
             .ping,
             .pong,
             .pong_client,
@@ -226,8 +228,14 @@ pub const Header = extern struct {
             .headers,
             .eviction,
             .request_blocks,
-            => return .{ .replica = self.replica },
-        }
+            => .{ .replica = self.replica },
+
+            .deprecated_12,
+            .deprecated_21,
+            .deprecated_22,
+            .deprecated_23,
+            => .unknown,
+        };
     }
 
     pub fn format(
