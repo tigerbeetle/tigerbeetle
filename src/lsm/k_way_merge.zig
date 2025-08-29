@@ -95,7 +95,6 @@ pub fn KWayMergeIteratorType(
 
             // We must loop on stream_index but assign at it.k, as k may be less than stream_index
             // when there are empty streams.
-            // TODO Do we have test coverage for this edge case?
             var stream_index: u32 = 0;
             while (stream_index < it.streams_count) : (stream_index += 1) {
                 it.keys[it.k] = stream_peek(it.context, stream_index) catch |err| switch (err) {
@@ -254,7 +253,6 @@ fn TestContextType(comptime streams_max: u32) type {
             context: *const TestContext,
             stream_index: u32,
         ) error{ Empty, Drained }!u32 {
-            // TODO: test for Drained somehow as well.
             const stream = context.streams[stream_index];
             if (stream.len == 0) return error.Empty;
             return stream[0].key;
@@ -313,114 +311,6 @@ fn TestContextType(comptime streams_max: u32) type {
             }
 
             try testing.expectEqualSlices(Value, expect, actual.items);
-        }
-
-        fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
-            if (log) std.debug.print("\n", .{});
-            const allocator = testing.allocator;
-
-            var streams: [streams_max][]u32 = undefined;
-
-            const streams_buffer = try allocator.alloc(u32, streams_max * stream_key_count_max);
-            defer allocator.free(streams_buffer);
-
-            const expect_buffer = try allocator.alloc(Value, streams_max * stream_key_count_max);
-            defer allocator.free(expect_buffer);
-
-            var k: u32 = 0;
-            while (k < streams_max) : (k += 1) {
-                if (log) std.debug.print("k = {}\n", .{k});
-                {
-                    var i: u32 = 0;
-                    while (i < k) : (i += 1) {
-                        const len = fuzz_stream_len(prng, stream_key_count_max);
-                        streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
-                        fuzz_stream_keys(prng, streams[i]);
-
-                        if (log) {
-                            std.debug.print("stream {} = ", .{i});
-                            for (streams[i]) |key| std.debug.print("{},", .{key});
-                            std.debug.print("\n", .{});
-                        }
-                    }
-                }
-
-                var expect_buffer_len: usize = 0;
-                for (streams[0..k], 0..) |stream, version| {
-                    for (stream) |key| {
-                        expect_buffer[expect_buffer_len] = .{
-                            .key = key,
-                            .version = @intCast(version),
-                        };
-                        expect_buffer_len += 1;
-                    }
-                }
-                const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
-                std.mem.sort(Value, expect_with_duplicates, {}, value_less_than);
-
-                var target: usize = 0;
-                var previous_key: ?u32 = null;
-                for (expect_with_duplicates) |value| {
-                    if (previous_key) |p| {
-                        if (value.key == p) continue;
-                    }
-                    previous_key = value.key;
-                    expect_with_duplicates[target] = value;
-                    target += 1;
-                }
-                const expect = expect_with_duplicates[0..target];
-
-                if (log) {
-                    std.debug.print("expect = ", .{});
-                    for (expect) |value| std.debug.print("({},{}),", .{ value.key, value.version });
-                    std.debug.print("\n", .{});
-                }
-
-                try merge(.ascending, streams[0..k], expect);
-
-                for (streams[0..k]) |stream| mem.reverse(u32, stream);
-                mem.reverse(Value, expect);
-
-                try merge(.descending, streams[0..k], expect);
-
-                if (log) std.debug.print("\n", .{});
-            }
-        }
-
-        fn fuzz_stream_len(prng: *stdx.PRNG, stream_key_count_max: u32) u32 {
-            const Len = enum { zero, max, random };
-            return switch (prng.enum_weighted(Len, .{ .zero = 5, .max = 5, .random = 90 })) {
-                .zero => 0,
-                .max => stream_key_count_max,
-                .random => prng.int_inclusive(u32, stream_key_count_max),
-            };
-        }
-
-        fn fuzz_stream_keys(prng: *stdx.PRNG, stream: []u32) void {
-            const key_max = prng.range_inclusive(u32, 512, 1023);
-            const Key = enum { all_same, random };
-            switch (prng.enum_weighted(Key, .{ .all_same = 5, .random = 95 })) {
-                .all_same => {
-                    @memset(stream, prng.int(u32));
-                },
-                .random => {
-                    prng.fill(mem.sliceAsBytes(stream));
-                },
-            }
-            for (stream) |*key| key.* = key.* % key_max;
-            std.mem.sort(u32, stream, {}, key_less_than);
-        }
-
-        fn key_less_than(_: void, a: u32, b: u32) bool {
-            return a < b;
-        }
-
-        fn value_less_than(_: void, a: Value, b: Value) bool {
-            return switch (math.order(a.key, b.key)) {
-                .lt => true,
-                .eq => a.version > b.version,
-                .gt => false,
-            };
         }
     };
 }
@@ -492,10 +382,215 @@ test "k_way_merge: unit" {
     );
 }
 
+fn FuzzTestContextType(comptime streams_max: u32) type {
+    const testing = std.testing;
+
+    return struct {
+        const FuzzTestContext = @This();
+
+        const TestContext = TestContextType(streams_max);
+        const Value = TestContext.Value;
+
+        const log = false;
+
+        prng: *stdx.PRNG,
+        inner: TestContext,
+
+        fn fuzz_stream_peek(
+            context: *const FuzzTestContext,
+            stream_index: u32,
+        ) error{ Empty, Drained }!u32 {
+            switch (context.prng.enum_weighted(
+                enum { normal, drained },
+                .{ .normal = 95, .drained = 5 },
+            )) {
+                .normal => return context.inner.stream_peek(stream_index),
+                .drained => return error.Drained,
+            }
+        }
+
+        fn stream_pop(context: *FuzzTestContext, stream_index: u32) Value {
+            return context.inner.stream_pop(stream_index);
+        }
+
+        fn stream_precedence(context: *const FuzzTestContext, a: u32, b: u32) bool {
+            return context.inner.stream_precedence(a, b);
+        }
+
+        fn merge(
+            direction: Direction,
+            streams_keys: []const []const u32,
+            expect: []const Value,
+            prng: *stdx.PRNG,
+        ) !void {
+            const fuzz_helper = @import("../testing/fuzz.zig");
+            const KWay = KWayMergeIteratorType(
+                FuzzTestContext,
+                u32,
+                Value,
+                Value.to_key,
+                streams_max,
+                fuzz_stream_peek,
+                stream_pop,
+                stream_precedence,
+            );
+            var actual = std.ArrayList(Value).init(testing.allocator);
+            defer actual.deinit();
+
+            var streams: [streams_max][]Value = undefined;
+
+            for (streams_keys, 0..) |stream_keys, i| {
+                errdefer for (streams[0..i]) |s| testing.allocator.free(s);
+                streams[i] = try testing.allocator.alloc(Value, stream_keys.len);
+                for (stream_keys, 0..) |key, j| {
+                    streams[i][j] = .{
+                        .key = key,
+                        .version = @intCast(i),
+                    };
+                }
+            }
+            defer for (streams[0..streams_keys.len]) |s| testing.allocator.free(s);
+
+            var context: FuzzTestContext = .{ .inner = .{ .streams = streams }, .prng = prng };
+            var kway = KWay.init(&context, @intCast(streams_keys.len), direction);
+
+            const Declarations = fuzz_helper.DeclEnumExcludingType(
+                KWay,
+                &.{ .init, .empty },
+            );
+
+            var values_popped: u32 = 0;
+            while (values_popped < expect.len) {
+                switch (prng.enum_weighted(Declarations, .{ .pop = 98, .reset = 2 })) {
+                    .pop => {
+                        const maybe_value = kway.pop() catch continue;
+                        const value = maybe_value orelse break;
+                        try actual.append(value);
+                        values_popped += 1;
+                    },
+                    .reset => {
+                        kway.reset();
+                    },
+                }
+            }
+
+            try testing.expectEqualSlices(Value, expect, actual.items);
+        }
+
+        fn fuzz(prng: *stdx.PRNG, stream_key_count_max: u32) !void {
+            if (log) std.debug.print("\n", .{});
+            const allocator = testing.allocator;
+
+            var streams: [streams_max][]u32 = undefined;
+
+            const streams_buffer = try allocator.alloc(u32, streams_max * stream_key_count_max);
+            defer allocator.free(streams_buffer);
+
+            const expect_buffer = try allocator.alloc(Value, streams_max * stream_key_count_max);
+            defer allocator.free(expect_buffer);
+
+            var k: u32 = 0;
+            while (k < streams_max) : (k += 1) {
+                if (log) std.debug.print("k = {}\n", .{k});
+                {
+                    var i: u32 = 0;
+                    while (i < k) : (i += 1) {
+                        const len = fuzz_stream_len(prng, stream_key_count_max);
+                        streams[i] = streams_buffer[i * stream_key_count_max ..][0..len];
+                        fuzz_stream_keys(prng, streams[i]);
+
+                        if (log) {
+                            std.debug.print("stream {} = ", .{i});
+                            for (streams[i]) |key| std.debug.print("{},", .{key});
+                            std.debug.print("\n", .{});
+                        }
+                    }
+                }
+
+                var expect_buffer_len: usize = 0;
+                for (streams[0..k], 0..) |stream, version| {
+                    for (stream) |key| {
+                        expect_buffer[expect_buffer_len] = .{
+                            .key = key,
+                            .version = @intCast(version),
+                        };
+                        expect_buffer_len += 1;
+                    }
+                }
+                const expect_with_duplicates = expect_buffer[0..expect_buffer_len];
+                std.mem.sort(Value, expect_with_duplicates, {}, value_less_than);
+
+                var target: usize = 0;
+                var previous_key: ?u32 = null;
+                for (expect_with_duplicates) |value| {
+                    if (previous_key) |p| {
+                        if (value.key == p) continue;
+                    }
+                    previous_key = value.key;
+                    expect_with_duplicates[target] = value;
+                    target += 1;
+                }
+                const expect = expect_with_duplicates[0..target];
+
+                if (log) {
+                    std.debug.print("expect = ", .{});
+                    for (expect) |value| std.debug.print("({},{}),", .{ value.key, value.version });
+                    std.debug.print("\n", .{});
+                }
+
+                try merge(.ascending, streams[0..k], expect, prng);
+
+                for (streams[0..k]) |stream| mem.reverse(u32, stream);
+                mem.reverse(Value, expect);
+
+                try merge(.descending, streams[0..k], expect, prng);
+
+                if (log) std.debug.print("\n", .{});
+            }
+        }
+
+        fn fuzz_stream_len(prng: *stdx.PRNG, stream_key_count_max: u32) u32 {
+            const Len = enum { zero, max, random };
+            return switch (prng.enum_weighted(Len, .{ .zero = 5, .max = 5, .random = 90 })) {
+                .zero => 0,
+                .max => stream_key_count_max,
+                .random => prng.int_inclusive(u32, stream_key_count_max),
+            };
+        }
+
+        fn fuzz_stream_keys(prng: *stdx.PRNG, stream: []u32) void {
+            const key_max = prng.range_inclusive(u32, 512, 1023);
+            const Key = enum { all_same, random };
+            switch (prng.enum_weighted(Key, .{ .all_same = 5, .random = 95 })) {
+                .all_same => {
+                    @memset(stream, prng.int(u32));
+                },
+                .random => {
+                    prng.fill(mem.sliceAsBytes(stream));
+                },
+            }
+            for (stream) |*key| key.* = key.* % key_max;
+            std.mem.sort(u32, stream, {}, key_less_than);
+        }
+
+        fn key_less_than(_: void, a: u32, b: u32) bool {
+            return a < b;
+        }
+
+        fn value_less_than(_: void, a: Value, b: Value) bool {
+            return switch (math.order(a.key, b.key)) {
+                .lt => true,
+                .eq => a.version > b.version,
+                .gt => false,
+            };
+        }
+    };
+}
+
 test "k_way_merge: fuzz" {
     const seed = std.crypto.random.int(u64);
     errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
 
     var prng = stdx.PRNG.from_seed(seed);
-    try TestContextType(32).fuzz(&prng, 256);
+    try FuzzTestContextType(32).fuzz(&prng, 256);
 }
