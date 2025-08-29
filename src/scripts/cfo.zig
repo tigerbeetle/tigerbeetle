@@ -38,7 +38,7 @@
 //! - Prefer fresher commits (based on commit time stamp).
 //! - For each commit and fuzzer combination, keep at most `seed_count_max` seeds.
 //! - Prefer failing seeds to successful seeds.
-//! - Prefer seeds that failed faster
+//! - Prefer seeds that failed faster.
 //! - Prefer older seeds.
 //! - When dropping a non-failing seed, add its count to some other non-failing seeds.
 //!
@@ -78,6 +78,7 @@ const Fuzzer = enum {
     lsm_segmented_array,
     lsm_tree,
     storage,
+    vopr_debug,
     vopr_lite,
     vopr_testing_lite,
     vopr_testing,
@@ -100,6 +101,7 @@ const Fuzzer = enum {
         .lsm_segmented_array = 1,
         .lsm_tree = 2,
         .storage = 1,
+        .vopr_debug = 1,
         .vopr_lite = 8,
         .vopr_testing_lite = 8,
         .vopr_testing = 8,
@@ -114,23 +116,32 @@ const Fuzzer = enum {
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr, .vopr_lite => &.{"vopr:build"},
-            .vopr_testing, .vopr_testing_lite => &.{ "vopr:build", "-Dvopr-state-machine=testing" },
-            else => &.{"fuzz:build"},
+            .vopr_debug,
+            => &.{"vopr:build"},
+            .vopr,
+            .vopr_lite,
+            => &.{ "vopr:build", "-Drelease" },
+            .vopr_testing,
+            .vopr_testing_lite,
+            => &.{ "vopr:build", "-Drelease", "-Dvopr-state-machine=testing" },
+            else => &.{ "fuzz:build", "-Drelease" },
         };
     }
 
     fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            inline .vopr, .vopr_lite => .{"vopr"},
-            inline .vopr_testing, .vopr_testing_lite => .{ "vopr", "-Dvopr-state-machine=testing" },
-            inline else => .{"fuzz"},
+            .vopr_debug => .{"vopr"},
+            .vopr, .vopr_lite => .{ "vopr", "-Drelease" },
+            .vopr_testing,
+            .vopr_testing_lite,
+            => .{ "vopr", "-Drelease", "-Dvopr-state-machine=testing" },
+            else => .{ "fuzz", "-Drelease" },
         } ++ .{"--"} ++ args_exec(fuzzer);
     }
 
     fn args_exec(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr, .vopr_testing => &.{},
+            .vopr, .vopr_debug, .vopr_testing => &.{},
             .vopr_lite, .vopr_testing_lite => &.{"--lite"},
             else => |f| &.{@tagName(f)},
         };
@@ -619,7 +630,7 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             const fuzzer_present_on_branch = switch (fuzzer) {
-                .vopr, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
+                .vopr, .vopr_debug, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
                 else => std.mem.indexOf(
                     u8,
                     branch_cfo,
@@ -810,8 +821,8 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
         }
         assert(arg_max > 0);
 
-        // +4: zig/zig build -Drelease SEED
-        break :arg_count_max arg_max + 4;
+        // +3: zig/zig build <args> SEED
+        break :arg_count_max arg_max + 3;
     };
     var args: stdx.BoundedArrayType([]const u8, arg_count_max) = .{};
 
@@ -822,7 +833,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     // - build time is excluded from overall runtime,
     // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
     args.clear();
-    args.push_slice(&.{ "./zig/zig", "build", "-Drelease" });
+    args.push_slice(&.{ "./zig/zig", "build" });
     args.push_slice(switch (options.fuzzer) {
         inline else => |f| comptime f.args_run(),
     });
@@ -832,7 +843,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
 
     const exe = exe: {
         args.clear();
-        args.push_slice(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.push_slice(&.{ "build", "-Dprint-exe" });
         args.push_slice(switch (options.fuzzer) {
             inline else => |f| comptime f.args_build(),
         });
