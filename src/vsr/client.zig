@@ -743,14 +743,14 @@ pub fn ClientType(
             self.message_bus.send_message_to_replica(replica, message);
         }
 
+        // In addition to the primary, each request is also sent to a randomly chosen backup, to
+        // handle the case where the client → primary link is down. This ensures logical
+        // availability of the cluster, i.e., as long the client is connected to a backup that in
+        // turn is connected to the primary, the request will be processed by the cluster.
         fn send_request_with_hedging(self: *Client, message: *Message.Request) void {
             const primary: u8 = @intCast(self.view % self.replica_count);
             self.send_message_to_replica(primary, message.base());
 
-            // Send request to a random backup to handle the case where the client → primary link
-            // is down. This ensures logical availability of the cluster, i.e., as long the
-            // client is connected to a backup that in turn is connected to the primary, the
-            // request will be processed by the cluster.
             if (self.replica_count > 1) {
                 const offset_random = self.prng.range_inclusive(u8, 1, self.replica_count - 1);
                 const backup_random = (primary + offset_random) % self.replica_count;
