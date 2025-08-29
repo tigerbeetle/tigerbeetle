@@ -758,7 +758,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                         switch (connection.peer) {
                             .client => |existing| assert(bus.process.clients.remove(existing)),
-                            .unknown, .replica => {},
+                            .replica => |existing| bus.replicas[existing] = null,
+                            .unknown => {},
                             .none => unreachable,
                         }
 
@@ -789,15 +790,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             switch (connection.peer) {
                                 .client => |existing| assert(bus.process.clients.remove(existing)),
                                 .unknown => {},
-                                .replica => unreachable,
-                                .none => unreachable,
+                                .replica, .none => unreachable,
                             }
                         }
 
                         result.value_ptr.* = connection;
                         log.info("{}: set_and_verify_peer connection from client={}", .{
                             bus.id,
-                            connection.peer.client,
+                            client_id,
                         });
                     },
                     .none, .unknown => unreachable,
