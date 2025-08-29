@@ -5180,6 +5180,26 @@ pub fn ReplicaType(
             self.commit_prepare = null;
         }
 
+        // For each op, in addition to the primary, a randomly chosen backup also sends a reply
+        // to the client. All replicas initialize the PRNG with the same seed, so they arrive
+        // at the same random backup. This improves logical availability in the case where the
+        // the primary → client link is down. If it doesn't work, we have a fallback where a
+        // backup directly replies to client requests (see `ignore_request_message`).
+        fn execute_op_reply_to_client(self: *Replica, op: u64) bool {
+            if (self.replica == self.primary_index(self.view)) return true;
+
+            if (self.replica_count == 1) {
+                assert(self.standby());
+                return false;
+            }
+
+            var prng = stdx.PRNG.from_seed(op);
+            const offset_random = prng.range_inclusive(u8, 1, self.replica_count - 1);
+            const backup_random = (self.primary_index(self.view) + offset_random) % self.replica_count;
+            assert(backup_random != self.primary_index(self.view));
+            return self.replica == backup_random;
+        }
+
         fn execute_op(self: *Replica, prepare: *const Message.Prepare) void {
             // TODO Can we add more checks around allowing execute_op() during a view change?
             assert(self.commit_stage == .execute);
@@ -5356,26 +5376,7 @@ pub fn ReplicaType(
                 }
             }
 
-            const primary_ = self.primary_index(self.view);
-
-            // For each op, in addition to the primary, a randomly chosen backup also sends a reply
-            // to the client. All replicas initialize the PRNG with the same seed, so they arrive
-            // at the same random backup. This improves logical availability in the case where the
-            // the primary → client link is down. If it doesn't work, we have a fallback where a
-            // backup directly replies to client requests (see `ignore_request_message`).
-            const reply_to_client = blk: {
-                if (self.replica_count > 1) {
-                    var prng = stdx.PRNG.from_seed(prepare.header.op);
-                    const offset_random = prng.range_inclusive(u8, 1, self.replica_count - 1);
-                    const backup_random = (primary_ + offset_random) % self.replica_count;
-                    assert(backup_random != primary_);
-                    break :blk self.replica == primary_ or self.replica == backup_random;
-                } else {
-                    break :blk self.replica == primary_;
-                }
-            };
-
-            if (reply_to_client) {
+            if (self.execute_op_reply_to_client(prepare.header.op)) {
                 if (reply.header.client == 0) {
                     log.debug("{}: execute_op: no reply to client: {}", .{
                         self.log_prefix(),
