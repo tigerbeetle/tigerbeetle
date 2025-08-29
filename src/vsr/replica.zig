@@ -5195,7 +5195,8 @@ pub fn ReplicaType(
 
             var prng = stdx.PRNG.from_seed(op);
             const offset_random = prng.range_inclusive(u8, 1, self.replica_count - 1);
-            const backup_random = (self.primary_index(self.view) + offset_random) % self.replica_count;
+            const backup_random =
+                (self.primary_index(self.view) + offset_random) % self.replica_count;
             assert(backup_random != self.primary_index(self.view));
             return self.replica == backup_random;
         }
