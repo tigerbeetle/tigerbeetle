@@ -87,7 +87,6 @@ const CLIArgs = union(enum) {
         commit_stall_probability: ?Ratio = null,
 
         // Highly experimental options that will be removed in a future release:
-        replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
         statsd: ?[]const u8 = null,
@@ -499,7 +498,6 @@ pub const Command = union(enum) {
         trace: ?[]const u8,
         development: bool,
         experimental: bool,
-        replicate_closed_loop: bool,
         replicate_star: bool,
         aof_file: ?Path,
         path: []const u8,
@@ -1006,7 +1004,6 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
-        .replicate_closed_loop = start.replicate_closed_loop,
         .replicate_star = start.replicate_star,
         .aof_file = aof_file,
         .path = start.positional.path,

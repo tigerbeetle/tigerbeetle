@@ -2185,21 +2185,7 @@ pub fn ReplicaType(
                 self.checkpoint_id_for_op(prepare.message.header.op).?);
 
             // Wait until we have a quorum of prepare_ok messages (including ourself).
-            //
-            // When running with replicate_options.closed_loop this is changed significantly.
-            // Instead, the primary will try and wait for all replicas less 1 to respond, within a
-            // `prepare_timeout`. If the timeout fires, the quorum requirement for the whole
-            // pipeline is lowered to `self.quorum_replication` and checked again.
-            const threshold = if (self.replicate_options.closed_loop)
-                // It's possible that the on_prepare_timeout fires between reaching a replication
-                // quorum and receiving another prepare_ok. In that case, consider the threshold
-                // to have been quorum_replication, so following logic is skipped accordingly.
-                if (prepare.ok_quorum_received)
-                    self.quorum_replication
-                else
-                    @max(self.quorum_replication, self.replica_count - 1)
-            else
-                self.quorum_replication;
+            const threshold = self.quorum_replication;
 
             if (!prepare.ok_from_all_replicas.is_set(message.header.replica)) {
                 self.primary_abdicating = false;
@@ -3518,51 +3504,6 @@ pub fn ReplicaType(
 
                 self.prepare_timeout.reset();
                 return;
-            }
-
-            // Special case: replicate_options.closed_loop is set, and while we haven't yet received
-            // all prepare_oks, we have received enough to form a regular quorum. The head of the
-            // pipeline blocks anything further down, so checking the rest of the pipeline is gated
-            // by the head.
-            if (self.replicate_options.closed_loop and
-                prepare.ok_from_all_replicas.count() >= self.quorum_replication)
-            {
-                log.warn("{}: on_prepare_timeout: received quorum " ++
-                    "(prepare_oks={} quorum_replication={} replica_count={})", .{
-                    self.log_prefix(),
-                    prepare.ok_from_all_replicas.count(),
-                    self.quorum_replication,
-                    self.replica_count,
-                });
-
-                // If the head has received enough prepare_oks, it's possible the rest of the
-                // pipeline has too. Check the head (again) and do the same for all other prepares
-                // in the pipeline.
-                var prepares = self.pipeline.queue.prepare_queue.iterator_mutable();
-                while (prepares.next_ptr()) |prepare_pipelined| {
-                    assert(prepare_pipelined.message.header.command == .prepare);
-                    if (prepare_pipelined.ok_quorum_received) {
-                        continue;
-                    }
-
-                    if (prepare_pipelined.ok_from_all_replicas.count() >= self.quorum_replication) {
-                        prepare_pipelined.ok_quorum_received = true;
-                    }
-                }
-
-                if (self.primary_pipeline_pending()) |_| {
-                    self.prepare_timeout.reset();
-                } else {
-                    self.prepare_timeout.stop();
-
-                    // There are no prepares in the pipeline waiting for a prepare_ok quorum, give
-                    // the primary another shot at staying primary even if it currently abdicating.
-                    maybe(self.primary_abdicating);
-                    self.primary_abdicating = false;
-                    self.primary_abdicate_timeout.stop();
-                }
-
-                return self.commit_pipeline();
             }
 
             // The list of remote replicas yet to send a prepare_ok:
