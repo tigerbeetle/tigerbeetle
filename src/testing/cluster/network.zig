@@ -236,8 +236,17 @@ pub const Network = struct {
         const peer_type = message.header.peer_type();
         if (peer_type != .unknown) {
             switch (path.source) {
-                .client => |client_id| assert(std.meta.eql(peer_type, .{ .client = client_id })),
-                .replica => |index| assert(std.meta.eql(peer_type, .{ .replica = index })),
+                .client => |client_id| {
+                    assert(std.meta.eql(peer_type, .{ .client = client_id }));
+                },
+                .replica => |index| {
+                    // Request may be forwarded by a replica, but we always return peer_type as the
+                    // client ID, as it is useful for the production MessageBus. Specifically, a
+                    // replica that receives a request from a client can cache the connection in the
+                    // client map, instead of waiting for an infrequent PingClient message to do so.
+                    assert(std.meta.eql(peer_type, .{ .replica = index }) or
+                        message.header.command == .request);
+                },
             }
         }
 
