@@ -72,11 +72,6 @@ pub fn KWayMergeIteratorType(
             };
         }
 
-        pub fn empty(it: *const KWayMergeIterator) bool {
-            assert(it.state == .iterating);
-            return it.k == 0;
-        }
-
         pub fn reset(it: *KWayMergeIterator) void {
             it.* = .{
                 .context = it.context,
@@ -456,7 +451,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
 
             const Declarations = fuzz_helper.DeclEnumExcludingType(
                 KWay,
-                &.{ .init, .empty },
+                &.{.init},
             );
 
             var values_popped: u32 = 0;

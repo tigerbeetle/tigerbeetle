@@ -3,6 +3,82 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.57
+
+Released: 2025-08-29
+
+### Safety And Performance
+
+- [#3200](https://github.com/tigerbeetle/tigerbeetle/pull/3200)
+
+  Improved performance in `set_associative_cache.zig` by using Fastrange and SIMD.
+
+- [#3201](https://github.com/tigerbeetle/tigerbeetle/pull/3201)
+
+  Improved performance and better codegen in `aegis.zig` by avoiding aliasing.
+
+- [#3205](https://github.com/tigerbeetle/tigerbeetle/pull/3205)
+
+  Retain table repair progress across checkpoint boundaries,
+  to reduce the time to complete state sync for active clusters.
+
+- [#3216](https://github.com/tigerbeetle/tigerbeetle/pull/3216)
+
+  Use the `NOSIGNAL` flag with both asynchronous `send` and synchronous `send_now`.
+  This avoids receiving a possible `SIGPIPE` signal raised by the kernel.
+
+- [#3189](https://github.com/tigerbeetle/tigerbeetle/pull/3189)
+
+  Improve the Rust client API to make the returned future thread-safe.
+  Thanks @michabp!
+
+- [#3208](https://github.com/tigerbeetle/tigerbeetle/pull/3208)
+
+  Fix the Go client to make the subfolder with external files required by CGO
+  compatible with `go vendor`.
+  Thanks @itzloop.
+
+- [#3203](https://github.com/tigerbeetle/tigerbeetle/pull/3203)
+
+  Fix the Python client to make `close()` async on `ClientAsync`.
+
+### Internals
+
+- [#3215](https://github.com/tigerbeetle/tigerbeetle/pull/3215)
+
+  Removed support for _closed loop replication_ in repair and sync protocols.
+
+- [#3210](https://github.com/tigerbeetle/tigerbeetle/pull/3210),
+  [#3211](https://github.com/tigerbeetle/tigerbeetle/pull/3211)
+
+  Ban equality and inequality comparisons with `error` values, as they may silently
+  perform an untyped comparison.
+  Enforce handling errors with `switch` blocks instead.
+
+- [#3207](https://github.com/tigerbeetle/tigerbeetle/pull/3207)
+
+  Consolidate all Windows APIs we use (not present in Zig’s `std`) under `stdx.windows`.
+
+- [#3199](https://github.com/tigerbeetle/tigerbeetle/pull/3199),
+  [#3194](https://github.com/tigerbeetle/tigerbeetle/pull/3194)
+
+  Improve upgrade tests.
+
+- [#3202](https://github.com/tigerbeetle/tigerbeetle/pull/3202),
+  [#3140](https://github.com/tigerbeetle/tigerbeetle/pull/3140)
+
+  Improve the documentation to explain adaptive routing and add notes about
+  using CDC in production.
+
+- [#3196](https://github.com/tigerbeetle/tigerbeetle/pull/3196)
+
+  Moves the `unshare` code into `stdx.unshare` and uses it for both Vortex and CFO.
+  Also fixes how `vortex run` was handling the child process error code.
+
+### TigerTracks 🎧
+
+- [American Pie - Catch 22 😈](https://www.youtube.com/watch?v=9SzrN3oGCCw)
+
 ## TigerBeetle 0.16.56
 
 Released: 2025-08-22
