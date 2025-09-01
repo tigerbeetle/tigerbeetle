@@ -843,12 +843,14 @@ fn build_test(
     },
 ) !void {
     const stdx_unit_tests = b.addTest(.{
+        .name = "test-stdx",
         .root_source_file = b.path("src/stdx/stdx.zig"),
         .target = options.target,
         .optimize = options.mode,
         .filters = b.args orelse &.{},
     });
     const unit_tests = b.addTest(.{
+        .name = "test-unit",
         .root_source_file = b.path("src/unit_tests.zig"),
         .target = options.target,
         .optimize = options.mode,
@@ -950,6 +952,7 @@ fn build_test_integration(
     integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
     integration_tests_options.addOptionPath("vortex_exe", vortex_exe);
     const integration_tests = b.addTest(.{
+        .name = "test-integration",
         .root_source_file = b.path("src/integration_tests.zig"),
         .target = options.target,
         .optimize = options.mode,
