@@ -2290,8 +2290,8 @@ const TestReplicas = struct {
     fn get(
         t: *const TestReplicas,
         comptime field: std.meta.FieldEnum(Cluster.Replica),
-    ) std.meta.fieldInfo(Cluster.Replica, field).type {
-        var value_all: ?std.meta.fieldInfo(Cluster.Replica, field).type = null;
+    ) @FieldType(Cluster.Replica, @tagName(field)) {
+        var value_all: ?@FieldType(Cluster.Replica, @tagName(field)) = null;
         for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             const value = @field(replica, @tagName(field));

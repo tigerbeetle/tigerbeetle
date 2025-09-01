@@ -120,7 +120,7 @@ pub const Event = union(enum) {
         @setEvalBranchQuota(32_000);
         return switch (event.*) {
             inline else => |source_payload, tag| {
-                const TargetPayload = std.meta.fieldInfo(EventType, tag).type;
+                const TargetPayload = @FieldType(EventType, @tagName(tag));
                 const target_payload_info = @typeInfo(TargetPayload);
                 assert(target_payload_info == .void or target_payload_info == .@"struct");
 

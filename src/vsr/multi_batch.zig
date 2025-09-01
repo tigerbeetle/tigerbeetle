@@ -468,7 +468,7 @@ pub const MultiBatchEncoder = struct {
             TrailerItem.padding,
         );
 
-        const postamble: *Postamble = @alignCast(@ptrCast(
+        const postamble: *Postamble = @ptrCast(@alignCast(
             buffer[self.buffer_index + padding + trailer_size - @sizeOf(Postamble) ..],
         ));
         postamble.* = .{
@@ -623,7 +623,7 @@ test "batch: invalid format" {
         .{ .element_size = element_size / 2 },
     ));
 
-    const postamble: *Postamble = @alignCast(@ptrCast(
+    const postamble: *Postamble = @ptrCast(@alignCast(
         buffer[bytes_written - @sizeOf(Postamble) ..],
     ));
     postamble.batch_count = batch_count + 1;

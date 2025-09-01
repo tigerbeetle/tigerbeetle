@@ -414,9 +414,9 @@ pub const Decoder = struct {
 pub const Encoder = struct {
     pub const FrameHeader = struct {
         /// Total size in bytes including the `size` field.
-        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .type)) +
-            @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .channel)) +
-            @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .size));
+        pub const size_total = @sizeOf(@FieldType(Decoder.FrameHeader, "type")) +
+            @sizeOf(@FieldType(Decoder.FrameHeader, "channel")) +
+            @sizeOf(@FieldType(Decoder.FrameHeader, "size"));
 
         type: FrameType,
         channel: Channel,
@@ -424,9 +424,9 @@ pub const Encoder = struct {
 
     pub const Header = struct {
         /// Total size in bytes including the `body_size` field.
-        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.Header, .class)) +
-            @sizeOf(std.meta.FieldType(Decoder.Header, .weight)) +
-            @sizeOf(std.meta.FieldType(Decoder.Header, .body_size));
+        pub const size_total = @sizeOf(@FieldType(Decoder.Header, "class")) +
+            @sizeOf(@FieldType(Decoder.Header, "weight")) +
+            @sizeOf(@FieldType(Decoder.Header, "body_size"));
 
         class: u16,
         weight: u16,
@@ -904,7 +904,7 @@ test "amqp: BasicProperties property_flags" {
             var properties: BasicProperties = .{};
             switch (set_field) {
                 inline else => |field| {
-                    const Field = std.meta.Child(std.meta.FieldType(BasicProperties, field));
+                    const Field = std.meta.Child(@FieldType(BasicProperties, @tagName(field)));
                     @field(properties, @tagName(field)) = switch (Field) {
                         []const u8 => "",
                         DeliveryMode => .persistent,
@@ -1116,7 +1116,7 @@ const TestingTable = struct {
             const entry_field = std.meta.stringToEnum(FieldEnum, entry.key).?;
             switch (entry_field) {
                 inline else => |field| {
-                    const Field = std.meta.FieldType(TestingTable, field);
+                    const Field = @FieldType(TestingTable, @tagName(field));
                     @field(object, @tagName(field)) = switch (std.meta.Child(Field)) {
                         bool => entry.value.boolean,
                         []const u8 => entry.value.string,

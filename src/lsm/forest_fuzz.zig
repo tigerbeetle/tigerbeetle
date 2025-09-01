@@ -386,7 +386,7 @@ const Environment = struct {
     }
 
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
-        const Tree = std.meta.fieldInfo(GrooveAccounts.IndexTrees, index).type;
+        const Tree = @FieldType(GrooveAccounts.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
         const Index = GrooveAccounts.IndexTreeFieldHelperType(@tagName(index)).Index;
 
