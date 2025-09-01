@@ -51,7 +51,7 @@ fn devhub_coverage(shell: *Shell) !void {
 
     const kcov: []const []const u8 = &.{ "kcov", "--include-path=./src", "./src/devhub/coverage" };
     inline for (.{
-        "{kcov} ./zig-out/bin/test",
+        "{kcov} ./zig-out/bin/test-unit",
         "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_tree 92",
         "{kcov} ./zig-out/bin/fuzz --events-max=500000 lsm_forest 92",
         "{kcov} ./zig-out/bin/vopr 92",
