@@ -139,7 +139,7 @@ pub const MessageBuffer = struct {
 
         // Check that command is valid without materializing invalid Zig enum value.
         comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
-            std.meta.FieldType(Header, .command) == vsr.Command);
+            @FieldType(Header, "command") == vsr.Command);
         const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
         _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
             vsr.fatal(

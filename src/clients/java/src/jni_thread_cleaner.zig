@@ -165,7 +165,7 @@ test "JNIThreadCleaner:tls" {
         fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
             assert(tls_key != null);
 
-            const self: *TestContext = @alignCast(@ptrCast(tls_value));
+            const self: *TestContext = @ptrCast(@alignCast(tls_value));
             _ = self.counter.fetchAdd(1, .monotonic);
         }
     };

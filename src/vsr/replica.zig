@@ -4898,7 +4898,7 @@ pub fn ReplicaType(
         }
 
         fn commit_checkpoint_data_aof_callback(replica: *anyopaque) void {
-            const self: *Replica = @alignCast(@ptrCast(replica));
+            const self: *Replica = @ptrCast(@alignCast(replica));
             assert(self.commit_stage == .checkpoint_data);
             self.trace.stop(.replica_aof_checkpoint);
             self.commit_checkpoint_data_callback_join(.aof);
@@ -8527,9 +8527,9 @@ pub fn ReplicaType(
 
             const BitSet = stdx.BitSetType(128);
             comptime assert(BitSet.Word ==
-                std.meta.fieldInfo(Header.DoViewChange, .present_bitset).type);
+                @FieldType(Header.DoViewChange, "present_bitset"));
             comptime assert(BitSet.Word ==
-                std.meta.fieldInfo(Header.DoViewChange, .nack_bitset).type);
+                @FieldType(Header.DoViewChange, "nack_bitset"));
 
             // Collect nack and presence bits for the headers, so that the new primary can run CTRL
             // protocol to truncate uncommitted headers. When:
