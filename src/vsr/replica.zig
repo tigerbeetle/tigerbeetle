@@ -5185,6 +5185,10 @@ pub fn ReplicaType(
         // at the same random backup. This improves logical availability in the case where the
         // the primary → client link is down. If it doesn't work, we have a fallback where a
         // backup directly replies to client requests (see `ignore_request_message`).
+        // Selecting a random backup as opposed to using a determistic function also guards us from
+        // subtle resonance issues wherein the same backup replies to the same client every time.
+        // This could happen if `active client count % replica count == 0`, and these clients'
+        // requests arrive at the primary in the same order every time.
         fn execute_op_reply_to_client(self: *Replica, op: u64) bool {
             if (self.replica == self.primary_index(self.view)) return true;
 
