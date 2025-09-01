@@ -910,6 +910,26 @@ fn build_test_integration(
         mode: std.builtin.OptimizeMode,
     },
 ) void {
+    const tigerbeetle_web = download_release(b, "latest", options.target, options.mode);
+    const vsr_options_old, const vsr_module_old = build_vsr_module(b, .{
+        .stdx_module = options.stdx_module,
+        .git_commit = "bee71e0000000000000000000000000000bee71e".*, // Beetle-hash!
+        .config_verify = true,
+        .config_release = "0.16.98",
+        .config_release_client_min = "0.16.4",
+        .config_aof_recovery = false,
+        .hash_log_mode = .none,
+    });
+    const tigerbeetle_previous = build_tigerbeetle_executable_multiversion(b, .{
+        .stdx_module = options.stdx_module,
+        .vsr_module = vsr_module_old,
+        .vsr_options = vsr_options_old,
+        .llvm_objcopy = options.llvm_objcopy,
+        .tigerbeetle_previous = tigerbeetle_web,
+        .target = options.target,
+        .mode = options.mode,
+    });
+
     // For integration tests, we build an independent copy of TigerBeetle with "real" config and
     // multiversioning.
     const vsr_options, const vsr_module = build_vsr_module(b, .{
@@ -921,7 +941,6 @@ fn build_test_integration(
         .config_aof_recovery = false,
         .hash_log_mode = .none,
     });
-    const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{
         .stdx_module = options.stdx_module,
         .vsr_module = vsr_module,
