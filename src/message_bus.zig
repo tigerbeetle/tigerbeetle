@@ -758,8 +758,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                         switch (connection.peer) {
                             .client => |existing| assert(bus.process.clients.remove(existing)),
+                            .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
                             .unknown => {},
-                            .none, .replica => unreachable,
+                            .none => unreachable,
                         }
 
                         bus.replicas[replica_index] = connection;
@@ -786,7 +787,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         } else {
                             switch (connection.peer) {
                                 .unknown => {},
-                                .client, .replica, .none => unreachable,
+                                .client, .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
+                                .none => unreachable,
                             }
                         }
 

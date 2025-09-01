@@ -168,7 +168,13 @@ pub const MessageBuffer = struct {
         // and not when we receive a full message.
         const message_peer = header.peer_type();
         if (message_peer != .unknown) {
-            if (buffer.peer == .unknown) {
+            if (buffer.peer == .unknown or
+                // Allow transition from client → replica, as peer_type always returns client ID
+                // for request messages, even if they are being forwarded by replicas.
+                // Other transitions like client → client, client → replica, or replica  → replica
+                // are unexpected, the peer must not change in the middle of a TCP session.
+                (buffer.peer == .client and message_peer == .replica))
+            {
                 buffer.peer = message_peer;
             } else {
                 if (!std.meta.eql(buffer.peer, message_peer)) {
