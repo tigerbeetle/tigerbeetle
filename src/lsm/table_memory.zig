@@ -119,6 +119,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.value_context.count <= table.values.len);
             assert(table.value_context.sorted);
 
+            if (!table.key_range_contains(key)) {
+                return null;
+            }
+
             return binary_search.binary_search_values(
                 Key,
                 Value,
@@ -295,11 +299,18 @@ pub fn TableMemoryType(comptime Table: type) type {
             return key_from_value(&a) < key_from_value(&b);
         }
 
+        pub fn key_range_contains(table: *const TableMemory, key: Key) bool {
+            assert(table.value_context.sorted);
+
+            if (table.count() == 0) return false;
+            return table.key_min() <= key and key <= table.key_max();
+        }
+
         pub fn key_min(table: *const TableMemory) Key {
             const values = table.values_used();
 
             assert(values.len > 0);
-            assert(table.mutability == .immutable);
+            assert(table.value_context.sorted);
 
             return key_from_value(&values[0]);
         }
@@ -308,7 +319,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const values = table.values_used();
 
             assert(values.len > 0);
-            assert(table.mutability == .immutable);
+            assert(table.value_context.sorted);
 
             return key_from_value(&values[values.len - 1]);
         }
