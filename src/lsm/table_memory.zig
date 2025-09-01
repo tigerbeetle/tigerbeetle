@@ -170,6 +170,17 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.value_context.sorted);
 
+            if (table_mutable.count() == 0) {
+                // Mutable table is empty so we can exit early.
+                table_mutable.reset();
+                table_immutable.mutability = .{ .immutable = .{
+                    .flushed = table_immutable.value_context.count == 0,
+                    .absorbed = true,
+                    .snapshot_min = snapshot_min,
+                } };
+                return;
+            }
+
             const values_count_limit = table_immutable.values.len;
             assert(values_count_limit == values_count_limit);
             assert(table_immutable.count() <= values_count_limit);
