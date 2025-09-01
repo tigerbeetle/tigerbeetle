@@ -803,7 +803,7 @@ pub fn StateMachineType(
 
             pub const Field = std.meta.FieldEnum(PrefetchContext);
             pub fn FieldType(comptime field: Field) type {
-                return std.meta.fieldInfo(PrefetchContext, field).type;
+                return @FieldType(PrefetchContext, @tagName(field));
             }
 
             pub fn parent(
@@ -839,7 +839,7 @@ pub fn StateMachineType(
 
             pub const Field = std.meta.FieldEnum(ScanLookup);
             pub fn FieldType(comptime field: Field) type {
-                return std.meta.fieldInfo(ScanLookup, field).type;
+                return @FieldType(ScanLookup, @tagName(field));
             }
 
             pub fn parent(
@@ -4780,7 +4780,7 @@ fn ExpirePendingTransfersType(
         const EvaluateNext = @import("lsm/scan_range.zig").EvaluateNext;
         const ScanLookupStatus = @import("lsm/scan_lookup.zig").ScanLookupStatus;
 
-        const Tree = std.meta.FieldType(TransfersGroove.IndexTrees, .expires_at);
+        const Tree = @FieldType(TransfersGroove.IndexTrees, "expires_at");
         const Value = Tree.Table.Value;
 
         // TODO(zig) Context should be `*ExpirePendingTransfers`,

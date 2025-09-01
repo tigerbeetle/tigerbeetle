@@ -135,7 +135,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 .client => @as(u64, @truncate(process_id.client)),
             };
 
-            const process: std.meta.FieldType(MessageBus, .process) = switch (process_type) {
+            const process: @FieldType(MessageBus, "process") = switch (process_type) {
                 .replica => blk: {
                     const address = options.configuration[process_id.replica];
                     const fd = try init_tcp(options.io, address.any.family);

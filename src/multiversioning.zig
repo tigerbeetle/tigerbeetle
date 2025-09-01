@@ -1306,6 +1306,36 @@ pub const Multiversion = struct {
                 // Close the handle before trying to execute.
                 posix.close(self.target_fd);
 
+                const pipe_name: [*:0]const u16 =
+                    std.unicode.utf8ToUtf16LeStringLiteral("\\\\.\\pipe\\") ++ random_wstr();
+
+                // Use pipe to send our HANDLE to the child, see `wait_for_parent_to_exit`.
+                const pipe = std.os.windows.kernel32.CreateNamedPipeW(
+                    pipe_name,
+                    std.os.windows.PIPE_ACCESS_OUTBOUND |
+                        0x00080000, // FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    std.os.windows.PIPE_TYPE_BYTE | std.os.windows.PIPE_WAIT,
+                    1, // nMaxInstances
+                    0, // nOutBufferSize
+                    0, // nInBufferSize
+                    0, // nDefaultTimeOut
+                    null, // lpSecurityAttributes
+                );
+                if (pipe == std.os.windows.INVALID_HANDLE_VALUE) {
+                    log.err("CreateNamedPipeW: {}", .{std.os.windows.GetLastError()});
+                    return error.CreateNamedPipeWFailed;
+                }
+                assert(pipe != std.os.windows.INVALID_HANDLE_VALUE);
+                errdefer std.os.windows.CloseHandle(pipe);
+
+                // Pass the name of the pipe via inherited environment.
+                assert(
+                    std.os.windows.kernel32.SetEnvironmentVariableW(
+                        TB_MULTIVERSION_PIPE,
+                        pipe_name,
+                    ) != 0,
+                );
+
                 // If bInheritHandles is FALSE, and dwFlags inside STARTUPINFOW doesn't have
                 // STARTF_USESTDHANDLES set, the stdin/stdout/stderr handles of the parent will
                 // be passed through to the child.
@@ -1321,6 +1351,32 @@ pub const Multiversion = struct {
                     &lp_startup_info,
                     &lp_process_information,
                 ) catch return error.CreateProcessWFailed;
+                const child: std.os.windows.HANDLE = lp_process_information.hProcess;
+
+                if (stdx.windows.ConnectNamedPipe(pipe, null) == std.os.windows.FALSE and
+                    std.os.windows.GetLastError() != .PIPE_CONNECTED)
+                {
+                    log.err("ConnectNamedPipe: {}", .{std.os.windows.GetLastError()});
+                    return error.ConnectNamedPipeFailed;
+                }
+
+                var me: std.os.windows.HANDLE = undefined;
+                if (std.os.windows.kernel32.DuplicateHandle(
+                    std.os.windows.GetCurrentProcess(),
+                    std.os.windows.GetCurrentProcess(),
+                    child,
+                    &me,
+                    0,
+                    std.os.windows.FALSE,
+                    std.os.windows.DUPLICATE_SAME_ACCESS,
+                ) != std.os.windows.TRUE) {
+                    log.err("DuplicateHandle: {}", .{std.os.windows.GetLastError()});
+                    return error.DuplicateHandleFailed;
+                }
+
+                const write_size = try std.os.windows.WriteFile(pipe, std.mem.asBytes(&me), null);
+                assert(write_size == @sizeOf(@TypeOf(me)));
+
                 std.process.exit(0);
             },
             else => @panic("unsupported platform"),
@@ -1377,6 +1433,71 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
         // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
         return try allocator.dupeZ(u8, native_self_exe_path);
     }
+}
+
+pub fn random_wstr() [32]u16 {
+    var result: [32]u16 = @splat(std.unicode.utf8ToUtf16LeStringLiteral("0")[0]);
+
+    var buffer_utf8: [31]u8 = undefined;
+    const name_utf8 = stdx.array_print(31, &buffer_utf8, "{d}", .{std.crypto.random.int(u64)});
+    var fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(&result));
+    _ = std.unicode.utf8ToUtf16LeAllocZ(fba.allocator(), name_utf8) catch |err| switch (err) {
+        error.InvalidUtf8, error.OutOfMemory => unreachable,
+    };
+    return result;
+}
+
+// During upgrades, tigerbeetle dynamically re-executes itself at a different version.
+// There can be only one tigerbeetle instance running at a time, due to any of:
+// - data file lock,
+// - incoming port,
+// - available RAM.
+// On POSIX, execve semantics of replacing the parent process gives us this for free.
+// On Windows, parent and child cooperate, with the child blocking until the parent exit.
+// Specifically:
+// 1. Parent creates a named pipe with a random name.
+// 2. Parent passes the name of this pipe to the child via inherited env variable.
+// 3. Parent duplicates its own handle into the child process.
+// 4. Parent passes the value of this handle to the child via anonymous pipe
+//    (We don't want to pass parent handle _directly_ to avoid handle inheritance)
+// 5. Child gets the name of the pipe trough env.
+// 6. Child receives the parent's handle through the pipe.
+// 7. Child waits for parent to exit.
+const TB_MULTIVERSION_PIPE = std.unicode.utf8ToUtf16LeStringLiteral("TB_MULTIVERSION_PIPE");
+pub fn wait_for_parent_to_exit() !void {
+    comptime assert(builtin.os.tag == .windows);
+
+    var pipe_name_buffer: [64]u16 = undefined;
+    const count = std.os.windows.kernel32.GetEnvironmentVariableW(
+        TB_MULTIVERSION_PIPE,
+        &pipe_name_buffer,
+        pipe_name_buffer.len,
+    );
+    if (count == 0) return;
+    assert(pipe_name_buffer[count] == 0);
+
+    const pipe = std.os.windows.kernel32.CreateFileW(
+        @ptrCast(&pipe_name_buffer),
+        std.os.windows.GENERIC_READ,
+        0,
+        null,
+        std.os.windows.OPEN_EXISTING,
+        0,
+        null,
+    );
+    if (pipe == std.os.windows.INVALID_HANDLE_VALUE) {
+        log.err("CreateFileW: {}", .{std.os.windows.GetLastError()});
+        return error.CreateFileWFailed;
+    }
+    assert(pipe != std.os.windows.INVALID_HANDLE_VALUE);
+    defer std.os.windows.CloseHandle(pipe);
+
+    var parent: std.os.windows.HANDLE = undefined;
+    const read_size = try std.os.windows.ReadFile(pipe, std.mem.asBytes(&parent), null);
+    assert(read_size == @sizeOf(@TypeOf(parent)));
+    defer std.os.windows.CloseHandle(parent);
+
+    try std.os.windows.WaitForSingleObject(parent, std.os.windows.INFINITE);
 }
 
 const HeaderBodyOffsets = struct {

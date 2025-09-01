@@ -41,3 +41,8 @@ pub extern "kernel32" fn LockFileEx(
 pub extern "kernel32" fn SetEndOfFile(
     hFile: windows.HANDLE,
 ) callconv(.winapi) windows.BOOL;
+
+pub extern "kernel32" fn ConnectNamedPipe(
+    hNamedPipe: windows.HANDLE,
+    lpOverlapped: ?*windows.OVERLAPPED,
+) callconv(.winapi) windows.BOOL;
