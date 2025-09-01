@@ -576,7 +576,10 @@ test "MultiversionHeader.advertisable" {
 const multiversion_uuid = "tigerbeetle-multiversion-1768a738-ef69-4605-8b5c-c6e63580e345";
 
 pub const Multiversion = struct {
-    const ArgsEnvp = if (builtin.target.os.tag == .windows) void else struct {
+    const ArgsEnvp = if (builtin.target.os.tag == .windows) struct {
+        target_path_w: [:0]const u16,
+        exe_path_w: [:0]const u16,
+    } else struct {
         // Coerces to [*:null]const ?[*:0]const u8 but lets us keep information to free the memory
         // later.
         args: [:null]?[*:0]const u8,
@@ -723,11 +726,12 @@ pub const Multiversion = struct {
                 };
             },
 
-            // ArgsEnvp is void on Windows, and command line passing is handled directly by
-            // exec_target_fd().
-            .windows => {},
+            .windows => .{
+                .target_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, target_path),
+                .exe_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, exe_path),
+            },
 
-            else => @panic("unsupported platform"),
+            else => comptime unreachable,
         };
 
         return .{
@@ -739,7 +743,7 @@ pub const Multiversion = struct {
                     .linux => .elf,
                     .windows => .pe,
                     .macos => .macho,
-                    else => @panic("unsupported platform"),
+                    else => comptime unreachable,
                 },
                 .detect => .detect,
             },
@@ -766,7 +770,10 @@ pub const Multiversion = struct {
 
         allocator.free(self.source_buffer);
 
-        if (builtin.target.os.tag != .windows) {
+        if (builtin.target.os.tag == .windows) {
+            allocator.free(self.args_envp.target_path_w);
+            allocator.free(self.args_envp.exe_path_w);
+        } else {
             allocator.free(std.mem.span(self.args_envp.args[0].?));
             allocator.free(self.args_envp.args);
         }
@@ -1277,17 +1284,6 @@ pub const Multiversion = struct {
                 unreachable;
             },
             .windows => {
-                // Includes the null byte, that utf8ToUtf16LeAllocZ needs.
-                var buffer: [std.fs.max_path_bytes]u8 = undefined;
-                var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
-                const allocator = fixed_allocator.allocator();
-
-                const target_path_w = std.unicode.utf8ToUtf16LeAllocZ(
-                    allocator,
-                    self.target_path,
-                ) catch unreachable;
-                defer allocator.free(target_path_w);
-
                 // "The Unicode version of this function, CreateProcessW, can modify the contents of
                 // this string. Therefore, this parameter cannot be a pointer to read-only memory
                 // (such as a const variable or a literal string). If this parameter is a constant
@@ -1328,11 +1324,18 @@ pub const Multiversion = struct {
                 assert(pipe != std.os.windows.INVALID_HANDLE_VALUE);
                 errdefer std.os.windows.CloseHandle(pipe);
 
-                // Pass the name of the pipe via inherited environment.
+                // Pass the name of the pipe and the path to the original executable
+                // via the inherited environment.
                 assert(
                     std.os.windows.kernel32.SetEnvironmentVariableW(
-                        TB_MULTIVERSION_PIPE,
+                        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_PIPE),
                         pipe_name,
+                    ) != 0,
+                );
+                assert(
+                    std.os.windows.kernel32.SetEnvironmentVariableW(
+                        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_EXE),
+                        self.args_envp.exe_path_w,
                     ) != 0,
                 );
 
@@ -1340,7 +1343,7 @@ pub const Multiversion = struct {
                 // STARTF_USESTDHANDLES set, the stdin/stdout/stderr handles of the parent will
                 // be passed through to the child.
                 std.os.windows.CreateProcessW(
-                    target_path_w,
+                    self.args_envp.target_path_w,
                     cmd_line_w,
                     null,
                     null,
@@ -1402,11 +1405,10 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
 
     const native_self_exe_path = try std.fs.selfExePath(&buf);
 
-    if (builtin.target.os.tag == .linux and std.mem.eql(
-        u8,
-        native_self_exe_path,
-        "/memfd:" ++ multiversion_uuid ++ " (deleted)",
-    )) {
+    if (builtin.target.os.tag == .linux and
+        std.mem.eql(u8, native_self_exe_path, "/memfd:" ++ multiversion_uuid ++ " (deleted)"))
+    {
+        comptime assert(builtin.target.os.tag == .linux);
         // Technically, "/memfd:tigerbeetle-multiversion-... (deleted)" is a valid path at which you
         // could place your binary - please don't!
         assert(std.fs.cwd().statFile(native_self_exe_path) catch null == null);
@@ -1416,23 +1418,40 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
         assert(std.fs.path.isAbsolute(path));
 
         return path;
-    } else if (std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null) {
-        assert(builtin.target.os.tag == .windows or builtin.target.os.tag == .macos);
-        // Similar to above, you _could_ call your binary "tigerbeetle-multiversion-...". This can't
-        // be checked with an assert unfortunately.
+    }
+
+    if (builtin.target.os.tag == .macos and
+        std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null)
+    {
+        comptime assert(builtin.target.os.tag == .macos);
+        // Similarly to the Linux case, assume that UUID-containing name means an upgrade, though
+        // it's not possible to assert this.
 
         // Running from a temp path already; the real path is argv[0].
-        var arg_iterator = try std.process.argsWithAllocator(allocator);
-        defer arg_iterator.deinit();
+        const path = try allocator.dupeZ(u8, std.mem.span(os.argv[0]));
+        assert(std.fs.path.isAbsolute(path));
 
-        const path = arg_iterator.next().?;
+        return path;
+    }
+
+    if (builtin.target.os.tag == .windows and
+        std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null)
+    {
+        comptime assert(builtin.target.os.tag == .windows);
+        // Similarly to the Linux case, assume that UUID-containing name means an upgrade, though
+        // it's not possible to assert this.
+
+        // Windows make it error-prone to set argv[0], so the path is passed via env.
+        const path = try std.process.getEnvVarOwned(allocator, TB_MULTIVERSION_EXE);
+        defer allocator.free(path);
+
         assert(std.fs.path.isAbsolute(path));
 
         return try allocator.dupeZ(u8, path);
-    } else {
-        // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
-        return try allocator.dupeZ(u8, native_self_exe_path);
     }
+
+    // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
+    return try allocator.dupeZ(u8, native_self_exe_path);
 }
 
 pub fn random_wstr() [32]u16 {
@@ -1463,13 +1482,14 @@ pub fn random_wstr() [32]u16 {
 // 5. Child gets the name of the pipe trough env.
 // 6. Child receives the parent's handle through the pipe.
 // 7. Child waits for parent to exit.
-const TB_MULTIVERSION_PIPE = std.unicode.utf8ToUtf16LeStringLiteral("TB_MULTIVERSION_PIPE");
+const TB_MULTIVERSION_PIPE = "TB_MULTIVERSION_PIPE";
+const TB_MULTIVERSION_EXE = "TB_MULTIVERSION_EXE";
 pub fn wait_for_parent_to_exit() !void {
     comptime assert(builtin.os.tag == .windows);
 
     var pipe_name_buffer: [64]u16 = undefined;
     const count = std.os.windows.kernel32.GetEnvironmentVariableW(
-        TB_MULTIVERSION_PIPE,
+        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_PIPE),
         &pipe_name_buffer,
         pipe_name_buffer.len,
     );
