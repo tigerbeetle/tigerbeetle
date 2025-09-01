@@ -1,9 +1,10 @@
 $ErrorActionPreference = "Stop"
 
+$ZIG_MIRROR="https://pkg.machengine.org/zig"
 $ZIG_RELEASE = "0.14.1"
 $ZIG_CHECKSUMS = @"
-https://ziglang.org/download/0.14.1/zig-aarch64-windows-0.14.1.zip b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7
-https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip 554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c
+$ZIG_MIRROR/0.14.1/zig-aarch64-windows-0.14.1.zip b5aac0ccc40dd91e8311b1f257717d8e3903b5fefb8f659de6d65a840ad1d0e7
+$ZIG_MIRROR/0.14.1/zig-x86_64-windows-0.14.1.zip 554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c
 "@
 
 $ZIG_ARCH = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") {
@@ -18,7 +19,7 @@ $ZIG_OS = "windows"
 $ZIG_EXTENSION = ".zip"
 
 # Build URL:
-$ZIG_URL = "https://ziglang.org/download/$ZIG_RELEASE/zig-$ZIG_ARCH-$ZIG_OS-$ZIG_RELEASE$ZIG_EXTENSION"
+$ZIG_URL = "$ZIG_MIRROR/$ZIG_RELEASE/zig-$ZIG_ARCH-$ZIG_OS-$ZIG_RELEASE$ZIG_EXTENSION"
 $ZIG_ARCHIVE = [System.IO.Path]::GetFileName("$ZIG_URL")
 $ZIG_DIRECTORY = "$ZIG_ARCHIVE" -replace [regex]::Escape($ZIG_EXTENSION), ""
 
