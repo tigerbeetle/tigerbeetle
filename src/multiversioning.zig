@@ -16,6 +16,67 @@ pub const checksum = @import("vsr/checksum.zig");
 pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
 pub const multiversion_binary_platform_size_max = constants.multiversion_binary_platform_size_max;
 
+// Multiversion interface backed by three different implementations:
+// - MultiversionOS implements the real dynamic re-execution logic,
+// - single_version is used when multiversion is disabled (release list of count one),
+// - VOPR simulation.
+pub const Multiversion = struct {
+    context: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        releases_bundled: *const fn (context: *anyopaque) ReleaseList,
+        release_execute: *const fn (context: *anyopaque, release: Release) void,
+        tick: *const fn (context: *anyopaque) void,
+    };
+
+    /// A list of all versions of code that are available in the current binary.
+    /// Includes the current version, newer versions, and older versions.
+    /// Ordered from lowest/oldest to highest/newest.
+    /// Can be updated by multiversioning while running.
+    pub fn releases_bundled(multiversion: Multiversion) ReleaseList {
+        return multiversion.vtable.releases_bundled(multiversion.context);
+    }
+
+    /// Replace the currently-running replica with the given release.
+    ///
+    /// If called with a `release` that is *not* in `releases_bundled`, the replica should shut
+    /// down with a helpful error message to warn the operator that they must upgrade.
+    // NB: this is void for VOPR, but the actual implementation is noreturn.
+    pub fn release_execute(multiversion: Multiversion, release: Release) void {
+        multiversion.vtable.release_execute(multiversion.context, release);
+    }
+
+    pub fn tick(multiversion: Multiversion) void {
+        multiversion.vtable.tick(multiversion.context);
+    }
+
+    /// Multiversion implementation that only has one release available.
+    pub fn single_release(comptime release: Release) Multiversion {
+        const vtable = struct {
+            fn releases_bundled(_: *anyopaque) ReleaseList {
+                var result: ReleaseList = .empty;
+                result.push(release);
+                return result;
+            }
+            fn release_execute(_: *anyopaque, release_next: Release) void {
+                assert(release_next.value != release.value);
+                @panic("multiversion unsupported");
+            }
+            fn tick(_: *anyopaque) void {}
+        };
+
+        return .{
+            .context = @constCast(&{}),
+            .vtable = &.{
+                .releases_bundled = vtable.releases_bundled,
+                .release_execute = vtable.release_execute,
+                .tick = vtable.tick,
+            },
+        };
+    }
+};
+
 /// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
 /// old CPU Type IDs.
 /// These are valid (in the MachO spec) but ancient (macOS has never run on anything other than
@@ -575,7 +636,7 @@ test "MultiversionHeader.advertisable" {
 
 const multiversion_uuid = "tigerbeetle-multiversion-1768a738-ef69-4605-8b5c-c6e63580e345";
 
-pub const Multiversion = struct {
+pub const MultiversionOS = struct {
     const ArgsEnvp = if (builtin.target.os.tag == .windows) struct {
         target_path_w: [:0]const u16,
         exe_path_w: [:0]const u16,
@@ -603,8 +664,7 @@ pub const Multiversion = struct {
     target_body_offset: ?u32 = null,
     target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
-    /// This list is referenced by `Replica.releases_bundled`.
-    /// Note that this only contains the advertisable releases, which are a subset of the actual
+    /// This list only contains the advertisable releases, which are a subset of the actual
     /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
     releases_bundled: ReleaseList = .empty,
 
@@ -632,7 +692,7 @@ pub const Multiversion = struct {
         io: *IO,
         exe_path: [:0]const u8,
         exe_path_format: enum { detect, native },
-    ) !Multiversion {
+    ) !MultiversionOS {
         assert(std.fs.path.isAbsolute(exe_path));
 
         const multiversion_binary_size_max_by_format = switch (exe_path_format) {
@@ -763,7 +823,7 @@ pub const Multiversion = struct {
         };
     }
 
-    pub fn deinit(self: *Multiversion, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *MultiversionOS, allocator: std.mem.Allocator) void {
         posix.close(self.target_fd);
         self.target_fd = IO.INVALID_FILE;
         allocator.free(self.target_path);
@@ -780,7 +840,30 @@ pub const Multiversion = struct {
         self.* = undefined;
     }
 
-    pub fn open_sync(self: *Multiversion) !void {
+    pub fn multiversion(self: *MultiversionOS) Multiversion {
+        return .{ .context = self, .vtable = &.{
+            .releases_bundled = vtable_releases_bundled,
+            .release_execute = vtable_release_execute,
+            .tick = vtable_tick,
+        } };
+    }
+
+    fn vtable_releases_bundled(context: *anyopaque) ReleaseList {
+        const self: *const MultiversionOS = @ptrCast(@alignCast(context));
+        return self.releases_bundled;
+    }
+
+    fn vtable_release_execute(context: *anyopaque, release: Release) void {
+        const self: *MultiversionOS = @ptrCast(@alignCast(context));
+        self.replica_release_execute(release);
+    }
+
+    fn vtable_tick(context: *anyopaque) void {
+        const self: *MultiversionOS = @ptrCast(@alignCast(context));
+        self.tick();
+    }
+
+    pub fn open_sync(self: *MultiversionOS) !void {
         assert(self.stage == .init);
         assert(!self.timeout.ticking);
 
@@ -816,12 +899,12 @@ pub const Multiversion = struct {
         }
     }
 
-    pub fn tick(self: *Multiversion) void {
+    fn tick(self: *MultiversionOS) void {
         self.timeout.tick();
         if (self.timeout.fired()) self.on_timeout();
     }
 
-    pub fn timeout_start(self: *Multiversion, replica_index: u8) void {
+    pub fn timeout_start(self: *MultiversionOS, replica_index: u8) void {
         assert(!self.timeout.ticking);
         if (builtin.target.os.tag != .linux) {
             // Checking for new binaries on disk after the replica has been opened is only
@@ -834,7 +917,7 @@ pub const Multiversion = struct {
         log.debug("enabled automatic on-disk version detection.", .{});
     }
 
-    fn on_timeout(self: *Multiversion) void {
+    fn on_timeout(self: *MultiversionOS) void {
         self.timeout.reset();
 
         assert(builtin.target.os.tag == .linux);
@@ -854,12 +937,12 @@ pub const Multiversion = struct {
         self.binary_statx();
     }
 
-    fn binary_statx(self: *Multiversion) void {
+    fn binary_statx(self: *MultiversionOS) void {
         assert(self.stage == .init);
 
         self.stage = .source_stat;
         self.io.statx(
-            *Multiversion,
+            *MultiversionOS,
             self,
             binary_statx_callback,
             &self.completion,
@@ -871,7 +954,7 @@ pub const Multiversion = struct {
         );
     }
 
-    fn binary_statx_callback(self: *Multiversion, _: *IO.Completion, result: anyerror!void) void {
+    fn binary_statx_callback(self: *MultiversionOS, _: *IO.Completion, result: anyerror!void) void {
         assert(self.stage == .source_stat);
 
         _ = result catch |e| {
@@ -907,7 +990,7 @@ pub const Multiversion = struct {
         self.timeout_statx_previous = .{ .previous = self.timeout_statx };
     }
 
-    fn binary_open(self: *Multiversion) void {
+    fn binary_open(self: *MultiversionOS) void {
         assert(self.stage == .init);
         assert(self.source_offset == null);
 
@@ -916,7 +999,7 @@ pub const Multiversion = struct {
 
         switch (builtin.os.tag) {
             .linux => self.io.openat(
-                *Multiversion,
+                *MultiversionOS,
                 self,
                 binary_open_callback,
                 &self.completion,
@@ -935,7 +1018,7 @@ pub const Multiversion = struct {
     }
 
     fn binary_open_callback(
-        self: *Multiversion,
+        self: *MultiversionOS,
         _: *IO.Completion,
         result: IO.OpenatError!posix.fd_t,
     ) void {
@@ -953,14 +1036,14 @@ pub const Multiversion = struct {
         self.binary_read();
     }
 
-    fn binary_read(self: *Multiversion) void {
+    fn binary_read(self: *MultiversionOS) void {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
         assert(self.source_offset.? < self.source_buffer.len);
 
         self.io.read(
-            *Multiversion,
+            *MultiversionOS,
             self,
             binary_read_callback,
             &self.completion,
@@ -971,7 +1054,7 @@ pub const Multiversion = struct {
     }
 
     fn binary_read_callback(
-        self: *Multiversion,
+        self: *MultiversionOS,
         _: *IO.Completion,
         result: IO.ReadError!usize,
     ) void {
@@ -1009,7 +1092,7 @@ pub const Multiversion = struct {
         }
     }
 
-    fn target_update(self: *Multiversion, source_buffer: []align(8) u8) !void {
+    fn target_update(self: *MultiversionOS, source_buffer: []align(8) u8) !void {
         assert(self.stage == .target_update);
         const offsets = switch (self.exe_path_format) {
             .elf => try parse_elf(source_buffer),
@@ -1126,7 +1209,7 @@ pub const Multiversion = struct {
         self.stage = .ready;
     }
 
-    fn handle_error(self: *Multiversion, result: anyerror) void {
+    fn handle_error(self: *MultiversionOS, result: anyerror) void {
         assert(self.stage != .init);
 
         log.err("binary does not contain valid multiversion data: {}", .{result});
@@ -1134,7 +1217,41 @@ pub const Multiversion = struct {
         self.stage = .{ .err = result };
     }
 
-    pub fn exec_current(self: *Multiversion, release_target: Release) !noreturn {
+    fn replica_release_execute(self: *MultiversionOS, release: Release) noreturn {
+        assert(release.value != constants.config.process.release.value);
+        assert(release.value != Release.zero.value);
+        assert(release.value != Release.minimum.value);
+
+        if (!self.releases_bundled.contains(release)) {
+            log.err("release_execute: release {} is not available;" ++
+                " upgrade (or downgrade) the binary", .{
+                release,
+            });
+            @panic("release not available");
+        }
+
+        // We have two paths here, depending on if we're upgrading or downgrading. If we're
+        // downgrading the invariant is that this code is running _before_ we've finished opening,
+        // that is, release_transition is called in open().
+        if (release.value < constants.config.process.release.value) {
+            self.exec_release(
+                release,
+            ) catch |err| {
+                std.debug.panic("failed to execute previous release: {}", .{err});
+            };
+        } else {
+            // For the upgrade case, re-run the latest binary in place. If we need something older
+            // than the latest, that'll be handled when the case above is hit when re-execing:
+            // (current version v1) -> (latest version v4) -> (desired version v2)
+            self.exec_current(release) catch |err| {
+                std.debug.panic("failed to execute latest release: {}", .{err});
+            };
+        }
+
+        comptime unreachable;
+    }
+
+    fn exec_current(self: *MultiversionOS, release_target: Release) !noreturn {
         // target_fd is only modified in target_update() which happens synchronously.
         assert(self.stage != .target_update);
 
@@ -1180,7 +1297,7 @@ pub const Multiversion = struct {
     /// exec_release is called before a replica is fully open, but just after it has transitioned to
     /// static. Therefore, standard `os.read` blocking syscalls are available.
     /// (in any case, using blocking IO on a memfd on Linux is safe.)
-    pub fn exec_release(self: *Multiversion, release_target: Release) !noreturn {
+    fn exec_release(self: *MultiversionOS, release_target: Release) !noreturn {
         // exec_release uses self.source_buffer, but this may be the target of an async read by
         // the kernel (from binary_open_callback). Assert that timeouts are not running, and
         // multiversioning is ready to ensure this can't be the case.
@@ -1262,7 +1379,7 @@ pub const Multiversion = struct {
         try self.exec_target_fd();
     }
 
-    fn exec_target_fd(self: *Multiversion) !noreturn {
+    fn exec_target_fd(self: *MultiversionOS) !noreturn {
         switch (builtin.os.tag) {
             .linux => {
                 if (execveat(
@@ -1943,7 +2060,7 @@ pub fn print_information(
     const absolute_exe_path_z = try gpa.dupeZ(u8, absolute_exe_path);
     defer gpa.free(absolute_exe_path_z);
 
-    var multiversion = try Multiversion.init(
+    var multiversion = try MultiversionOS.init(
         gpa,
         &io,
         absolute_exe_path_z,

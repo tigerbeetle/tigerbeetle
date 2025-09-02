@@ -16,6 +16,7 @@ const IO = @import("io.zig").IO;
 
 const AOF = @import("../aof.zig").AOFType(IO);
 const TimeSim = @import("time.zig").TimeSim;
+const Multiversion = vsr.multiversioning.Multiversion;
 const IdPermutation = @import("id.zig").IdPermutation;
 
 const StateCheckerType = @import("cluster/state_checker.zig").StateCheckerType;
@@ -742,9 +743,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .message_bus_options = .{ .network = cluster.network },
                     .release = options.release,
                     .release_client_min = release_client_min,
-                    .releases_bundled = &cluster.replica_releases_bundled[replica_index],
-                    .release_execute = replica_release_execute_soon,
-                    .release_execute_context = null,
+                    .multiversion = replica_multiversion(replica),
                     .test_context = cluster,
                     .tracer = &cluster.replica_tracers[replica_index],
                     .replicate_options = cluster.options.replicate_options,
@@ -760,10 +759,37 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             cluster.network.link(replica.message_bus.process, &replica.message_bus);
         }
 
-        fn replica_release_execute_soon(replica: *Replica, release: vsr.Release) void {
-            assert(replica.release.value != release.value);
+        fn replica_multiversion(replica_context: *Replica) Multiversion {
+            const vtable = struct {
+                fn releases_bundled(context: *anyopaque) vsr.ReleaseList {
+                    const replica: *Replica = @ptrCast(@alignCast(context));
+                    const cluster: *Cluster = @ptrCast(@alignCast(replica.test_context.?));
+                    return cluster.replica_releases_bundled[replica.replica];
+                }
+                fn release_execute(context: *anyopaque, release_next: vsr.Release) void {
+                    const replica: *Replica = @ptrCast(@alignCast(context));
+                    const cluster: *Cluster = @ptrCast(@alignCast(replica.test_context.?));
+                    cluster.replica_release_execute_soon(replica, release_next);
+                }
+                fn tick(_: *anyopaque) void {}
+            };
 
-            const cluster: *Cluster = @ptrCast(@alignCast(replica.test_context.?));
+            return .{
+                .context = replica_context,
+                .vtable = &.{
+                    .releases_bundled = vtable.releases_bundled,
+                    .release_execute = vtable.release_execute,
+                    .tick = vtable.tick,
+                },
+            };
+        }
+
+        fn replica_release_execute_soon(
+            cluster: *Cluster,
+            replica: *Replica,
+            release: vsr.Release,
+        ) void {
+            assert(replica.release.value != release.value);
             assert(cluster.replica_upgrades[replica.replica] == null);
 
             log.debug("{}: release_execute_soon: release={}..{}", .{
@@ -804,7 +830,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
 
             cluster.replica_crash(replica_index);
 
-            if (replica.releases_bundled.contains(release)) {
+            if (replica.multiversion.releases_bundled().contains(release)) {
                 // Disable faults while restarting to ensure that the cluster doesn't get stuck due
                 // to too many replicas in status=recovering_head.
                 const faulty = cluster.storages[replica_index].faulty;
@@ -1135,7 +1161,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .sync_op_min = replica.superblock.working.vsr_state.sync_op_min,
                     .sync_op_max = replica.superblock.working.vsr_state.sync_op_max,
                     .release = replica.release.triple().patch,
-                    .release_max = replica.releases_bundled.last().triple().patch,
+                    .release_max = replica.multiversion.releases_bundled().last().triple().patch,
                     .grid_blocks_acquired = if (replica.grid.free_set.opened)
                         replica.grid.free_set.count_acquired()
                     else

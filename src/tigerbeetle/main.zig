@@ -293,51 +293,45 @@ fn command_start(
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
 
-    var multiversion: ?vsr.multiversioning.Multiversion = blk: {
+    var multiversion_os: ?vsr.multiversioning.MultiversionOS = null;
+    defer if (multiversion_os != null) multiversion_os.?.deinit(gpa);
+
+    const multiversion: vsr.multiversioning.Multiversion = blk: {
         if (constants.config.process.release.value ==
             vsr.multiversioning.Release.minimum.value)
         {
             log.info("multiversioning: upgrades disabled for development ({}) release.", .{
                 constants.config.process.release,
             });
-            break :blk null;
+            break :blk .single_release(constants.config.process.release);
         }
         if (constants.aof_recovery) {
             log.info("multiversioning: upgrades disabled due to aof_recovery.", .{});
-            break :blk null;
+            break :blk .single_release(constants.config.process.release);
         }
 
         if (args.addresses_zero) {
             log.info("multiversioning: upgrades disabled due to --addresses=0", .{});
-            break :blk null;
+            break :blk .single_release(constants.config.process.release);
         }
 
         self_exe_path = try vsr.multiversioning.self_exe_path(gpa);
-        break :blk try vsr.multiversioning.Multiversion.init(
+        multiversion_os = try vsr.multiversioning.MultiversionOS.init(
             gpa,
             io,
             self_exe_path.?,
             .native,
         );
+        // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
+        // enabled even if the first version fails to load.
+        multiversion_os.?.open_sync() catch {};
+
+        break :blk multiversion_os.?.multiversion();
     };
-
-    defer if (multiversion != null) multiversion.?.deinit(gpa);
-
-    // The error from .open_sync() is ignored - timeouts and checking for new binaries are still
-    // enabled even if the first version fails to load.
-    if (multiversion != null) multiversion.?.open_sync() catch {};
-
-    var releases_bundled_baseline: vsr.multiversioning.ReleaseList = .empty;
-    releases_bundled_baseline.push(constants.config.process.release);
-
-    const releases_bundled = if (multiversion != null)
-        &multiversion.?.releases_bundled
-    else
-        &releases_bundled_baseline;
 
     log.info("release={}", .{config.process.release});
     log.info("release_client_min={}", .{config.process.release_client_min});
-    log.info("releases_bundled={any}", .{releases_bundled.slice()});
+    log.info("releases_bundled={any}", .{multiversion.releases_bundled().slice()});
     log.info("git_commit={?s}", .{config.process.git_commit});
 
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
@@ -347,9 +341,7 @@ fn command_start(
         .node_count = args.addresses.count_as(u8),
         .release = config.process.release,
         .release_client_min = config.process.release_client_min,
-        .releases_bundled = releases_bundled,
-        .release_execute = replica_release_execute,
-        .release_execute_context = if (multiversion) |*pointer| pointer else null,
+        .multiversion = multiversion,
         .pipeline_requests_limit = args.pipeline_requests_limit,
         .storage_size_limit = args.storage_size_limit,
         .storage = storage,
@@ -383,11 +375,11 @@ fn command_start(
         else => |e| return e,
     };
 
-    if (multiversion != null) {
+    if (multiversion_os != null) {
         if (args.development) {
             log.info("multiversioning: upgrade polling disabled due to --development.", .{});
         } else {
-            multiversion.?.timeout_start(replica.replica);
+            multiversion_os.?.timeout_start(replica.replica);
         }
 
         if (args.experimental) {
@@ -487,7 +479,6 @@ fn command_start(
 
     while (true) {
         replica.tick();
-        if (multiversion != null) multiversion.?.tick();
         try io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
 }
@@ -593,47 +584,6 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
     while (true) {
         runner.tick();
     }
-}
-
-fn replica_release_execute(replica: *Replica, release: vsr.Release) noreturn {
-    assert(release.value != replica.release.value);
-    assert(release.value != vsr.Release.zero.value);
-    assert(release.value != vsr.Release.minimum.value);
-    const release_execute_context = replica.release_execute_context orelse {
-        @panic("replica_release_execute unsupported");
-    };
-
-    const multiversion: *vsr.multiversioning.Multiversion =
-        @ptrCast(@alignCast(release_execute_context));
-
-    if (!replica.releases_bundled.contains(release)) {
-        log.err("{}: release_execute: release {} is not available;" ++
-            " upgrade (or downgrade) the binary", .{
-            replica.replica,
-            release,
-        });
-        @panic("release not available");
-    }
-
-    // We have two paths here, depending on if we're upgrading or downgrading. If we're downgrading
-    // the invariant is that this code is running _before_ we've finished opening, that is,
-    // release_transition is called in open().
-    if (release.value < replica.release.value) {
-        multiversion.exec_release(
-            release,
-        ) catch |err| {
-            std.debug.panic("failed to execute previous release: {}", .{err});
-        };
-    } else {
-        // For the upgrade case, re-run the latest binary in place. If we need something older
-        // than the latest, that'll be handled when the case above is hit when re-execing:
-        // (current version v1) -> (latest version v4) -> (desired version v2)
-        multiversion.exec_current(release) catch |err| {
-            std.debug.panic("failed to execute latest release: {}", .{err});
-        };
-    }
-
-    unreachable;
 }
 
 fn print_value(
