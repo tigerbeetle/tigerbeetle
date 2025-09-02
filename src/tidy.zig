@@ -156,6 +156,11 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.copy_right instead of std version";
     }
 
+    // TODO(zig): Remove when upgrading to Zig 0.15.x:
+    if (std.mem.indexOf(u8, source, "using" ++ "namespace") != null) {
+        return "using" ++ "namespace was removed from Zig";
+    }
+
     if (std.mem.indexOf(u8, source, "@memcpy(") != null) {
         if (std.mem.indexOf(u8, source, "// Bypass tidy's ban, for stdx.") == null and
             std.mem.indexOf(u8, source, "// Bypass tidy's ban, for go_bindings.") == null)
