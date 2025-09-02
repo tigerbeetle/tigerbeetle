@@ -745,47 +745,46 @@ fn BasicPropertiesType(comptime target: enum { encode, decode }) type {
             return @bitReverse(bitset.bits);
         }
 
-        pub usingnamespace switch (target) {
-            .decode => struct {
-                pub fn decode(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
-                    var reader = Decoder.init(content);
-                    var bitset: stdx.BitSetType(16) = .{ .bits = @bitReverse(flags) };
-                    var properties: BasicProperties = .{};
-                    inline for (std.meta.fields(BasicProperties), 0..) |field, index| {
-                        if (bitset.is_set(index)) {
-                            const FieldType = std.meta.Child(field.type);
-                            @field(properties, field.name) = try switch (FieldType) {
-                                []const u8 => reader.read_short_string(),
-                                Decoder.Table => reader.read_table(),
-                                DeliveryMode => reader.read_enum(DeliveryMode),
-                                u64 => reader.read_int(u64),
-                                u8 => reader.read_int(u8),
-                                else => comptime unreachable,
-                            };
-                        }
-                    }
-                    assert(reader.index == content.len);
-                    return properties;
+        pub fn decode(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
+            comptime assert(target == .decode);
+
+            var reader = Decoder.init(content);
+            var bitset: stdx.BitSetType(16) = .{ .bits = @bitReverse(flags) };
+            var properties: BasicProperties = .{};
+            inline for (std.meta.fields(BasicProperties), 0..) |field, index| {
+                if (bitset.is_set(index)) {
+                    const FieldType = std.meta.Child(field.type);
+                    @field(properties, field.name) = try switch (FieldType) {
+                        []const u8 => reader.read_short_string(),
+                        Decoder.Table => reader.read_table(),
+                        DeliveryMode => reader.read_enum(DeliveryMode),
+                        u64 => reader.read_int(u64),
+                        u8 => reader.read_int(u8),
+                        else => comptime unreachable,
+                    };
                 }
-            },
-            .encode => struct {
-                pub fn encode(self: *const BasicProperties, encoder: *Encoder) void {
-                    encoder.write_int(u16, self.property_flags());
-                    inline for (std.meta.fields(BasicProperties)) |field| {
-                        if (@field(self, field.name)) |value| {
-                            switch (@TypeOf(value)) {
-                                []const u8 => encoder.write_short_string(value),
-                                Encoder.Table => encoder.write_table(value),
-                                DeliveryMode => encoder.write_int(u8, @intFromEnum(value)),
-                                u64 => encoder.write_int(u64, value),
-                                u8 => encoder.write_int(u8, value),
-                                else => unreachable,
-                            }
-                        }
+            }
+            assert(reader.index == content.len);
+            return properties;
+        }
+
+        pub fn encode(self: *const BasicProperties, encoder: *Encoder) void {
+            comptime assert(target == .encode);
+
+            encoder.write_int(u16, self.property_flags());
+            inline for (std.meta.fields(BasicProperties)) |field| {
+                if (@field(self, field.name)) |value| {
+                    switch (@TypeOf(value)) {
+                        []const u8 => encoder.write_short_string(value),
+                        Encoder.Table => encoder.write_table(value),
+                        DeliveryMode => encoder.write_int(u8, @intFromEnum(value)),
+                        u64 => encoder.write_int(u64, value),
+                        u8 => encoder.write_int(u8, value),
+                        else => unreachable,
                     }
                 }
-            },
-        };
+            }
+        }
     };
 }
 

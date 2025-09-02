@@ -191,16 +191,16 @@ fn expect_state_in(self: *LoggedProcess, comptime valid_states: anytype) void {
 // The test for LoggedProcess needs an executable that runs forever which is solved (without
 // depending on system executables) by using the Zig compiler to build this very file as an
 // executable in a temporary directory.
-pub usingnamespace if (@import("root") != @This()) struct {
-    // For production builds, don't include the main function.
-    // This is `if __name__ == "__main__":` at comptime!
-} else struct {
-    pub fn main() !void {
-        while (true) {
-            _ = try std.io.getStdErr().write("yep\n");
+// For production builds, don't include the main function.
+// This is `if __name__ == "__main__":` at comptime!
+pub const main =
+    if (@import("root") != @This()) {} else struct {
+        fn main() !void {
+            while (true) {
+                _ = try std.io.getStdErr().write("yep\n");
+            }
         }
-    }
-};
+    }.main;
 
 test "LoggedProcess: starts and stops" {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

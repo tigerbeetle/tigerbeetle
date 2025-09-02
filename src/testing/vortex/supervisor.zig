@@ -48,7 +48,7 @@ const IO = @import("../../io.zig").IO;
 const RingBufferType = stdx.RingBufferType;
 const LoggedProcess = @import("./logged_process.zig");
 const faulty_network = @import("./faulty_network.zig");
-const constants = @import("./constants.zig");
+const constants = @import("constants.zig");
 const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
 
@@ -56,18 +56,18 @@ const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
 
-const replica_ports_actual = constants.replica_ports_actual;
-const replica_ports_proxied = constants.replica_ports_proxied;
+const replica_ports_actual = constants.vortex.replica_ports_actual;
+const replica_ports_proxied = constants.vortex.replica_ports_proxied;
 
 // Calculate replica ports for each replica. Because
 // we want replicas to communicate over the proxies, we use those ports
 // for their peers, but we must use the replica's actual port for itself
 // (because that's the port it listens to).
 const replica_ports_for_replicas = blk: {
-    var result: [constants.replicas_max][constants.replicas_max]u16 = undefined;
-    for (0..constants.replicas_max) |replica_self| {
-        var ports: [constants.replicas_max]u16 = undefined;
-        for (0..constants.replicas_max) |replica_other| {
+    var result: [constants.vsr.replicas_max][constants.vsr.replicas_max]u16 = undefined;
+    for (0..constants.vsr.replicas_max) |replica_self| {
+        var ports: [constants.vsr.replicas_max]u16 = undefined;
+        for (0..constants.vsr.replicas_max) |replica_other| {
             ports[replica_other] = if (replica_self == replica_other)
                 replica_ports_actual[replica_other]
             else
@@ -100,15 +100,15 @@ fn replica_addresses_for_clients(
 // processes in the Vortex test. The replicas get their replica indices, and
 // the other ones are assigned manually here.
 const vortex_process_ids = .{
-    .supervisor = constants.replicas_max,
-    .workload = constants.replicas_max + 1,
-    .network = constants.replicas_max + 2,
+    .supervisor = constants.vsr.replicas_max,
+    .workload = constants.vsr.replicas_max + 1,
+    .network = constants.vsr.replicas_max + 2,
 };
 comptime {
     // Check that the assigned process IDs are sequential and start at the right number.
     for (
         std.meta.fields(@TypeOf(vortex_process_ids)),
-        constants.replicas_max..,
+        constants.vsr.replicas_max..,
     ) |field, value_expected| {
         const value_actual = @field(vortex_process_ids, field.name);
         assert(value_actual == value_expected);
@@ -176,7 +176,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
-    var replicas: [constants.replicas_max]*Replica = undefined;
+    var replicas: [constants.vsr.replicas_max]*Replica = undefined;
     var replicas_initialized: usize = 0;
     defer {
         for (replicas[0..replicas_initialized]) |replica| {
@@ -189,18 +189,18 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         }
     }
 
-    var datafile_buffers: [constants.replicas_max][std.fs.max_path_bytes]u8 = undefined;
+    var datafile_buffers: [constants.vsr.replicas_max][std.fs.max_path_bytes]u8 = undefined;
     for (0..args.replica_count) |replica_index| {
         const datafile = try std.fmt.bufPrint(
             datafile_buffers[replica_index][0..],
             "{s}/{d}_{d}.tigerbeetle",
-            .{ output_directory, constants.cluster_id, replica_index },
+            .{ output_directory, constants.vortex.cluster_id, replica_index },
         );
 
         const arg_cluster = try std.fmt.allocPrint(
             allocator,
             "--cluster={d}",
-            .{constants.cluster_id},
+            .{constants.vortex.cluster_id},
         );
         defer allocator.free(arg_cluster);
         const arg_replica = try std.fmt.allocPrint(
@@ -260,7 +260,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     }
 
     // Construct mappings between proxy and underlying replicas.
-    var mappings: [constants.replicas_max]faulty_network.Mapping = undefined;
+    var mappings: [constants.vsr.replicas_max]faulty_network.Mapping = undefined;
     for (0..args.replica_count) |replica_index| {
         mappings[replica_index] = .{
             .origin = .{ .in = std.net.Ip4Address.init(
@@ -316,9 +316,9 @@ const Supervisor = struct {
     test_deadline: i128,
     disable_faults: bool,
 
-    running_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
-    terminated_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
-    stopped_replicas_buffer: [constants.replicas_max]ReplicaWithIndex = undefined,
+    running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
+    terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
+    stopped_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
 
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
@@ -365,7 +365,7 @@ const Supervisor = struct {
         const liveness_faulty_replicas_max = @divFloor(supervisor.replicas.len - 1, 2);
         const workload_result = while (std.time.nanoTimestamp() < supervisor.test_deadline) {
             supervisor.network.tick();
-            try supervisor.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+            try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
             const running_replicas = replicas_in_state(
@@ -387,7 +387,7 @@ const Supervisor = struct {
             const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
 
             if (acceptable_faults_start_ns) |start_ns| {
-                const deadline = start_ns + constants.liveness_requirement_seconds *
+                const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
                     std.time.ns_per_s;
                 // If we've been in a state with an acceptable number of faults for the required
                 // amount of time, we should have seen finished requests.
@@ -415,7 +415,7 @@ const Supervisor = struct {
 
                 if (no_finished_requests) {
                     log.err("liveness check: no finished requests after {d} seconds", .{
-                        constants.liveness_requirement_seconds,
+                        constants.vortex.liveness_requirement_seconds,
                     });
                     return error.TestFailed;
                 }
@@ -446,7 +446,7 @@ const Supervisor = struct {
                     // Record the previously passed liveness requirement period in the trace:
                     const duration_ns = @as(u64, @intCast(std.time.nanoTimestamp())) - start_ns;
                     if (@divFloor(duration_ns, std.time.ns_per_s) >
-                        constants.liveness_requirement_seconds)
+                        constants.vortex.liveness_requirement_seconds)
                     {
                         try supervisor.trace.write(.{
                             .name = .liveness_required,
@@ -610,8 +610,8 @@ const Supervisor = struct {
                     .quiesce => {
                         const duration = supervisor.prng.range_inclusive(
                             u64,
-                            constants.liveness_requirement_seconds,
-                            constants.liveness_requirement_seconds * 2,
+                            constants.vortex.liveness_requirement_seconds,
+                            constants.vortex.liveness_requirement_seconds * 2,
                         ) * std.time.ns_per_s;
                         sleep_deadline = now + duration;
 
@@ -940,7 +940,7 @@ const Workload = struct {
         const argv = &.{
             vortex_path,
             "workload",
-            std.fmt.comptimePrint("--cluster-id={d}", .{constants.cluster_id}),
+            std.fmt.comptimePrint("--cluster-id={d}", .{constants.vortex.cluster_id}),
             arg_addresses,
             driver_command_arg,
         };
@@ -1025,11 +1025,13 @@ const Workload = struct {
         var it = workload.requests_finished.iterator();
         while (it.next()) |request| {
             assert(request.timestamp_start_micros < request.timestamp_end_micros);
-            // If a request started before the acceptably-faulty period, we ignore that part of
-            // its duration.
+            // If a request started before the acceptably-faulty period,
+            // we ignore that part of its duration.
             const duration_adjusted_micros = request.timestamp_end_micros -|
                 @max(request.timestamp_start_micros, @divFloor(start_ns, 1000));
-            if (duration_adjusted_micros > constants.liveness_requirement_micros) return request;
+            if (duration_adjusted_micros > constants.vortex.liveness_requirement_micros) {
+                return request;
+            }
         }
         return null;
     }

@@ -85,39 +85,35 @@ pub fn check(name: []const u8) Mark {
     return Mark{ .name = name };
 }
 
-pub fn wrap_log(comptime base: anytype) type {
-    if (builtin.is_test) {
-        return struct {
-            pub usingnamespace base;
+pub fn wrap_log(comptime base: type) type {
+    return struct {
+        pub const mark = if (builtin.is_test) struct {
+            pub fn err(comptime fmt: []const u8, args: anytype) void {
+                record(fmt);
+                base.err(fmt, args);
+            }
 
-            pub const mark = struct {
-                pub fn err(comptime fmt: []const u8, args: anytype) void {
-                    record(fmt);
-                    base.err(fmt, args);
-                }
+            pub fn warn(comptime fmt: []const u8, args: anytype) void {
+                record(fmt);
+                base.warn(fmt, args);
+            }
 
-                pub fn warn(comptime fmt: []const u8, args: anytype) void {
-                    record(fmt);
-                    base.warn(fmt, args);
-                }
+            pub fn info(comptime fmt: []const u8, args: anytype) void {
+                record(fmt);
+                base.info(fmt, args);
+            }
 
-                pub fn info(comptime fmt: []const u8, args: anytype) void {
-                    record(fmt);
-                    base.info(fmt, args);
-                }
+            pub fn debug(comptime fmt: []const u8, args: anytype) void {
+                record(fmt);
+                base.debug(fmt, args);
+            }
+        } else base;
 
-                pub fn debug(comptime fmt: []const u8, args: anytype) void {
-                    record(fmt);
-                    base.debug(fmt, args);
-                }
-            };
-        };
-    } else {
-        return struct {
-            pub usingnamespace base;
-            pub const mark = base;
-        };
-    }
+        pub const err = base.err;
+        pub const warn = base.warn;
+        pub const info = base.info;
+        pub const debug = base.debug;
+    };
 }
 
 fn record(fmt: []const u8) void {

@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const c = @import("c.zig");
+const c = @import("c.zig").c;
 
 pub fn register_function(
     env: c.napi_env,
