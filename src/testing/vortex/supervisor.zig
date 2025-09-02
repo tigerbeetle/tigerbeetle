@@ -16,13 +16,11 @@
 //!
 //!     $ zig build test:integration -- "vortex smoke"
 //!
-//! If you need more control, you can run this program directly. Using `unshare` is recommended to
-//! be sure all child processes are killed, and to get network sandboxing.
+//! If you need more control, you can run this program directly.
 //!
 //!     $ zig build
 //!     $ zig build vortex:build
-//!     $ unshare --net --fork --map-root-user --pid bash -c 'ip link set up dev lo ; \
-//!         ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle'
+//!     $ ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle
 //!
 //! Other options:
 //!
