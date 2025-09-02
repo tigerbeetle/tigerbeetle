@@ -666,19 +666,6 @@ pub fn ClientType(
             });
 
             self.send_request_with_hedging(message);
-
-            // Try to learn the new view.
-            const ping = Header.PingClient{
-                .command = .ping_client,
-                .cluster = self.cluster,
-                .release = self.release,
-                .client = self.id,
-                .ping_timestamp_monotonic = self.time.monotonic(),
-            };
-
-            const next_backup: u32 =
-                (self.view + self.request_timeout.attempts) % self.replica_count;
-            self.send_header_to_replica(@as(u8, @intCast(next_backup)), ping.frame_const());
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -701,13 +688,6 @@ pub fn ClientType(
             defer self.message_bus.unref(message);
 
             self.send_message_to_replicas(message);
-        }
-
-        fn send_header_to_replica(self: *Client, replica: u8, header: *const Header) void {
-            const message = self.create_message_from_header(header);
-            defer self.message_bus.unref(message);
-
-            self.send_message_to_replica(replica, message);
         }
 
         fn send_message_to_replicas(self: *Client, message: *Message) void {
