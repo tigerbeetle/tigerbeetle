@@ -1,3 +1,26 @@
+//! K-way merge via a loser tree algorithm (Knuth Volume 3 p. 253).
+//! Merges k sorted streams using a tournament (loser) tree.
+//! The current global winner lives in `contender`. Internal nodes in `losers`
+//! store the losers of the last comparisons along the root-to-leaf paths.
+//!     0 (winner, contender)
+//!
+//!     1
+//!    / \
+//!   2   3
+//!  / \ / \
+//! 4  5 6  7
+//! -------------
+//! K input streams
+//!
+//! The internal nodes are organized in a flat Eytzinger layout.
+//! That is the tree above is stored as [1][2][3][4][5][6][7].
+//! Empty streams are represented with a sentinel node that always loses against real nodes.
+//!
+//! There are also a few optimizations that seem to be helpful, but did not work, such as:
+//! - Only store stream_id in the inner nodes, and have a heads array for the first keys
+//!   of the streams. This reduces space (densely packed) and the bytes in swap.
+//!   Unfortunately, it made the code much slower.
+//!
 const std = @import("std");
 const stdx = @import("stdx");
 const assert = std.debug.assert;
@@ -33,36 +56,16 @@ pub fn KWayMergeIteratorType(
     comptime stream_precedence: fn (context: *const Context, a: u32, b: u32) bool,
 ) type {
     comptime assert(options.streams_max >= 1);
+    comptime assert(options.streams_max < std.math.maxInt(@TypeOf(options.streams_max)));
 
     return struct {
-
-        // K-way merge via a loser tree algorithm (Knuth Volume 3 p. 253).
-        // Merges k sorted streams using a tournament (loser) tree.
-        // The current global winner lives in `contender`. Internal nodes in `losers`
-        // store the losers of the last comparisons along the root-to-leaf paths.
-        //     0 (winner, contender)
-        //
-        //     1
-        //    / \
-        //   2   3
-        //  / \ / \
-        // 4  5 6  7
-        // -------------
-        // K input streams
-        //
-        // The internal nodes are organized in a flat Eytzinger layout.
-        // That is the tree above is stored as [1][2][3][4][5][6][7].
-        //
-        // There are also a few optimizations that seem to be helpful, but did not work, such as:
-        // - Only store stream_id in the inner nodes, and have a heads array for the first keys
-        //   of the streams. This reduces space (densely packed) and the bytes in swap.
-        //   Unfortunately, it made the code much slower.
-
         const KWayMergeIterator = @This();
 
         const node_max: u32 = std.math.ceilPowerOfTwoAssert(u32, options.streams_max);
         const stream_id_invalid = std.math.maxInt(@TypeOf(options.streams_max));
         const sentinel: Node = .{
+            // The key itself is not used to determine whether a Node is a sentinel.
+            // This ensures that valid Keys with the maximum value are not treated as sentinels.
             .key = std.math.maxInt(Key),
             .stream_id = stream_id_invalid,
             .sentinel = true,
@@ -92,7 +95,7 @@ pub fn KWayMergeIteratorType(
                 direction: Direction,
                 ctx: *const Context,
             ) bool {
-                // a sentinel always loses
+                // A sentinel always loses.
                 if (b.sentinel) return true;
                 if (a.sentinel) return false;
 
@@ -117,10 +120,10 @@ pub fn KWayMergeIteratorType(
                 .tree_height = 0,
                 .nodes_count = 0,
                 .contender = sentinel,
-                .losers = .{sentinel} ** node_max,
+                .losers = @splat(sentinel),
                 .key_popped = null,
                 .direction = direction,
-                .streams_active = undefined,
+                .streams_active = 0,
                 .streams_count = streams_count,
                 .state = .loading,
             };
@@ -132,7 +135,7 @@ pub fn KWayMergeIteratorType(
                 .tree_height = 0,
                 .nodes_count = 0,
                 .contender = sentinel,
-                .losers = .{sentinel} ** node_max,
+                .losers = @splat(sentinel),
                 .direction = self.direction,
                 .streams_active = self.streams_active,
                 .streams_count = self.streams_count,
@@ -141,13 +144,14 @@ pub fn KWayMergeIteratorType(
             };
         }
 
-        fn loading(
-            self: *KWayMergeIterator,
-        ) error{Drained}!void {
+        fn load(self: *KWayMergeIterator) error{Drained}!void {
+            assert(self.state == .loading);
+            assert(self.nodes_count == 0);
+            assert(self.tree_height == 0);
             errdefer self.reset();
 
             // Collect the non‑empty batches as initial “contestants”.
-            var contestants: [node_max]Node = .{sentinel} ** node_max;
+            var contestants: [node_max]Node = @splat(sentinel);
             var contestants_count: u16 = 0;
             for (0..self.streams_count) |id| {
                 const key = stream_peek(self.context, @intCast(id)) catch |err| switch (err) {
@@ -199,7 +203,7 @@ pub fn KWayMergeIteratorType(
         }
 
         pub fn pop(self: *KWayMergeIterator) error{Drained}!?Value {
-            if (self.state == .loading) try self.loading();
+            if (self.state == .loading) try self.load();
             assert(self.state == .iterating);
 
             while (self.streams_active > 0) {
