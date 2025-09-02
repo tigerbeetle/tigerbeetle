@@ -77,7 +77,7 @@ are coming; see the [Coding](./coding) section for details. For this tutorial, w
 and connect to the cluster using the built-in CLI client. In a separate terminal, start a REPL with
 
 ```console
-$ ./tigerbeetle repl --cluster=0 --addresses=3000
+./tigerbeetle repl --cluster=0 --addresses=3000
 ```
 
 The `--addresses` argument is the port the server is listening on. The `--cluster` argument is
