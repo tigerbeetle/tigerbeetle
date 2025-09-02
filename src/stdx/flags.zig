@@ -450,99 +450,99 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
 //   - using Zig compiler to build this very file as an executable in a temporary directory,
 //   - running the following main with various args and capturing stdout, stderr, and the exit code.
 //   - asserting that the captured values are correct.
-pub usingnamespace if (@import("root") != @This()) struct {
-    // For production builds, don't include the main function.
-    // This is `if __name__ == "__main__":` at comptime!
-} else struct {
-    const CLIArgs = union(enum) {
-        empty,
-        prefix: struct {
-            foo: u8 = 0,
-            foo_bar: u8 = 0,
-            opt: bool = false,
-            option: bool = false,
-        },
-        pos: struct { flag: bool = false, positional: struct {
-            p1: []const u8,
-            p2: []const u8,
-            p3: ?u32 = null,
-            p4: ?u32 = null,
-        } },
-        required: struct {
-            foo: u8,
-            bar: u8,
-        },
-        values: struct {
-            int: u32 = 0,
-            size: stdx.ByteSize = .{ .value = 0 },
-            boolean: bool = false,
-            path: []const u8 = "not-set",
-            optional: ?[]const u8 = null,
-            choice: enum { marlowe, shakespeare } = .marlowe,
-        },
-        subcommand: union(enum) {
+// For production builds, don't include the main function.
+// This is `if __name__ == "__main__":` at comptime!
+pub const main =
+    if (@import("root") != @This()) {} else struct {
+        const CLIArgs = union(enum) {
+            empty,
+            prefix: struct {
+                foo: u8 = 0,
+                foo_bar: u8 = 0,
+                opt: bool = false,
+                option: bool = false,
+            },
+            pos: struct { flag: bool = false, positional: struct {
+                p1: []const u8,
+                p2: []const u8,
+                p3: ?u32 = null,
+                p4: ?u32 = null,
+            } },
+            required: struct {
+                foo: u8,
+                bar: u8,
+            },
+            values: struct {
+                int: u32 = 0,
+                size: stdx.ByteSize = .{ .value = 0 },
+                boolean: bool = false,
+                path: []const u8 = "not-set",
+                optional: ?[]const u8 = null,
+                choice: enum { marlowe, shakespeare } = .marlowe,
+            },
+            subcommand: union(enum) {
+                pub const help =
+                    \\subcommand help
+                    \\
+                ;
+
+                c1: struct { a: bool = false },
+                c2: struct { b: bool = false },
+            },
+
             pub const help =
-                \\subcommand help
+                \\ flags-test-program [flags]
                 \\
             ;
+        };
 
-            c1: struct { a: bool = false },
-            c2: struct { b: bool = false },
-        },
+        fn main() !void {
+            var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+            const gpa = gpa_allocator.allocator();
 
-        pub const help =
-            \\ flags-test-program [flags]
-            \\
-        ;
-    };
+            var args = try std.process.argsWithAllocator(gpa);
+            defer args.deinit();
 
-    pub fn main() !void {
-        var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-        const gpa = gpa_allocator.allocator();
+            const cli_args = parse(&args, CLIArgs);
 
-        var args = try std.process.argsWithAllocator(gpa);
-        defer args.deinit();
-
-        const cli_args = parse(&args, CLIArgs);
-
-        const stdout = std.io.getStdOut();
-        const out_stream = stdout.writer();
-        switch (cli_args) {
-            .empty => try out_stream.print("empty\n", .{}),
-            .prefix => |values| {
-                try out_stream.print("foo: {}\n", .{values.foo});
-                try out_stream.print("foo-bar: {}\n", .{values.foo_bar});
-                try out_stream.print("opt: {}\n", .{values.opt});
-                try out_stream.print("option: {}\n", .{values.option});
-            },
-            .pos => |values| {
-                try out_stream.print("p1: {s}\n", .{values.positional.p1});
-                try out_stream.print("p2: {s}\n", .{values.positional.p2});
-                try out_stream.print("p3: {?}\n", .{values.positional.p3});
-                try out_stream.print("p4: {?}\n", .{values.positional.p4});
-                try out_stream.print("flag: {}\n", .{values.flag});
-            },
-            .required => |required| {
-                try out_stream.print("foo: {}\n", .{required.foo});
-                try out_stream.print("bar: {}\n", .{required.bar});
-            },
-            .values => |values| {
-                try out_stream.print("int: {}\n", .{values.int});
-                try out_stream.print("size: {}\n", .{values.size.bytes()});
-                try out_stream.print("boolean: {}\n", .{values.boolean});
-                try out_stream.print("path: {s}\n", .{values.path});
-                try out_stream.print("optional: {?s}\n", .{values.optional});
-                try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
-            },
-            .subcommand => |values| {
-                switch (values) {
-                    .c1 => |c1| try out_stream.print("c1.a: {}\n", .{c1.a}),
-                    .c2 => |c2| try out_stream.print("c2.b: {}\n", .{c2.b}),
-                }
-            },
+            const stdout = std.io.getStdOut();
+            const out_stream = stdout.writer();
+            switch (cli_args) {
+                .empty => try out_stream.print("empty\n", .{}),
+                .prefix => |values| {
+                    try out_stream.print("foo: {}\n", .{values.foo});
+                    try out_stream.print("foo-bar: {}\n", .{values.foo_bar});
+                    try out_stream.print("opt: {}\n", .{values.opt});
+                    try out_stream.print("option: {}\n", .{values.option});
+                },
+                .pos => |values| {
+                    try out_stream.print("p1: {s}\n", .{values.positional.p1});
+                    try out_stream.print("p2: {s}\n", .{values.positional.p2});
+                    try out_stream.print("p3: {?}\n", .{values.positional.p3});
+                    try out_stream.print("p4: {?}\n", .{values.positional.p4});
+                    try out_stream.print("flag: {}\n", .{values.flag});
+                },
+                .required => |required| {
+                    try out_stream.print("foo: {}\n", .{required.foo});
+                    try out_stream.print("bar: {}\n", .{required.bar});
+                },
+                .values => |values| {
+                    try out_stream.print("int: {}\n", .{values.int});
+                    try out_stream.print("size: {}\n", .{values.size.bytes()});
+                    try out_stream.print("boolean: {}\n", .{values.boolean});
+                    try out_stream.print("path: {s}\n", .{values.path});
+                    try out_stream.print("optional: {?s}\n", .{values.optional});
+                    try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
+                },
+                .subcommand => |values| {
+                    switch (values) {
+                        .c1 => |c1| try out_stream.print("c1.a: {}\n", .{c1.a}),
+                        .c2 => |c2| try out_stream.print("c2.b: {}\n", .{c2.b}),
+                    }
+                },
+            }
         }
-    }
-};
+    }.main;
 
 test "flags" {
     const Snap = stdx.Snap;
