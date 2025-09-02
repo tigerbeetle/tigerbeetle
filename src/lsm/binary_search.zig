@@ -99,17 +99,17 @@ pub fn binary_search_values_upsert_index(
 
         const mid = offset + half;
 
-        // This trick seems to be what's needed to get llvm to emit branchless code for this,
-        // a ternary-style if expression was generated as a jump here for whatever reason.
-        const next_offsets = [_]usize{ offset, mid };
-        offset = next_offsets[
-            // For exact matches, takes the first half if `mode == .lower_bound`,
-            // or the second half if `mode == .upper_bound`.
-            @intFromBool(switch (comptime config.mode) {
-                .lower_bound => key_from_value(&values[mid]) < key,
-                .upper_bound => key_from_value(&values[mid]) <= key,
-            })
-        ];
+        // For exact matches, takes the first half if `mode == .lower_bound`,
+        // or the second half if `mode == .upper_bound`.
+        const take_upper_half: bool = (switch (comptime config.mode) {
+            .lower_bound => key_from_value(&values[mid]) < key,
+            .upper_bound => key_from_value(&values[mid]) <= key,
+        });
+
+        if (take_upper_half) {
+            @branchHint(.unpredictable);
+            offset = mid;
+        }
 
         length -= half;
     }
