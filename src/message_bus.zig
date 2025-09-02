@@ -719,7 +719,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.maybe_close(bus);
             }
 
-            fn set_and_verify_peer(connection: *Connection, bus: *MessageBus) void {
+            fn set_and_verify_peer(connection: *Connection, bus: *MessageBus) bool {
                 comptime assert(process_type == .replica);
 
                 assert(bus.connections_used > 0);
@@ -730,18 +730,18 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.recv_buffer != null);
 
                 const header_peer: Connection.Peer = switch (connection.recv_buffer.?.peer) {
-                    .unknown => return,
+                    .unknown => return true,
                     .replica => |replica| .{ .replica = replica },
                     .client, .client_likely => |client| .{ .client = client },
                 };
 
-                if (std.meta.eql(connection.peer, header_peer)) return;
+                if (std.meta.eql(connection.peer, header_peer)) return true;
 
                 defer connection.peer = header_peer;
 
                 switch (header_peer) {
                     .replica => |replica_index| {
-                        assert(replica_index < bus.configuration.len);
+                        if (replica_index >= bus.configuration.len) return false;
                         // If there is a connection to this replica, terminate and replace it.
                         // Otherwise, this connection was misclassified to a client due to a
                         // forwarded request message (see `peer_type` in message_header.zig), map it
@@ -802,6 +802,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     },
                     .none, .unknown => unreachable,
                 }
+
+                return true;
             }
 
             fn recv(connection: *Connection, bus: *MessageBus) void {
@@ -859,7 +861,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // This has the same effect as an asymmetric network where, for a short time
                     // bounded by the time it takes to ping, we can hear from a peer before we
                     // can send back to them.
-                    .replica => connection.set_and_verify_peer(bus),
+                    .replica => if (!connection.set_and_verify_peer(bus)) {
+                        log.warn(
+                            "message from unexpected peer: peer={}",
+                            .{connection.peer},
+                        );
+                        connection.terminate(bus, .shutdown);
+                        return;
+                    },
                     // The client connects only to replicas and should set peer when connecting:
                     .client => assert(connection.peer == .replica),
                 }
