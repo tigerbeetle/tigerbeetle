@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const c = @import("src/c.zig");
+const c = @import("src/c.zig").c;
 const translate = @import("src/translate.zig");
 const tb = vsr.tigerbeetle;
 const tb_client = vsr.tb_client;
