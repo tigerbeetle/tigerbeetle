@@ -40,10 +40,72 @@ pub fn TableMemoryType(comptime Table: type) type {
             },
         };
 
+        //const KWayMergeContext = struct {
+        //prefers the information.
+        //has its own copy.
+        //slices
+        //origin / preference
+        //};
+
+        const SortedRun = struct {
+            min: u32,
+            max: u32, // exclusive.
+        };
+
+        const SortedRunTracker = struct {
+            const sorted_runs_max = constants.lsm_compaction_ops + 1;
+            values: []const Value, // reference to the values buffer.
+            runs: [sorted_runs_max]SortedRun,
+            runs_count: u8,
+
+            fn init(values: []const Value) SortedRunTracker {
+                return .{
+                    .values = values,
+                    .runs = undefined,
+                    .runs_count = 0,
+                };
+            }
+
+            fn add(tracker: *SortedRunTracker, run: SortedRun) void {
+                // ignore empty runs
+                if (run.min == run.max) return;
+                tracker.runs[tracker.runs_count] = run;
+                tracker.runs_count += 1;
+            }
+
+            fn reset(tracker: *SortedRunTracker) void {
+                tracker.runs_count = 0;
+            }
+
+            // returns number of runs.
+            // mostly for invariants
+            fn count(tracker: *const SortedRunTracker) u32 {
+                return tracker.runs_count;
+            }
+
+            fn merge_context() void {
+                unreachable;
+            }
+
+            fn invariant(tracker: *const SortedRunTracker, table_count: u32) void {
+                if (tracker.count() == 0) return;
+
+                const runs_count = tracker.count();
+                for (tracker.runs[0 .. runs_count - 1], tracker.runs[1..runs_count]) |a, b| {
+                    assert(a.min < b.min); // ordered.
+                    assert(a.max == b.min); // no holes.
+                }
+                assert(tracker.runs[runs_count - 1].max == table_count);
+                assert(table_count <= tracker.values.len);
+            }
+        };
+
         values: []Value,
         value_context: ValueContext,
         mutability: Mutability,
         name: []const u8,
+
+        run_tracker: SortedRunTracker,
 
         pub fn init(
             table: *TableMemory,
@@ -63,7 +125,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .immutable => .{ .immutable = .{} },
                 },
                 .name = name,
-
+                .run_tracker = undefined,
                 .values = undefined,
             };
 
@@ -71,6 +133,8 @@ pub fn TableMemoryType(comptime Table: type) type {
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            table.run_tracker = SortedRunTracker.init(table.values);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -83,8 +147,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .mutable => .{ .mutable = .{} },
             };
 
+            table.run_tracker.reset();
+
             table.* = .{
                 .values = table.values,
+                .run_tracker = table.run_tracker,
                 .value_context = .{},
                 .mutability = mutability,
                 .name = table.name,
@@ -133,12 +200,48 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
         }
 
+        //pub fn merge(table_immutable: *TableMemory, table_mutable: *const TableMemory, snapshot_min: u64) void {
+        // assert
+
+        // TODO: absorb case.ah that means we modify the table_memory.
+        // maybe we call absorb from the outside then.
+        // if we call it from the outside we do not modify the table_mutable state.
+        // or we handle everything here inside.
+        //if (!table_immutable.mutability.immutable.flushed) unreachable;
+
+        // Now we merge from the mutable table
+        // var merge_context table_mutable.run_tracker.context();
+        // var iter = KWayIterator(&merge_context).init();
+        // merge
+        // offload deduplication to extra pass to have less changes.
+        // done.
+
+        //}
+
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
             assert(table.value_context.count <= table.values.len);
             defer assert(table.value_context.sorted);
 
+            // TODO(TZ): this is before the sort, maybe remove?
+            // here it might be that we did not track it in the fuzzer.
+            // that means we need to do something now.
+            table.run_tracker.invariant(table.count());
             table.sort();
+
+            // TODO(TZ): do the K-way Merge here. instead of the sort.
+            // What is the correct flow here.
+            // We merge from the mutable -> immutable
+            // for absorb optimization we only copy over.
+            // we reabsorb the immutable state in the mutable
+            // and perform the same merge.
+            // mutable_table.absorb(immutable_table) // we absorb the mutable table in order to merge it.
+            // mutable_table.merge_into(immutable_table)
+            // immutable_table.merge(mutable_table)
+            // immutable_table.merge(mutable_table) // eitehr the immutable table has entries left or not.
+
+            // TODO(TZ) think about this reset;
+            table.run_tracker.reset();
 
             // If we have no values, then we can consider ourselves flushed right away.
             table.mutability = .{ .immutable = .{
@@ -155,6 +258,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table.* = .{
                 .values = table.values,
+                .run_tracker = table.run_tracker,
                 .value_context = .{},
                 .mutability = .{ .mutable = .{} },
                 .name = table.name,
@@ -211,25 +315,45 @@ pub fn TableMemoryType(comptime Table: type) type {
             } };
         }
 
+        // Sorting is a property that we track on `put`.
+        // That means some of the other fields are not up-to-date.
+        fn assume_sorted(table: *TableMemory) void {
+            // It means it might be sorted by our tracking of the property
+            // Set suffix sort here to not create another run that overlaps with this one.
+            table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
+
+            table.run_tracker.reset();
+            table.run_tracker.add(.{ .min = 0, .max = table.count() });
+        }
+
         pub fn sort(table: *TableMemory) void {
             assert(table.mutability == .mutable);
+            defer table.run_tracker.invariant(table.count());
 
             if (!table.value_context.sorted) {
-                table.mutable_sort_suffix_from_offset(0);
+                _ = table.mutable_sort_suffix_from_offset(0);
                 table.value_context.sorted = true;
             }
+
+            table.assume_sorted();
         }
 
         pub fn sort_suffix(table: *TableMemory) void {
             assert(table.mutability == .mutable);
             assert(table.mutability.mutable.suffix_offset <= table.count());
+            defer table.run_tracker.invariant(table.count());
 
-            table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            if (table.value_context.sorted) {
+                table.assume_sorted();
+                return;
+            }
 
+            const run = table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            table.run_tracker.add(run);
             assert(table.mutability.mutable.suffix_offset == table.count());
         }
 
-        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) void {
+        fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) SortedRun {
             assert(table.mutability == .mutable);
             assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
             assert(offset <= table.count());
@@ -237,20 +361,15 @@ pub fn TableMemoryType(comptime Table: type) type {
             const target_count = sort_suffix_from_offset(table.values_used(), offset);
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
+            return .{ .min = offset, .max = target_count };
         }
 
-        /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
-        /// returned count may be less than or equal to the original `values.len`.)
-        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
-            assert(offset <= values.len);
-
-            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
-
+        fn deduplicate(values: []Value) u32 {
             // Merge values with identical keys (last one wins) and collapse tombstones for
             // secondary indexes.
             const source_count: u32 = @intCast(values.len);
-            var source_index: u32 = offset;
-            var target_index: u32 = offset;
+            var source_index: u32 = 0;
+            var target_index: u32 = 0;
             while (source_index < source_count) {
                 const value = values[source_index];
                 values[target_index] = value;
@@ -294,15 +413,26 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(source_count == source_index);
 
             if (constants.verify) {
-                if (offset < target_count) {
+                if (0 < target_count) {
                     for (
-                        values[offset .. target_count - 1],
-                        values[offset + 1 .. target_count],
+                        values[0 .. target_count - 1],
+                        values[1..target_count],
                     ) |*value, *value_next| {
                         assert(key_from_value(value) < key_from_value(value_next));
                     }
                 }
             }
+            return target_count;
+        }
+
+        /// Returns the new length of `values`. (Values are deduplicated after sorting, so the
+        /// returned count may be less than or equal to the original `values.len`.)
+        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
+            assert(offset <= values.len);
+
+            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+            const target_count = offset + deduplicate(values[offset..]);
+
             return target_count;
         }
 

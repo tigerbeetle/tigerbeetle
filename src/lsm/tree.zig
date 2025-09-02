@@ -527,6 +527,9 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 .tree = @enumFromInt(tree.config.id),
             } });
 
+            // tree.table_immutabe.merge(&tree.table_mutable, snapshot_min);
+            // tree.table_mutable.reset();
+
             if (tree.table_immutable.mutability.immutable.flushed) {
                 // The immutable table must be visible to the next bar.
                 // In addition, the immutable table is conceptually an output table of this
