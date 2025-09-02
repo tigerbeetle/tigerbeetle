@@ -84,6 +84,7 @@ pub fn build(b: *std.Build) !void {
         .scripts = b.step("scripts", "Free form automation scripts"),
         .scripts_build = b.step("scripts:build", "Build automation scripts"),
         .vortex = b.step("vortex", "Full system tests with pluggable client drivers"),
+        .vortex_build = b.step("vortex:build", "Build the Vortex"),
         .@"test" = b.step("test", "Run all tests"),
         .test_fmt = b.step("test:fmt", "Check formatting"),
         .test_integration = b.step("test:integration", "Run integration tests"),
@@ -277,13 +278,17 @@ pub fn build(b: *std.Build) !void {
     });
 
     // zig build vortex
-    _ = build_vortex(b, build_steps.vortex, .{
+    build_vortex(b, .{
+        .vortex_build = build_steps.vortex_build,
+        .vortex_run = build_steps.vortex,
+    }, .{
         .stdx_module = stdx_module,
         .vsr_module = vsr_module,
         .vsr_options = vsr_options,
         .target = target,
         .mode = mode,
         .tb_client_header = tb_client_header.path,
+        .print_exe = build_options.print_exe,
     });
 
     // zig build clients:$lang
@@ -482,7 +487,7 @@ fn build_ci(
     inline for (&.{ CIMode.dotnet, .go, .rust, .java, .node, .python }) |language| {
         if (default or mode == .clients or mode == language) {
             // Client tests expect vortex to exist.
-            build_ci_step(b, step_ci, .{"vortex"});
+            build_ci_step(b, step_ci, .{"vortex:build"});
             build_ci_step(b, step_ci, .{"clients:" ++ @tagName(language)});
         }
         if (all or mode == .clients or mode == language) {
@@ -945,11 +950,7 @@ fn build_test_integration(
         .mode = options.mode,
     });
 
-    const step_vortex = b.step(
-        "vortex_integration_test",
-        "special build of vortex for multiversion integration test",
-    );
-    const vortex_exe = build_vortex(b, step_vortex, .{
+    const vortex = build_vortex_executable(b, .{
         .tb_client_header = options.tb_client_header,
         .stdx_module = options.stdx_module,
         .vsr_module = vsr_module,
@@ -957,11 +958,12 @@ fn build_test_integration(
         .target = options.target,
         .mode = options.mode,
     });
+    const vortex_artifact = b.addInstallArtifact(vortex, .{});
 
     const integration_tests_options = b.addOptions();
     integration_tests_options.addOptionPath("tigerbeetle_exe", tigerbeetle);
     integration_tests_options.addOptionPath("tigerbeetle_exe_past", tigerbeetle_previous);
-    integration_tests_options.addOptionPath("vortex_exe", vortex_exe);
+    integration_tests_options.addOptionPath("vortex_exe", vortex_artifact.emitted_bin.?);
     const integration_tests = b.addTest(.{
         .name = "test-integration",
         .root_module = b.createModule(.{
@@ -1168,7 +1170,39 @@ fn build_scripts(
 
 fn build_vortex(
     b: *std.Build,
-    step_vortex: *std.Build.Step,
+    steps: struct {
+        vortex_build: *std.Build.Step,
+        vortex_run: *std.Build.Step,
+    },
+    options: struct {
+        tb_client_header: std.Build.LazyPath,
+        stdx_module: *std.Build.Module,
+        vsr_module: *std.Build.Module,
+        vsr_options: *std.Build.Step.Options,
+        target: std.Build.ResolvedTarget,
+        mode: std.builtin.OptimizeMode,
+        print_exe: bool,
+    },
+) void {
+    const vortex = build_vortex_executable(b, .{
+        .tb_client_header = options.tb_client_header,
+        .stdx_module = options.stdx_module,
+        .vsr_module = options.vsr_module,
+        .vsr_options = options.vsr_options,
+        .target = options.target,
+        .mode = options.mode,
+    });
+
+    const install_step = print_or_install(b, vortex, options.print_exe);
+    steps.vortex_build.dependOn(install_step);
+
+    const run_cmd = b.addRunArtifact(vortex);
+    if (b.args) |args| run_cmd.addArgs(args);
+    steps.vortex_run.dependOn(&run_cmd.step);
+}
+
+fn build_vortex_executable(
+    b: *std.Build,
     options: struct {
         tb_client_header: std.Build.LazyPath,
         stdx_module: *std.Build.Module,
@@ -1177,7 +1211,7 @@ fn build_vortex(
         target: std.Build.ResolvedTarget,
         mode: std.builtin.OptimizeMode,
     },
-) std.Build.LazyPath {
+) *std.Build.Step.Compile {
     const tb_client = b.addLibrary(.{
         .name = "tb_client",
         .linkage = .static,
@@ -1211,11 +1245,7 @@ fn build_vortex(
     vortex.linkLibrary(tb_client);
     vortex.addIncludePath(options.tb_client_header.dirname());
     vortex.root_module.addOptions("vsr_options", options.vsr_options);
-
-    const install_step = b.addInstallArtifact(vortex, .{});
-    step_vortex.dependOn(&install_step.step);
-
-    return install_step.emitted_bin.?;
+    return vortex;
 }
 
 // Zig cross-targets, Dotnet RID (Runtime Identifier), CPU features.
