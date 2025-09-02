@@ -205,51 +205,52 @@ fn SegmentedArrayBaseType(
             }
         }
 
-        pub usingnamespace if (Key) |_| struct {
-            /// Returns the absolute index of the element being inserted.
-            pub fn insert_element(
-                array: *SegmentedArray,
-                node_pool: *NodePool,
-                element: T,
-            ) u32 {
-                if (options.verify) array.verify();
+        /// Returns the absolute index of the element being inserted.
+        /// Available only when `Key != null`.
+        pub fn insert_element(
+            array: *SegmentedArray,
+            node_pool: *NodePool,
+            element: T,
+        ) u32 {
+            comptime assert(Key != null);
+            if (options.verify) array.verify();
 
-                const count_before = array.len();
+            const count_before = array.len();
 
-                const cursor = array.search(key_from_value(&element));
-                const absolute_index = array.absolute_index_for_cursor(cursor);
-                array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
+            const cursor = array.search(key_from_value(&element));
+            const absolute_index = array.absolute_index_for_cursor(cursor);
+            array.insert_elements_at_absolute_index(node_pool, absolute_index, &[_]T{element});
 
-                if (options.verify) array.verify();
+            if (options.verify) array.verify();
 
-                const count_after = array.len();
-                assert(count_after == count_before + 1);
+            const count_after = array.len();
+            assert(count_after == count_before + 1);
 
-                return absolute_index;
-            }
-        } else struct {
-            pub fn insert_elements(
-                array: *SegmentedArray,
-                node_pool: *NodePool,
-                absolute_index: u32,
-                elements: []const T,
-            ) void {
-                if (options.verify) array.verify();
+            return absolute_index;
+        }
 
-                const count_before = array.len();
+        /// Available only when `Key == null`.
+        pub fn insert_elements(
+            array: *SegmentedArray,
+            node_pool: *NodePool,
+            absolute_index: u32,
+            elements: []const T,
+        ) void {
+            comptime assert(Key == null);
+            if (options.verify) array.verify();
 
-                array.insert_elements_at_absolute_index(
-                    node_pool,
-                    absolute_index,
-                    elements,
-                );
+            const count_before = array.len();
+            array.insert_elements_at_absolute_index(
+                node_pool,
+                absolute_index,
+                elements,
+            );
 
-                const count_after = array.len();
-                assert(count_after == count_before + elements.len);
+            const count_after = array.len();
+            assert(count_after == count_before + elements.len);
 
-                if (options.verify) array.verify();
-            }
-        };
+            if (options.verify) array.verify();
+        }
 
         fn insert_elements_at_absolute_index(
             array: *SegmentedArray,
@@ -882,68 +883,74 @@ fn SegmentedArrayBaseType(
             }
         }
 
-        pub usingnamespace if (Key) |K| struct {
-            /// Returns a cursor to the index of the key either exactly equal to the target key or,
-            /// if there is no exact match, the next greatest key.
-            pub fn search(array: *const SegmentedArray, key: K) Cursor {
-                if (array.node_count == 0) {
-                    return .{
-                        .node = 0,
-                        .relative_index = 0,
-                    };
-                }
-
-                var offset: usize = 0;
-                var length: usize = array.node_count;
-                while (length > 1) {
-                    const half = length / 2;
-                    const mid = offset + half;
-
-                    const node = &array.nodes[mid].?[0];
-
-                    if (key_from_value(node) < key) {
-                        @branchHint(.unpredictable);
-                        offset = mid;
-                    }
-
-                    length -= half;
-                }
-
-                // Unlike a normal binary search, don't increment the offset when "key" is higher
-                // than the element — "round down" to the previous node.
-                // This guarantees that the node result is never "== node_count".
-                //
-                // (If there are two adjacent nodes starting with keys A and C, and we search B,
-                // we want to pick the A node.)
-                const node: u32 = @intCast(offset);
-                assert(node < array.node_count);
-
-                const relative_index = binary_search_values_upsert_index(
-                    K,
-                    T,
-                    key_from_value,
-                    array.node_elements(node),
-                    key,
-                    .{},
-                );
-
-                // Follow the same rule as absolute_index_for_cursor:
-                // only return relative_index==array.count() at the last node.
-                if (node + 1 < array.node_count and
-                    relative_index == array.count(node))
-                {
-                    return .{
-                        .node = node + 1,
-                        .relative_index = 0,
-                    };
-                } else {
-                    return .{
-                        .node = node,
-                        .relative_index = relative_index,
-                    };
-                }
+        /// Returns a cursor to the index of the key either exactly equal to the target key or,
+        /// if there is no exact match, the next greatest key.
+        /// Available only when `Key != null`.
+        pub fn search(
+            array: *const SegmentedArray,
+            key: K: {
+                assert(Key != null);
+                break :K Key.?;
+            },
+        ) Cursor {
+            const K = Key.?;
+            if (array.node_count == 0) {
+                return .{
+                    .node = 0,
+                    .relative_index = 0,
+                };
             }
-        } else struct {};
+
+            var offset: usize = 0;
+            var length: usize = array.node_count;
+            while (length > 1) {
+                const half = length / 2;
+                const mid = offset + half;
+
+                const node = &array.nodes[mid].?[0];
+
+                if (key_from_value(node) < key) {
+                    @branchHint(.unpredictable);
+                    offset = mid;
+                }
+
+                length -= half;
+            }
+
+            // Unlike a normal binary search, don't increment the offset when "key" is higher
+            // than the element — "round down" to the previous node.
+            // This guarantees that the node result is never "== node_count".
+            //
+            // (If there are two adjacent nodes starting with keys A and C, and we search B,
+            // we want to pick the A node.)
+            const node: u32 = @intCast(offset);
+            assert(node < array.node_count);
+
+            const relative_index = binary_search_values_upsert_index(
+                K,
+                T,
+                key_from_value,
+                array.node_elements(node),
+                key,
+                .{},
+            );
+
+            // Follow the same rule as absolute_index_for_cursor:
+            // only return relative_index==array.count() at the last node.
+            if (node + 1 < array.node_count and
+                relative_index == array.count(node))
+            {
+                return .{
+                    .node = node + 1,
+                    .relative_index = 0,
+                };
+            } else {
+                return .{
+                    .node = node,
+                    .relative_index = relative_index,
+                };
+            }
+        }
     };
 }
 
