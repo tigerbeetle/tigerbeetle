@@ -8697,6 +8697,7 @@ pub fn ReplicaType(
                 self.message_bus.send_message_to_client(reply.header.client, reply.base());
                 return;
             }
+            // TODO(client_release): drop cold path after #2821 is in (0.16.34 or later).
 
             const reply_copy = self.message_bus.get_message(.reply);
             defer self.message_bus.unref(reply_copy);

@@ -129,7 +129,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         .major = 0,
         .minor = 16,
         .patch = 4,
-    };
+    }; // NB: grep for 'TODO(client_release)' after changing!
 
     const version_info = VersionInfo{
         .release_triple = try shell.fmt(
