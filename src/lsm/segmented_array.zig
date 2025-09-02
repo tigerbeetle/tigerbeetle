@@ -900,11 +900,11 @@ fn SegmentedArrayBaseType(
                     const mid = offset + half;
 
                     const node = &array.nodes[mid].?[0];
-                    // This trick seems to be what's needed to get llvm to emit branchless code for
-                    // this, a ternary-style if expression was generated as a jump here for whatever
-                    // reason.
-                    const next_offsets = [_]usize{ offset, mid };
-                    offset = next_offsets[@intFromBool(key_from_value(node) < key)];
+
+                    if (key_from_value(node) < key) {
+                        @branchHint(.unpredictable);
+                        offset = mid;
+                    }
 
                     length -= half;
                 }
