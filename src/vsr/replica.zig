@@ -1437,7 +1437,7 @@ pub fn ReplicaType(
                     // (`after` will be adjusted at runtime each time before it is started.)
                     .after = 10 / constants.tick_ms,
                 },
-                .prng = stdx.PRNG.from_seed(replica_index),
+                .prng = stdx.PRNG.from_seed(@truncate(options.nonce)),
 
                 .trace = self.trace,
                 .test_context = options.test_context,
