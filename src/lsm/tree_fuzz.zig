@@ -368,6 +368,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }
 
             if (last_beat) {
+                env.tree.compact(); // TODO(TZ) check if this is the right move.
                 env.tree.swap_mutable_and_immutable(
                     snapshot_min_for_table_output(compaction_op_min(op)),
                 );
