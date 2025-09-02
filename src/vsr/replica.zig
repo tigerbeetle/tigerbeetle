@@ -3756,7 +3756,7 @@ pub fn ReplicaType(
                 constants.grid_scrubber_interval_ticks_max,
             );
 
-            while (self.grid.blocks_missing.enqueue_blocks_available() > 0) {
+            while (self.grid.blocks_missing.repair_blocks_available() > 0) {
                 const fault = self.grid_scrubber.read_fault() orelse break;
                 assert(!self.grid.free_set.is_free(fault.block_address));
 
@@ -3768,7 +3768,7 @@ pub fn ReplicaType(
                     @tagName(fault.block_type),
                 });
 
-                self.grid.blocks_missing.enqueue_block(
+                self.grid.blocks_missing.repair_block(
                     fault.block_address,
                     fault.block_checksum,
                 );
@@ -10418,7 +10418,7 @@ pub fn ReplicaType(
                         &self.grid_repair_table_bitsets[self.grid_repair_tables.index(table)];
 
                     const enqueue_result =
-                        self.grid.blocks_missing.enqueue_table(table, table_bitset, &table_info);
+                        self.grid.blocks_missing.sync_table(table, table_bitset, &table_info);
 
                     switch (enqueue_result) {
                         .insert => self.trace.start(.{ .replica_sync_table = .{

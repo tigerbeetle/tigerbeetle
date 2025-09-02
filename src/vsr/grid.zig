@@ -749,7 +749,7 @@ pub fn GridType(comptime Storage: type) type {
         pub fn repair_block_waiting(grid: *Grid, address: u64, checksum: u128) bool {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
-            return grid.blocks_missing.repair_waiting(address, checksum);
+            return grid.blocks_missing.block_waiting(address, checksum);
         }
 
         /// Write a block that should already exist but (maybe) doesn't because of:
@@ -767,10 +767,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
             assert(grid.writing(block_header.address, block.*) == .not_writing);
-            assert(grid.blocks_missing.repair_waiting(block_header.address, block_header.checksum));
+            assert(grid.blocks_missing.block_waiting(block_header.address, block_header.checksum));
             assert(!grid.free_set.is_free(block_header.address));
 
-            grid.blocks_missing.repair_commence(block_header.address, block_header.checksum);
+            grid.blocks_missing.write_commence(block_header.address, block_header.checksum);
             grid.write_block(callback, write, block, .repair);
         }
 
@@ -787,7 +787,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.callback == .none or grid.callback == .checkpoint);
             assert((grid.callback == .checkpoint) == (block_header.block_type == .free_set));
             assert(grid.writing(block_header.address, block.*) == .not_writing);
-            assert(!grid.blocks_missing.repair_waiting(
+            assert(!grid.blocks_missing.block_waiting(
                 block_header.address,
                 block_header.checksum,
             ));
@@ -921,7 +921,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Precede the write's callback, since the callback takes back ownership of the block.
-            if (completed_write.repair) grid.blocks_missing.repair_complete(cache_block.*);
+            if (completed_write.repair) grid.blocks_missing.write_complete(cache_block.*);
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
@@ -1297,8 +1297,8 @@ pub fn GridType(comptime Storage: type) type {
                 read_remote_head.resolves = read_remote_resolves;
                 grid.read_global_queue.push(read_remote_head);
 
-                if (grid.blocks_missing.enqueue_blocks_available() > 0) {
-                    grid.blocks_missing.enqueue_block(
+                if (grid.blocks_missing.repair_blocks_available() > 0) {
+                    grid.blocks_missing.repair_block(
                         read_remote_head.address,
                         read_remote_head.checksum,
                     );
