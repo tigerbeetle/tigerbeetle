@@ -116,8 +116,11 @@ pub fn ScanTreeType(
                 ScanTree,
                 ScanTree.Key,
                 ScanTree.Value,
+                .{
+                    .streams_max = KWayMergeStreams.streams_count,
+                    .deduplicate = true,
+                },
                 ScanTree.key_from_value,
-                KWayMergeStreams.streams_count,
                 stream.peek,
                 stream.pop,
                 stream.precedence,
