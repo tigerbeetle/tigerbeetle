@@ -207,7 +207,7 @@ pub const Header = extern struct {
             // However, we return the client ID, as it is useful for the MessageBus. Specifically,
             // a replica that receives a request from a client can immediately cache the connection
             // in its client map, instead of waiting for an infrequent PingClient message to do so.
-            .request => |request| .{ .client = request.client },
+            .request => |request| .{ .client_likely = request.client },
 
             // The peer is certainly a client:
             .ping_client => |ping| .{ .client = ping.client },

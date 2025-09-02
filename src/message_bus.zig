@@ -732,7 +732,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 const header_peer: Connection.Peer = switch (connection.recv_buffer.?.peer) {
                     .unknown => return,
                     .replica => |replica| .{ .replica = replica },
-                    .client => |client| .{ .client = client },
+                    .client, .client_likely => |client| .{ .client = client },
                 };
 
                 if (std.meta.eql(connection.peer, header_peer)) return;
@@ -757,9 +757,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         }
 
                         switch (connection.peer) {
+                            .unknown => {},
                             .client => |existing| assert(bus.process.clients.remove(existing)),
                             .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
-                            .unknown => {},
                             .none => unreachable,
                         }
 
@@ -787,7 +787,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                         } else {
                             switch (connection.peer) {
                                 .unknown => {},
-                                .client, .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
+                                .client, .replica => assert(
+                                    connection.recv_buffer.?.invalid.? == .misdirected,
+                                ),
                                 .none => unreachable,
                             }
                         }
