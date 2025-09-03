@@ -24,6 +24,6 @@ do
         git fetch
         git switch --discard-changes --detach origin/main
         ./zig/download.sh
-        ./zig/zig build -Drelease scripts -- cfo
+        unshare --user --pid --fork ./zig/zig build -Drelease scripts -- cfo
     ) || sleep 10 # Be resilient to cfo bugs and network errors, but avoid busy-loop retries.
 done

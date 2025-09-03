@@ -154,16 +154,6 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
         return error.NotSupported;
     }
 
-    if (builtin.os.tag == .linux) {
-        // Relaunch in a fresh pid namespace.
-        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{
-            .pid = true,
-            .network = false,
-        });
-    } else {
-        log.warn("cfo may spawn runaway processes when run on a non-Linux OS", .{});
-    }
-
     if (cli_args.budget_minutes == 0) fatal("--budget-minutes: must be greater than zero", .{});
     if (cli_args.refresh_minutes == 0) fatal("--refresh-minutes: must be greater than zero", .{});
     if (cli_args.timeout_minutes == 0) fatal("--timeout-minutes: must be greater than zero", .{});
