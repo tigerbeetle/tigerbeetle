@@ -25,6 +25,7 @@ const TestStorage = @import("../testing/storage.zig").Storage;
 const Time = @import("../time.zig").Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
+const Multiversion = @import("../multiversioning.zig").Multiversion;
 
 const marks = @import("../testing/marks.zig");
 
@@ -284,18 +285,7 @@ pub fn ReplicaType(
         /// It should never be modified by a running replica.
         release_client_min: vsr.Release,
 
-        /// A list of all versions of code that are available in the current binary.
-        /// Includes the current version, newer versions, and older versions.
-        /// Ordered from lowest/oldest to highest/newest.
-        /// Can be updated by multiversioning while running.
-        releases_bundled: *const vsr.ReleaseList,
-
-        /// Replace the currently-running replica with the given release.
-        ///
-        /// If called with a `release` that is *not* in `releases_bundled`, the replica should shut
-        /// down with a helpful error message to warn the operator that they must upgrade.
-        release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
-        release_execute_context: ?*anyopaque,
+        multiversion: Multiversion,
 
         commit_stall_probability: Ratio,
 
@@ -644,9 +634,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32 = Grid.Cache.value_count_max_multiple,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: *const vsr.ReleaseList,
-            release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
-            release_execute_context: ?*anyopaque,
+            multiversion: Multiversion,
             test_context: ?*anyopaque = null,
             timeout_prepare_ticks: ?u64 = null,
             timeout_grid_repair_message_ticks: ?u64 = null,
@@ -710,6 +698,8 @@ pub fn ReplicaType(
                 .replica = replica,
             });
 
+            self.test_context = options.test_context;
+
             // Initialize the replica:
             try self.init(allocator, .{
                 .cluster = self.superblock.working.cluster,
@@ -727,10 +717,7 @@ pub fn ReplicaType(
                 .grid_cache_blocks_count = options.grid_cache_blocks_count,
                 .release = options.release,
                 .release_client_min = options.release_client_min,
-                .releases_bundled = options.releases_bundled,
-                .release_execute = options.release_execute,
-                .release_execute_context = options.release_execute_context,
-                .test_context = options.test_context,
+                .multiversion = options.multiversion,
                 .timeout_prepare_ticks = options.timeout_prepare_ticks,
                 .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
                 .commit_stall_probability = options.commit_stall_probability,
@@ -1070,10 +1057,7 @@ pub fn ReplicaType(
             grid_cache_blocks_count: u32,
             release: vsr.Release,
             release_client_min: vsr.Release,
-            releases_bundled: *const vsr.ReleaseList,
-            release_execute: *const fn (replica: *Replica, release: vsr.Release) void,
-            release_execute_context: ?*anyopaque,
-            test_context: ?*anyopaque,
+            multiversion: Multiversion,
             timeout_prepare_ticks: ?u64,
             timeout_grid_repair_message_ticks: ?u64,
             commit_stall_probability: ?Ratio,
@@ -1185,8 +1169,9 @@ pub fn ReplicaType(
             // Flexible quorums are safe if these two quorums intersect so that this relation holds:
             assert(quorum_replication + quorum_view_change > replica_count);
 
-            options.releases_bundled.verify();
-            assert(options.releases_bundled.contains(options.release));
+            const releases_bundled = options.multiversion.releases_bundled();
+            releases_bundled.verify();
+            assert(releases_bundled.contains(options.release));
 
             const request_size_limit =
                 @sizeOf(Header) + options.state_machine_options.batch_size_limit;
@@ -1305,9 +1290,7 @@ pub fn ReplicaType(
                 .quorum_majority = quorum_majority,
                 .release = options.release,
                 .release_client_min = options.release_client_min,
-                .releases_bundled = options.releases_bundled,
-                .release_execute = options.release_execute,
-                .release_execute_context = options.release_execute_context,
+                .multiversion = options.multiversion,
                 .commit_stall_probability = options.commit_stall_probability orelse
                     stdx.PRNG.ratio(2, 5),
                 .nonce = options.nonce,
@@ -1440,7 +1423,7 @@ pub fn ReplicaType(
                 .prng = stdx.PRNG.from_seed(@truncate(options.nonce)),
 
                 .trace = self.trace,
-                .test_context = options.test_context,
+                .test_context = self.test_context,
                 .aof = options.aof,
                 .replicate_options = options.replicate_options,
             };
@@ -1528,9 +1511,9 @@ pub fn ReplicaType(
                     self.syncing == .updating_checkpoint);
             }
 
-            // TODO Replica owns Time; should it tick() here instead of Clock?
             self.clock.tick();
             self.message_bus.tick();
+            self.multiversion.tick();
 
             const timeouts = .{
                 .{ &self.ping_timeout, on_ping_timeout },
@@ -3453,6 +3436,10 @@ pub fn ReplicaType(
                 ping_route = self.routing.route_encode(self.routing.a);
             }
 
+            const releases = self.multiversion.releases_bundled();
+            releases.verify();
+            assert(releases.contains(self.release));
+
             message.header.* = Header.Ping{
                 .command = .ping,
                 .size = @sizeOf(Header) + @sizeOf(vsr.Release) * constants.vsr_releases_max,
@@ -3464,22 +3451,17 @@ pub fn ReplicaType(
                 .checkpoint_op = self.op_checkpoint(),
                 .ping_timestamp_monotonic = self.clock.monotonic(),
                 .route = ping_route,
-                .release_count = self.releases_bundled.count,
+                .release_count = releases.count,
             };
-
-            // self.releases_bundled is usually pointer into Multiversion, which might update in
-            // place if a new binary is available on disk.
-            self.releases_bundled.verify();
-            assert(self.releases_bundled.contains(self.release));
 
             const ping_versions = std.mem.bytesAsSlice(vsr.Release, message.body_used());
             stdx.copy_disjoint(
                 .inexact,
                 vsr.Release,
                 ping_versions,
-                self.releases_bundled.slice(),
+                releases.slice(),
             );
-            @memset(ping_versions[self.releases_bundled.count..], vsr.Release.zero);
+            @memset(ping_versions[releases.count..], vsr.Release.zero);
             message.header.set_checksum_body(message.body_used());
             message.header.set_checksum();
 
@@ -3883,8 +3865,9 @@ pub fn ReplicaType(
 
             const release_target: ?vsr.Release = release: {
                 var release_target: ?vsr.Release = null;
-                for (self.releases_bundled.slice(), 0..) |release, i| {
-                    if (i > 0) assert(release.value > self.releases_bundled.slice()[i - 1].value);
+                const releases = self.multiversion.releases_bundled();
+                for (releases.slice(), 0..) |release, i| {
+                    if (i > 0) assert(release.value > releases.slice()[i - 1].value);
                     // Ignore old releases.
                     if (release.value <= self.release.value) continue;
 
@@ -10698,7 +10681,7 @@ pub fn ReplicaType(
                 //
                 // Even though we are upgrading, our target version is not necessarily available in
                 // our binary. (In this case, release_execute() is responsible for error-ing out.)
-                maybe(self.release.value == self.releases_bundled.first().value);
+                maybe(self.release.value == self.multiversion.releases_bundled().first().value);
                 assert(self.commit_min == self.op_checkpoint() or
                     self.commit_min == vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint()));
                 maybe(self.journal.status == .init);
@@ -10711,7 +10694,7 @@ pub fn ReplicaType(
                 source.fn_name,
             });
 
-            self.release_execute(self, release_target);
+            self.multiversion.release_execute(release_target);
             // At this point, depending on the implementation of release_execute():
             // - For testing/cluster.zig: `self` is no longer valid – the replica has been
             //   deinitialized and re-opened on the new version.
