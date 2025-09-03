@@ -8791,23 +8791,28 @@ pub fn ReplicaType(
                 message.header.command == .eviction or
                 message.header.command == .reply);
 
-            // Don't externalize a view for which view change hasn't yet completed. This avoids
-            // a scenario where a partitioned replica leaks a higher view number to the client, and
-            // the client uses this view number for subsequent requests:
-            // * New subsequent requests will be ignored by the cluster, locking out the client.
-            // * Duplicate subsequent requests will cause the primary to crash, since we expect the
-            //   request's view to be smaller than the primary's view (see
-            //   `ignore_request_message_duplicate` and `ignore_request_message_preparing`),
-            if (self.status != .normal) return;
-            if (self.log_view_durable() < self.log_view) {
-                log.debug("{}: send_message_to_client_base: dropped {s} " ++
-                    "(log_view_durable={} log_view={})", .{
-                    self.log_prefix(),
-                    @tagName(message.header.command),
-                    self.log_view_durable(),
-                    self.log_view,
-                });
-                return;
+            if (message.header.command == .reply or message.header.command == .pong_client) {
+                // Don't externalize a view for which view change hasn't yet completed. This avoids
+                // a scenario where a partitioned replica leaks a higher view number to the client,
+                // and the client uses this view number for subsequent requests:
+                // * New subsequent requests will be ignored by the cluster, locking out the client.
+                // * Duplicate subsequent requests will cause the primary to crash, since we expect
+                //   the request's view to be smaller than the primary's view (see
+                //   `ignore_request_message_duplicate` and `ignore_request_message_preparing`),
+                if (self.status != .normal) return;
+                if (self.log_view_durable() < self.log_view) {
+                    log.debug("{}: send_message_to_client_base: dropped {s} " ++
+                        "(log_view_durable={} log_view={})", .{
+                        self.log_prefix(),
+                        @tagName(message.header.command),
+                        self.log_view_durable(),
+                        self.log_view,
+                    });
+                    return;
+                }
+            } else {
+                assert(message.header.command == .eviction);
+                assert(self.primary());
             }
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
