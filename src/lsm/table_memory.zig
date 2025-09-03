@@ -45,11 +45,13 @@ pub fn TableMemoryType(comptime Table: type) type {
         const SortedRun = struct {
             min: u32,
             max: u32, // exclusive.
-            src: enum { mutable, immutable }, // this defines where the sorted run initially came from and determines the priority
+            src: Source, // this defines where the sorted run initially came from and determines the priority
         };
 
         // One sort() call and one immutable table run.
         const sorted_runs_max = constants.lsm_compaction_ops + 2;
+
+        const Source = enum { mutable, immutable };
 
         const MergeContext = struct {
             const streams_max = sorted_runs_max; // TODO(TZ): clean up
@@ -58,7 +60,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             streams: [streams_max][]const Value,
             streams_count: u32,
-            source: [streams_max]enum { mutable, immutabe },
+            source: [streams_max]Source,
 
             fn stream_peek(
                 context: *const MergeContext,
@@ -76,10 +78,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             fn stream_precedence(context: *const MergeContext, a: u32, b: u32) bool {
-                // Higher streams have higher precedence.
-                if (context.source[a] == context.source[b]) return a < b;
-                if (context.source[a] == .mutable) return true;
-                return false;
+                // Prefer immutable over mutable on ties.
+                if (context.source[a] != context.source[b]) return context.source[a] == .immutable;
+                return a < b;
             }
         };
 
@@ -134,6 +135,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
                 for (tracker.runs[0..tracker.count()], 0..) |run, i| {
                     context.streams[i] = values[run.min..run.max];
+                    context.source[i] = run.src;
                 }
                 context.streams_count = tracker.count();
                 return context;
@@ -148,6 +150,51 @@ pub fn TableMemoryType(comptime Table: type) type {
                     assert(a.max == b.min); // no holes.
                 }
                 assert(tracker.runs[runs_count - 1].max == table_count);
+            }
+        };
+        const DedupSink = struct {
+            out: []Value,
+            target_index: u32 = 0,
+            // Holds the current candidate that may merge with the next item.
+            pending: ?Value = null,
+
+            pub fn init(out: []Value) DedupSink {
+                return .{ .out = out };
+            }
+
+            inline fn sameKey(a: *const Value, b: *const Value) bool {
+                return key_from_value(a) == key_from_value(b);
+            }
+
+            pub fn push(self: *DedupSink, v: Value) void {
+                if (self.pending) |p| {
+                    if (sameKey(&p, &v)) {
+                        if (Table.usage == .secondary_index) {
+                            // Annihilate put/remove pair for secondary indexes.
+                            assert(Table.tombstone(&p) != Table.tombstone(&v));
+                            self.pending = null; // drop both
+                        } else {
+                            // Primary index: last one wins in a run of dups.
+                            self.pending = v;
+                        }
+                    } else {
+                        // Key changed: flush pending and keep new as pending.
+                        self.out[self.target_index] = p;
+                        self.target_index += 1;
+                        self.pending = v;
+                    }
+                } else {
+                    self.pending = v;
+                }
+            }
+
+            pub fn finish(self: *DedupSink) u32 {
+                if (self.pending) |p| {
+                    self.out[self.target_index] = p;
+                    self.target_index += 1;
+                    self.pending = null;
+                }
+                return self.target_index;
             }
         };
 
@@ -253,6 +300,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable.run_tracker.invariant(table_mutable.count());
 
             if (table_mutable.run_tracker.count() == 1) {
+                std.debug.print("table already sorted {s} \n", .{table_mutable.name});
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
                 table_immutable.value_context.count = table_mutable.count();
                 table_immutable.mutability = .{ .immutable = .{
@@ -273,11 +321,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             var merge_iterator = KWayMergeIterator.init(&merge_context, @intCast(merge_context.streams_count), .ascending);
 
             var target_index: u32 = 0;
+            var dedup_sink = DedupSink.init(table_immutable.values);
             while (merge_iterator.pop() catch unreachable) |value| : (target_index += 1) {
-                table_immutable.values[target_index] = value;
+                //table_immutable.values[target_index] = value;
+                dedup_sink.push(value);
             }
             // we could do dedpulication in place should we ?
-            table_immutable.value_context.count = deduplicate(table_immutable.values[0..target_index]);
+            //table_immutable.value_context.count = deduplicate(table_immutable.values[0..target_index]);
+            table_immutable.value_context.count = dedup_sink.finish();
 
             // set data correctly e.g. immutable and mutable.reset();
             // If we have no values, then we can consider ourselves flushed right away.
@@ -583,6 +634,8 @@ const TestTable = struct {
         return v.key;
     }
 };
+
+// add more tests.
 
 test "table_memory: unit" {
     const testing = std.testing;
