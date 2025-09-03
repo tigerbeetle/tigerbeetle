@@ -62,7 +62,7 @@ pub const std_options: std.Options = .{
 };
 
 pub fn main() !void {
-    if (builtin.os.tag == .windows) try vsr.multiversioning.wait_for_parent_to_exit();
+    if (builtin.os.tag == .windows) try vsr.multiversion.wait_for_parent_to_exit();
 
     var arena_instance = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena_instance.deinit();
@@ -163,7 +163,7 @@ pub fn main() !void {
             var stdout_writer = stdout_buffer.writer();
             const stdout = stdout_writer.any();
 
-            try vsr.multiversioning.print_information(gpa, args.path, stdout);
+            try vsr.multiversion.print_information(gpa, args.path, stdout);
             try stdout_buffer.flush();
         },
         .amqp => |*args| try command_amqp(gpa, time, args),
@@ -203,10 +203,10 @@ fn command_version(gpa: mem.Allocator, verbose: bool) !void {
         }
 
         try stdout.writeAll("\n");
-        const self_exe_path = try vsr.multiversioning.self_exe_path(gpa);
+        const self_exe_path = try vsr.multiversion.self_exe_path(gpa);
         defer gpa.free(self_exe_path);
 
-        vsr.multiversioning.print_information(gpa, self_exe_path, stdout) catch {};
+        vsr.multiversion.print_information(gpa, self_exe_path, stdout) catch {};
     }
     try stdout_buffer.flush();
 }
@@ -293,12 +293,12 @@ fn command_start(
     var self_exe_path: ?[:0]const u8 = null;
     defer if (self_exe_path) |path| gpa.free(path);
 
-    var multiversion_os: ?vsr.multiversioning.MultiversionOS = null;
+    var multiversion_os: ?vsr.multiversion.MultiversionOS = null;
     defer if (multiversion_os != null) multiversion_os.?.deinit(gpa);
 
-    const multiversion: vsr.multiversioning.Multiversion = blk: {
+    const multiversion: vsr.multiversion.Multiversion = blk: {
         if (constants.config.process.release.value ==
-            vsr.multiversioning.Release.minimum.value)
+            vsr.multiversion.Release.minimum.value)
         {
             log.info("multiversioning: upgrades disabled for development ({}) release.", .{
                 constants.config.process.release,
@@ -315,8 +315,8 @@ fn command_start(
             break :blk .single_release(constants.config.process.release);
         }
 
-        self_exe_path = try vsr.multiversioning.self_exe_path(gpa);
-        multiversion_os = try vsr.multiversioning.MultiversionOS.init(
+        self_exe_path = try vsr.multiversion.self_exe_path(gpa);
+        multiversion_os = try vsr.multiversion.MultiversionOS.init(
             gpa,
             io,
             self_exe_path.?,

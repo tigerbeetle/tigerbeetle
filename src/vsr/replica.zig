@@ -25,7 +25,7 @@ const TestStorage = @import("../testing/storage.zig").Storage;
 const Time = @import("../time.zig").Time;
 const RepairBudgetJournal = @import("repair_budget.zig").RepairBudgetJournal;
 const RepairBudgetGrid = @import("repair_budget.zig").RepairBudgetGrid;
-const Multiversion = @import("../multiversioning.zig").Multiversion;
+const Multiversion = @import("../multiversion.zig").Multiversion;
 
 const marks = @import("../testing/marks.zig");
 
