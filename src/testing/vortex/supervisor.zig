@@ -146,6 +146,13 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     var output_directory_buffer: [std.fs.max_path_bytes]u8 = undefined;
     const output_directory = args.output_directory orelse
         try create_tmp_dir(&output_directory_buffer);
+    defer {
+        if (args.output_directory == null) {
+            std.fs.cwd().deleteTree(output_directory) catch |err| {
+                log.err("error deleting tree: {}", .{err});
+            };
+        }
+    }
     log.info("output directory: {s}", .{output_directory});
 
     var trace_file_buffer: [std.fs.max_path_bytes]u8 = undefined;
