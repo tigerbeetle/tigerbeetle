@@ -86,6 +86,37 @@ pub const Peer = union(enum) {
     unknown,
     replica: u8,
     client: u128,
+    client_likely: u128,
+
+    pub fn transition(old: Peer, new: Peer) enum { retain, update, reject } {
+        return switch (old) {
+            .unknown => .update,
+            .client_likely => switch (new) {
+                .client_likely => if (std.meta.eql(old, new))
+                    .retain
+                else
+                    // Receiving requests from two different clients on the same connection implies
+                    // that we are talking to a replica. However, as we don't know which one, we
+                    // retain this as a connection to a client, for simplicity.
+                    .retain,
+                .client => if (old.client_likely == new.client) .update else .reject,
+                .replica => .update,
+                .unknown => .retain,
+            },
+
+            .replica => switch (new) {
+                .replica => if (std.meta.eql(old, new)) .retain else .reject,
+                .client => .reject,
+                .client_likely, .unknown => .retain,
+            },
+            .client => switch (new) {
+                .client => if (std.meta.eql(old, new)) .retain else .reject,
+                .client_likely => if (old.client == new.client_likely) .retain else .reject,
+                .replica => .reject,
+                .unknown => .retain,
+            },
+        };
+    }
 };
 
 pub const Zone = enum {

@@ -665,22 +665,7 @@ pub fn ClientType(
                 message.header.checksum,
             });
 
-            // Retransmit potentially dropped message.
-            const primary: u32 = self.view % self.replica_count;
-            self.send_message_to_replica(@as(u8, @intCast(primary)), message.base());
-
-            // Try to learn the new view.
-            const ping = Header.PingClient{
-                .command = .ping_client,
-                .cluster = self.cluster,
-                .release = self.release,
-                .client = self.id,
-                .ping_timestamp_monotonic = self.time.monotonic(),
-            };
-
-            const next_backup: u32 =
-                (self.view + self.request_timeout.attempts) % self.replica_count;
-            self.send_header_to_replica(@as(u8, @intCast(next_backup)), ping.frame_const());
+            self.send_request_with_hedging(message);
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -703,13 +688,6 @@ pub fn ClientType(
             defer self.message_bus.unref(message);
 
             self.send_message_to_replicas(message);
-        }
-
-        fn send_header_to_replica(self: *Client, replica: u8, header: *const Header) void {
-            const message = self.create_message_from_header(header);
-            defer self.message_bus.unref(message);
-
-            self.send_message_to_replica(replica, message);
         }
 
         fn send_message_to_replicas(self: *Client, message: *Message) void {
@@ -743,6 +721,22 @@ pub fn ClientType(
             }
 
             self.message_bus.send_message_to_replica(replica, message);
+        }
+
+        // In addition to the primary, each request is also sent to a randomly chosen backup, to
+        // handle the case where the client → primary link is down. This ensures logical
+        // availability of the cluster, i.e., as long the client is connected to a backup that in
+        // turn is connected to the primary, the request will be processed by the cluster.
+        fn send_request_with_hedging(self: *Client, message: *Message.Request) void {
+            const primary: u8 = @intCast(self.view % self.replica_count);
+            self.send_message_to_replica(primary, message.base());
+
+            if (self.replica_count > 1) {
+                const offset_random = self.prng.range_inclusive(u8, 1, self.replica_count - 1);
+                const backup_random = (primary + offset_random) % self.replica_count;
+                assert(backup_random != primary);
+                self.send_message_to_replica(backup_random, message.base());
+            }
         }
 
         fn send_request_for_the_first_time(self: *Client, message: *Message.Request) void {
@@ -780,10 +774,7 @@ pub fn ClientType(
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            self.send_message_to_replica(
-                @as(u8, @intCast(self.view % self.replica_count)),
-                message.base(),
-            );
+            self.send_request_with_hedging(message);
         }
     };
 }

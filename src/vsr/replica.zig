@@ -5180,6 +5180,31 @@ pub fn ReplicaType(
             self.commit_prepare = null;
         }
 
+        // For each op, in addition to the primary, a randomly chosen backup also sends a reply
+        // to the client. All replicas initialize the PRNG with the same seed, so they arrive
+        // at the same random backup. This improves logical availability in the case where the
+        // the primary → client link is down. If it doesn't work, we have a fallback where a
+        // backup directly replies to client requests (see `ignore_request_message`).
+        // Selecting a random backup as opposed to using a determistic function also guards us from
+        // subtle resonance issues wherein the same backup replies to the same client every time.
+        // This could happen if `active client count % replica count == 0`, and these clients'
+        // requests arrive at the primary in the same order every time.
+        fn execute_op_reply_to_client(self: *Replica, op: u64) bool {
+            if (self.replica == self.primary_index(self.view)) return true;
+
+            if (self.replica_count == 1) {
+                assert(self.standby());
+                return false;
+            }
+
+            var prng = stdx.PRNG.from_seed(op);
+            const offset_random = prng.range_inclusive(u8, 1, self.replica_count - 1);
+            const backup_random =
+                (self.primary_index(self.view) + offset_random) % self.replica_count;
+            assert(backup_random != self.primary_index(self.view));
+            return self.replica == backup_random;
+        }
+
         fn execute_op(self: *Replica, prepare: *const Message.Prepare) void {
             // TODO Can we add more checks around allowing execute_op() during a view change?
             assert(self.commit_stage == .execute);
@@ -5356,7 +5381,7 @@ pub fn ReplicaType(
                 }
             }
 
-            if (self.primary_index(self.view) == self.replica) {
+            if (self.execute_op_reply_to_client(prepare.header.op)) {
                 if (reply.header.client == 0) {
                     log.debug("{}: execute_op: no reply to client: {}", .{
                         self.log_prefix(),
@@ -5829,14 +5854,6 @@ pub fn ReplicaType(
                 return true;
             }
 
-            // We must only ever send our view number to a client via a pong message if we are
-            // in normal status. Otherwise, we may be partitioned from the cluster with a newer
-            // view number, leak this to the client, which would then pass this to the cluster
-            // in subsequent client requests, which would then ignore these client requests with
-            // a newer view number, locking out the client. The principle here is that we must
-            // never send view numbers for views that have not yet started.
-            if (self.status != .normal) return true;
-
             if (message.header.release.value < self.release_client_min.value) {
                 log.warn("{}: on_ping_client: ignoring unsupported client version; too low" ++
                     " (client={} version={}<{})", .{
@@ -6063,19 +6080,25 @@ pub fn ReplicaType(
                 return true;
             }
 
-            // This check must precede any send_eviction_message_to_client(), since only the primary
-            // should send evictions.
-            if (self.backup()) {
-                // Clients only send requests to the primary. Either the client's view is outdated,
-                // or a message was misdirected. Intentionally don't try to forward the message to
-                // the primary, to avoid amplifying the network load.
-                log.debug("{}: on_request: ignoring (backup view={} header.view={})", .{
+            // We only externalize views for which view change is complete (see
+            // `send_message_to_client_base`), but a buggy client may still send a view higher
+            // than one the cluster has seen. Err on the side of safety and drop such requests.
+            if (message.header.view > self.view) {
+                log.debug("{}: on_request: ignoring (view={} header.view={})", .{
                     self.log_prefix(),
                     self.view,
                     message.header.view,
                 });
                 return true;
             }
+
+            // This check must precede any send_eviction_message_to_client(), since only the primary
+            // should send evictions.
+            if (self.backup()) {
+                self.ignore_request_message_backup(message);
+                return true;
+            }
+
             assert(self.primary());
 
             if (message.header.release.value < self.release_client_min.value) {
@@ -6195,6 +6218,53 @@ pub fn ReplicaType(
             if (self.ignore_request_message_preparing(message)) return true;
 
             return false;
+        }
+
+        // If backups recognize a client, they reply directly to duplicate requests, while newer
+        // requests are forwarded to the primary. Older requests are dropped. If they don't
+        // recognize a client (or the client may have been evicted), only register requests are
+        // forwarded to the primary.
+        // The key motivation here is to only forward requests to the primary if there is a positive
+        // reason to do so, otherwise we risk flooding the network with spurious request messages.
+        fn ignore_request_message_backup(self: *Replica, message: *Message.Request) void {
+            assert(self.status == .normal);
+            assert(self.backup());
+            assert(message.header.command == .request);
+
+            if (self.client_sessions.get(message.header.client)) |entry| {
+                assert(entry.header.command == .reply);
+                assert(entry.header.client == message.header.client);
+                assert(entry.header.client != 0);
+
+                if (entry.header.request < message.header.request) {
+                    log.debug("{}: on_request: forwarding new request to primary (view={})", .{
+                        self.log_prefix(),
+                        self.view,
+                    });
+                    self.send_message_to_replica(self.primary_index(self.view), message);
+                } else if (entry.header.request == message.header.request) {
+                    if (entry.header.request_checksum == message.header.checksum) {
+                        log.debug("{}: on_request: replying to duplicate request", .{
+                            self.log_prefix(),
+                        });
+                        self.on_request_repeat_reply(message, entry);
+                    } else {
+                        log.err("{}: on_request: request collision (client bug)", .{
+                            self.log_prefix(),
+                        });
+                    }
+                } else {
+                    log.debug("{}: on_request: ignoring older request", .{self.log_prefix()});
+                }
+            } else {
+                if (message.header.operation == .register) {
+                    log.debug("{}: on_request: forwarding register to primary (view={})", .{
+                        self.log_prefix(),
+                        self.view,
+                    });
+                    self.send_message_to_replica(self.primary_index(self.view), message);
+                }
+            }
         }
 
         fn ignore_request_message_upgrade(self: *Replica, message: *const Message.Request) bool {
@@ -6389,7 +6459,6 @@ pub fn ReplicaType(
             entry: *const ClientSessions.Entry,
         ) void {
             assert(self.status == .normal);
-            assert(self.primary());
 
             assert(message.header.command == .request);
             assert(message.header.client > 0);
@@ -6441,11 +6510,6 @@ pub fn ReplicaType(
             const self: *Replica = @fieldParentPtr("client_replies", client_replies);
             assert(reply_header.size > @sizeOf(Header));
             assert(destination_replica == null);
-
-            // Only allow the primary to reply, to avoid externalizing a view for which view change
-            // hasn't yet completed.
-            if (self.status != .normal) return;
-            if (!self.primary()) return;
 
             const reply = reply_ orelse {
                 if (self.client_sessions.get_slot_for_header(reply_header)) |slot| {
@@ -8251,7 +8315,7 @@ pub fn ReplicaType(
             if (self.release.value < message.header.release.value and
                 self.replica == message.header.replica)
             {
-                // Don't replica messages on a newer release than us if we were the one who
+                // Don't replicate messages on a newer release than us if we were the one who
                 // originally sent it. This can happen if our release backtracked due to being
                 // reformatted.
                 log.warn("{}: replicate: ignoring prepare from newer release", .{
@@ -8678,11 +8742,6 @@ pub fn ReplicaType(
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
             assert(reply.header.client != 0);
-            defer {
-                if (self.event_callback) |hook| {
-                    hook(self, .{ .message_sent = reply.base() });
-                }
-            }
 
             // If the request committed in a different view than the one it was originally prepared
             // in, we must inform the client about this newer view before we send it a reply.
@@ -8694,7 +8753,7 @@ pub fn ReplicaType(
 
             if (reply.header.view == self.view) {
                 // Hot path: no need to clone the message if the view is the same.
-                self.message_bus.send_message_to_client(reply.header.client, reply.base());
+                self.send_message_to_client_base(reply.header.client, reply.base());
                 return;
             }
             // TODO(client_release): drop cold path after #2821 is in (0.16.34 or later).
@@ -8715,7 +8774,7 @@ pub fn ReplicaType(
             reply_copy.header.view = self.view;
             reply_copy.header.set_checksum();
 
-            self.message_bus.send_message_to_client(reply.header.client, reply_copy.base());
+            self.send_message_to_client_base(reply.header.client, reply_copy.base());
         }
 
         fn send_header_to_client(self: *Replica, client: u128, header: Header) void {
@@ -8725,7 +8784,103 @@ pub fn ReplicaType(
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
+            self.send_message_to_client_base(client, message);
+        }
+
+        fn send_message_to_client_base(self: *Replica, client: u128, message: *Message) void {
+            assert(message.header.command == .pong_client or
+                message.header.command == .eviction or
+                message.header.command == .reply);
+
+            if (message.header.command == .reply or message.header.command == .pong_client) {
+                // Don't externalize a view for which view change hasn't yet completed. This avoids
+                // a scenario where a partitioned replica leaks a higher view number to the client,
+                // and the client uses this view number for subsequent requests:
+                // * New subsequent requests will be ignored by the cluster, locking out the client.
+                // * Duplicate subsequent requests will cause the primary to crash, since we expect
+                //   the request's view to be smaller than the primary's view (see
+                //   `ignore_request_message_duplicate` and `ignore_request_message_preparing`),
+                if (self.status != .normal) return;
+                if (self.log_view_durable() < self.log_view) {
+                    log.debug("{}: send_message_to_client_base: dropped {s} " ++
+                        "(log_view_durable={} log_view={})", .{
+                        self.log_prefix(),
+                        @tagName(message.header.command),
+                        self.log_view_durable(),
+                        self.log_view,
+                    });
+                    return;
+                }
+            } else {
+                assert(message.header.command == .eviction);
+                assert(self.primary());
+            }
+
+            // Switch on the header type so that we don't log opaque bytes for the per-command data.
+            switch (message.header.into_any()) {
+                inline else => |header| {
+                    log.debug("{}: sending {s} to client {}: {}", .{
+                        self.log_prefix(),
+                        @tagName(message.header.command),
+                        client,
+                        header,
+                    });
+                },
+            }
+
+            switch (message.header.into_any()) {
+                .eviction => |header| {
+                    assert(self.primary());
+                    assert(header.view == self.view);
+                    assert(header.release.value <= self.release.value);
+                },
+                .reply => |header| {
+                    assert(!self.standby());
+                    assert(header.view <= self.view);
+                    assert(header.op <= self.op_checkpoint_next_trigger());
+                    assert(header.release.value <= self.release.value);
+                },
+                .pong_client => |header| {
+                    assert(!self.standby());
+                    assert(header.view == self.view);
+                    assert(header.release.value == self.release.value);
+                },
+
+                .reserved,
+
+                // Deprecated messages are always `invalid()`.
+                .deprecated_12,
+                .deprecated_21,
+                .deprecated_22,
+                .deprecated_23,
+
+                .request,
+                .prepare,
+                .prepare_ok,
+                .start_view_change,
+                .do_view_change,
+                .start_view,
+                .headers,
+                .ping,
+                .pong,
+                .ping_client,
+                .commit,
+                .request_start_view,
+                .request_headers,
+                .request_prepare,
+                .request_reply,
+                .request_blocks,
+                .block,
+                => unreachable,
+            }
+
+            self.trace.count(.{ .replica_messages_out = .{
+                .command = message.header.command,
+            } }, 1);
+
             self.message_bus.send_message_to_client(client, message);
+
+            if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
         }
 
         fn send_header_to_other_replicas(self: *Replica, header: Header) void {
@@ -8805,9 +8960,6 @@ pub fn ReplicaType(
                     });
                 },
             }
-            self.trace.count(.{ .replica_messages_out = .{
-                .command = message.header.command,
-            } }, 1);
 
             if (message.header.invalid()) |reason| {
                 log.warn("{}: send_message_to_replica: invalid ({s})", .{
@@ -8819,11 +8971,6 @@ pub fn ReplicaType(
 
             assert(message.header.cluster == self.cluster);
 
-            // Compare the release in this message to ours only if we authored the message.
-            if (message.header.replica == self.replica) {
-                assert(message.header.release.value <= self.release.value);
-            }
-
             if (message.header.command == .block) {
                 assert(message.header.protocol <= vsr.Version);
             } else {
@@ -8832,23 +8979,31 @@ pub fn ReplicaType(
 
             // TODO According to message.header.command, assert on the destination replica.
             switch (message.header.into_any()) {
-                .reserved => unreachable,
+                .eviction,
+                .reserved,
                 // Deprecated messages are always `invalid()`.
-                .deprecated_12 => unreachable,
-                .deprecated_21 => unreachable,
-                .deprecated_22 => unreachable,
-                .deprecated_23 => unreachable,
+                .deprecated_12,
+                .deprecated_21,
+                .deprecated_22,
+                .deprecated_23,
+                => unreachable,
+
                 .request => {
                     assert(!self.standby());
                     // Do not assert message.header.replica because we forward .request messages.
                     assert(self.status == .normal);
-                    assert(message.header.view <= self.view);
+                    // Backups forwarding .request may have a smaller release than the client.
+                    maybe(message.header.release.value > self.release.value);
                 },
                 .prepare => |header| {
                     maybe(self.standby());
                     assert(self.replica != replica);
                     // Do not assert message.header.replica because we forward .prepare messages.
-                    if (header.replica == self.replica) assert(message.header.view <= self.view);
+                    // Backups replicating .prepare may have a smaller release than the primary.
+                    if (header.replica == self.replica) {
+                        assert(header.release.value <= self.release.value);
+                        assert(message.header.view <= self.view);
+                    }
                     assert(header.operation != .reserved);
                 },
                 .prepare_ok => |header| {
@@ -8862,17 +9017,20 @@ pub fn ReplicaType(
                     // Otherwise, we would be enabling a partitioned primary to commit.
                     assert(replica == self.primary_index(self.view));
                     assert(header.replica == self.replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .reply => |header| {
                     assert(!self.standby());
                     assert(header.view <= self.view);
                     assert(header.op <= self.op_checkpoint_next_trigger());
+                    assert(header.release.value <= self.release.value);
                 },
-                .start_view_change => {
+                .start_view_change => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal or self.status == .view_change);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .do_view_change => |header| {
                     assert(!self.standby());
@@ -8886,6 +9044,7 @@ pub fn ReplicaType(
                     assert(header.commit_min == self.commit_min);
                     assert(header.checkpoint_op == self.op_checkpoint());
                     assert(header.log_view == self.log_view);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
                 .start_view => |header| {
                     assert(!self.standby());
@@ -8897,70 +9056,74 @@ pub fn ReplicaType(
                     assert(header.replica != replica);
                     assert(header.commit_max == self.commit_max);
                     assert(header.checkpoint_op == self.op_checkpoint());
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .headers => {
+                .headers => |header| {
                     assert(!self.standby());
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .ping => {
+                .ping => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == self.release.value);
                 },
-                .pong => {
+                .pong => |header| {
                     maybe(self.standby());
                     assert(self.status == .normal or self.status == .view_change);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == self.release.value);
                 },
                 .ping_client => unreachable,
                 .pong_client => unreachable,
-                .commit => {
+                .commit => |header| {
                     assert(!self.standby());
                     assert(self.status == .normal);
                     assert(self.primary());
                     assert(self.syncing == .idle);
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view == self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_start_view => {
+                .request_start_view => |header| {
                     maybe(self.standby());
-                    assert(message.header.view >= self.view);
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.view >= self.view);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
                     assert(self.primary_index(message.header.view) == replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_headers => {
+                .request_headers => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_prepare => {
+                .request_prepare => |header| {
                     maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .request_reply => {
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
+                .request_reply => |header| {
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
                 },
-                .eviction => {
+                .request_blocks => |header| {
+                    maybe(self.standby());
+                    assert(header.replica == self.replica);
+                    assert(header.replica != replica);
+                    assert(header.release.value == vsr.Release.zero.value);
+                },
+                .block => |header| {
                     assert(!self.standby());
-                    assert(self.status == .normal);
-                    assert(self.primary());
-                    assert(message.header.view == self.view);
-                    assert(message.header.replica == self.replica);
-                },
-                .request_blocks => {
-                    maybe(self.standby());
-                    assert(message.header.replica == self.replica);
-                    assert(message.header.replica != replica);
-                },
-                .block => {
-                    assert(!self.standby());
+                    assert(header.release.value <= self.release.value);
                 },
             }
             // Critical:
@@ -9015,9 +9178,12 @@ pub fn ReplicaType(
                 assert(self.loopback_queue == null);
                 self.loopback_queue = message.ref();
             } else {
-                if (self.event_callback) |hook| {
-                    hook(self, .{ .message_sent = message });
-                }
+                self.trace.count(.{ .replica_messages_out = .{
+                    .command = message.header.command,
+                } }, 1);
+
+                if (self.event_callback) |hook| hook(self, .{ .message_sent = message });
+
                 self.message_bus.send_message_to_replica(replica, message);
             }
         }

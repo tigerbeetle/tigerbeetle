@@ -195,27 +195,24 @@ pub const Header = extern struct {
     /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
     /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
     pub fn peer_type(self: *const Header) vsr.Peer {
-        switch (self.into_any()) {
+        return switch (self.into_any()) {
             .reserved => unreachable,
-            // TODO: replicas used to forward requests. They no longer do, and can always return
-            // request.client starting with the next release.
-            .request => |request| {
-                switch (request.operation) {
-                    // However, we do not forward the first .register request sent by a client:
-                    .register => return .{ .client = request.client },
-                    else => return .unknown,
-                }
-            },
-            .prepare => return .unknown,
-            .block => return .unknown,
-            .reply => return .unknown,
-            .deprecated_12 => return .unknown,
-            .deprecated_21 => return .unknown,
-            .deprecated_22 => return .unknown,
-            .deprecated_23 => return .unknown,
-            // These messages identify the peer as either a replica or a client:
-            .ping_client => |ping| return .{ .client = ping.client },
-            // All other messages identify the peer as a replica:
+
+            .reply,
+            .prepare,
+            .block,
+            => .unknown,
+
+            // The peer may be a replica or a client, since replicas forward request messages.
+            // However, we return the client ID, as it is useful for the MessageBus. Specifically,
+            // a replica that receives a request from a client can immediately cache the connection
+            // in its client map, instead of waiting for an infrequent PingClient message to do so.
+            .request => |request| .{ .client_likely = request.client },
+
+            // The peer is certainly a client:
+            .ping_client => |ping| .{ .client = ping.client },
+
+            // The peer is certainly a replica:
             .ping,
             .pong,
             .pong_client,
@@ -231,8 +228,14 @@ pub const Header = extern struct {
             .headers,
             .eviction,
             .request_blocks,
-            => return .{ .replica = self.replica },
-        }
+            => .{ .replica = self.replica },
+
+            .deprecated_12,
+            .deprecated_21,
+            .deprecated_22,
+            .deprecated_23,
+            => .unknown,
+        };
     }
 
     pub fn format(

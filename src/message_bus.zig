@@ -719,10 +719,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.maybe_close(bus);
             }
 
-            fn set_and_verify_peer(
-                connection: *Connection,
-                bus: *MessageBus,
-            ) bool {
+            fn set_and_verify_peer(connection: *Connection, bus: *MessageBus) bool {
                 comptime assert(process_type == .replica);
 
                 assert(bus.connections_used > 0);
@@ -735,53 +732,77 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 const header_peer: Connection.Peer = switch (connection.recv_buffer.?.peer) {
                     .unknown => return true,
                     .replica => |replica| .{ .replica = replica },
-                    .client => |client| .{ .client = client },
+                    .client, .client_likely => |client| .{ .client = client },
                 };
 
-                if (connection.peer != .unknown) {
-                    return std.meta.eql(connection.peer, header_peer);
-                }
+                if (std.meta.eql(connection.peer, header_peer)) return true;
 
-                connection.peer = header_peer;
-                switch (connection.peer) {
+                defer connection.peer = header_peer;
+
+                switch (header_peer) {
                     .replica => |replica_index| {
-                        if (replica_index >= bus.configuration.len) {
-                            return false;
-                        }
-
-                        // If there is a connection to this replica, terminate and replace it:
+                        if (replica_index >= bus.configuration.len) return false;
+                        // If there is a connection to this replica, terminate and replace it.
+                        // Otherwise, this connection was misclassified to a client due to a
+                        // forwarded request message (see `peer_type` in message_header.zig), map it
+                        // to the correct replica. Allowed transitions:
+                        // * unknown → replica
+                        // * client  → replica
                         if (bus.replicas[replica_index]) |old| {
+                            assert(old != connection);
                             assert(old.peer == .replica);
                             assert(old.peer.replica == replica_index);
                             assert(old.state != .free);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
+
+                        switch (connection.peer) {
+                            .unknown => {},
+                            .client => |existing| assert(bus.process.clients.remove(existing)),
+                            .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
+                            .none => unreachable,
+                        }
+
                         bus.replicas[replica_index] = connection;
                         log.info("{}: set_and_verify_peer: connection from replica={}", .{
                             bus.id,
                             replica_index,
                         });
                     },
-                    .client => {
-                        assert(connection.peer.client != 0);
-                        const result =
-                            bus.process.clients.getOrPutAssumeCapacity(connection.peer.client);
-                        // If there is a connection to this client, terminate and replace it:
+                    .client => |client_id| {
+                        assert(client_id != 0);
+                        const result = bus.process.clients.getOrPutAssumeCapacity(client_id);
+
+                        // If there is a connection to this client, terminate and replace it.
+                        // Allowed transitions:
+                        // * unknown → client
                         if (result.found_existing) {
                             const old = result.value_ptr.*;
+
+                            assert(old != connection);
                             assert(old.peer == .client);
-                            assert(old.peer.client == connection.peer.client);
+                            assert(old.peer.client == client_id);
                             assert(old.state == .connected or old.state == .terminating);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
+                        } else {
+                            switch (connection.peer) {
+                                .unknown => {},
+                                .client, .replica => assert(
+                                    connection.recv_buffer.?.invalid.? == .misdirected,
+                                ),
+                                .none => unreachable,
+                            }
                         }
+
                         result.value_ptr.* = connection;
                         log.info("{}: set_and_verify_peer connection from client={}", .{
                             bus.id,
-                            connection.peer.client,
+                            client_id,
                         });
                     },
                     .none, .unknown => unreachable,
                 }
+
                 return true;
             }
 
