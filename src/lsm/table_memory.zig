@@ -7,6 +7,8 @@ const binary_search = @import("binary_search.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 
+const KWayMergeIteratorType = @import("k_way_merge.zig").KWayMergeIteratorType;
+
 pub fn TableMemoryType(comptime Table: type) type {
     const Key = Table.Key;
     const Value = Table.Value;
@@ -40,27 +42,67 @@ pub fn TableMemoryType(comptime Table: type) type {
             },
         };
 
-        //const KWayMergeContext = struct {
-        //prefers the information.
-        //has its own copy.
-        //slices
-        //origin / preference
-        //};
-
         const SortedRun = struct {
             min: u32,
             max: u32, // exclusive.
+            src: enum { mutable, immutable }, // this defines where the sorted run initially came from and determines the priority
         };
 
+        // One sort() call and one immutable table run.
+        const sorted_runs_max = constants.lsm_compaction_ops + 2;
+
+        const MergeContext = struct {
+            const streams_max = sorted_runs_max; // TODO(TZ): clean up
+
+            const log = false;
+
+            streams: [streams_max][]const Value,
+            streams_count: u32,
+            source: [streams_max]enum { mutable, immutabe },
+
+            fn stream_peek(
+                context: *const MergeContext,
+                stream_index: u32,
+            ) error{ Empty, Drained }!Key {
+                const stream = context.streams[stream_index];
+                if (stream.len == 0) return error.Empty;
+                return key_from_value(&stream[0]);
+            }
+
+            fn stream_pop(context: *MergeContext, stream_index: u32) Value {
+                const stream = context.streams[stream_index];
+                context.streams[stream_index] = stream[1..];
+                return stream[0];
+            }
+
+            fn stream_precedence(context: *const MergeContext, a: u32, b: u32) bool {
+                // Higher streams have higher precedence.
+                if (context.source[a] == context.source[b]) return a < b;
+                if (context.source[a] == .mutable) return true;
+                return false;
+            }
+        };
+
+        const KWayMergeIterator = KWayMergeIteratorType(
+            MergeContext,
+            Key,
+            Value,
+            .{
+                .streams_max = sorted_runs_max,
+                .deduplicate = false,
+            },
+            key_from_value,
+            MergeContext.stream_peek,
+            MergeContext.stream_pop,
+            MergeContext.stream_precedence,
+        );
+
         const SortedRunTracker = struct {
-            const sorted_runs_max = constants.lsm_compaction_ops + 1;
-            values: []const Value, // reference to the values buffer.
             runs: [sorted_runs_max]SortedRun,
             runs_count: u8,
 
-            fn init(values: []const Value) SortedRunTracker {
+            fn init() SortedRunTracker {
                 return .{
-                    .values = values,
                     .runs = undefined,
                     .runs_count = 0,
                 };
@@ -83,8 +125,18 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return tracker.runs_count;
             }
 
-            fn merge_context() void {
-                unreachable;
+            fn merge_context(tracker: *const SortedRunTracker, values: []const Value) MergeContext {
+                var context = MergeContext{
+                    .streams = undefined,
+                    .streams_count = 0,
+                    .source = undefined,
+                };
+
+                for (tracker.runs[0..tracker.count()], 0..) |run, i| {
+                    context.streams[i] = values[run.min..run.max];
+                }
+                context.streams_count = tracker.count();
+                return context;
             }
 
             fn invariant(tracker: *const SortedRunTracker, table_count: u32) void {
@@ -96,7 +148,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                     assert(a.max == b.min); // no holes.
                 }
                 assert(tracker.runs[runs_count - 1].max == table_count);
-                assert(table_count <= tracker.values.len);
             }
         };
 
@@ -125,7 +176,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .immutable => .{ .immutable = .{} },
                 },
                 .name = name,
-                .run_tracker = undefined,
+                .run_tracker = SortedRunTracker.init(),
                 .values = undefined,
             };
 
@@ -133,8 +184,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
-
-            table.run_tracker = SortedRunTracker.init(table.values);
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
@@ -200,23 +249,46 @@ pub fn TableMemoryType(comptime Table: type) type {
             );
         }
 
-        //pub fn merge(table_immutable: *TableMemory, table_mutable: *const TableMemory, snapshot_min: u64) void {
-        // assert
+        pub fn merge(table_immutable: *TableMemory, table_mutable: *TableMemory, snapshot_min: u64) void {
+            table_mutable.run_tracker.invariant(table_mutable.count());
 
-        // TODO: absorb case.ah that means we modify the table_memory.
-        // maybe we call absorb from the outside then.
-        // if we call it from the outside we do not modify the table_mutable state.
-        // or we handle everything here inside.
-        //if (!table_immutable.mutability.immutable.flushed) unreachable;
+            if (table_mutable.run_tracker.count() == 1) {
+                std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
+                table_immutable.value_context.count = table_mutable.count();
+                table_immutable.mutability = .{ .immutable = .{
+                    .flushed = table_immutable.value_context.count == 0,
+                    .snapshot_min = snapshot_min,
+                } };
+                table_immutable.value_context.sorted = true;
+                table_mutable.reset();
+                return;
+            }
 
-        // Now we merge from the mutable table
-        // var merge_context table_mutable.run_tracker.context();
-        // var iter = KWayIterator(&merge_context).init();
-        // merge
-        // offload deduplication to extra pass to have less changes.
-        // done.
+            // TODO(TZ) : what happens if it is empty here?
+            // and what should we do? Why does it crash then?
+            // here the fuzzer model does not fit.
+            //if (table_mutable.count() == 0)
 
-        //}
+            var merge_context = table_mutable.run_tracker.merge_context(table_mutable.values_used());
+            var merge_iterator = KWayMergeIterator.init(&merge_context, @intCast(merge_context.streams_count), .ascending);
+
+            var target_index: u32 = 0;
+            while (merge_iterator.pop() catch unreachable) |value| : (target_index += 1) {
+                table_immutable.values[target_index] = value;
+            }
+            // we could do dedpulication in place should we ?
+            table_immutable.value_context.count = deduplicate(table_immutable.values[0..target_index]);
+
+            // set data correctly e.g. immutable and mutable.reset();
+            // If we have no values, then we can consider ourselves flushed right away.
+            table_immutable.mutability = .{ .immutable = .{
+                .flushed = table_immutable.value_context.count == 0,
+                .snapshot_min = snapshot_min,
+            } };
+            table_immutable.value_context.sorted = true;
+
+            table_mutable.reset();
+        }
 
         pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
             assert(table.mutability == .mutable);
@@ -250,6 +322,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             } };
         }
 
+        // TDOO(TZ) check here everything.
         pub fn make_mutable(table: *TableMemory) void {
             assert(table.mutability == .immutable);
             assert(table.mutability.immutable.flushed == true);
@@ -263,6 +336,39 @@ pub fn TableMemoryType(comptime Table: type) type {
                 .mutability = .{ .mutable = .{} },
                 .name = table.name,
             };
+        }
+        pub fn absorb_new(
+            table_immutable: *TableMemory,
+            table_mutable: *TableMemory,
+            snapshot_min: u64,
+        ) void {
+            assert(table_immutable.mutability == .immutable);
+            maybe(table_immutable.mutability.immutable.absorbed);
+            assert(table_immutable.value_context.sorted);
+            assert(table_mutable.mutability == .mutable);
+            maybe(table_mutable.value_context.sorted);
+
+            const values_count_limit = table_immutable.values.len;
+            assert(table_immutable.count() <= values_count_limit);
+            assert(table_mutable.count() <= values_count_limit);
+            assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
+
+            // copy now from immutable to mutable and
+            stdx.copy_disjoint(
+                .inexact,
+                Value,
+                table_mutable.values[table_mutable.count()..],
+                table_immutable.values[0..table_immutable.count()],
+            );
+            const tables_combined_count = table_immutable.count() + table_mutable.count();
+            // Here we need to src. immutable to prioritze this run in the merge.
+            table_mutable.run_tracker.add(.{
+                .min = table_mutable.count(),
+                .max = tables_combined_count,
+                .src = .immutable,
+            });
+            table_mutable.value_context.count = tables_combined_count;
+            table_immutable.merge(table_mutable, snapshot_min);
         }
 
         /// Merge and sort the immutable/mutable tables (favoring values in the latter) into the
@@ -323,7 +429,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
 
             table.run_tracker.reset();
-            table.run_tracker.add(.{ .min = 0, .max = table.count() });
+            table.run_tracker.add(.{ .min = 0, .max = table.count(), .src = .mutable });
         }
 
         pub fn sort(table: *TableMemory) void {
@@ -361,7 +467,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const target_count = sort_suffix_from_offset(table.values_used(), offset);
             table.value_context.count = target_count;
             table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
-            return .{ .min = offset, .max = target_count };
+            return .{ .min = offset, .max = target_count, .src = .mutable };
         }
 
         fn deduplicate(values: []Value) u32 {

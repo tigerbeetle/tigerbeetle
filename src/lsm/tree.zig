@@ -535,16 +535,19 @@ pub fn TreeType(comptime TreeTable: type, comptime Storage: type) type {
                 // In addition, the immutable table is conceptually an output table of this
                 // compaction bar, and now its snapshot_min matches the snapshot_min of the
                 // Compactions' output tables.
-                tree.table_mutable.make_immutable(snapshot_min);
-                tree.table_immutable.make_mutable();
-                std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
+                //tree.table_mutable.make_immutable(snapshot_min);
+                //tree.table_immutable.make_mutable();
+                //std.mem.swap(TableMemory, &tree.table_mutable, &tree.table_immutable);
+
+                tree.table_immutable.merge(&tree.table_mutable, snapshot_min);
             } else {
                 assert(tree.table_immutable.value_context.count +
                     tree.table_mutable.value_context.count <= tree.table_immutable.values.len);
 
                 // The immutable table wasn't flushed because there is enough room left over for the
                 // mutable table's values, allowing us to skip some compaction work.
-                tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
+                //tree.table_immutable.absorb(&tree.table_mutable, snapshot_min);
+                tree.table_immutable.absorb_new(&tree.table_mutable, snapshot_min);
 
                 assert(tree.table_mutable.value_context.count == 0);
             }
