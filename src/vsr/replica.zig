@@ -8742,6 +8742,8 @@ pub fn ReplicaType(
         fn send_reply_message_to_client(self: *Replica, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
+            maybe(reply.header.view > self.log_view_durable());
+
             assert(reply.header.client != 0);
 
             // If the request committed in a different view than the one it was originally prepared
@@ -8749,11 +8751,12 @@ pub fn ReplicaType(
             // Otherwise, the client might send a next request to the old primary, which would
             // observe a broken hash chain.
             //
-            // To do this, we always set reply's view to the current one, and use the `context`
-            // field for hash chaining.
+            // To do this, if our durable log view is fresher than the reply's view, we externalize
+            // that to the client, and use the `context` field for hash chaining.
 
-            if (reply.header.view == self.view) {
-                // Hot path: no need to clone the message if the view is the same.
+            if (reply.header.view >= self.log_view_durable()) {
+                // Hot path: We don't update header view if it is fresher than the view we can
+                // safely externalize to the client.
                 self.send_message_to_client_base(reply.header.client, reply.base());
                 return;
             }
