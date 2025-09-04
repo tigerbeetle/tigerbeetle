@@ -40,7 +40,7 @@ pub fn KWayMergeIteratorType(
     comptime Key: type,
     comptime Value: type,
     comptime options: Options,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     /// Peek the next key in the stream identified by stream_index.
     /// For example, peek(stream_index=2) returns user_streams[2][0].
     /// Returns Drained if the stream was consumed and

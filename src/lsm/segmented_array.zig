@@ -34,7 +34,7 @@ pub fn SortedSegmentedArrayType(
     comptime NodePool: type,
     comptime element_count_max: u32,
     comptime Key: type,
-    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const T) callconv(.@"inline") Key,
     comptime options: Options,
 ) type {
     return SegmentedArrayBaseType(T, NodePool, element_count_max, Key, key_from_value, options);
@@ -52,7 +52,7 @@ fn SegmentedArrayBaseType(
     comptime element_count_max: u32,
     // Set when the SegmentedArray is ordered:
     comptime Key: ?type,
-    comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.Inline) K) else void,
+    comptime key_from_value: if (Key) |K| (fn (*const T) callconv(.@"inline") K) else void,
     comptime options: Options,
 ) type {
     comptime assert(Key == null or @typeInfo(Key.?) == .int or @typeInfo(Key.?) == .comptime_int);
@@ -1048,7 +1048,7 @@ fn FuzzContextType(
     comptime node_size: u32,
     comptime element_count_max: u32,
     comptime Key: type,
-    comptime key_from_value: fn (*const T) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const T) callconv(.@"inline") Key,
     comptime element_order: enum { sorted, unsorted },
     comptime options: Options,
 ) type {

@@ -20,12 +20,12 @@ pub fn ScanRangeType(
     comptime value_next: fn (
         context: EvaluatorContext,
         value: *const Tree.Table.Value,
-    ) callconv(.Inline) EvaluateNext,
+    ) callconv(.@"inline") EvaluateNext,
     /// Extracts the ObjectTree's timestamp from the table value.
     comptime timestamp_from_value: fn (
         context: EvaluatorContext,
         value: *const Tree.Table.Value,
-    ) callconv(.Inline) u64,
+    ) callconv(.@"inline") u64,
 ) type {
     return struct {
         const ScanRange = @This();
