@@ -13,10 +13,6 @@
 ///!
 ///! Additionally, each function is unit tested against a real JVM to validate if they are
 ///! calling the correct vtable entry with the expected arguments.
-const std = @import("std");
-
-/// JNI calling convention.
-pub const jni_call: std.builtin.CallingConvention = .c;
 
 // https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getversion.
 pub const jni_version_1_1: JInt = 0x00010001;
@@ -3212,7 +3208,7 @@ fn JNIInterfaceType(comptime T: type) type {
             var fn_info = @typeInfo(Fn);
             switch (fn_info) {
                 .@"fn" => {
-                    fn_info.@"fn".calling_convention = JNICALL;
+                    fn_info.@"fn".calling_convention = .c;
                     return @Type(fn_info);
                 },
                 else => @compileError("Expected " ++ @tagName(function) ++ " to be a function"),

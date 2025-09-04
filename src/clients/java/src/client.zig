@@ -186,11 +186,11 @@ comptime {
     const prefix = "Java_com_tigerbeetle_NativeClient_";
 
     const Exports = struct {
-        fn on_load(vm: *jni.JavaVM) callconv(jni.JNICALL) jni.JInt {
+        fn on_load(vm: *jni.JavaVM) callconv(.c) jni.JInt {
             return NativeClient.on_load(vm);
         }
 
-        fn on_unload(vm: *jni.JavaVM) callconv(jni.JNICALL) void {
+        fn on_unload(vm: *jni.JavaVM) callconv(.c) void {
             NativeClient.on_unload(vm);
         }
 
@@ -200,7 +200,7 @@ comptime {
             tb_client_buffer: jni.JObject,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-        ) callconv(jni.JNICALL) void {
+        ) callconv(.c) void {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
 
@@ -222,7 +222,7 @@ comptime {
             tb_client_buffer: jni.JObject,
             cluster_id: jni.JByteArray,
             addresses: jni.JString,
-        ) callconv(jni.JNICALL) void {
+        ) callconv(.c) void {
             _ = class;
             assert(env.get_array_length(cluster_id) == 16);
 
@@ -242,7 +242,7 @@ comptime {
             env: *jni.JNIEnv,
             class: jni.JClass,
             tb_client_buffer: jni.JObject,
-        ) callconv(jni.JNICALL) void {
+        ) callconv(.c) void {
             _ = class;
             NativeClient.client_deinit(
                 ReflectionHelper.get_client_from_buffer(env, tb_client_buffer),
@@ -254,7 +254,7 @@ comptime {
             class: jni.JClass,
             tb_client_buffer: jni.JObject,
             request_obj: jni.JObject,
-        ) callconv(jni.JNICALL) void {
+        ) callconv(.c) void {
             _ = class;
             NativeClient.submit(
                 env,
