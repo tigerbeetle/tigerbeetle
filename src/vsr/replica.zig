@@ -1832,7 +1832,7 @@ pub fn ReplicaType(
                 .command = .pong_client,
                 .cluster = self.cluster,
                 .replica = self.replica,
-                .view = self.view,
+                .view = self.log_view_durable(),
                 .release = self.release,
                 .ping_timestamp_monotonic = message.header.ping_timestamp_monotonic,
             }));
@@ -5777,6 +5777,8 @@ pub fn ReplicaType(
         fn create_message_from_header(self: *Replica, header: Header) *Message {
             assert(
                 header.view == self.view or
+                    header.command == .pong_client or
+                    header.command == .eviction or
                     header.command == .request_start_view or
                     header.command == .request_headers or
                     header.command == .request_prepare or
@@ -6063,9 +6065,8 @@ pub fn ReplicaType(
                 return true;
             }
 
-            // We only externalize views for which view change is complete (see
-            // `send_message_to_client_base`), but a buggy client may still send a view higher
-            // than one the cluster has seen. Err on the side of safety and drop such requests.
+            // A buggy client may send a view higher than one the cluster has seen. Err on the side
+            // of safety and drop such requests.
             if (message.header.view > self.view) {
                 log.debug("{}: on_request: ignoring (view={} header.view={})", .{
                     self.log_prefix(),
@@ -8715,7 +8716,7 @@ pub fn ReplicaType(
                 .cluster = self.cluster,
                 .release = self.release,
                 .replica = self.replica,
-                .view = self.view,
+                .view = self.log_view_durable(),
                 .client = client,
                 .reason = reason,
             }));
@@ -8724,6 +8725,8 @@ pub fn ReplicaType(
         fn send_reply_message_to_client(self: *Replica, reply: *Message.Reply) void {
             assert(reply.header.command == .reply);
             assert(reply.header.view <= self.view);
+            maybe(reply.header.view > self.log_view_durable());
+
             assert(reply.header.client != 0);
 
             // If the request committed in a different view than the one it was originally prepared
@@ -8731,11 +8734,12 @@ pub fn ReplicaType(
             // Otherwise, the client might send a next request to the old primary, which would
             // observe a broken hash chain.
             //
-            // To do this, we always set reply's view to the current one, and use the `context`
-            // field for hash chaining.
+            // To do this, if our durable log view is fresher than the reply's view, we externalize
+            // that to the client, and use the `context` field for hash chaining.
 
-            if (reply.header.view == self.view) {
-                // Hot path: no need to clone the message if the view is the same.
+            if (reply.header.view >= self.log_view_durable()) {
+                // Hot path: We don't update header view if it is fresher than the view we can
+                // safely externalize to the client.
                 self.send_message_to_client_base(reply.header.client, reply.base());
                 return;
             }
@@ -8754,7 +8758,7 @@ pub fn ReplicaType(
                 reply_copy.buffer,
                 reply.buffer[0..reply.header.size],
             );
-            reply_copy.header.view = self.view;
+            reply_copy.header.view = self.log_view_durable();
             reply_copy.header.set_checksum();
 
             self.send_message_to_client_base(reply.header.client, reply_copy.base());
@@ -8762,7 +8766,8 @@ pub fn ReplicaType(
 
         fn send_header_to_client(self: *Replica, client: u128, header: Header) void {
             assert(header.cluster == self.cluster);
-            assert(header.view == self.view);
+            assert(header.view <= self.log_view_durable());
+            assert(header.command == .pong_client or header.command == .eviction);
 
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
@@ -8774,30 +8779,6 @@ pub fn ReplicaType(
             assert(message.header.command == .pong_client or
                 message.header.command == .eviction or
                 message.header.command == .reply);
-
-            if (message.header.command == .reply or message.header.command == .pong_client) {
-                // Don't externalize a view for which view change hasn't yet completed. This avoids
-                // a scenario where a partitioned replica leaks a higher view number to the client,
-                // and the client uses this view number for subsequent requests:
-                // * New subsequent requests will be ignored by the cluster, locking out the client.
-                // * Duplicate subsequent requests will cause the primary to crash, since we expect
-                //   the request's view to be smaller than the primary's view (see
-                //   `ignore_request_message_duplicate` and `ignore_request_message_preparing`),
-                if (self.status != .normal) return;
-                if (self.log_view_durable() < self.log_view) {
-                    log.debug("{}: send_message_to_client_base: dropped {s} " ++
-                        "(log_view_durable={} log_view={})", .{
-                        self.log_prefix(),
-                        @tagName(message.header.command),
-                        self.log_view_durable(),
-                        self.log_view,
-                    });
-                    return;
-                }
-            } else {
-                assert(message.header.command == .eviction);
-                assert(self.primary());
-            }
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
@@ -8811,22 +8792,33 @@ pub fn ReplicaType(
                 },
             }
 
+            // We set the view for outgoing messages such that we don't externalize one for which
+            // view change hasn't yet completed (see call sites). This avoids the following
+            // scenarios which could occur if a partitioned replica leaks a higher view to the
+            // client, and the client uses this view for subsequent requests:
+            // * Subsequent new requests are ignored by the cluster, locking out the client.
+            // * Subequent duplicate requests cause the primary to crash, since we expect
+            //   the request's view to be smaller than the primary's view (see
+            //   `ignore_request_message_duplicate` and `ignore_request_message_preparing`),
             switch (message.header.into_any()) {
                 .eviction => |header| {
                     assert(self.primary());
-                    assert(header.view == self.view);
                     assert(header.release.value <= self.release.value);
+                    assert(header.view <= self.log_view_durable());
                 },
                 .reply => |header| {
                     assert(!self.standby());
-                    assert(header.view <= self.view);
                     assert(header.op <= self.op_checkpoint_next_trigger());
                     assert(header.release.value <= self.release.value);
+                    // For the case where a backup is replying to a client directly, the prepare's
+                    // view could exceed the backup's durable log view. This is still safe, since
+                    // the prepare's view is <= the primary's durable log view.
+                    maybe(header.view > self.log_view_durable());
                 },
                 .pong_client => |header| {
                     assert(!self.standby());
-                    assert(header.view == self.view);
                     assert(header.release.value == self.release.value);
+                    assert(header.view <= self.log_view_durable());
                 },
 
                 .reserved,

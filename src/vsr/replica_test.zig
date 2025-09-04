@@ -1937,6 +1937,50 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
     try expectEqual(b1.commit(), checkpoint_3_trigger + 1);
 }
 
+test "Cluster: partitioned replica with higher view cannot lock out client" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{ .index = 0, .count = 1 });
+
+    try c.request(1, 1);
+
+    try expectEqual(t.replica(.R_).commit(), 1);
+    try expectEqual(t.replica(.R_).view(), 1);
+    try expectEqual(t.replica(.R_).log_view(), 1);
+
+    const a0 = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    // Partition primary, allow one of the backups to increment its view to 2 but the other to
+    // maintain its view at 1. Block exchange of DVC messages to avoid view change.
+    a0.drop_all(.R_, .bidirectional);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    b1.drop_all(.R_, .incoming);
+
+    t.run();
+    try expectEqual(b1.view(), 1);
+    try expectEqual(b1.log_view(), 1);
+    try expectEqual(b2.view(), 2);
+    try expectEqual(b2.log_view(), 1);
+
+    // Reconnect primary, partition the backup with view=2 so it doesn't influence a view change.
+    a0.pass_all(.R_, .bidirectional);
+    b2.drop_all(.R_, .bidirectional);
+
+    // Verify that the client is able to get its requests processed by the cluster even though
+    // there is a partitioned replica with a higher view number (view=2) than the cluster (view=1).
+    try c.request(2, 2);
+
+    try expectEqual(b2.view(), 2);
+    try expectEqual(b1.view(), 1);
+    try expectEqual(a0.view(), 1);
+
+    try expectEqual(b1.commit(), 2);
+    try expectEqual(a0.commit(), 2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
