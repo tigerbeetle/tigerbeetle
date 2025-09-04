@@ -19,19 +19,10 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub const ValueContext = struct {
             count: u32 = 0,
-            /// When true, `values` is strictly ascending-ordered (no duplicates).
-            sorted: bool = true,
         };
 
         const Mutability = union(enum) {
-            mutable: struct {
-                /// The offset (within `values`) of the unsorted suffix.
-                /// - At the end of each beat, the mutable table's suffix is sorted and
-                ///   deduplicated, and the suffix offset advances.
-                /// - (At the end of the bar, the mutable table consists of a sequence of sorted
-                ///   arrays, which is then itself finally sorted and deduplicated.)
-                suffix_offset: u32 = 0,
-            },
+            mutable: struct {},
             immutable: struct {
                 /// An empty table has nothing to flush.
                 flushed: bool = true,
@@ -127,6 +118,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             fn merge_context(tracker: *const SortedRunTracker, values: []const Value) MergeContext {
+                // TODO: What are the invariants for this?
                 var context = MergeContext{
                     .streams = undefined,
                     .streams_count = 0,
@@ -140,9 +132,20 @@ pub fn TableMemoryType(comptime Table: type) type {
                 context.streams_count = tracker.count();
                 return context;
             }
+            fn last_ref(tracker: *SortedRunTracker) ?*SortedRun {
+                if (tracker.count() == 0) return null;
+                return &tracker.runs[tracker.count() - 1];
+            }
+
+            fn last(tracker: *const SortedRunTracker) ?*const SortedRun {
+                if (tracker.count() == 0) return null;
+                return &tracker.runs[tracker.count() - 1];
+            }
 
             fn invariant(tracker: *const SortedRunTracker, table_count: u32) void {
                 if (tracker.count() == 0) return;
+
+                assert(tracker.runs[0].min == 0);
 
                 const runs_count = tracker.count();
                 for (tracker.runs[0 .. runs_count - 1], tracker.runs[1..runs_count]) |a, b| {
@@ -150,6 +153,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                     assert(a.max == b.min); // no holes.
                 }
                 assert(tracker.runs[runs_count - 1].max == table_count);
+                var immutable_runs: u1 = 0;
+                for (tracker.runs[0..runs_count]) |run| {
+                    immutable_runs += if (run.src == .immutable) 1 else 0;
+                }
+                assert(immutable_runs == 0 or immutable_runs == 1);
             }
         };
         const DedupSink = struct {
@@ -264,23 +272,25 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn put(table: *TableMemory, value: *const Value) void {
             assert(table.mutability == .mutable);
-            assert(table.value_context.count < table.values.len);
-            if (table.value_context.sorted) {
-                table.value_context.sorted = table.value_context.count == 0 or
-                    key_from_value(&table.values[table.value_context.count - 1]) <
-                        key_from_value(value);
-            } else {
-                assert(table.value_context.count > 0);
+            assert(table.count() < table.values.len);
+
+            if (table.run_tracker.last_ref()) |last_run| {
+                if (last_run.max == table.count()) {
+                    const expand: bool = table.count() == 0 or
+                        key_from_value(&table.values[table.count() - 1]) <
+                            key_from_value(value);
+                    last_run.max += @intFromBool(expand);
+                }
             }
 
-            table.values[table.value_context.count] = value.*;
+            table.values[table.count()] = value.*;
             table.value_context.count += 1;
         }
 
         /// This must be called on sorted tables.
         pub fn get(table: *TableMemory, key: Key) ?*const Value {
-            assert(table.value_context.count <= table.values.len);
-            assert(table.value_context.sorted);
+            assert(table.count() <= table.values.len);
+            assert(table.sorted());
 
             if (!table.key_range_contains(key)) {
                 return null;
@@ -304,10 +314,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
                 table_immutable.value_context.count = table_mutable.count();
                 table_immutable.mutability = .{ .immutable = .{
-                    .flushed = table_immutable.value_context.count == 0,
+                    .flushed = table_immutable.count() == 0,
                     .snapshot_min = snapshot_min,
                 } };
-                table_immutable.value_context.sorted = true;
+                table_immutable.run_tracker.reset();
+                table_immutable.run_tracker.add(.{ .min = 0, .max = table_immutable.count(), .src = .immutable });
                 table_mutable.reset();
                 return;
             }
@@ -316,6 +327,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             // and what should we do? Why does it crash then?
             // here the fuzzer model does not fit.
             //if (table_mutable.count() == 0)
+            // this is uper strange maybe hit by absorb case?
 
             var merge_context = table_mutable.run_tracker.merge_context(table_mutable.values_used());
             var merge_iterator = KWayMergeIterator.init(&merge_context, @intCast(merge_context.streams_count), .ascending);
@@ -333,61 +345,18 @@ pub fn TableMemoryType(comptime Table: type) type {
             // set data correctly e.g. immutable and mutable.reset();
             // If we have no values, then we can consider ourselves flushed right away.
             table_immutable.mutability = .{ .immutable = .{
-                .flushed = table_immutable.value_context.count == 0,
+                .flushed = table_immutable.count() == 0,
                 .snapshot_min = snapshot_min,
             } };
-            table_immutable.value_context.sorted = true;
+
+            table_immutable.run_tracker.reset();
+            table_immutable.run_tracker.add(.{ .min = 0, .max = table_immutable.count(), .src = .immutable });
+
+            assert(table_immutable.sorted());
 
             table_mutable.reset();
         }
 
-        pub fn make_immutable(table: *TableMemory, snapshot_min: u64) void {
-            assert(table.mutability == .mutable);
-            assert(table.value_context.count <= table.values.len);
-            defer assert(table.value_context.sorted);
-
-            // TODO(TZ): this is before the sort, maybe remove?
-            // here it might be that we did not track it in the fuzzer.
-            // that means we need to do something now.
-            table.run_tracker.invariant(table.count());
-            table.sort();
-
-            // TODO(TZ): do the K-way Merge here. instead of the sort.
-            // What is the correct flow here.
-            // We merge from the mutable -> immutable
-            // for absorb optimization we only copy over.
-            // we reabsorb the immutable state in the mutable
-            // and perform the same merge.
-            // mutable_table.absorb(immutable_table) // we absorb the mutable table in order to merge it.
-            // mutable_table.merge_into(immutable_table)
-            // immutable_table.merge(mutable_table)
-            // immutable_table.merge(mutable_table) // eitehr the immutable table has entries left or not.
-
-            // TODO(TZ) think about this reset;
-            table.run_tracker.reset();
-
-            // If we have no values, then we can consider ourselves flushed right away.
-            table.mutability = .{ .immutable = .{
-                .flushed = table.value_context.count == 0,
-                .snapshot_min = snapshot_min,
-            } };
-        }
-
-        // TDOO(TZ) check here everything.
-        pub fn make_mutable(table: *TableMemory) void {
-            assert(table.mutability == .immutable);
-            assert(table.mutability.immutable.flushed == true);
-            assert(table.value_context.count <= table.values.len);
-            assert(table.value_context.sorted);
-
-            table.* = .{
-                .values = table.values,
-                .run_tracker = table.run_tracker,
-                .value_context = .{},
-                .mutability = .{ .mutable = .{} },
-                .name = table.name,
-            };
-        }
         pub fn absorb_new(
             table_immutable: *TableMemory,
             table_mutable: *TableMemory,
@@ -395,14 +364,18 @@ pub fn TableMemoryType(comptime Table: type) type {
         ) void {
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
-            assert(table_immutable.value_context.sorted);
+            assert(table_immutable.sorted());
             assert(table_mutable.mutability == .mutable);
-            maybe(table_mutable.value_context.sorted);
+            maybe(table_mutable.sorted());
 
             const values_count_limit = table_immutable.values.len;
             assert(table_immutable.count() <= values_count_limit);
             assert(table_mutable.count() <= values_count_limit);
             assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
+
+            if (table_mutable.count() == 0) {
+                return;
+            }
 
             // copy now from immutable to mutable and
             stdx.copy_disjoint(
@@ -422,102 +395,57 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_immutable.merge(table_mutable, snapshot_min);
         }
 
-        /// Merge and sort the immutable/mutable tables (favoring values in the latter) into the
-        /// immutable table. Then reset the mutable table.
-        pub fn absorb(
-            table_immutable: *TableMemory,
-            table_mutable: *TableMemory,
-            snapshot_min: u64,
-        ) void {
-            assert(table_immutable.mutability == .immutable);
-            maybe(table_immutable.mutability.immutable.absorbed);
-            assert(table_immutable.value_context.sorted);
-            assert(table_mutable.mutability == .mutable);
-            maybe(table_mutable.value_context.sorted);
-
-            if (table_mutable.count() == 0) {
-                // Mutable table is empty so we can exit early.
-                table_mutable.reset();
-                table_immutable.mutability = .{ .immutable = .{
-                    .flushed = table_immutable.value_context.count == 0,
-                    .absorbed = true,
-                    .snapshot_min = snapshot_min,
-                } };
-                return;
-            }
-
-            const values_count_limit = table_immutable.values.len;
-            assert(values_count_limit == values_count_limit);
-            assert(table_immutable.count() <= values_count_limit);
-            assert(table_mutable.count() <= values_count_limit);
-            assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
-
-            stdx.copy_disjoint(
-                .inexact,
-                Value,
-                table_immutable.values[table_immutable.count()..],
-                table_mutable.values[0..table_mutable.count()],
-            );
-
-            const tables_combined_count = table_immutable.count() + table_mutable.count();
-            table_immutable.value_context.count =
-                sort_suffix_from_offset(table_immutable.values[0..tables_combined_count], 0);
-            assert(table_immutable.count() <= tables_combined_count);
-
-            table_mutable.reset();
-            table_immutable.mutability = .{ .immutable = .{
-                .flushed = table_immutable.value_context.count == 0,
-                .absorbed = true,
-                .snapshot_min = snapshot_min,
-            } };
-        }
-
-        // Sorting is a property that we track on `put`.
-        // That means some of the other fields are not up-to-date.
-        fn assume_sorted(table: *TableMemory) void {
-            // It means it might be sorted by our tracking of the property
-            // Set suffix sort here to not create another run that overlaps with this one.
-            table.mutability = .{ .mutable = .{ .suffix_offset = table.count() } };
-
-            table.run_tracker.reset();
-            table.run_tracker.add(.{ .min = 0, .max = table.count(), .src = .mutable });
-        }
-
         pub fn sort(table: *TableMemory) void {
             assert(table.mutability == .mutable);
             defer table.run_tracker.invariant(table.count());
 
-            if (!table.value_context.sorted) {
+            if (!table.sorted()) {
                 _ = table.mutable_sort_suffix_from_offset(0);
-                table.value_context.sorted = true;
+                table.run_tracker.reset();
+                table.run_tracker.add(.{ .min = 0, .max = table.count(), .src = .mutable });
             }
+        }
 
-            table.assume_sorted();
+        fn sorted(table: *const TableMemory) bool {
+            // Empty table is considered sorted.
+            if (table.count() == 0) return true;
+
+            // Only one sorted run can exist if it is sorted.
+            if (table.run_tracker.count() != 1) return false;
+
+            const last_run = table.run_tracker.last().?;
+            assert(last_run.min == 0);
+            assert(last_run.max <= table.count());
+
+            return table.count() == last_run.max;
         }
 
         pub fn sort_suffix(table: *TableMemory) void {
             assert(table.mutability == .mutable);
-            assert(table.mutability.mutable.suffix_offset <= table.count());
             defer table.run_tracker.invariant(table.count());
 
-            if (table.value_context.sorted) {
-                table.assume_sorted();
-                return;
-            }
+            if (table.sorted()) return;
 
-            const run = table.mutable_sort_suffix_from_offset(table.mutability.mutable.suffix_offset);
+            const sort_suffix_offset = if (table.run_tracker.last()) |last_run| last_run.max else 0;
+            assert(sort_suffix_offset <= table.count());
+
+            if (sort_suffix_offset == table.count()) return;
+
+            const run = table.mutable_sort_suffix_from_offset(sort_suffix_offset);
+            assert(run.min < run.max);
+            assert(run.max == table.count()); // the invariant checks this too.
+            assert(sort_suffix_offset <= run.max);
             table.run_tracker.add(run);
-            assert(table.mutability.mutable.suffix_offset == table.count());
         }
 
         fn mutable_sort_suffix_from_offset(table: *TableMemory, offset: u32) SortedRun {
             assert(table.mutability == .mutable);
-            assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
+            //assert(offset == table.mutability.mutable.suffix_offset or offset == 0);
+            assert(offset == 0 or offset == table.run_tracker.last().?.max);
             assert(offset <= table.count());
 
             const target_count = sort_suffix_from_offset(table.values_used(), offset);
             table.value_context.count = target_count;
-            table.mutability = .{ .mutable = .{ .suffix_offset = target_count } };
             return .{ .min = offset, .max = target_count, .src = .mutable };
         }
 
@@ -598,7 +526,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn key_range_contains(table: *const TableMemory, key: Key) bool {
-            assert(table.value_context.sorted);
+            assert(table.sorted());
 
             if (table.count() == 0) return false;
             return table.key_min() <= key and key <= table.key_max();
@@ -608,7 +536,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const values = table.values_used();
 
             assert(values.len > 0);
-            assert(table.value_context.sorted);
+            assert(table.sorted());
 
             return key_from_value(&values[0]);
         }
@@ -617,7 +545,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             const values = table.values_used();
 
             assert(values.len > 0);
-            assert(table.value_context.sorted);
+            assert(table.sorted());
 
             return key_from_value(&values[values.len - 1]);
         }
