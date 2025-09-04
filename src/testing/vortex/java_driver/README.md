@@ -6,7 +6,7 @@ Run the following to test with this driver:
 
 ```
 ./zig/zig build -Drelease install
-./zig/zig build -Drelease vortex
+./zig/zig build -Drelease vortex:build
 ./zig/zig build clients:java -Drelease
 (cd src/clients/java && mvn package)
 (cd src/testing/vortex/java_driver && mvn package)

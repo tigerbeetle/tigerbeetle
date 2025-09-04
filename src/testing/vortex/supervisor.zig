@@ -20,7 +20,7 @@
 //! be sure all child processes are killed, and to get network sandboxing.
 //!
 //!     $ zig build
-//!     $ zig build vortex
+//!     $ zig build vortex:build
 //!     $ unshare --net --fork --map-root-user --pid bash -c 'ip link set up dev lo ; \
 //!         ./zig-out/bin/vortex supervisor --tigerbeetle-executable=./zig-out/bin/tigerbeetle'
 //!
