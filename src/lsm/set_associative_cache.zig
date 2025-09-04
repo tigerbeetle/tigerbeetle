@@ -33,8 +33,8 @@ const Metrics = struct {
 pub fn SetAssociativeCacheType(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime hash: fn (Key) callconv(.Inline) u64,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
+    comptime hash: fn (Key) callconv(.@"inline") u64,
     comptime layout: Layout,
 ) type {
     assert(math.isPowerOfTwo(@sizeOf(Key)));

@@ -33,7 +33,7 @@ pub const Config = struct {
 pub fn binary_search_values_upsert_index(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -174,7 +174,7 @@ const BinarySearchResult = struct {
 pub inline fn binary_search_values(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -232,7 +232,7 @@ pub const BinarySearchRangeUpsertIndexes = struct {
 pub inline fn binary_search_values_range_upsert_indexes(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key_min: Key,
     key_max: Key,
@@ -302,7 +302,7 @@ pub const BinarySearchRange = struct {
 pub inline fn binary_search_values_range(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key_min: Key,
     key_max: Key,

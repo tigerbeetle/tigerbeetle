@@ -47,13 +47,13 @@ pub fn TableType(
     comptime TableValue: type,
     /// Returns the key for a value. For example, given `object` returns `object.id`.
     /// Since most objects contain an id, this avoids duplicating the key when storing the value.
-    comptime table_key_from_value: fn (*const TableValue) callconv(.Inline) TableKey,
+    comptime table_key_from_value: fn (*const TableValue) callconv(.@"inline") TableKey,
     /// Must compare greater than all other keys.
     comptime table_sentinel_key: TableKey,
     /// Returns whether a value is a tombstone value.
-    comptime table_tombstone: fn (*const TableValue) callconv(.Inline) bool,
+    comptime table_tombstone: fn (*const TableValue) callconv(.@"inline") bool,
     /// Returns a tombstone value representation for a key.
-    comptime table_tombstone_from_key: fn (TableKey) callconv(.Inline) TableValue,
+    comptime table_tombstone_from_key: fn (TableKey) callconv(.@"inline") TableValue,
     /// The maximum number of values per table.
     comptime table_value_count_max: usize,
     comptime table_usage: TableUsage,

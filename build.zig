@@ -1770,7 +1770,7 @@ fn set_windows_dll(allocator: std.mem.Allocator, java_home: []const u8) void {
     _ = SetDllDirectoryA(java_bin_server_path);
 }
 
-extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.C) std.os.windows.BOOL;
+extern "kernel32" fn SetDllDirectoryA(path: [*:0]const u8) callconv(.c) std.os.windows.BOOL;
 
 fn print_or_install(b: *std.Build, compile: *std.Build.Step.Compile, print: bool) *std.Build.Step {
     const PrintStep = struct {

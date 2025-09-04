@@ -16,7 +16,7 @@ pub fn ZigZagMergeIteratorType(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     comptime streams_max: u32,
     /// Peek the next key in the stream identified by `stream_index`.
     /// For example, `peek(stream_index=2)` returns `user_streams[2][0]`.

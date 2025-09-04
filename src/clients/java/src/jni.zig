@@ -13,10 +13,6 @@
 ///!
 ///! Additionally, each function is unit tested against a real JVM to validate if they are
 ///! calling the correct vtable entry with the expected arguments.
-const std = @import("std");
-
-/// JNI calling convention.
-pub const JNICALL: std.builtin.CallingConvention = .C;
 
 // https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getversion.
 pub const jni_version_1_1: JInt = 0x00010001;
@@ -3116,7 +3112,7 @@ pub const JavaVM = opaque {
     pub const get_default_java_vm_init_args = struct {
         extern "jvm" fn JNI_GetDefaultJavaVMInitArgs(
             vm_args: ?*JavaVMInitArgs,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_GetDefaultJavaVMInitArgs;
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#jni_get_createdjavavm.
@@ -3125,7 +3121,7 @@ pub const JavaVM = opaque {
             vm_buf: [*]*JavaVM,
             buf_len: JSize,
             vm_len: ?*JSize,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_GetCreatedJavaVMs;
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#jni_createjavavm.
@@ -3134,7 +3130,7 @@ pub const JavaVM = opaque {
             jvm: **JavaVM,
             env: **JNIEnv,
             args: *JavaVMInitArgs,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_CreateJavaVM;
 
     const JNIInterface = JNIInterfaceType(JavaVM);
@@ -3212,7 +3208,7 @@ fn JNIInterfaceType(comptime T: type) type {
             var fn_info = @typeInfo(Fn);
             switch (fn_info) {
                 .@"fn" => {
-                    fn_info.@"fn".calling_convention = JNICALL;
+                    fn_info.@"fn".calling_convention = .c;
                     return @Type(fn_info);
                 },
                 else => @compileError("Expected " ++ @tagName(function) ++ " to be a function"),

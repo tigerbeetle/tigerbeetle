@@ -35,7 +35,7 @@ pub const JNIThreadCleaner = struct {
     }
 
     // Will be called by the OS with the JVM handler when the thread finalizes.
-    fn destructor_callback(jvm: *anyopaque) callconv(.C) void {
+    fn destructor_callback(jvm: *anyopaque) callconv(.c) void {
         assert(tls_key != null);
         detach_current_thread(@ptrCast(jvm));
     }
@@ -73,7 +73,7 @@ pub const JNIThreadCleaner = struct {
         .linux, .macos => struct {
             const Key = std.c.pthread_key_t;
 
-            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
+            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.c) void) Key {
                 var key: Key = undefined;
                 const ret = std.c.pthread_key_create(&key, destructor);
                 if (ret != .SUCCESS) {
@@ -102,18 +102,18 @@ pub const JNIThreadCleaner = struct {
                 const FLS_OUT_OF_INDEXES: std.os.windows.DWORD = 0xffffffff;
                 // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flsalloc
                 extern "kernel32" fn FlsAlloc(
-                    ?*const fn (value: *anyopaque) callconv(.C) void,
-                ) callconv(.C) std.os.windows.DWORD;
+                    ?*const fn (value: *anyopaque) callconv(.c) void,
+                ) callconv(.c) std.os.windows.DWORD;
                 // https://learn.microsoft.com/en-us/windows/win32/api/fibersapi/nf-fibersapi-flssetvalue
                 extern "kernel32" fn FlsSetValue(
                     std.os.windows.DWORD,
                     *anyopaque,
-                ) callconv(.C) std.os.windows.BOOL;
+                ) callconv(.c) std.os.windows.BOOL;
             };
 
             const Key = std.os.windows.DWORD;
 
-            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.C) void) Key {
+            fn create_key(destructor: ?*const fn (value: *anyopaque) callconv(.c) void) Key {
                 const key = windows.FlsAlloc(destructor);
                 if (key == windows.FLS_OUT_OF_INDEXES) {
                     const message = "Unexpected result calling FlsAlloc";
@@ -162,7 +162,7 @@ test "JNIThreadCleaner:tls" {
             event.wait();
         }
 
-        fn destructor_callback(tls_value: *anyopaque) callconv(.C) void {
+        fn destructor_callback(tls_value: *anyopaque) callconv(.c) void {
             assert(tls_key != null);
 
             const self: *TestContext = @ptrCast(@alignCast(tls_value));
