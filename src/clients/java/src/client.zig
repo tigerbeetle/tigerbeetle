@@ -134,7 +134,7 @@ const NativeClient = struct {
         timestamp: u64,
         result_ptr: ?[*]const u8,
         result_len: u32,
-    ) callconv(.C) void {
+    ) callconv(.c) void {
         const jvm: *jni.JavaVM = @ptrFromInt(context_ptr);
 
         const env = JNIHelper.try_get_env(jvm) orelse

@@ -112,7 +112,7 @@ pub fn on_complete(
     timestamp: u64,
     result_ptr: [*c]const u8,
     result_len: u32,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = tb_context;
     _ = timestamp;
     const context: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));

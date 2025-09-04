@@ -6,7 +6,7 @@ pub fn register_function(
     env: c.napi_env,
     exports: c.napi_value,
     comptime name: [:0]const u8,
-    function: *const fn (env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value,
+    function: *const fn (env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value,
 ) !void {
     var napi_function: c.napi_value = undefined;
     if (c.napi_create_function(env, null, 0, function, null, &napi_function) != c.napi_ok) {

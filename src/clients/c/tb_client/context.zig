@@ -133,7 +133,7 @@ pub const CompletionCallback = *const fn (
     timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const InitError = std.mem.Allocator.Error || error{
     Unexpected,

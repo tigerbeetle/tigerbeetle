@@ -41,7 +41,7 @@ export fn napi_register_module_v1(env: c.napi_env, exports: c.napi_value) c.napi
 
 // Add-on code
 
-fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     const args = translate.extract_args(env, info, .{
         .count = 1,
         .function = "init",
@@ -57,7 +57,7 @@ fn init(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
     return create(env, cluster, addresses) catch null;
 }
 
-fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     const args = translate.extract_args(env, info, .{
         .count = 1,
         .function = "deinit",
@@ -67,7 +67,7 @@ fn deinit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value
     return null;
 }
 
-fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.C) c.napi_value {
+fn submit(env: c.napi_env, info: c.napi_callback_info) callconv(.c) c.napi_value {
     const args = translate.extract_args(env, info, .{
         .count = 4,
         .function = "submit",
@@ -261,7 +261,7 @@ fn on_completion(
     timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = timestamp;
 
     switch (packet_extern.status) {
@@ -341,7 +341,7 @@ fn on_completion_js(
     unused_js_cb: c.napi_value,
     unused_context: ?*anyopaque,
     packet_argument: ?*anyopaque,
-) callconv(.C) void {
+) callconv(.c) void {
     _ = unused_js_cb;
     _ = unused_context;
 
