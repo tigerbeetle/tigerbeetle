@@ -71,7 +71,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
-        /// Number of connections currently in use (i.e. connection.peer != .none).
+        /// Number of connections currently in use (i.e. connection.state != .free).
         connections_used: usize = 0,
         connections_suspended: QueueType(Connection) = QueueType(Connection).init(.{
             .name = null,
@@ -252,7 +252,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             // on the next tick().
             for (bus.connections) |*connection| {
                 if (connection.state == .free) {
-                    assert(connection.peer == .none);
                     // This will immediately add the connection to bus.replicas,
                     // or else will return early if a socket file descriptor cannot be obtained:
                     // TODO See if we can clean this up to remove/expose the early return branch.
@@ -270,9 +269,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.id,
             });
             for (bus.connections) |*connection| {
-                if (connection.peer == .client) {
-                    connection.terminate(bus, .shutdown);
-                    return;
+                if (connection.recv_buffer) |*buffer| {
+                    if (buffer.peer == .client) {
+                        connection.terminate(bus, .shutdown);
+                        return;
+                    }
                 }
             }
 
@@ -280,9 +281,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus.id,
             });
             for (bus.connections) |*connection| {
-                if (connection.peer == .unknown) {
-                    connection.terminate(bus, .shutdown);
-                    return;
+                if (connection.recv_buffer) |*buffer| {
+                    if (buffer.peer == .unknown) {
+                        connection.terminate(bus, .shutdown);
+                        return;
+                    }
                 }
             }
 
@@ -300,7 +303,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             assert(bus.connections_used < bus.connections.len);
             bus.process.accept_connection = for (bus.connections) |*connection| {
                 if (connection.state == .free) {
-                    assert(connection.peer == .none);
                     connection.state = .accepting;
                     break connection;
                 }
@@ -435,9 +437,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 replica: u8,
             };
 
-            /// The peer is determined by inspecting the first message header
-            /// received.
-            peer: Peer = .none,
             state: enum {
                 /// The connection is not in use, with peer set to `.none`.
                 free,
@@ -486,14 +485,19 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             pub fn connect_to_replica(connection: *Connection, bus: *MessageBus, replica: u8) void {
                 if (process_type == .replica) assert(replica != bus.process.replica);
 
-                assert(connection.peer == .none);
                 assert(connection.state == .free);
                 assert(connection.fd == IO.INVALID_SOCKET);
 
                 const family = bus.configuration[replica].any.family;
                 connection.fd = init_tcp(bus.io, family) catch return;
-                connection.peer = .{ .replica = replica };
                 connection.state = .connecting;
+
+                assert(connection.recv_buffer == null);
+                connection.recv_buffer = MessageBuffer.init(.{
+                    .pool = bus.pool,
+                    .replica_count = bus.configuration.len,
+                    .peer = .{ .replica = replica },
+                });
                 bus.connections_used += 1;
 
                 assert(bus.replicas[replica] == null);
@@ -510,7 +514,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                 log.debug("{}: connect_to_replica: connecting to={} after={}ms", .{
                     bus.id,
-                    connection.peer.replica,
+                    replica,
                     ms,
                 });
 
@@ -542,11 +546,14 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
                 assert(connection.state == .connecting);
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer == .replica);
+
                 result catch unreachable;
 
                 log.debug("{}: on_connect_with_exponential_backoff: to={}", .{
                     bus.id,
-                    connection.peer.replica,
+                    connection.recv_buffer.?.peer.replica,
                 });
 
                 assert(!connection.recv_submitted);
@@ -559,7 +566,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // We use `recv_completion` for the connection `timeout()` and `connect()` calls
                     &connection.recv_completion,
                     connection.fd,
-                    bus.configuration[connection.peer.replica],
+                    bus.configuration[connection.recv_buffer.?.peer.replica],
                 );
             }
 
@@ -579,24 +586,22 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     return;
                 }
                 assert(connection.state == .connecting);
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer == .replica);
+
                 connection.state = .connected;
 
+                const replica = connection.recv_buffer.?.peer.replica;
                 result catch |err| {
-                    log.warn("{}: on_connect: error to={} {}", .{
-                        bus.id,
-                        connection.peer.replica,
-                        err,
-                    });
+                    log.warn("{}: on_connect: error to={} {}", .{ bus.id, replica, err });
                     connection.terminate(bus, .close);
                     return;
                 };
 
-                log.info("{}: on_connect: connected to={}", .{ bus.id, connection.peer.replica });
-                bus.replicas_connect_attempts[connection.peer.replica] = 0;
+                log.info("{}: on_connect: connected to={}", .{ bus.id, replica });
+                bus.replicas_connect_attempts[replica] = 0;
 
                 connection.assert_recv_send_initial_state(bus);
-                assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus.pool);
                 connection.recv(bus);
                 // A message may have been queued for sending while we were connecting:
                 // TODO Should we relax recv() and send() to return if `state != .connected`?
@@ -606,32 +611,36 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// Given a newly accepted fd, start receiving messages on it.
             /// Callbacks will be continuously re-registered until terminate() is called.
             pub fn on_accept(connection: *Connection, bus: *MessageBus, fd: IO.socket_t) void {
-                assert(connection.peer == .none);
                 assert(connection.state == .accepting);
                 assert(connection.fd == IO.INVALID_SOCKET);
 
-                connection.peer = .unknown;
                 connection.state = .connected;
                 connection.fd = fd;
                 bus.connections_used += 1;
+                assert(connection.recv_buffer == null);
+                connection.recv_buffer = MessageBuffer.init(.{
+                    .pool = bus.pool,
+                    .replica_count = bus.configuration.len,
+                    .peer = .unknown,
+                });
 
                 connection.assert_recv_send_initial_state(bus);
                 assert(connection.send_queue.empty());
 
-                assert(connection.recv_buffer == null);
-                connection.recv_buffer = MessageBuffer.init(bus.pool);
                 connection.recv(bus);
             }
 
             fn assert_recv_send_initial_state(connection: *Connection, bus: *MessageBus) void {
                 assert(bus.connections_used > 0);
 
-                assert(connection.peer == .unknown or connection.peer == .replica);
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer == .replica or
+                    connection.recv_buffer.?.peer == .unknown);
+
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
 
                 assert(connection.recv_submitted == false);
-                assert(connection.recv_buffer == null);
 
                 assert(connection.send_submitted == false);
                 assert(connection.send_progress == 0);
@@ -640,7 +649,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             /// Add a message to the connection's send queue, starting a send operation
             /// if the queue was previously empty.
             pub fn send_message(connection: *Connection, bus: *MessageBus, message: *Message) void {
-                assert(connection.peer == .client or connection.peer == .replica);
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer != .unknown);
+
                 switch (connection.state) {
                     .connected, .connecting => {},
                     .terminating => return,
@@ -649,7 +660,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 if (connection.send_queue.full()) {
                     log.info("{}: send_message: to={} queue full, dropping command={s}", .{
                         bus.id,
-                        connection.peer,
+                        connection.recv_buffer.?.peer,
                         @tagName(message.header.command),
                     });
                     return;
@@ -658,7 +669,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // If the connection has not yet been established we can't send yet.
                 // Instead on_connect() will call send().
                 if (connection.state == .connecting) {
-                    assert(connection.peer == .replica);
+                    assert(connection.recv_buffer.?.peer == .replica);
                     return;
                 }
                 // If there is no send operation currently in progress, start one.
@@ -676,7 +687,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 bus: *MessageBus,
                 how: enum { shutdown, close },
             ) void {
-                assert(connection.peer != .none);
                 assert(connection.state != .free);
                 assert(connection.fd != IO.INVALID_SOCKET);
                 switch (how) {
@@ -719,48 +729,42 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 connection.maybe_close(bus);
             }
 
-            fn set_and_verify_peer(connection: *Connection, bus: *MessageBus) bool {
-                comptime assert(process_type == .replica);
-
+            fn set_and_verify_peer(
+                connection: *Connection,
+                bus: *MessageBus,
+                peer_prior_recv: vsr.Peer,
+                peer_after_recv: vsr.Peer,
+            ) void {
                 assert(bus.connections_used > 0);
 
-                assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
                 assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.invalid == null);
 
-                const header_peer: Connection.Peer = switch (connection.recv_buffer.?.peer) {
-                    .unknown => return true,
-                    .replica => |replica| .{ .replica = replica },
-                    .client, .client_likely => |client| .{ .client = client },
-                };
+                if (std.meta.eql(peer_prior_recv, peer_after_recv)) return;
 
-                if (std.meta.eql(connection.peer, header_peer)) return true;
-
-                defer connection.peer = header_peer;
-
-                switch (header_peer) {
+                switch (peer_after_recv) {
                     .replica => |replica_index| {
-                        if (replica_index >= bus.configuration.len) return false;
+                        assert(replica_index < bus.configuration.len);
                         // If there is a connection to this replica, terminate and replace it.
                         // Otherwise, this connection was misclassified to a client due to a
                         // forwarded request message (see `peer_type` in message_header.zig), map it
                         // to the correct replica. Allowed transitions:
-                        // * unknown → replica
-                        // * client  → replica
+                        // * unknown        → replica
+                        // * client_likely  → replica
                         if (bus.replicas[replica_index]) |old| {
                             assert(old != connection);
-                            assert(old.peer == .replica);
-                            assert(old.peer.replica == replica_index);
                             assert(old.state != .free);
                             if (old.state != .terminating) old.terminate(bus, .shutdown);
                         }
 
-                        switch (connection.peer) {
+                        switch (peer_prior_recv) {
                             .unknown => {},
-                            .client => |existing| assert(bus.process.clients.remove(existing)),
-                            .replica => assert(connection.recv_buffer.?.invalid.? == .misdirected),
-                            .none => unreachable,
+                            .client_likely => |existing| assert(
+                                bus.process.clients.remove(existing),
+                            ),
+                            .replica, .client => unreachable,
                         }
 
                         bus.replicas[replica_index] = connection;
@@ -775,23 +779,24 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
                         // If there is a connection to this client, terminate and replace it.
                         // Allowed transitions:
-                        // * unknown → client
-                        if (result.found_existing) {
-                            const old = result.value_ptr.*;
+                        // * unknown        → client
+                        // * client_likely  → client
+                        switch (peer_prior_recv) {
+                            .client_likely => {
+                                assert(result.found_existing);
+                                assert(result.value_ptr.* == connection);
+                                return;
+                            },
+                            .unknown => {
+                                if (result.found_existing) {
+                                    const old = result.value_ptr.*;
 
-                            assert(old != connection);
-                            assert(old.peer == .client);
-                            assert(old.peer.client == client_id);
-                            assert(old.state == .connected or old.state == .terminating);
-                            if (old.state != .terminating) old.terminate(bus, .shutdown);
-                        } else {
-                            switch (connection.peer) {
-                                .unknown => {},
-                                .client, .replica => assert(
-                                    connection.recv_buffer.?.invalid.? == .misdirected,
-                                ),
-                                .none => unreachable,
-                            }
+                                    assert(old != connection);
+                                    assert(old.state == .connected or old.state == .terminating);
+                                    if (old.state != .terminating) old.terminate(bus, .shutdown);
+                                }
+                            },
+                            .replica, .client => unreachable,
                         }
 
                         result.value_ptr.* = connection;
@@ -800,14 +805,32 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             client_id,
                         });
                     },
-                    .none, .unknown => unreachable,
-                }
 
-                return true;
+                    .client_likely => |client_id| {
+                        assert(client_id != 0);
+                        switch (peer_prior_recv) {
+                            .unknown => {
+                                // If you receive an unknown -> client_likely transition, it could
+                                // be a replica/client sending you a request message. Instead of
+                                // terminating an existing connection and replacing it, if one
+                                // exists in the client map, wait for it to get resolved to either a
+                                // replica or a client.
+                                const result =
+                                    bus.process.clients.getOrPutAssumeCapacity(client_id);
+                                if (!result.found_existing) {
+                                    result.value_ptr.* = connection;
+                                    log.info("{}: set_and_verify_peer connection from " ++
+                                        "client_likely={}", .{ bus.id, client_id });
+                                }
+                            },
+                            .replica, .client, .client_likely => unreachable,
+                        }
+                    },
+                    .unknown => unreachable,
+                }
             }
 
             fn recv(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.peer != .none);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
                 assert(connection.recv_buffer != null);
@@ -842,18 +865,38 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.state == .connected);
                 const bytes_received = result catch |err| {
                     // TODO: maybe don't need to close on *every* error
-                    log.warn("{}: on_recv: from={} {}", .{ bus.id, connection.peer, err });
+                    log.warn("{}: on_recv: from={} {}", .{
+                        bus.id,
+                        connection.recv_buffer.?.peer,
+                        err,
+                    });
                     connection.terminate(bus, .shutdown);
                     return;
                 };
                 // No bytes received means that the peer closed its side of the connection.
                 if (bytes_received == 0) {
-                    log.info("{}: on_recv: from={} orderly shutdown", .{ bus.id, connection.peer });
+                    log.info("{}: on_recv: from={} orderly shutdown", .{
+                        bus.id,
+                        connection.recv_buffer.?.peer,
+                    });
                     connection.terminate(bus, .close);
                     return;
                 }
                 assert(bytes_received <= constants.message_size_max);
+
+                const peer_prior_recv = connection.recv_buffer.?.peer;
                 connection.recv_buffer.?.recv_advance(@intCast(bytes_received));
+                const peer_after_recv = connection.recv_buffer.?.peer;
+
+                if (connection.recv_buffer.?.invalid) |reason| {
+                    log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
+                        bus.id,
+                        connection.recv_buffer.?.peer,
+                        @tagName(reason),
+                    });
+                    connection.terminate(bus, .close);
+                    return;
+                }
 
                 switch (process_type) {
                     // Replicas may forward messages from clients or from other replicas so we
@@ -861,16 +904,13 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // This has the same effect as an asymmetric network where, for a short time
                     // bounded by the time it takes to ping, we can hear from a peer before we
                     // can send back to them.
-                    .replica => if (!connection.set_and_verify_peer(bus)) {
-                        log.warn(
-                            "message from unexpected peer: peer={}",
-                            .{connection.peer},
-                        );
-                        connection.terminate(bus, .shutdown);
-                        return;
-                    },
+                    .replica => connection.set_and_verify_peer(
+                        bus,
+                        peer_prior_recv,
+                        peer_after_recv,
+                    ),
                     // The client connects only to replicas and should set peer when connecting:
-                    .client => assert(connection.peer == .replica),
+                    .client => assert(connection.recv_buffer.?.peer == .replica),
                 }
                 connection.call_on_messages(bus);
             }
@@ -878,16 +918,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
                 if (connection.recv_buffer.?.has_message()) {
                     bus.on_messages_callback(bus, &connection.recv_buffer.?);
-                }
-
-                if (connection.recv_buffer.?.invalid) |reason| {
-                    log.warn("{}: on_recv: from={} terminating connection: invalid {s}", .{
-                        bus.id,
-                        connection.peer,
-                        @tagName(reason),
-                    });
-                    connection.terminate(bus, .close);
-                    return;
                 }
 
                 if (connection.recv_buffer.?.has_message()) {
@@ -903,10 +933,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             fn send(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.peer == .client or connection.peer == .replica);
                 assert(connection.state == .connected);
                 assert(connection.fd != IO.INVALID_SOCKET);
                 assert(!connection.send_submitted);
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer != .unknown);
 
                 connection.send_now(bus);
 
@@ -959,7 +990,10 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 );
                 assert(connection.send_submitted);
                 connection.send_submitted = false;
-                assert(connection.peer == .client or connection.peer == .replica);
+
+                assert(connection.recv_buffer != null);
+                assert(connection.recv_buffer.?.peer != .unknown);
+
                 if (connection.state == .terminating) {
                     connection.maybe_close(bus);
                     return;
@@ -969,7 +1003,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // TODO: maybe don't need to close on *every* error
                     log.warn("{}: on_send: to={} {}", .{
                         bus.id,
-                        connection.peer,
+                        connection.recv_buffer.?.peer,
                         err,
                     });
                     connection.terminate(bus, .shutdown);
@@ -986,7 +1020,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             }
 
             fn maybe_close(connection: *Connection, bus: *MessageBus) void {
-                assert(connection.peer != .none);
                 assert(connection.state == .terminating);
                 // If a recv or send operation is currently submitted to the kernel,
                 // submitting a close would cause a race. Therefore we must wait for
@@ -995,17 +1028,17 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 // Even if there's no active physical IO in progress, we want to wait until all
                 // messages already received are consumed, to prevent graceful termination of
                 // connection from dropping messages.
-                if (connection.recv_buffer) |*receive_buffer| {
-                    if (receive_buffer.has_message()) return;
-                }
+
+                assert(connection.recv_buffer != null);
+                if (connection.recv_buffer.?.has_message()) return;
+
                 connection.send_submitted = true;
                 connection.recv_submitted = true;
                 // We can free resources now that there is no longer any I/O in progress.
                 while (connection.send_queue.pop()) |message| {
                     bus.unref(message);
                 }
-                if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
-                connection.recv_buffer = null;
+
                 assert(connection.fd != IO.INVALID_SOCKET);
                 defer connection.fd = IO.INVALID_SOCKET;
                 // It's OK to use the send completion here as we know that no send
@@ -1030,25 +1063,21 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                 assert(connection.send_submitted);
                 assert(connection.recv_submitted);
 
-                assert(connection.peer != .none);
                 assert(connection.state == .terminating);
+                assert(connection.recv_buffer != null);
 
                 // Reset the connection to its initial state.
                 defer {
-                    assert(connection.recv_buffer == null);
                     assert(connection.send_queue.empty());
 
-                    switch (connection.peer) {
-                        .none => unreachable,
+                    switch (connection.recv_buffer.?.peer) {
                         .unknown => {},
-                        .client => switch (process_type) {
+                        .client, .client_likely => |client_id| switch (process_type) {
                             .replica => {
                                 // A newer client connection may have replaced this one:
-                                if (bus.process.clients.get(
-                                    connection.peer.client,
-                                )) |existing_connection| {
+                                if (bus.process.clients.get(client_id)) |existing_connection| {
                                     if (existing_connection == connection) {
-                                        assert(bus.process.clients.remove(connection.peer.client));
+                                        assert(bus.process.clients.remove(client_id));
                                     }
                                 } else {
                                     // A newer client connection may even leapfrog this connection
@@ -1058,23 +1087,29 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                             },
                             .client => unreachable,
                         },
-                        .replica => {
+                        .replica => |replica| {
                             // A newer replica connection may have replaced this one:
-                            if (bus.replicas[connection.peer.replica] == connection) {
-                                bus.replicas[connection.peer.replica] = null;
+                            if (bus.replicas[replica] == connection) {
+                                bus.replicas[replica] = null;
                             } else {
                                 // A newer replica connection may even leapfrog this connection and
                                 // then be terminated and set to null before we can get here:
-                                stdx.maybe(bus.replicas[connection.peer.replica] == null);
+                                stdx.maybe(bus.replicas[replica] == null);
                             }
                         },
                     }
                     bus.connections_used -= 1;
+                    connection.recv_buffer.?.deinit(bus.pool);
+                    connection.recv_buffer = null;
                     connection.* = .{};
                 }
 
                 result catch |err| {
-                    log.warn("{}: on_closing: to={} {}", .{ bus.id, connection.peer, err });
+                    log.warn("{}: on_closing: to={} {}", .{
+                        bus.id,
+                        connection.recv_buffer.?.peer,
+                        err,
+                    });
                     return;
                 };
             }

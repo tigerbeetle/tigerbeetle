@@ -28,6 +28,7 @@ pub const MessageBus = struct {
 
     pub const Options = struct {
         network: *Network,
+        replica_count: u8,
     };
 
     pub fn init(
@@ -41,7 +42,11 @@ pub const MessageBus = struct {
             .network = options.network,
             .pool = message_pool,
             .process = process,
-            .buffer = MessageBuffer.init(message_pool),
+            .buffer = MessageBuffer.init(.{
+                .pool = message_pool,
+                .replica_count = options.replica_count,
+                .peer = .unknown,
+            }),
             .on_messages_callback = on_messages_callback,
         };
     }
