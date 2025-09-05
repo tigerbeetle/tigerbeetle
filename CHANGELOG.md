@@ -3,6 +3,58 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle (unreleased)
+
+Released: 2025-09-05
+
+### Safety And Performance
+
+- [#3226](https://github.com/tigerbeetle/tigerbeetle/pull/3226),
+  [#3230](https://github.com/tigerbeetle/tigerbeetle/pull/3230),
+  [#3223](https://github.com/tigerbeetle/tigerbeetle/pull/3223),
+  [#3222](https://github.com/tigerbeetle/tigerbeetle/pull/3222)
+
+  Low-level LSM performance improvements. The k-way merge iterator now uses a tournament tree
+  instead of a heap, we skip sorting of the mutable table if it's not needed, and we skip binary
+  search if possible by min/max key ranges.
+
+- [#3237](https://github.com/tigerbeetle/tigerbeetle/pull/3237)
+
+  Use a different PRNG seed for Replica each time, rather than a fixed seed of the replica ID. This
+  PRNG controls things like exponential backoff jitter and the order of the blocks on which the grid
+  scrubber runs.
+
+### Features
+
+- [#3206](https://github.com/tigerbeetle/tigerbeetle/pull/3206)
+
+  In order to avoid bimodality if a replica is down (eg, a client sends a request, doesn't hear
+  anything, eventually times out and tries a different replica) clients now proactively send their
+  requests to the primary and a randomly selected replica.
+
+  Backups can also send replies directly to clients, meaning that a client could be completely
+  partitioned from the primary, but still remain available.
+
+### Internals
+
+- [#3227](https://github.com/tigerbeetle/tigerbeetle/pull/3227),
+  [#3231](https://github.com/tigerbeetle/tigerbeetle/pull/3231),
+  [#3242](https://github.com/tigerbeetle/tigerbeetle/pull/3242)
+
+  Preparation for the Zig 0.15.1 upgrade.
+
+- [#3236](https://github.com/tigerbeetle/tigerbeetle/pull/3236),
+  [#3229](https://github.com/tigerbeetle/tigerbeetle/pull/3229),
+  [#3198](https://github.com/tigerbeetle/tigerbeetle/pull/3198)
+
+  A host of multiversion improvements! Multiversioning is now a proper interface, rather than being
+  scattered about. Additionally, Windows support is now significantly more robust, and will be
+  integration tested like the other platforms in the next release.
+
+### TigerTracks 🎧
+
+- [See You Again](https://www.youtube.com/watch?v=RgKAFK5djSk)
+
 ## TigerBeetle 0.16.57
 
 Released: 2025-08-29
