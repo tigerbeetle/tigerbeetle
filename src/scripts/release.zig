@@ -22,12 +22,12 @@ const log = std.log;
 const assert = std.debug.assert;
 
 const Shell = @import("../shell.zig");
-const multiversioning = @import("../multiversioning.zig");
+const multiversion = @import("../multiversion.zig");
 const changelog = @import("./changelog.zig");
 
 const MiB = stdx.MiB;
 
-const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
+const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 
 const Language = enum { dotnet, go, java, node, python, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
@@ -86,7 +86,7 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             }
 
             break :blk .{
-                multiversioning.Release.from(.{
+                multiversion.Release.from(.{
                     .major = last_release.release.?.triple().major,
                     .minor = last_release.release.?.triple().minor,
                     .patch = last_release.release.?.triple().patch + 1,
@@ -111,14 +111,14 @@ pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
             };
         }
     };
-    assert(multiversioning.Release.less_than({}, release_multiversion, release));
+    assert(multiversion.Release.less_than({}, release_multiversion, release));
 
     // Ensure we're building a version newer than the first multiversion release. That was
     // bootstrapped with code to do a custom build of the release before that (see git history)
     // whereas now past binaries are downloaded and the multiversion parts extracted.
     const first_multiversion_release = "0.15.4";
     assert(release.value >
-        (try multiversioning.Release.parse(first_multiversion_release)).value);
+        (try multiversion.Release.parse(first_multiversion_release)).value);
 
     // The minimum client version allowed to connect. This has implications for backwards
     // compatibility and the upgrade path for replicas and clients. If there's no overlap
@@ -318,7 +318,7 @@ fn build_tigerbeetle_target(
         .{
             .executable_name = exe_name,
             .executable_mtime = commit_date_time,
-            .max_size = multiversioning.multiversion_binary_size_max,
+            .max_size = multiversion.multiversion_binary_size_max,
         },
     );
 }
@@ -600,18 +600,18 @@ fn publish(
                 null,
             );
 
-            const parsed_offsets = try multiversioning.parse_elf(past_binary_contents);
+            const parsed_offsets = try multiversion.parse_elf(past_binary_contents);
             const header_bytes =
                 past_binary_contents[parsed_offsets.x86_64.?.header_offset..][0..@sizeOf(
-                    multiversioning.MultiversionHeader,
+                    multiversion.MultiversionHeader,
                 )];
 
-            const header = try multiversioning.MultiversionHeader.init_from_bytes(header_bytes);
+            const header = try multiversion.MultiversionHeader.init_from_bytes(header_bytes);
             const release_min = header.past.releases[0];
             const release_max = header.past.releases[header.past.count - 1];
             assert(release_min < release_max);
 
-            break :blk multiversioning.Release{ .value = release_min };
+            break :blk multiversion.Release{ .value = release_min };
         };
 
         const notes = try shell.fmt(

@@ -4,8 +4,8 @@ const assert = std.debug.assert;
 const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
-const Release = @import("../multiversioning.zig").Release;
-const ReleaseTriple = @import("../multiversioning.zig").ReleaseTriple;
+const Release = @import("../multiversion.zig").Release;
+const ReleaseTriple = @import("../multiversion.zig").ReleaseTriple;
 
 const MiB = stdx.MiB;
 

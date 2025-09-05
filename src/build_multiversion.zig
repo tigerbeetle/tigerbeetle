@@ -4,13 +4,13 @@ const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
-const multiversioning = @import("./multiversioning.zig");
+const multiversion = @import("./multiversion.zig");
 const stdx = @import("stdx");
 const Shell = @import("shell.zig");
 
-const multiversion_binary_size_max = multiversioning.multiversion_binary_size_max;
-const MultiversionHeader = multiversioning.MultiversionHeader;
-const section_to_macho_cpu = multiversioning.section_to_macho_cpu;
+const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
+const MultiversionHeader = multiversion.MultiversionHeader;
+const section_to_macho_cpu = multiversion.section_to_macho_cpu;
 
 const Target = union(enum) {
     const Arch = enum { x86_64, aarch64 };
@@ -102,7 +102,7 @@ pub fn main() !void {
 
     const stat = try shell.cwd.statFile(cli_args.output);
     assert(stat.size <= multiversion_binary_size_max);
-    assert(stat.size <= multiversioning.multiversion_binary_platform_size_max(.{
+    assert(stat.size <= multiversion.multiversion_binary_platform_size_max(.{
         .macos = target == .macos,
         .debug = cli_args.debug,
     }));
@@ -176,11 +176,11 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
     const checksum_binary_without_header = try checksum_file(
         shell,
         tigerbeetle_working,
-        multiversioning.multiversion_binary_size_max,
+        multiversion.multiversion_binary_size_max,
     );
 
     var header: MultiversionHeader = .{
-        .current_release = (try multiversioning.Release.parse(vsr_options.release.?)).value,
+        .current_release = (try multiversion.Release.parse(vsr_options.release.?)).value,
         .current_checksum = current_checksum,
         .current_flags = .{
             .debug = options.debug,
@@ -188,7 +188,7 @@ fn build_multiversion_single_arch(shell: *Shell, options: struct {
         },
         .past = past_versions.past_releases,
         .checksum_binary_without_header = checksum_binary_without_header,
-        .current_release_client_min = (try multiversioning.Release.parse(
+        .current_release_client_min = (try multiversion.Release.parse(
             vsr_options.release_client_min.?,
         )).value,
         .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
@@ -334,8 +334,8 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
             multiversion_binary_size_max,
         );
 
-        var header = multiversioning.MultiversionHeader{
-            .current_release = (try multiversioning.Release.parse(vsr_options.release.?)).value,
+        var header = multiversion.MultiversionHeader{
+            .current_release = (try multiversion.Release.parse(vsr_options.release.?)).value,
             .current_checksum = current_checksum,
             .current_flags = .{
                 .debug = options.debug,
@@ -343,7 +343,7 @@ fn build_multiversion_universal(shell: *Shell, options: struct {
             },
             .past = past_versions.past_releases,
             .checksum_binary_without_header = checksum_binary_without_header,
-            .current_release_client_min = (try multiversioning.Release.parse(
+            .current_release_client_min = (try multiversion.Release.parse(
                 vsr_options.release_client_min.?,
             )).value,
             .current_git_commit = try git_sha_to_binary(&vsr_options.git_commit.?),
@@ -415,7 +415,7 @@ fn make_deterministic(shell: *Shell, options: struct {
     return try checksum_file(
         shell,
         options.output,
-        multiversioning.multiversion_binary_size_max,
+        multiversion.multiversion_binary_size_max,
     );
 }
 
@@ -441,9 +441,9 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     );
 
     const parsed_offsets = switch (options.target) {
-        .windows => try multiversioning.parse_pe(past_binary_contents),
-        .macos => try multiversioning.parse_macho(past_binary_contents),
-        .linux => try multiversioning.parse_elf(past_binary_contents),
+        .windows => try multiversion.parse_pe(past_binary_contents),
+        .macos => try multiversion.parse_macho(past_binary_contents),
+        .linux => try multiversion.parse_elf(past_binary_contents),
     };
     const arch_offsets = switch (options.arch) {
         .x86_64 => parsed_offsets.x86_64.?,
@@ -454,13 +454,13 @@ fn build_multiversion_body(shell: *Shell, options: struct {
         past_binary_contents[arch_offsets.header_offset..][0..@sizeOf(MultiversionHeader)];
 
     var header = try MultiversionHeader.init_from_bytes(header_bytes);
-    if (header.current_release == (try multiversioning.Release.parse("0.15.4")).value) {
+    if (header.current_release == (try multiversion.Release.parse("0.15.4")).value) {
         // current_git_commit and current_release_client_min were added after 0.15.4. These are the
         // values for that release.
         header.current_git_commit = try git_sha_to_binary(
             "14abaeabd09bd7c78a95b6b990748f3612b3e4cc",
         );
-        header.current_release_client_min = (try multiversioning.Release.parse("0.15.3")).value;
+        header.current_release_client_min = (try multiversion.Release.parse("0.15.3")).value;
     }
 
     var unpacked = std.ArrayList([]const u8).init(shell.arena.allocator());
@@ -471,7 +471,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     const old_current_release = header.current_release;
     const old_current_release_output_name = try shell.fmt("{s}/tigerbeetle-past-{}-{s}", .{
         options.tmp_path,
-        multiversioning.Release{ .value = old_current_release },
+        multiversion.Release{ .value = old_current_release },
         @tagName(options.arch),
     });
 
@@ -508,7 +508,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     }
 
     // It's important to verify the previous current_release checksum - it can't be verified at
-    // runtime by multiversioning.zig, since it relies on objcopy to extract.
+    // runtime by multiversion.zig, since it relies on objcopy to extract.
     assert(header.current_checksum == try checksum_file(
         shell,
         old_current_release_output_name,
@@ -556,7 +556,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     | {
         const past_name = try shell.fmt("{s}/tigerbeetle-past-{}-{s}", .{
             options.tmp_path,
-            multiversioning.Release{ .value = past_release },
+            multiversion.Release{ .value = past_release },
             @tagName(options.arch),
         });
         const mode_exec = if (builtin.os.tag == .windows) 0 else 0o777;
@@ -616,7 +616,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
     ) |release, offset, size| {
         const past_name = try shell.fmt("{s}/tigerbeetle-past-{}-{s}", .{
             options.tmp_path,
-            multiversioning.Release{ .value = release },
+            multiversion.Release{ .value = release },
             @tagName(options.arch),
         });
         const contents = try shell.cwd.readFileAlloc(shell.arena.allocator(), past_name, size);
@@ -630,7 +630,7 @@ fn build_multiversion_body(shell: *Shell, options: struct {
 }
 
 /// Does the same thing as llvm-lipo (builds a universal binary) but allows building binaries
-/// that have deprecated architectures. This is used by multiversioning on macOS, where these
+/// that have deprecated architectures. This is used by multiversion on macOS, where these
 /// deprecated architectures hold the multiversion header and body.
 /// It's much easier to embed and read them here, then to do it in the inner MachO binary, like
 /// we do with ELF or PE.
@@ -767,25 +767,25 @@ fn self_check_enabled(target: Target) bool {
     };
 }
 
-fn self_check(shell: *Shell, multiversion: []const u8, past_releases: []const []const u8) !void {
+fn self_check(shell: *Shell, tigerbeetle: []const u8, past_releases: []const []const u8) !void {
     assert(past_releases.len > 0);
     try shell.exec(
-        "{multiversion} multiversion {multiversion}",
-        .{ .multiversion = multiversion },
+        "{tigerbeetle} multiversion {tigerbeetle}",
+        .{ .tigerbeetle = tigerbeetle },
     );
     for (past_releases) |past_release| {
         // 0.15.3 didn't have the multiversion subcommand since it was the epoch.
         if (std.mem.indexOf(u8, past_release, "0.15.3") != null) continue;
         try shell.exec(
-            "{past_release} multiversion {multiversion}",
-            .{ .multiversion = multiversion, .past_release = past_release },
+            "{past_release} multiversion {tigerbeetle}",
+            .{ .tigerbeetle = tigerbeetle, .past_release = past_release },
         );
     }
 }
 
 fn checksum_file(shell: *Shell, path: []const u8, size_max: u32) !u128 {
     const contents = try shell.cwd.readFileAlloc(shell.arena.allocator(), path, size_max);
-    return multiversioning.checksum.checksum(contents);
+    return multiversion.checksum.checksum(contents);
 }
 
 fn git_sha_to_binary(commit: []const u8) ![20]u8 {
