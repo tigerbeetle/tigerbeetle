@@ -603,8 +603,8 @@ pub fn ReplicaType(
         /// (commit_stage=stall)
         commit_stall_timeout: Timeout,
 
-        /// Used to calculate exponential backoff with random jitter.
-        /// Seeded with the replica's index number.
+        /// Used to calculate exponential backoff with random jitter, and for the grid scrubber.
+        /// Seeded with the replica's nonce.
         prng: stdx.PRNG,
 
         /// Used by `Cluster` in the simulator.
