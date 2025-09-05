@@ -36,6 +36,10 @@ pub const MessageBuffer = struct {
     /// and used by the message bus to map connections to replicas and clients.
     peer: vsr.Peer = .unknown,
 
+    /// Number of replicas in the configuration, used to invalidate the buffer if we receive a
+    /// message from a replica with a spurious ID.
+    replica_count: usize,
+
     // An error occurred, and the MessageBus should terminate connection.
     // Can be set by replica to indicate semantic errors, such as wrong cluster.
     invalid: ?InvalidReason = null,
@@ -50,6 +54,7 @@ pub const MessageBuffer = struct {
         header_checksum,
         header_size,
         header_cluster,
+        header_replica_index,
         body_checksum,
         misdirected,
     };
@@ -67,8 +72,16 @@ pub const MessageBuffer = struct {
         }
     }
 
-    pub fn init(pool: *MessagePool) MessageBuffer {
-        return .{ .message = pool.get_message(null) };
+    pub fn init(options: struct {
+        pool: *MessagePool,
+        replica_count: usize,
+        peer: vsr.Peer,
+    }) MessageBuffer {
+        return .{
+            .message = options.pool.get_message(null),
+            .replica_count = options.replica_count,
+            .peer = options.peer,
+        };
     }
 
     pub fn deinit(buffer: *MessageBuffer, pool: *MessagePool) void {
@@ -158,6 +171,11 @@ pub const MessageBuffer = struct {
 
         if (header.size < @sizeOf(Header) or header.size > constants.message_size_max) {
             buffer.invalidate(.header_size);
+            return;
+        }
+
+        if (header.replica >= buffer.replica_count) {
+            buffer.invalidate(.header_replica_index);
             return;
         }
         assert(@sizeOf(Header) <= header.size and header.size <= constants.message_size_max);
@@ -422,13 +440,18 @@ test "MessageBuffer fuzz" {
             buffer[byte_index] ^= @as(u8, 1) << bit_index;
         }
 
+        const members_count = 6;
         var pool = try MessagePool.init(gpa, .{ .replica = .{
-            .members_count = 6,
+            .members_count = members_count,
             .pipeline_requests_limit = 1,
         } });
         defer pool.deinit(gpa);
 
-        var message_buffer = MessageBuffer.init(&pool);
+        var message_buffer = MessageBuffer.init(.{
+            .pool = &pool,
+            .replica_count = members_count,
+            .peer = .unknown,
+        });
         defer message_buffer.deinit(&pool);
 
         var recv_size: u32 = 0;

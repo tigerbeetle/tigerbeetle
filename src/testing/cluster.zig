@@ -329,7 +329,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .replica_count = options.cluster.replica_count,
                         .time = client_times[i].time(),
                         .message_pool = &client_pools[i],
-                        .message_bus_options = .{ .network = network },
+                        .message_bus_options = .{
+                            .network = network,
+                            .replica_count = options.cluster.replica_count +
+                                options.cluster.standby_count,
+                        },
                         .eviction_callback = client_on_eviction,
                     },
                 );
@@ -739,7 +743,11 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .nonce = options.nonce,
                     .time = cluster.replica_times[replica_index].time(),
                     .state_machine_options = cluster.options.state_machine,
-                    .message_bus_options = .{ .network = cluster.network },
+                    .message_bus_options = .{
+                        .network = cluster.network,
+                        .replica_count = cluster.options.replica_count +
+                            cluster.options.standby_count,
+                    },
                     .release = options.release,
                     .release_client_min = release_client_min,
                     .releases_bundled = &cluster.replica_releases_bundled[replica_index],

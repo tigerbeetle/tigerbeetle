@@ -2700,7 +2700,11 @@ const TestClientBus = struct {
                 .{ .client = client_id },
                 message_pool,
                 on_messages,
-                .{ .network = context.cluster.network },
+                .{
+                    .network = context.cluster.network,
+                    .replica_count = context.cluster.options.replica_count +
+                        context.cluster.options.standby_count,
+                },
             ),
         };
         errdefer client_bus.message_bus.deinit(allocator);
