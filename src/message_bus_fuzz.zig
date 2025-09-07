@@ -1,3 +1,4 @@
+const builtin = @import("builtin");
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.message_bus_fuzz);
@@ -22,8 +23,13 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const tick_message_bus_probability = ratio(1, 4);
     const restart_probability = ratio(1, 50);
 
+    if (builtin.os.tag == .linux) {
+        // Get our own network namespace so that multiple instances of the fuzzer can use the same
+        // ports without conflicting.
+        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{ .pid = false, .network = true });
+    }
+
     const configuration = &.{
-        // TODO avoid port collisions in CFO. Maybe as a CLI arg?
         try std.net.Address.parseIp4("127.0.0.1", 3000),
         try std.net.Address.parseIp4("127.0.0.1", 3001),
         try std.net.Address.parseIp4("127.0.0.1", 3002),
