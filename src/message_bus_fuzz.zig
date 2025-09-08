@@ -23,18 +23,6 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const tick_message_bus_probability = ratio(1, 4);
     const restart_probability = ratio(1, 50);
 
-    if (builtin.os.tag == .linux) {
-        // Get our own network namespace so that multiple instances of the fuzzer can use the same
-        // ports without conflicting.
-        try stdx.unshare.maybe_unshare_and_relaunch(gpa, .{ .pid = false, .network = true });
-    }
-
-    const configuration = &.{
-        try std.net.Address.parseIp4("127.0.0.1", 3000),
-        try std.net.Address.parseIp4("127.0.0.1", 3001),
-        try std.net.Address.parseIp4("127.0.0.1", 3002),
-    };
-
     const command_weights = weights: {
         var command_weights = fuzz.random_enum_weights(&prng, vsr.Command);
         // The message bus asserts that no message has command=reserved.
@@ -63,19 +51,35 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     }
     defer for (ios) |*io| io.deinit();
 
+    // To avoid port conflicts in CFO, we connect the message buses.
+    var configuration = [3]std.net.Address{
+        try std.net.Address.parseIp4("127.0.0.1", 0),
+        try std.net.Address.parseIp4("127.0.0.1", 0),
+        try std.net.Address.parseIp4("127.0.0.1", 0),
+    };
+
     var message_buses = try gpa.alloc(MessageBus, replica_count);
     defer gpa.free(message_buses);
 
-    for (message_buses, ios, 0..) |*message_bus, *io, i| {
-        errdefer for (message_buses[0..i]) |*b| b.deinit(gpa);
+    var i: u32 = replica_count;
+    while (i > 0) {
+        i -= 1;
 
-        message_bus.* = try MessageBus.init(
+        const replica = replica_count - i - 1;
+        errdefer for (message_buses[0..replica]) |*b| b.deinit(gpa);
+
+        message_buses[replica] = try MessageBus.init(
             gpa,
-            .{ .replica = @intCast(i) },
+            .{ .replica = @intCast(replica) },
             &message_pool,
             on_messages_callback,
-            .{ .configuration = configuration, .io = io, .clients_limit = clients_limit },
+            .{
+                .configuration = &configuration,
+                .io = &ios[replica],
+                .clients_limit = clients_limit,
+            },
         );
+        configuration[replica] = message_buses[replica].process.accept_address;
     }
     defer for (message_buses) |*message_bus| message_bus.deinit(gpa);
 
@@ -129,13 +133,13 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
         message_buses[replica_send].send_message_to_replica(replica_receive, message);
 
-        for (message_buses, ios, 0..) |*message_bus, *io, i| {
+        for (message_buses, ios, 0..) |*message_bus, *io, replica_index| {
             if (prng.chance(tick_message_bus_probability)) {
                 message_bus.tick();
             }
 
             if (prng.chance(restart_probability)) {
-                log.debug("{}: restart", .{i});
+                log.debug("{}: restart", .{replica_index});
 
                 io.cancel_all();
                 message_bus.deinit(gpa);
@@ -144,10 +148,10 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 io.* = IO.init(32, 0) catch unreachable;
                 message_bus.* = MessageBus.init(
                     gpa,
-                    .{ .replica = @intCast(i) },
+                    .{ .replica = @intCast(replica_index) },
                     &message_pool,
                     on_messages_callback,
-                    .{ .configuration = configuration, .io = io, .clients_limit = clients_limit },
+                    .{ .configuration = &configuration, .io = io, .clients_limit = clients_limit },
                 ) catch unreachable;
             }
 
