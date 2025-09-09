@@ -184,3 +184,68 @@ test "Time monotonic smoke" {
     assert(instant_1.duration_since(instant_1).ns == 0);
     assert(instant_2.duration_since(instant_1).ns >= 0);
 }
+
+/// Equivalent to `std.time.Timer`,
+/// but using the `vsr.Time` interface as the source of time.
+pub const Timer = struct {
+    started: Instant,
+    previous: Instant,
+    time: Time,
+
+    pub fn init(time: Time) Timer {
+        const current = time.monotonic_instant();
+        return .{
+            .started = current,
+            .previous = current,
+            .time = time,
+        };
+    }
+
+    /// Reads the timer value since start or the last reset in nanoseconds.
+    pub fn read(self: *Timer) stdx.Duration {
+        const current = self.sample();
+        return current.duration_since(self.started);
+    }
+
+    /// Resets the timer value to 0/now.
+    pub fn reset(self: *Timer) void {
+        const current = self.sample();
+        self.started = current;
+    }
+
+    /// Returns an Instant sampled at the callsite that is
+    /// guaranteed to be monotonic with respect to the timer's starting point.
+    fn sample(self: *Timer) Instant {
+        const current = self.time.monotonic_instant();
+        if (current.ns > self.previous.ns) {
+            self.previous = current;
+        }
+        return self.previous;
+    }
+};
+
+const fixtures = @import("testing/fixtures.zig");
+const testing = std.testing;
+
+test Timer {
+    var time_sim = fixtures.init_time(.{ .resolution = 1 });
+    const time = time_sim.time();
+
+    var timer = Timer.init(time);
+    // Repeat the cycle read/reset multiple times:
+    for (0..3) |_| {
+        const time_0 = timer.read();
+        try testing.expectEqual(@as(u64, 0), time_0.ns);
+        time.tick();
+
+        const time_1 = timer.read();
+        try testing.expectEqual(@as(u64, 1), time_1.ns);
+        time.tick();
+
+        const time_2 = timer.read();
+        try testing.expectEqual(@as(u64, 2), time_2.ns);
+        time.tick();
+
+        timer.reset();
+    }
+}
