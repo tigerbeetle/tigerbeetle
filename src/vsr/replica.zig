@@ -727,6 +727,13 @@ pub fn ReplicaType(
             // Disable all dynamic allocation from this point onwards.
             self.static_allocator.transition_from_init_to_static();
 
+            // Mark grid cache as MADV_DONTDUMP, after transitioning to static, to reduce core dump
+            // size.
+            self.grid.madv_dont_dump() catch |e| {
+                log.warn("unable to mark grid cache as MADV_DONTDUMP - " ++
+                    "core dumps will be large: {}", .{e});
+            };
+
             const release_target = self.superblock.working.vsr_state.checkpoint.release;
             assert(release_target.value >= self.superblock.working.release_format.value);
             log.info("superblock release={}", .{release_target});
