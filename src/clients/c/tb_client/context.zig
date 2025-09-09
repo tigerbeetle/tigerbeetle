@@ -294,12 +294,12 @@ pub fn ContextType(
             });
             context.client = Client.init(
                 allocator,
+                &context.message_pool,
+                time,
                 .{
                     .id = context.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
-                    .time = time,
-                    .message_pool = &context.message_pool,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
@@ -312,9 +312,7 @@ pub fn ContextType(
                     @errorName(err),
                 });
                 return switch (err) {
-                    error.TimerUnsupported => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,
-                    else => unreachable,
                 };
             };
             errdefer context.client.deinit(allocator);

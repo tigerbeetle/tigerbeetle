@@ -206,10 +206,10 @@ pub const Runner = struct {
 
         self.metrics = .{
             .producer = .{
-                .timer = try std.time.Timer.start(),
+                .timer = .init(time),
             },
             .consumer = .{
-                .timer = try std.time.Timer.start(),
+                .timer = .init(time),
             },
             .flush_ticks = 0,
             .flush_timeout_ticks = @divExact(30 * std.time.ms_per_s, constants.tick_ms),
@@ -221,14 +221,17 @@ pub const Runner = struct {
         self.message_pool = try MessagePool.init(allocator, .client);
         errdefer self.message_pool.deinit(allocator);
 
-        self.vsr_client = try Client.init(allocator, .{
-            .id = stdx.unique_u128(),
-            .cluster = options.cluster_id,
-            .replica_count = @intCast(options.addresses.len),
-            .time = time,
-            .message_pool = &self.message_pool,
-            .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
-        });
+        self.vsr_client = try Client.init(
+            allocator,
+            &self.message_pool,
+            time,
+            .{
+                .id = stdx.unique_u128(),
+                .cluster = options.cluster_id,
+                .replica_count = @intCast(options.addresses.len),
+                .message_bus_options = .{ .configuration = options.addresses, .io = &self.io },
+            },
+        );
         errdefer self.vsr_client.deinit(allocator);
 
         self.amqp_client = try amqp.Client.init(allocator, .{
@@ -869,7 +872,7 @@ pub const Runner = struct {
 /// though the current method of shipping the metrics is a temporary solution.
 const Metrics = struct {
     const TimingSummary = struct {
-        timer: std.time.Timer,
+        timer: vsr.time.Timer,
 
         duration_min: ?stdx.Duration = null,
         duration_max: ?stdx.Duration = null,
@@ -883,7 +886,7 @@ const Metrics = struct {
         ) void {
             metrics.timing(
                 event_count,
-                .{ .ns = metrics.timer.read() },
+                metrics.timer.read(),
             );
         }
 
@@ -1452,10 +1455,14 @@ test "amqp: JSON message" {
     }
 }
 
+const fixtures = @import("../testing/fixtures.zig");
+
 test "amqp: metrics" {
+    var time_sim = fixtures.init_time(.{});
     var summary: Metrics.TimingSummary = .{
-        .timer = try std.time.Timer.start(),
+        .timer = .init(time_sim.time()),
     };
+
     try testing.expectEqual(@as(u64, 0), summary.count);
     try testing.expectEqual(@as(u64, 0), summary.event_count);
     try testing.expectEqual(@as(u64, 0), summary.duration_sum.ns);

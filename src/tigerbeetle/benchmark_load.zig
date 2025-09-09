@@ -91,14 +91,17 @@ pub fn main(
     defer for (clients.slice()) |*client| client.deinit(allocator);
 
     for (0..cli_args.clients) |i| {
-        clients.push(try Client.init(allocator, .{
-            .id = stdx.unique_u128(),
-            .cluster = cluster_id,
-            .replica_count = @intCast(addresses.len),
-            .time = time,
-            .message_pool = &message_pools.slice()[i],
-            .message_bus_options = .{ .configuration = addresses, .io = io },
-        }));
+        clients.push(try Client.init(
+            allocator,
+            &message_pools.slice()[i],
+            time,
+            .{
+                .id = stdx.unique_u128(),
+                .cluster = cluster_id,
+                .replica_count = @intCast(addresses.len),
+                .message_bus_options = .{ .configuration = addresses, .io = io },
+            },
+        ));
     }
 
     // Each array position corresponds to a histogram bucket of 1ms. The last bucket is 10_000ms+.

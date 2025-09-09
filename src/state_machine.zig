@@ -890,7 +890,7 @@ pub fn StateMachineType(
             compact: TimingSummary = .{},
             checkpoint: TimingSummary = .{},
 
-            timer: std.time.Timer,
+            timer: vsr.time.Timer,
 
             pub fn log_and_reset(metrics: *Metrics) void {
                 inline for (comptime std.meta.fieldNames(Metrics)) |field_name| {
@@ -1012,6 +1012,7 @@ pub fn StateMachineType(
             self: *StateMachine,
             allocator: mem.Allocator,
             grid: *Grid,
+            time: vsr.time.Time,
             options: Options,
         ) !void {
             assert(options.batch_size_limit <= config.message_body_size_max);
@@ -1030,7 +1031,7 @@ pub fn StateMachineType(
                 .scan_lookup_results = undefined,
 
                 .metrics = .{
-                    .timer = try std.time.Timer.start(),
+                    .timer = .init(time),
                 },
             };
 
@@ -2782,11 +2783,11 @@ pub fn StateMachineType(
                             event_size,
                         ));
                     };
-                    const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
+                    const duration = self.metrics.timer.read();
 
                     self.metrics.record(
                         Metrics.from_operation(operation_comptime),
-                        duration_us,
+                        duration.to_us(),
                         batch_count,
                     );
                 },
@@ -3049,8 +3050,8 @@ pub fn StateMachineType(
             const callback = self.compact_callback.?;
             self.compact_callback = null;
 
-            const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
-            self.metrics.record(.compact, duration_us, 1);
+            const duration = self.metrics.timer.read();
+            self.metrics.record(.compact, duration.to_us(), 1);
 
             callback(self);
         }
@@ -3070,8 +3071,8 @@ pub fn StateMachineType(
             const callback = self.checkpoint_callback.?;
             self.checkpoint_callback = null;
 
-            const duration_us = @divFloor(self.metrics.timer.read(), std.time.ns_per_us);
-            self.metrics.record(.checkpoint, duration_us, 1);
+            const duration = self.metrics.timer.read();
+            self.metrics.record(.checkpoint, duration.to_us(), 1);
 
             self.metrics.log_and_reset();
 

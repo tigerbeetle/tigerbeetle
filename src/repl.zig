@@ -679,12 +679,12 @@ pub fn ReplType(comptime MessageBus: type) type {
             const client_id = stdx.unique_u128();
             const client = try Client.init(
                 allocator,
+                message_pool,
+                time,
                 .{
                     .id = client_id,
                     .cluster = options.cluster_id,
                     .replica_count = @intCast(options.addresses.len),
-                    .time = time,
-                    .message_pool = message_pool,
                     .message_bus_options = .{
                         .configuration = options.addresses,
                         .io = io,

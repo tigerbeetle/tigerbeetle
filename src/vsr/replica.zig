@@ -623,10 +623,7 @@ pub fn ReplicaType(
             node_count: u8,
             pipeline_requests_limit: u32,
             storage_size_limit: u64,
-            storage: *Storage,
-            message_pool: *MessagePool,
             nonce: Nonce,
-            time: Time,
             aof: ?*AOF,
             state_machine_options: StateMachine.Options,
             message_bus_options: MessageBus.Options,
@@ -646,6 +643,9 @@ pub fn ReplicaType(
         pub fn open(
             self: *Replica,
             parent_allocator: std.mem.Allocator,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            time: Time,
             options: OpenOptions,
         ) !void {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
@@ -665,7 +665,7 @@ pub fn ReplicaType(
 
             self.superblock = try SuperBlock.init(
                 allocator,
-                options.storage,
+                storage,
                 .{
                     .storage_size_limit = options.storage_size_limit,
                 },
@@ -701,28 +701,31 @@ pub fn ReplicaType(
             self.test_context = options.test_context;
 
             // Initialize the replica:
-            try self.init(allocator, .{
-                .cluster = self.superblock.working.cluster,
-                .replica_index = replica,
-                .replica_count = replica_count,
-                .standby_count = options.node_count - replica_count,
-                .pipeline_requests_limit = options.pipeline_requests_limit,
-                .storage = options.storage,
-                .aof = options.aof,
-                .nonce = options.nonce,
-                .time = options.time,
-                .message_pool = options.message_pool,
-                .state_machine_options = options.state_machine_options,
-                .message_bus_options = options.message_bus_options,
-                .grid_cache_blocks_count = options.grid_cache_blocks_count,
-                .release = options.release,
-                .release_client_min = options.release_client_min,
-                .multiversion = options.multiversion,
-                .timeout_prepare_ticks = options.timeout_prepare_ticks,
-                .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
-                .commit_stall_probability = options.commit_stall_probability,
-                .replicate_options = options.replicate_options,
-            });
+            try self.init(
+                allocator,
+                storage,
+                message_pool,
+                time,
+                .{
+                    .cluster = self.superblock.working.cluster,
+                    .replica_index = replica,
+                    .replica_count = replica_count,
+                    .standby_count = options.node_count - replica_count,
+                    .pipeline_requests_limit = options.pipeline_requests_limit,
+                    .aof = options.aof,
+                    .nonce = options.nonce,
+                    .state_machine_options = options.state_machine_options,
+                    .message_bus_options = options.message_bus_options,
+                    .grid_cache_blocks_count = options.grid_cache_blocks_count,
+                    .release = options.release,
+                    .release_client_min = options.release_client_min,
+                    .multiversion = options.multiversion,
+                    .timeout_prepare_ticks = options.timeout_prepare_ticks,
+                    .timeout_grid_repair_message_ticks = options.timeout_grid_repair_message_ticks,
+                    .commit_stall_probability = options.commit_stall_probability,
+                    .replicate_options = options.replicate_options,
+                },
+            );
 
             // Disable all dynamic allocation from this point onwards.
             self.static_allocator.transition_from_init_to_static();
@@ -1048,10 +1051,7 @@ pub fn ReplicaType(
             replica_index: u8,
             pipeline_requests_limit: u32,
             nonce: Nonce,
-            time: Time,
-            storage: *Storage,
             aof: ?*AOF,
-            message_pool: *MessagePool,
             message_bus_options: MessageBus.Options,
             state_machine_options: StateMachine.Options,
             grid_cache_blocks_count: u32,
@@ -1065,7 +1065,14 @@ pub fn ReplicaType(
         };
 
         /// NOTE: self.superblock must be initialized and opened prior to this call.
-        fn init(self: *Replica, allocator: Allocator, options: Options) !void {
+        fn init(
+            self: *Replica,
+            allocator: Allocator,
+            storage: *Storage,
+            message_pool: *MessagePool,
+            time: Time,
+            options: Options,
+        ) !void {
             assert(options.nonce != 0);
 
             const replica_count = options.replica_count;
@@ -1188,7 +1195,7 @@ pub fn ReplicaType(
             //   - a standby clock tracks active replicas and the standby itself.
             self.clock = try Clock.init(
                 allocator,
-                options.time,
+                time,
                 if (replica_index < replica_count) .{
                     .replica_count = replica_count,
                     .replica = replica_index,
@@ -1201,7 +1208,7 @@ pub fn ReplicaType(
             );
             errdefer self.clock.deinit(allocator);
 
-            self.journal = try Journal.init(allocator, options.storage, replica_index);
+            self.journal = try Journal.init(allocator, storage, replica_index);
             errdefer self.journal.deinit(allocator);
 
             var client_sessions = try ClientSessions.init(allocator);
@@ -1215,8 +1222,8 @@ pub fn ReplicaType(
             errdefer client_sessions_checkpoint.deinit(allocator);
 
             var client_replies = ClientReplies.init(.{
-                .storage = options.storage,
-                .message_pool = options.message_pool,
+                .storage = storage,
+                .message_pool = message_pool,
                 .replica_index = replica_index,
             });
             errdefer client_replies.deinit();
@@ -1249,6 +1256,7 @@ pub fn ReplicaType(
             try self.state_machine.init(
                 allocator,
                 &self.grid,
+                time,
                 options.state_machine_options,
             );
             errdefer self.state_machine.deinit(allocator);
@@ -1269,7 +1277,7 @@ pub fn ReplicaType(
             self.message_bus = try MessageBus.init(
                 allocator,
                 .{ .replica = options.replica_index },
-                options.message_pool,
+                message_pool,
                 Replica.on_messages_from_bus,
                 options.message_bus_options,
             );

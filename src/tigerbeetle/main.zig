@@ -150,8 +150,8 @@ pub fn main() !void {
 
             switch (command_storage) {
                 .format => try command_format(gpa, &storage, args),
-                .start => try command_start(gpa, &io, &tracer, &storage, args),
-                .recover => try command_reformat(gpa, &io, &tracer, &storage, args),
+                .start => try command_start(gpa, &io, &tracer, &storage, time, args),
+                .recover => try command_reformat(gpa, &io, &storage, time, args),
                 else => comptime unreachable,
             }
         },
@@ -236,6 +236,7 @@ fn command_start(
     io: *IO,
     tracer: *Tracer,
     storage: *Storage,
+    time: vsr.time.Time,
     args: *const cli.Command.Start,
 ) !void {
     var counting_allocator = vsr.CountingAllocator.init(base_allocator);
@@ -337,40 +338,44 @@ fn command_start(
     const clients_limit = constants.pipeline_prepare_queue_max + args.pipeline_requests_limit;
 
     var replica: Replica = undefined;
-    replica.open(gpa, .{
-        .node_count = args.addresses.count_as(u8),
-        .release = config.process.release,
-        .release_client_min = config.process.release_client_min,
-        .multiversion = multiversion,
-        .pipeline_requests_limit = args.pipeline_requests_limit,
-        .storage_size_limit = args.storage_size_limit,
-        .storage = storage,
-        .aof = if (aof != null) &aof.? else null,
-        .message_pool = &message_pool,
-        .nonce = nonce,
-        .time = tracer.time,
-        .timeout_prepare_ticks = args.timeout_prepare_ticks,
-        .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
-        .commit_stall_probability = args.commit_stall_probability,
-        .state_machine_options = .{
-            .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
-            .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
-            .lsm_forest_node_count = args.lsm_forest_node_count,
-            .cache_entries_accounts = args.cache_accounts,
-            .cache_entries_transfers = args.cache_transfers,
-            .cache_entries_transfers_pending = args.cache_transfers_pending,
+    replica.open(
+        gpa,
+        storage,
+        &message_pool,
+        time,
+
+        .{
+            .node_count = args.addresses.count_as(u8),
+            .release = config.process.release,
+            .release_client_min = config.process.release_client_min,
+            .multiversion = multiversion,
+            .pipeline_requests_limit = args.pipeline_requests_limit,
+            .storage_size_limit = args.storage_size_limit,
+            .aof = if (aof != null) &aof.? else null,
+            .nonce = nonce,
+            .timeout_prepare_ticks = args.timeout_prepare_ticks,
+            .timeout_grid_repair_message_ticks = args.timeout_grid_repair_message_ticks,
+            .commit_stall_probability = args.commit_stall_probability,
+            .state_machine_options = .{
+                .batch_size_limit = args.request_size_limit - @sizeOf(vsr.Header),
+                .lsm_forest_compaction_block_count = args.lsm_forest_compaction_block_count,
+                .lsm_forest_node_count = args.lsm_forest_node_count,
+                .cache_entries_accounts = args.cache_accounts,
+                .cache_entries_transfers = args.cache_transfers,
+                .cache_entries_transfers_pending = args.cache_transfers_pending,
+            },
+            .message_bus_options = .{
+                .configuration = args.addresses.const_slice(),
+                .io = io,
+                .clients_limit = clients_limit,
+            },
+            .grid_cache_blocks_count = args.cache_grid_blocks,
+            .tracer = tracer,
+            .replicate_options = .{
+                .star = args.replicate_star,
+            },
         },
-        .message_bus_options = .{
-            .configuration = args.addresses.const_slice(),
-            .io = io,
-            .clients_limit = clients_limit,
-        },
-        .grid_cache_blocks_count = args.cache_grid_blocks,
-        .tracer = tracer,
-        .replicate_options = .{
-            .star = args.replicate_star,
-        },
-    }) catch |err| switch (err) {
+    ) catch |err| switch (err) {
         error.NoAddress => vsr.fatal(.cli, "all --addresses must be provided", .{}),
         else => |e| return e,
     };
@@ -493,26 +498,30 @@ fn command_start(
 fn command_reformat(
     gpa: mem.Allocator,
     io: *IO,
-    tracer: *Tracer,
     storage: *Storage,
+    time: vsr.time.Time,
     args: *const cli.Command.Recover,
 ) !void {
     var message_pool = try MessagePool.init(gpa, .client);
     defer message_pool.deinit(gpa);
 
-    var client = try Client.init(gpa, .{
-        .id = stdx.unique_u128(),
-        .cluster = args.cluster,
-        .replica_count = args.replica_count,
-        .time = tracer.time,
-        .message_pool = &message_pool,
-        .message_bus_options = .{
-            .configuration = args.addresses.const_slice(),
-            .io = io,
-            .clients_limit = null,
+    var client = try Client.init(
+        gpa,
+        &message_pool,
+        time,
+        .{
+            .id = stdx.unique_u128(),
+            .cluster = args.cluster,
+            .replica_count = args.replica_count,
+
+            .message_bus_options = .{
+                .configuration = args.addresses.const_slice(),
+                .io = io,
+                .clients_limit = null,
+            },
+            .eviction_callback = &reformat_client_eviction_callback,
         },
-        .eviction_callback = &reformat_client_eviction_callback,
-    });
+    );
     defer client.deinit(gpa);
 
     var reformatter = try ReplicaReformat.init(gpa, &client, storage, .{
