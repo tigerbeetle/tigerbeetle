@@ -36,6 +36,7 @@ pub fn RadixSorterNew(
     comptime Key: type,
     comptime Value: type,
     comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime lessThanFn: fn (void, lhs: Value, rhs: Value) bool,
 ) type {
     const RADIX_BITS = if (@sizeOf(Value) >= 128) 11 else 8;
     const RADIX_SIZE = 1 << RADIX_BITS;
@@ -79,6 +80,8 @@ pub fn RadixSorterNew(
             noalias input: []T,
             noalias scratch_buffer: []T,
         ) void {
+            if (input.len <= 64) return std.sort.insertion(T, input, {}, lessThanFn);
+
             var histogram: [RADIX_LEVELS][RADIX_SIZE]u32 = .{.{0} ** RADIX_SIZE} ** RADIX_LEVELS;
             count_frequency(T, input, &histogram);
             radix_sort_unrolled(T, input, scratch_buffer, histogram);
@@ -656,7 +659,11 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             //std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
 
-            RadixSorterNew(Key, Value, key_from_value).sort(Value, values[offset..], values_tmp[offset..]);
+            RadixSorterNew(Key, Value, key_from_value, sort_values_by_key_in_ascending_order).sort(
+                Value,
+                values[offset..],
+                values_tmp[offset..],
+            );
 
             // Deduplicate values in streaming fashion.
             var dedup_sink = DedupSink.init(values[offset..]);
