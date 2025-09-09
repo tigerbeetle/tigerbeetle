@@ -1418,7 +1418,8 @@ pub fn GridType(comptime Storage: type) type {
             // save on madvise() syscalls.
             var continuous_cache_start = @intFromPtr(grid.cache_blocks[0]);
             var continuous_cache_len = grid.cache_blocks[0].len;
-            var madvised: usize = 0;
+            var madvise_bytes: usize = 0;
+            var madvise_calls: usize = 0;
 
             for (grid.cache_blocks[1..]) |cache_block| {
                 if (continuous_cache_start + continuous_cache_len == @intFromPtr(cache_block.ptr)) {
@@ -1429,7 +1430,8 @@ pub fn GridType(comptime Storage: type) type {
                         continuous_cache_len,
                         std.posix.MADV.DONTDUMP,
                     );
-                    madvised += continuous_cache_len;
+                    madvise_bytes += continuous_cache_len;
+                    madvise_calls += 1;
 
                     continuous_cache_start = @intFromPtr(cache_block.ptr);
                     continuous_cache_len = cache_block.len;
@@ -1441,9 +1443,16 @@ pub fn GridType(comptime Storage: type) type {
                 continuous_cache_len,
                 std.posix.MADV.DONTDUMP,
             );
-            madvised += continuous_cache_len;
+            madvise_bytes += continuous_cache_len;
+            madvise_calls += 1;
 
-            assert(madvised == constants.block_size * grid.cache_blocks.len);
+            assert(madvise_bytes == constants.block_size * grid.cache_blocks.len);
+            assert(madvise_calls <= grid.cache_blocks.len);
+
+            log.debug("marked {} bytes as MADV_DONTDUMP with {} calls", .{
+                madvise_bytes,
+                madvise_calls,
+            });
         }
     };
 }
