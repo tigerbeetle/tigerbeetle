@@ -964,6 +964,10 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         break :blk aof_file;
     } else null;
 
+    if (start.log_trace and !start.log_debug) {
+        vsr.fatal(.cli, "--log-debug must be provided when using --log-trace", .{});
+    }
+
     return .{
         .addresses = addresses,
         .addresses_zero = std.mem.eql(u8, start.addresses, "0"),
