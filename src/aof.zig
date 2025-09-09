@@ -328,12 +328,12 @@ pub fn AOFType(comptime IO: type) type {
 
                 client.* = try Client.init(
                     allocator,
+                    message_pool,
+                    time,
                     .{
                         .id = stdx.unique_u128(),
                         .cluster = 0,
                         .replica_count = @intCast(addresses.len),
-                        .time = time,
-                        .message_pool = message_pool,
                         .message_bus_options = .{
                             .configuration = addresses,
                             .io = io,
