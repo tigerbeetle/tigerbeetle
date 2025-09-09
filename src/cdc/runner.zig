@@ -73,9 +73,12 @@ pub const Runner = struct {
     /// The producer is responsible for reading events from TigerBeetle.
     producer: enum {
         idle,
+        // Waiting for the rate limit to allow more requests.
+        rate_limit,
+        // Calling the VSR client.
         request,
-        /// No events to publish,
-        /// waiting for the timeout to check for new events.
+        /// No events to publish.
+        /// Waiting for the idle timeout to check for new events.
         waiting,
     },
 
@@ -86,6 +89,7 @@ pub const Runner = struct {
         progress_update,
     },
 
+    rate_limit: ?RateLimit,
     metrics: Metrics,
 
     state: union(enum) {
@@ -137,6 +141,9 @@ pub const Runner = struct {
             /// process.
             /// Must be greater than zero.
             idle_interval_ms: ?u32,
+            /// Limits the number of requests per second.
+            /// Must be greater than zero.
+            requests_per_second_limit: ?u32,
             /// Indicates whether to recover the last timestamp published on the state
             /// tracker queue, or override it with a user-defined value.
             recovery_mode: StateRecoveryMode,
@@ -196,6 +203,7 @@ pub const Runner = struct {
             .io = undefined,
             .producer = .idle,
             .consumer = .idle,
+            .rate_limit = undefined,
             .metrics = undefined,
             .state = .{ .unknown = options.recovery_mode },
             .buffer = dual_buffer,
@@ -203,6 +211,12 @@ pub const Runner = struct {
             .vsr_client = undefined,
             .amqp_client = undefined,
         };
+
+        self.rate_limit = if (options.requests_per_second_limit) |limit|
+            // The rate limit is expressed in "requests per second":
+            RateLimit.init(time, .{ .limit = limit, .period = .seconds(1) })
+        else
+            null;
 
         self.metrics = .{
             .producer = .{
@@ -606,7 +620,7 @@ pub const Runner = struct {
                     assert(self.buffer.find(.consuming) != null);
                     return;
                 }
-                self.producer = .request;
+                self.producer = .rate_limit;
                 self.metrics.producer.timer.reset();
                 self.produce_dispatch();
             },
@@ -622,10 +636,45 @@ pub const Runner = struct {
         assert(self.state.last.consumer_timestamp == 0 or
             TimestampRange.valid(self.state.last.consumer_timestamp));
         assert(self.state.last.producer_timestamp > self.state.last.consumer_timestamp);
-        switch (self.producer) {
+        dispatch: switch (self.producer) {
             .idle => unreachable,
+            // Check the configured rate limit, if any.
+            .rate_limit,
+            => switch (if (self.rate_limit) |*rate_limit| rate_limit.attempt() else .ok) {
+                .ok => {
+                    self.producer = .request;
+                    continue :dispatch self.producer;
+                },
+                .wait => |duration| {
+                    assert(duration.ns > 0);
+                    self.io.timeout(
+                        *Runner,
+                        self,
+                        struct {
+                            fn callback(
+                                runner: *Runner,
+                                completion: *IO.Completion,
+                                result: IO.TimeoutError!void,
+                            ) void {
+                                result catch unreachable;
+                                _ = completion;
+                                assert(runner.producer == .rate_limit);
+                                assert(runner.buffer.find(.producing) != null);
+                                maybe(runner.consumer == .idle);
+
+                                runner.producer = .request;
+                                runner.produce_dispatch();
+                            }
+                        }.callback,
+                        &self.idle_completion,
+                        @intCast(duration.ns),
+                    );
+                },
+            },
             // Submitting the request through the VSR client.
             .request => {
+                assert(self.buffer.find(.producing) != null);
+
                 const filter: tb.ChangeEventsFilter = .{
                     .limit = self.event_count_max,
                     .timestamp_min = self.state.last.producer_timestamp,
@@ -659,7 +708,7 @@ pub const Runner = struct {
 
                             const producer_begin = runner.buffer.producer_begin();
                             assert(producer_begin);
-                            runner.producer = .request;
+                            runner.producer = .rate_limit;
                             runner.produce_dispatch();
                         }
                     }.callback,
@@ -738,7 +787,7 @@ pub const Runner = struct {
                     if (self.buffer.all_free()) {
                         assert(self.producer == .idle);
                     } else {
-                        assert(self.producer == .request);
+                        assert(self.producer == .rate_limit or self.producer == .request);
                         assert(self.buffer.find(.free) != null);
                         assert(self.buffer.find(.producing) != null);
                     }
@@ -865,6 +914,69 @@ pub const Runner = struct {
         self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch unreachable;
 
         self.metrics.tick();
+    }
+};
+
+/// Rate limit to throttle the maximum number of requests to TigerBeetle within a time period.
+pub const RateLimit = struct {
+    const Options = struct {
+        /// The rate limit expressed as "requests per second".
+        /// Must be greater than zero. Inclusive.
+        limit: u32,
+        /// Time interval used to enforce the request limit.
+        period: stdx.Duration,
+    };
+
+    count: u32,
+    timer: vsr.time.Timer,
+    options: Options,
+
+    pub fn init(time: vsr.time.Time, options: Options) RateLimit {
+        assert(options.limit > 0);
+        assert(options.period.ns > 0);
+
+        return .{
+            .count = 0,
+            .timer = .init(time),
+            .options = options,
+        };
+    }
+
+    /// Attempt to increment the counter.
+    /// Return `.ok` if it succeed within the configured `limit` per second,
+    /// or `.wait` with the required amount of time to wait.
+    pub fn attempt(self: *RateLimit) union(enum) {
+        ok,
+        wait: stdx.Duration,
+    } {
+        assert(self.options.limit > 0);
+        assert(self.options.period.ns > 0);
+
+        if (self.count == 0) {
+            self.timer.reset();
+            self.count = 1;
+            return .ok;
+        }
+        assert(self.count > 0);
+        assert(self.count <= self.options.limit);
+
+        const duration = self.timer.read();
+        maybe(duration.ns == 0);
+
+        if (duration.ns >= self.options.period.ns) {
+            self.timer.reset();
+            self.count = 0;
+        } else if (self.count == self.options.limit) {
+            assert(duration.ns < self.options.period.ns);
+            return .{ .wait = .{
+                .ns = self.options.period.ns - duration.ns,
+            } };
+        }
+
+        self.count += 1;
+        assert(self.count <= self.options.limit);
+
+        return .ok;
     }
 };
 
@@ -1322,6 +1434,60 @@ pub const Message = struct {
 };
 
 const testing = std.testing;
+const fixtures = @import("../testing/fixtures.zig");
+
+test "amqp: RateLimit" {
+    // Simulated clock with 300ms resolution,
+    // to force an uneven ratio of 3.333 requests per second.
+    const resolution: u64 = 300 * std.time.ns_per_ms;
+    var time_sim = fixtures.init_time(.{ .resolution = resolution });
+    const time = time_sim.time();
+    var rate_limit = RateLimit.init(
+        time,
+        .{
+            .limit = 3,
+            .period = .seconds(1),
+        },
+    );
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    try switch (rate_limit.attempt()) {
+        .ok => testing.expect(false),
+        .wait => |duration| testing.expectEqual(
+            // 3 requests in 600ms, needs to wait 400ms.
+            std.time.ns_per_s - (2 * resolution),
+            duration.ns,
+        ),
+    };
+    time.tick();
+
+    try switch (rate_limit.attempt()) {
+        .ok => testing.expect(false),
+        .wait => |duration| testing.expectEqual(
+            // 3 requests in 900ms, needs to wait 100ms.
+            std.time.ns_per_s - (3 * resolution),
+            duration.ns,
+        ),
+    };
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .ok);
+    time.tick();
+
+    try testing.expect(rate_limit.attempt() == .wait);
+}
 
 test "amqp: DualBuffer" {
     const event_count_max = Runner.constants.event_count_max;
@@ -1454,8 +1620,6 @@ test "amqp: JSON message" {
         ).diff(buffer);
     }
 }
-
-const fixtures = @import("../testing/fixtures.zig");
 
 test "amqp: metrics" {
     var time_sim = fixtures.init_time(.{});

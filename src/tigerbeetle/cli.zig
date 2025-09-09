@@ -281,6 +281,7 @@ const CLIArgs = union(enum) {
         publish_routing_key: ?[]const u8 = null,
         event_count_max: ?u32 = null,
         idle_interval_ms: ?u32 = null,
+        requests_per_second_limit: ?u32 = null,
         timestamp_last: ?u64 = null,
         verbose: bool = false,
     };
@@ -611,6 +612,7 @@ pub const Command = union(enum) {
         publish_routing_key: ?[]const u8,
         event_count_max: ?u32,
         idle_interval_ms: ?u32,
+        requests_per_second_limit: ?u32,
         timestamp_last: ?u64,
         log_debug: bool,
     };
@@ -1169,6 +1171,16 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         );
     }
 
+    if (amqp.requests_per_second_limit) |requests_per_second_limit| {
+        if (requests_per_second_limit == 0) {
+            vsr.fatal(
+                .cli,
+                "--request-per-second-limit must not be zero.",
+                .{},
+            );
+        }
+    }
+
     return .{
         .addresses = addresses,
         .cluster = amqp.cluster,
@@ -1180,6 +1192,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         .publish_routing_key = amqp.publish_routing_key,
         .event_count_max = amqp.event_count_max,
         .idle_interval_ms = amqp.idle_interval_ms,
+        .requests_per_second_limit = amqp.requests_per_second_limit,
         .timestamp_last = amqp.timestamp_last,
         .log_debug = amqp.verbose,
     };

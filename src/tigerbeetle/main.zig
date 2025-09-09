@@ -589,6 +589,7 @@ fn command_amqp(gpa: mem.Allocator, time: Time, args: *const cli.Command.AMQP) !
             .publish_routing_key = args.publish_routing_key,
             .event_count_max = args.event_count_max,
             .idle_interval_ms = args.idle_interval_ms,
+            .requests_per_second_limit = args.requests_per_second_limit,
             .recovery_mode = if (args.timestamp_last) |timestamp_last|
                 .{ .override = timestamp_last }
             else

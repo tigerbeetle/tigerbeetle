@@ -958,6 +958,10 @@ pub const Duration = struct {
         return .{ .ns = amount_ms * std.time.ns_per_ms };
     }
 
+    pub fn seconds(amount_seconds: u64) Duration {
+        return .{ .ns = amount_seconds * std.time.ns_per_s };
+    }
+
     pub fn minutes(amount_minutes: u64) Duration {
         return .{ .ns = amount_minutes * std.time.ns_per_min };
     }
@@ -1006,6 +1010,10 @@ test "Instant/Duration" {
     assert(duration.ns == 1_000_000_000);
     assert(duration.to_us() == 1_000_000);
     assert(duration.to_ms() == 1_000);
+
+    assert(Duration.ms(1).ns == std.time.ns_per_ms);
+    assert(Duration.seconds(1).ns == std.time.ns_per_s);
+    assert(Duration.minutes(1).ns == std.time.ns_per_min);
 }
 
 /// DateTime in UTC, intended primarily for logging.
