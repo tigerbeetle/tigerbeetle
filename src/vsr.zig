@@ -76,10 +76,10 @@ pub const CountingAllocator = @import("counting_allocator.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u16 = 0;
 
-pub const multiversioning = @import("multiversioning.zig");
-pub const ReleaseList = multiversioning.ReleaseList;
-pub const Release = multiversioning.Release;
-pub const ReleaseTriple = multiversioning.ReleaseTriple;
+pub const multiversion = @import("multiversion.zig");
+pub const ReleaseList = multiversion.ReleaseList;
+pub const Release = multiversion.Release;
+pub const ReleaseTriple = multiversion.ReleaseTriple;
 
 pub const ProcessType = enum { replica, client };
 pub const Peer = union(enum) {
