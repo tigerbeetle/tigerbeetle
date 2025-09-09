@@ -887,8 +887,7 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                                     connection.peer,
                                     header.peer_type(),
                                 });
-                                connection.terminate(bus, .shutdown);
-                                return;
+                                connection.recv_buffer.?.invalidate(.misdirected);
                             }
                         }
                     },
