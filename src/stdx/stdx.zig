@@ -19,6 +19,7 @@ pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
+pub const radix = @import("radix.zig");
 
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
