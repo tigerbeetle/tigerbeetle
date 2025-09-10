@@ -375,6 +375,13 @@ fn command_start(
         else => |e| return e,
     };
 
+    // Mark grid cache as MADV_DONTDUMP, after transitioning to static in replica.open, to reduce
+    // core dump size.
+    replica.grid.madv_dont_dump() catch |e| {
+        log.warn("unable to mark grid cache as MADV_DONTDUMP - " ++
+            "core dumps will be large: {}", .{e});
+    };
+
     if (multiversion_os != null) {
         if (args.development) {
             log.info("multiversioning: upgrade polling disabled due to --development.", .{});
