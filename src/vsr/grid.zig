@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
@@ -1399,6 +1400,59 @@ pub fn GridType(comptime Storage: type) type {
                 // No block found -- since this is a coherent read, we must by syncing.
                 assert(grid.superblock.working.vsr_state.sync_op_max > 0);
             }
+        }
+
+        /// Mark all blocks in the grid cache as MADV_DONTDUMP. Must be done after transitioning
+        /// to static, as the combination of madvise() + mremap() can cause an EFAULT.
+        ///
+        /// It's OK that some blocks, such as the blocks used by compaction escape this -- this is
+        /// not to stop sensitive data from appearing in core dumps, but rather to keep the core
+        /// dump size managable even with a large grid cache.
+        pub fn madv_dont_dump(grid: *const Grid) !void {
+            if (builtin.target.os.tag != .linux) return;
+
+            assert(grid.cache_blocks.len > 0);
+
+            // Each block could be its own isolated memory mapping, with how things are done
+            // using allocate_block(), but it's extremely unlikely. Coalesce them where possible to
+            // save on madvise() syscalls.
+            var continuous_cache_start = @intFromPtr(grid.cache_blocks[0]);
+            var continuous_cache_len = grid.cache_blocks[0].len;
+            var madvise_bytes: usize = 0;
+            var madvise_calls: usize = 0;
+
+            for (grid.cache_blocks[1..]) |cache_block| {
+                if (continuous_cache_start + continuous_cache_len == @intFromPtr(cache_block.ptr)) {
+                    continuous_cache_len += cache_block.len;
+                } else {
+                    try std.posix.madvise(
+                        @ptrFromInt(continuous_cache_start),
+                        continuous_cache_len,
+                        std.posix.MADV.DONTDUMP,
+                    );
+                    madvise_bytes += continuous_cache_len;
+                    madvise_calls += 1;
+
+                    continuous_cache_start = @intFromPtr(cache_block.ptr);
+                    continuous_cache_len = cache_block.len;
+                }
+            }
+
+            try std.posix.madvise(
+                @ptrFromInt(continuous_cache_start),
+                continuous_cache_len,
+                std.posix.MADV.DONTDUMP,
+            );
+            madvise_bytes += continuous_cache_len;
+            madvise_calls += 1;
+
+            assert(madvise_bytes == constants.block_size * grid.cache_blocks.len);
+            assert(madvise_calls <= grid.cache_blocks.len);
+
+            log.debug("marked {} bytes as MADV_DONTDUMP with {} calls", .{
+                madvise_bytes,
+                madvise_calls,
+            });
         }
     };
 }
