@@ -721,8 +721,6 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     .update => {},
                 }
 
-                defer connection.peer = peer;
-
                 switch (peer) {
                     .replica => |replica_index| {
                         if (replica_index >= bus.configuration.len) return false;
@@ -819,6 +817,8 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     },
                     .unknown => {},
                 }
+
+                connection.peer = peer;
 
                 return true;
             }
