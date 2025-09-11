@@ -87,9 +87,11 @@ pub fn StateMachineType(
         pub fn init(
             self: *StateMachine,
             allocator: std.mem.Allocator,
+            time: vsr.time.Time,
             grid: *Grid,
             options: Options,
         ) !void {
+            _ = time;
             self.* = .{
                 .options = options,
                 .forest = undefined,

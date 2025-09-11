@@ -52,6 +52,11 @@ Here what the arguments mean:
   when the last query returned no events.<br>
   Optional. Defaults to `1000` ms if omitted.
 
+* `--requests-per-second-limit` throttles the maximum number of requests per second made
+  to TigerBeetle.<br>
+  Must be greater than zero.<br>
+  Optional. No limit if omitted.
+
 * `--timestamp-last` overrides the last published timestamp, resuming from this point.<br>
   This is a TigerBeetle timestamp with nanosecond precision.<br>
   Optional. If omitted, the last acknowledged timestamp is used.
@@ -185,20 +190,20 @@ the `history` flag.
 
 ### High Availability
 
-The CDC job is single instance. Starting a second `tigerbeetle amqp` with the same `cluster_id` 
-will exit with a non-zero exit code. For high availability, the CDC job could be monitored for 
+The CDC job is single instance. Starting a second `tigerbeetle amqp` with the same `cluster_id`
+will exit with a non-zero exit code. For high availability, the CDC job could be monitored for
 crashes and restarted in case a failure.
 
-The CDC job itself is stateless, and will resume from the last event acknowledged by RabbitMQ, 
+The CDC job itself is stateless, and will resume from the last event acknowledged by RabbitMQ,
 however it may replay events that weren't acknowledged but received by the exchange.
 
 ### TLS Support
 
-For secure `AMQPS` connections, we recommend using a TLS Tunnel to wrap the connection between 
+For secure `AMQPS` connections, we recommend using a TLS Tunnel to wrap the connection between
 TigerBeetle and RabbitMQ.
 
 ### Event Replay
 
 By default, when the CDC job starts, it resumes from the timestamp of the last acknowledged event in
-RabbitMQ. This can be overridden to using `--timestamp-last`. For example, `--timestamp-last=0` will 
+RabbitMQ. This can be overridden to using `--timestamp-last`. For example, `--timestamp-last=0` will
 replay all events.

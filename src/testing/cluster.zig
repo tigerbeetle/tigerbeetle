@@ -324,12 +324,12 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.*.?.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
+                    client_times[i].time(),
+                    &client_pools[i],
                     .{
                         .id = client_id_permutation.encode(i + client_id_permutation_shift),
                         .cluster = options.cluster.cluster_id,
                         .replica_count = options.cluster.replica_count,
-                        .time = client_times[i].time(),
-                        .message_pool = &client_pools[i],
                         .message_bus_options = .{ .network = network },
                         .eviction_callback = client_on_eviction,
                     },
@@ -729,16 +729,16 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
+                cluster.replica_times[replica_index].time(),
+                &cluster.storages[replica_index],
+                &cluster.replica_pools[replica_index],
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .pipeline_requests_limit = cluster.replica_pipeline_requests_limit,
-                    .storage = &cluster.storages[replica_index],
                     .aof = &cluster.aofs[replica_index],
                     // TODO Test restarting with a higher storage limit.
                     .storage_size_limit = cluster.options.storage_size_limit,
-                    .message_pool = &cluster.replica_pools[replica_index],
                     .nonce = options.nonce,
-                    .time = cluster.replica_times[replica_index].time(),
                     .state_machine_options = cluster.options.state_machine,
                     .message_bus_options = .{ .network = cluster.network },
                     .release = options.release,

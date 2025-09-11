@@ -82,7 +82,7 @@ pub fn ClientType(
 
         /// Measures the time elapsed between sending a request (in `raw_request`) and receiving the
         /// corresponding reply (in `on_reply`).
-        request_completion_timer: std.time.Timer,
+        request_completion_timer: vsr.time.Timer,
 
         /// The maximum body size for `command=request` messages.
         /// Set by the `register`'s reply.
@@ -127,12 +127,12 @@ pub fn ClientType(
 
         pub fn init(
             allocator: mem.Allocator,
+            time: Time,
+            message_pool: *MessagePool,
             options: struct {
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
-                time: Time,
-                message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
                 /// When eviction_callback is null, the client will panic on eviction.
                 ///
@@ -150,7 +150,7 @@ pub fn ClientType(
             var message_bus = try MessageBus.init(
                 allocator,
                 .{ .client = options.id },
-                options.message_pool,
+                message_pool,
                 Client.on_messages,
                 options.message_bus_options,
             );
@@ -158,11 +158,11 @@ pub fn ClientType(
 
             var self = Client{
                 .message_bus = message_bus,
-                .time = options.time,
+                .time = time,
                 .id = options.id,
                 .cluster = options.cluster,
                 .replica_count = options.replica_count,
-                .request_completion_timer = try std.time.Timer.start(),
+                .request_completion_timer = .init(time),
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = options.id,
@@ -570,18 +570,15 @@ pub fn ClientType(
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.operation == inflight_vsr_operation);
 
-            const request_completion_time_ms = @divFloor(
-                self.request_completion_timer.read(),
-                std.time.ns_per_ms,
-            );
-            if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
+            const request_completion_duration = self.request_completion_timer.read();
+            if (request_completion_duration.to_ms() > constants.client_request_completion_warn_ms) {
                 log.warn("{}: on_reply: slow request, request={} op={} size={} {s} time={}ms", .{
                     self.id,
                     inflight.message.header.request,
                     reply.header.op,
                     inflight.message.header.size,
                     inflight.message.header.operation.tag_name(StateMachine),
-                    request_completion_time_ms,
+                    request_completion_duration.to_ms(),
                 });
             }
 

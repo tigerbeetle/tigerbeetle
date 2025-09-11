@@ -83,15 +83,20 @@ pub const TestContext = struct {
         ctx.grid = try fixtures.init_grid(allocator, &ctx.trace, &ctx.superblock, .{});
         errdefer ctx.grid.deinit(allocator);
 
-        try ctx.state_machine.init(allocator, &ctx.grid, .{
-            .batch_size_limit = message_body_size_max,
-            .lsm_forest_compaction_block_count = StateMachine.Forest.Options
-                .compaction_block_count_min,
-            .lsm_forest_node_count = 1,
-            .cache_entries_accounts = 0,
-            .cache_entries_transfers = 0,
-            .cache_entries_transfers_pending = 0,
-        });
+        try ctx.state_machine.init(
+            allocator,
+            ctx.time_sim.time(),
+            &ctx.grid,
+            .{
+                .batch_size_limit = message_body_size_max,
+                .lsm_forest_compaction_block_count = StateMachine.Forest.Options
+                    .compaction_block_count_min,
+                .lsm_forest_node_count = 1,
+                .cache_entries_accounts = 0,
+                .cache_entries_transfers = 0,
+                .cache_entries_transfers_pending = 0,
+            },
+        );
         errdefer ctx.state_machine.deinit(allocator);
         // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state
         // machine needs a `pulse` to scan for pending transfers and correctly determine when to

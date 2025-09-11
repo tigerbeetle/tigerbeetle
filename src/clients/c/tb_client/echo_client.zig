@@ -33,12 +33,12 @@ pub fn EchoClientType(
 
         pub fn init(
             allocator: mem.Allocator,
+            time: Time,
+            message_pool: *MessagePool,
             options: struct {
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
-                time: Time,
-                message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
                 eviction_callback: ?*const fn (
                     client: *EchoClient,
@@ -53,8 +53,8 @@ pub fn EchoClientType(
             return EchoClient{
                 .id = options.id,
                 .cluster = options.cluster,
-                .message_pool = options.message_pool,
-                .time = options.time,
+                .message_pool = message_pool,
+                .time = time,
             };
         }
 
