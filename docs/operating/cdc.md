@@ -53,7 +53,8 @@ Here what the arguments mean:
   Optional. Defaults to `1000` ms if omitted.
 
 * `--requests-per-second-limit` throttles the maximum number of requests per second made
-  to TigerBeetle.<br>Must be greater than zero.<br>
+  to TigerBeetle.<br>
+  Must be greater than zero.<br>
   Optional. No limit if omitted.
 
 * `--timestamp-last` overrides the last published timestamp, resuming from this point.<br>
