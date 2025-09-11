@@ -188,39 +188,28 @@ test "Time monotonic smoke" {
 /// Equivalent to `std.time.Timer`,
 /// but using the `vsr.Time` interface as the source of time.
 pub const Timer = struct {
-    started: Instant,
-    previous: Instant,
     time: Time,
+    started: Instant,
 
     pub fn init(time: Time) Timer {
-        const current = time.monotonic_instant();
         return .{
-            .started = current,
-            .previous = current,
             .time = time,
+            .started = time.monotonic_instant(),
         };
     }
 
-    /// Reads the timer value since start or the last reset in nanoseconds.
+    /// Reads the timer value since start or the last reset.
     pub fn read(self: *Timer) stdx.Duration {
-        const current = self.sample();
+        const current = self.time.monotonic_instant();
+        assert(current.ns >= self.started.ns);
         return current.duration_since(self.started);
     }
 
-    /// Resets the timer value to 0/now.
+    /// Resets the timer.
     pub fn reset(self: *Timer) void {
-        const current = self.sample();
-        self.started = current;
-    }
-
-    /// Returns an Instant sampled at the callsite that is
-    /// guaranteed to be monotonic with respect to the timer's starting point.
-    fn sample(self: *Timer) Instant {
         const current = self.time.monotonic_instant();
-        if (current.ns > self.previous.ns) {
-            self.previous = current;
-        }
-        return self.previous;
+        assert(current.ns >= self.started.ns);
+        self.started = current;
     }
 };
 
