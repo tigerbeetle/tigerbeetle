@@ -91,6 +91,7 @@ pub const TestContext = struct {
             .cache_entries_accounts = 0,
             .cache_entries_transfers = 0,
             .cache_entries_transfers_pending = 0,
+            .log_trace = true,
         });
         errdefer ctx.state_machine.deinit(allocator);
         // Usually, `pulse_next_timestamp` starts in an unknown state, signaling that the state

@@ -144,7 +144,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
     );
 
     const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --validate --checksum-performance",
+        "./tigerbeetle benchmark --validate --checksum-performance --log-debug",
         .{},
     );
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
