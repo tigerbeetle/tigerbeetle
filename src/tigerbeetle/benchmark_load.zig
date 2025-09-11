@@ -93,8 +93,8 @@ pub fn main(
     for (0..cli_args.clients) |i| {
         clients.push(try Client.init(
             allocator,
-            &message_pools.slice()[i],
             time,
+            &message_pools.slice()[i],
             .{
                 .id = stdx.unique_u128(),
                 .cluster = cluster_id,

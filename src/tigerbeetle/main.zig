@@ -150,8 +150,8 @@ pub fn main() !void {
 
             switch (command_storage) {
                 .format => try command_format(gpa, &storage, args),
-                .start => try command_start(gpa, &io, &tracer, &storage, time, args),
-                .recover => try command_reformat(gpa, &io, &storage, time, args),
+                .start => try command_start(gpa, &io, time, &tracer, &storage, args),
+                .recover => try command_reformat(gpa, &io, time, &storage, args),
                 else => comptime unreachable,
             }
         },
@@ -234,9 +234,9 @@ fn command_format(
 fn command_start(
     base_allocator: mem.Allocator,
     io: *IO,
+    time: vsr.time.Time,
     tracer: *Tracer,
     storage: *Storage,
-    time: vsr.time.Time,
     args: *const cli.Command.Start,
 ) !void {
     var counting_allocator = vsr.CountingAllocator.init(base_allocator);
@@ -340,10 +340,9 @@ fn command_start(
     var replica: Replica = undefined;
     replica.open(
         gpa,
+        time,
         storage,
         &message_pool,
-        time,
-
         .{
             .node_count = args.addresses.count_as(u8),
             .release = config.process.release,
@@ -498,8 +497,8 @@ fn command_start(
 fn command_reformat(
     gpa: mem.Allocator,
     io: *IO,
-    storage: *Storage,
     time: vsr.time.Time,
+    storage: *Storage,
     args: *const cli.Command.Recover,
 ) !void {
     var message_pool = try MessagePool.init(gpa, .client);
@@ -507,8 +506,8 @@ fn command_reformat(
 
     var client = try Client.init(
         gpa,
-        &message_pool,
         time,
+        &message_pool,
         .{
             .id = stdx.unique_u128(),
             .cluster = args.cluster,

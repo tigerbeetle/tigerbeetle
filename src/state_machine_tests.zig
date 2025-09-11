@@ -85,8 +85,8 @@ pub const TestContext = struct {
 
         try ctx.state_machine.init(
             allocator,
-            &ctx.grid,
             ctx.time_sim.time(),
+            &ctx.grid,
             .{
                 .batch_size_limit = message_body_size_max,
                 .lsm_forest_compaction_block_count = StateMachine.Forest.Options

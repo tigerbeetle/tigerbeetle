@@ -33,8 +33,8 @@ pub fn EchoClientType(
 
         pub fn init(
             allocator: mem.Allocator,
-            message_pool: *MessagePool,
             time: Time,
+            message_pool: *MessagePool,
             options: struct {
                 id: u128,
                 cluster: u128,

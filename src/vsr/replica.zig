@@ -643,9 +643,9 @@ pub fn ReplicaType(
         pub fn open(
             self: *Replica,
             parent_allocator: std.mem.Allocator,
+            time: Time,
             storage: *Storage,
             message_pool: *MessagePool,
-            time: Time,
             options: OpenOptions,
         ) !void {
             assert(options.storage_size_limit <= constants.storage_size_limit_max);
@@ -703,9 +703,9 @@ pub fn ReplicaType(
             // Initialize the replica:
             try self.init(
                 allocator,
+                time,
                 storage,
                 message_pool,
-                time,
                 .{
                     .cluster = self.superblock.working.cluster,
                     .replica_index = replica,
@@ -1068,9 +1068,9 @@ pub fn ReplicaType(
         fn init(
             self: *Replica,
             allocator: Allocator,
+            time: Time,
             storage: *Storage,
             message_pool: *MessagePool,
-            time: Time,
             options: Options,
         ) !void {
             assert(options.nonce != 0);
@@ -1255,8 +1255,8 @@ pub fn ReplicaType(
 
             try self.state_machine.init(
                 allocator,
-                &self.grid,
                 time,
+                &self.grid,
                 options.state_machine_options,
             );
             errdefer self.state_machine.deinit(allocator);

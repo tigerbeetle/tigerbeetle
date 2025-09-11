@@ -328,8 +328,8 @@ pub fn AOFType(comptime IO: type) type {
 
                 client.* = try Client.init(
                     allocator,
-                    message_pool,
                     time,
+                    message_pool,
                     .{
                         .id = stdx.unique_u128(),
                         .cluster = 0,

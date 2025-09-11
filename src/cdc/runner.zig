@@ -237,8 +237,8 @@ pub const Runner = struct {
 
         self.vsr_client = try Client.init(
             allocator,
-            &self.message_pool,
             time,
+            &self.message_pool,
             .{
                 .id = stdx.unique_u128(),
                 .cluster = options.cluster_id,
@@ -950,6 +950,7 @@ pub const RateLimit = struct {
     } {
         assert(self.options.limit > 0);
         assert(self.options.period.ns > 0);
+        assert(self.count <= self.options.limit);
 
         if (self.count == 0) {
             self.timer.reset();
@@ -957,7 +958,6 @@ pub const RateLimit = struct {
             return .ok;
         }
         assert(self.count > 0);
-        assert(self.count <= self.options.limit);
 
         const duration = self.timer.read();
         maybe(duration.ns == 0);

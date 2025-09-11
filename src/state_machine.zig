@@ -1011,8 +1011,8 @@ pub fn StateMachineType(
         pub fn init(
             self: *StateMachine,
             allocator: mem.Allocator,
-            grid: *Grid,
             time: vsr.time.Time,
+            grid: *Grid,
             options: Options,
         ) !void {
             assert(options.batch_size_limit <= config.message_body_size_max);

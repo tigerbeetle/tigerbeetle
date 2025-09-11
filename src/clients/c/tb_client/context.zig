@@ -294,8 +294,8 @@ pub fn ContextType(
             });
             context.client = Client.init(
                 allocator,
-                &context.message_pool,
                 time,
+                &context.message_pool,
                 .{
                     .id = context.client_id,
                     .cluster = cluster_id,

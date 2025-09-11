@@ -324,8 +324,8 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                 errdefer for (clients[0..i]) |*c| c.*.?.deinit(allocator);
                 client.* = try Client.init(
                     allocator,
-                    &client_pools[i],
                     client_times[i].time(),
+                    &client_pools[i],
                     .{
                         .id = client_id_permutation.encode(i + client_id_permutation_shift),
                         .cluster = options.cluster.cluster_id,
@@ -729,9 +729,9 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             var replica = &cluster.replicas[replica_index];
             try replica.open(
                 cluster.allocator,
+                cluster.replica_times[replica_index].time(),
                 &cluster.storages[replica_index],
                 &cluster.replica_pools[replica_index],
-                cluster.replica_times[replica_index].time(),
                 .{
                     .node_count = cluster.options.replica_count + cluster.options.standby_count,
                     .pipeline_requests_limit = cluster.replica_pipeline_requests_limit,

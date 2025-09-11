@@ -718,8 +718,8 @@ const VSRContext = struct {
         const address = try std.net.Address.parseIp4("127.0.0.1", port);
         self.client = try Client.init(
             gpa,
-            &self.message_pool,
             time,
+            &self.message_pool,
             .{
                 .id = stdx.unique_u128(),
                 .cluster = 0,
