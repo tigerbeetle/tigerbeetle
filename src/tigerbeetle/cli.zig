@@ -1175,7 +1175,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         if (requests_per_second_limit == 0) {
             vsr.fatal(
                 .cli,
-                "--request-per-second-limit must not be zero.",
+                "--requests-per-second-limit must not be zero.",
                 .{},
             );
         }

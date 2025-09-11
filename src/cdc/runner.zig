@@ -89,7 +89,7 @@ pub const Runner = struct {
         progress_update,
     },
 
-    rate_limit: ?RateLimit,
+    rate_limit: RateLimit,
     metrics: Metrics,
 
     state: union(enum) {
@@ -212,11 +212,11 @@ pub const Runner = struct {
             .amqp_client = undefined,
         };
 
-        self.rate_limit = if (options.requests_per_second_limit) |limit|
-            // The rate limit is expressed in "requests per second":
-            RateLimit.init(time, .{ .limit = limit, .period = .seconds(1) })
-        else
-            null;
+        self.rate_limit = RateLimit.init(time, .{
+            .limit = options.requests_per_second_limit orelse std.math.maxInt(u32),
+            // The rate limit is expressed in "requests per second".
+            .period = .seconds(1),
+        });
 
         self.metrics = .{
             .producer = .{
@@ -638,9 +638,8 @@ pub const Runner = struct {
         assert(self.state.last.producer_timestamp > self.state.last.consumer_timestamp);
         dispatch: switch (self.producer) {
             .idle => unreachable,
-            // Check the configured rate limit, if any.
-            .rate_limit,
-            => switch (if (self.rate_limit) |*rate_limit| rate_limit.attempt() else .ok) {
+            // Check the configured rate limit.
+            .rate_limit => switch (self.rate_limit.attempt()) {
                 .ok => {
                     self.producer = .request;
                     continue :dispatch self.producer;
