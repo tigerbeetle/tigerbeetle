@@ -1271,4 +1271,5 @@ comptime {
     _ = @import("testing/snaptest.zig");
     _ = @import("zipfian.zig");
     _ = @import("unshare.zig");
+    _ = @import("radix.zig");
 }
