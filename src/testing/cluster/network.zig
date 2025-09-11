@@ -345,8 +345,6 @@ pub const Network = struct {
         if (target_bus.buffer.?.has_message()) {
             target_bus.suspended = true;
         }
-
-        target_bus.buffer.?.peer = .unknown;
     }
 
     fn raw_process_to_process(raw: u128) Process {

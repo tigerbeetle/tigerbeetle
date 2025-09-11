@@ -32,10 +32,6 @@ pub const MessageBuffer = struct {
     /// The amount of bytes received from the kernel.
     receive_size: u32 = 0,
 
-    /// Which peer we are receiving from, inferred from the received messages. Set during parsing,
-    /// and used by the message bus to map connections to replicas and clients.
-    peer: vsr.Peer = .unknown,
-
     // An error occurred, and the MessageBus should terminate connection.
     // Can be set by replica to indicate semantic errors, such as wrong cluster.
     invalid: ?InvalidReason = null,
@@ -145,9 +141,8 @@ pub const MessageBuffer = struct {
             vsr.fatal(
                 .unknown_vsr_command,
                 "unknown VSR command, crashing for safety " ++
-                    "(peer={} command={d} protocol={d} replica={d} release={})",
+                    "(command={d} protocol={d} replica={d} release={})",
                 .{
-                    buffer.peer,
                     command_raw,
                     header.protocol,
                     header.replica,
@@ -163,14 +158,6 @@ pub const MessageBuffer = struct {
         assert(@sizeOf(Header) <= header.size and header.size <= constants.message_size_max);
 
         buffer.advance_size += @sizeOf(Header);
-
-        // To avoid dropping outgoing messages, set the peer as soon as we can,
-        // and not when we receive a full message.
-        switch (vsr.Peer.transition(buffer.peer, header.peer_type())) {
-            .reject => buffer.invalidate(.misdirected),
-            .update => buffer.peer = header.peer_type(),
-            .retain => {},
-        }
     }
 
     fn advance_body(buffer: *MessageBuffer) void {
