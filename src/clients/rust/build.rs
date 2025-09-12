@@ -68,12 +68,16 @@ fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
 
         Ok(())
     } else {
-        todo!()
+        // This is probably a published tigerbeetle crate outside of the
+        // tigerbeetle source tree. Sanity check that we have the pre-built
+        // assets.
+        assert!(Path::new(&format!("{manifest_dir}/assets/tb_client.h")).try_exists()?);
+        Ok(())
     }
 }
 
 fn is_build_in_tree(manifest_dir: &str) -> anyhow::Result<bool> {
-    Ok(fs::exists(format!("{manifest_dir}/../../../build.zig"))?)
+    Ok(Path::new(&format!("{manifest_dir}/../../../build.zig")).try_exists()?)
 }
 
 fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
@@ -88,7 +92,7 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
         todo!()
     };
 
-    if !fs::exists(&zig_compiler)? {
+    if !Path::new(&zig_compiler).try_exists()? {
         println!("cargo:warning=No zig compiler found at {zig_compiler}.");
         println!("cargo:warning=You may need to run zig/download.ps1.");
         panic!("No zig compiler found.");
