@@ -3,11 +3,22 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
-## TigerBeetle (unreleased)
+## TigerBeetle 0.16.58
 
-Released: 2025-09-05
+Released: 2025-09-12
 
 ### Safety And Performance
+
+- [#3248](https://github.com/tigerbeetle/tigerbeetle/pull/3248)
+
+  Fix a bug where grid.cancel was erroneously being invoked during commit_stage=checkpoint_durable.
+
+- [#3245](https://github.com/tigerbeetle/tigerbeetle/pull/3245)
+
+  Remove peer type from MessageBuffer, maintaining it only at MessageBus level.
+
+  This solves a bug introduced by [#3206](https://github.com/tigerbeetle/tigerbeetle/pull/3206),
+  due to divergent peer state between MessageBus and MessageBuffer.
 
 - [#3226](https://github.com/tigerbeetle/tigerbeetle/pull/3226),
   [#3230](https://github.com/tigerbeetle/tigerbeetle/pull/3230),
@@ -26,6 +37,13 @@ Released: 2025-09-05
 
 ### Features
 
+- [#3253](https://github.com/tigerbeetle/tigerbeetle/pull/3253)
+
+  Introduce `--requests-per-second-limit` to throttle CDC requests to TigerBeetle.
+
+  Usage for this option is orthogonal to `--idle-interval-ms` and `--event-count-max`, allowing
+  fine-tuning for low latency without overflowing the AMQP target queue.
+
 - [#3206](https://github.com/tigerbeetle/tigerbeetle/pull/3206)
 
   In order to avoid bimodality if a replica is down (eg, a client sends a request, doesn't hear
@@ -36,6 +54,10 @@ Released: 2025-09-05
   partitioned from the primary, but still remain available.
 
 ### Internals
+
+- [#3251](https://github.com/tigerbeetle/tigerbeetle/pull/3251)
+
+  Mark grid cache blocks as MADV_DONTDUMP, making core dump size tractable even with large caches.
 
 - [#3227](https://github.com/tigerbeetle/tigerbeetle/pull/3227),
   [#3231](https://github.com/tigerbeetle/tigerbeetle/pull/3231),
