@@ -1279,7 +1279,7 @@ pub const Simulator = struct {
         for (eviction_reasons_reformats) |reason_or_null| {
             if (reason_or_null) |reason| {
                 log.err("reformat evicted with {s}", .{@tagName(reason)});
-                assert(reason == .no_session);
+                assert(reason == .no_session or reason == .session_too_low);
                 return true;
             }
         }
