@@ -12,7 +12,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const stdx = @import("stdx.zig");
 
-/// Stable, ascending radix sort for unsigned intergers. Sorted result will be in `values`.
+/// Stable, ascending radix sort for unsigned integers. The sorted result will be in `values`.
 pub fn sort(
     comptime Key: type,
     comptime Value: type,
@@ -27,25 +27,29 @@ pub fn sort(
 
     assert(stdx.disjoint_slices(Value, Value, values, values_scratch));
     assert(values.len == values_scratch.len);
-    assert(values.len <= std.math.maxInt(u32)); // At the moment we use u32 for the histogram.
+    assert(values.len <= std.math.maxInt(u32));
 
     const count: u32 = @intCast(values.len);
 
     if (count == 0) return;
-    // TODO: insertion sort fallback.
+    if (count <= 32) {
+        return std.sort.insertion(Value, values, {}, struct {
+            fn lessThan(_: void, a: Value, b: Value) bool {
+                return key_from_value(&a) < key_from_value(&b);
+            }
+        }.lessThan);
+    }
 
-    // Heuristic: use wider digits for larger vlaue sizes to reduce the number of passes.
+    // Heuristic: use more bits for larger value sizes to reduce the number of passes.
     const radix_bits_heuristic = if (@sizeOf(Value) >= 128) 11 else 8;
-    //const radix_bits_heuristic = 8;
-    //const radix_bits_heuristic = if (@sizeOf(Value) >= 128 or @sizeOf(Key) >= 32) 11 else 8;
     const radix_bits = @min(@bitSizeOf(Key), radix_bits_heuristic);
+    const radix_passes = stdx.div_ceil(@bitSizeOf(Key), radix_bits);
     const radix_partitions = 1 << radix_bits;
     const radix_mask = radix_partitions - 1;
-    const radix_passes = stdx.div_ceil(@bitSizeOf(Key), radix_bits);
 
-    const BitsKey = std.math.Log2Int(Key);
+    const BitsKey = std.math.Log2Int(Key); // Used to shift the key for each pass.
 
-    // Create the histograms per pass in a single pass over `values`.
+    // Create histograms per radix pass in a single iteration over `values`.
     const histograms = blk: {
         var histogram: [radix_passes][radix_partitions]u32 align(64) = @splat(@splat(0));
         for (values) |*value| {
@@ -62,32 +66,26 @@ pub fn sort(
     var source: []Value = values;
     var target: []Value = values_scratch;
     var target_offsets: [radix_partitions]u32 = @splat(0);
-    var partition_passes: u32 = 0;
 
-    // This hot loop is unrolled as it gives ~10% performance improvement.
     inline for (0..radix_passes) |pass| {
-        const pass_bit_offset: BitsKey = @intCast(pass * radix_bits);
-        // Determine if a pass is trivial if exactly one bucket has all `count` elements.
-        const pass_trivial: bool = trivial: {
+        // Determine if a pass is trivial if exactly one partition has all `count` elements.
+        const pass_trivial: bool = blk: {
             for (histograms[pass]) |partition_count| {
-                if (partition_count == 0) continue;
-                break :trivial partition_count == count;
+                if (partition_count == count) break :blk true;
             }
-            unreachable;
+            break :blk false;
         };
 
-        // Skip trival passes.
         if (!pass_trivial) {
-            partition_passes += 1;
-
-            // Build prefix sums to determin the partition target offsets.
+            // Build prefix sums.
             var next_offset: u32 = 0;
             for (0..radix_partitions) |partition_id| {
                 target_offsets[partition_id] = next_offset;
                 next_offset += histograms[pass][partition_id];
             }
 
-            // Partition pass.
+            // Partitioning pass.
+            const pass_bit_offset: BitsKey = @intCast(pass * radix_bits);
             for (source) |*value| {
                 const key: Key = key_from_value(value);
                 const partition_id: u32 = @intCast((key >> pass_bit_offset) & radix_mask);
@@ -99,29 +97,19 @@ pub fn sort(
         }
     }
 
-    //std.debug.print("partition_passes {} radix bits {} key {} bits value {} bytes \n", .{
-    //partition_passes,
-    //radix_bits,
-    //@bitSizeOf(Key),
-    //@sizeOf(Value),
-    //});
-    // Copy the values back in the input buffer `values`.
-    if (partition_passes % 2 != 0) {
+    // Copy the values back into the input buffer `values`.
+    if (values.ptr != source.ptr) {
         stdx.copy_disjoint(.exact, Value, values, values_scratch);
     }
 }
 
 const ratio = stdx.PRNG.ratio;
 
-// TODO: test more of the keys (in particular edge case).
-//       e.g. large keys
-//       what if we sort u6?
-
 pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
     return struct {
         const Value = @This();
 
-        x: Key, // TODO: rename to key.
+        x: Key,
         y: u32, // y ensures that values are distinct for the purpose of checking stability.
         padding: [value_length]u8 = @splat(0),
 
@@ -129,7 +117,6 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
             return value.x;
         }
 
-        // Those functions are only required for the comparision based helpers.
         fn compare_x_ascending(_: void, a: Value, b: Value) bool {
             return a.x < b.x;
         }
@@ -179,17 +166,23 @@ test "radix_sort_stable" {
 
                 {
                     // Set up `values`.
-
                     for (values) |*value| {
                         value.* = .{
-                            .x = prng.int_inclusive(Key, @min(std.math.maxInt(Key), values_count * 2 - 1)),
+                            .x = prng.int_inclusive(Key, @min(
+                                std.math.maxInt(Key),
+                                values_count * 2 - 1,
+                            )),
                             .y = undefined,
                         };
                     }
 
-                    // Sort algorithms often optimize the case of already-sorted (or already-reverse-sorted)
-                    // sub-arrays.
-                    const partitions_count = prng.range_inclusive(u32, 1, @max(values_count, 64) - 1);
+                    // Sort algorithms often optimize the case of already-sorted
+                    // (or already-reverse-sorted) sub-arrays.
+                    const partitions_count = prng.range_inclusive(
+                        u32,
+                        1,
+                        @max(values_count, 64) - 1,
+                    );
                     // The `partition_reverse_probability` is a subset of the partitions sorted by
                     // `partition_sort_percent`.
                     const partition_sort_probability = ratio(prng.int_inclusive(u8, 100), 100);
@@ -202,16 +195,30 @@ test "radix_sort_stable" {
                             if (partitions_remaining == 1) {
                                 break :size values_count - partition_offset;
                             } else {
-                                break :size prng.range_inclusive(u32, 1, values_count - partition_offset);
+                                break :size prng.range_inclusive(
+                                    u32,
+                                    1,
+                                    values_count - partition_offset,
+                                );
                             }
                         };
 
                         if (prng.chance(partition_sort_probability)) {
                             const partition = values[partition_offset..][0..partition_size];
                             if (prng.chance(partition_reverse_probability)) {
-                                std.mem.sortUnstable(Value, partition, {}, Value.compare_x_descending);
+                                std.mem.sortUnstable(
+                                    Value,
+                                    partition,
+                                    {},
+                                    Value.compare_x_descending,
+                                );
                             } else {
-                                std.mem.sortUnstable(Value, partition, {}, Value.compare_x_ascending);
+                                std.mem.sortUnstable(
+                                    Value,
+                                    partition,
+                                    {},
+                                    Value.compare_x_ascending,
+                                );
                             }
                         }
 
@@ -237,7 +244,6 @@ test "radix_sort_stable" {
                     }
                 }
 
-                //std.mem.sort(Value, values, {}, Value.compare_x_ascending);
                 sort(Key, Value, Value.key_from_value, values, values_scratch);
 
                 for (values, values_expected) |value, value_expected| {
