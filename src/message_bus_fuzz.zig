@@ -189,7 +189,6 @@ const IO = struct {
         backlog: std.ArrayListUnmanaged(*Completion) = .empty,
     };
 
-    // FIXME assert only one send in progress at a time
     const SocketConnection = struct {
         shutdown_recv: bool = false,
         shutdown_send: bool = false,
@@ -197,6 +196,9 @@ const IO = struct {
         remote: ?socket_t,
         sending: std.ArrayListUnmanaged(u8) = .empty,
         sending_offset: u32 = 0,
+        /// There is at most one send() and at most one recv() pending per socket.
+        pending_send: bool = false,
+        pending_recv: bool = false,
     };
 
     const Event = struct {
@@ -331,7 +333,9 @@ const IO = struct {
 
                 const sender = io.connections.getPtr(operation.socket).?;
                 assert(!sender.closed);
+                assert(sender.pending_send);
 
+                sender.pending_send = false;
                 if (sender.shutdown_send) {
                     const result: SendError!usize = error.BrokenPipe;
                     completion.callback(completion.context, completion, &result);
@@ -357,6 +361,8 @@ const IO = struct {
             .recv => |operation| {
                 const receiver = io.connections.getPtr(operation.socket).?;
                 assert(!receiver.closed);
+                assert(receiver.pending_recv);
+
                 if (receiver.shutdown_recv) {
                     const result: RecvError!usize = 0;
                     completion.callback(completion.context, completion, &result);
@@ -370,6 +376,7 @@ const IO = struct {
                 if (sender.sending_offset == sender.sending.items.len) {
                     if (sender.shutdown_send) {
                         receiver.shutdown_recv = true;
+                        receiver.pending_recv = false;
                         // Connection was half-closed, and we have received all the buffered data,
                         // so now it can close.
                         const result: RecvError!usize = 0;
@@ -397,6 +404,7 @@ const IO = struct {
                         sender.sending.items[sender.sending_offset..][0..recv_size],
                     );
                     sender.sending_offset += @intCast(recv_size);
+                    receiver.pending_recv = false;
 
                     const result: RecvError!usize = recv_size;
                     completion.callback(completion.context, completion, &result);
@@ -519,6 +527,10 @@ const IO = struct {
         socket: socket_t,
         buffer: []u8,
     ) void {
+        const connection = io.connections.getPtr(socket).?;
+        assert(!connection.pending_recv);
+        connection.pending_recv = true;
+
         completion.* = .{
             .context = context,
             .callback = erase_types(Context, RecvError!usize, callback),
@@ -540,6 +552,10 @@ const IO = struct {
         socket: socket_t,
         buffer: []const u8,
     ) void {
+        const connection = io.connections.getPtr(socket).?;
+        assert(!connection.pending_send);
+        connection.pending_send = true;
+
         completion.* = .{
             .context = context,
             .callback = erase_types(Context, SendError!usize, callback),
@@ -552,6 +568,7 @@ const IO = struct {
         const sender = io.connections.getPtr(socket).?;
         assert(!sender.closed);
         assert(!sender.shutdown_send);
+        assert(!sender.pending_send);
 
         if (!io.prng.chance(io.options.send_now_probability)) return null;
 
