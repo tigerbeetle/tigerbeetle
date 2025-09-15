@@ -20,6 +20,7 @@ const maybe = stdx.maybe;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
+    pub const ListenOptions = common.ListenOptions;
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
@@ -1397,7 +1398,7 @@ pub const IO = struct {
         _: *IO,
         fd: socket_t,
         address: std.net.Address,
-        options: common.ListenOptions,
+        options: ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
     }
