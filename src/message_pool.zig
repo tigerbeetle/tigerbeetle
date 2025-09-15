@@ -57,12 +57,12 @@ pub const Options = union(vsr.ProcessType) {
                 // -1 since we never connect to ourself.
                 const connections_max = replica.members_count + pipeline_limit - 1;
 
-                sum += @intCast(constants.journal_iops_read_max); // Journal reads
-                sum += @intCast(constants.journal_iops_write_max); // Journal writes
-                sum += @intCast(constants.client_replies_iops_read_max); // Client-reply reads
-                sum += @intCast(constants.client_replies_iops_write_max); // Client-reply writes
+                sum += constants.journal_iops_read_max; // Journal reads
+                sum += constants.journal_iops_write_max; // Journal writes
+                sum += constants.client_replies_iops_read_max; // Client-reply reads
+                sum += constants.client_replies_iops_write_max; // Client-reply writes
                 // Replica.grid_reads (Replica.BlockRead)
-                sum += @intCast(constants.grid_repair_reads_max);
+                sum += constants.grid_repair_reads_max;
                 sum += 1; // Replica.loopback_queue
                 sum += pipeline_limit; // Replica.Pipeline{Queue|Cache}
                 sum += 1; // Replica.commit_prepare
