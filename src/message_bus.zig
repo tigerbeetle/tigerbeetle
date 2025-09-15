@@ -10,16 +10,15 @@ const vsr = @import("vsr.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const RingBufferType = stdx.RingBufferType;
-const IO = @import("io.zig").IO;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const QueueType = @import("./queue.zig").QueueType;
 
-pub const MessageBusReplica = MessageBusType(.replica);
-pub const MessageBusClient = MessageBusType(.client);
+pub const MessageBusReplica = MessageBusType(@import("io.zig").IO, .replica);
+pub const MessageBusClient = MessageBusType(@import("io.zig").IO, .client);
 
-fn MessageBusType(comptime process_type: vsr.ProcessType) type {
+pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType) type {
     const SendQueue = RingBufferType(*Message, .{
         .array = switch (process_type) {
             .replica => constants.connection_send_queue_max_replica,
