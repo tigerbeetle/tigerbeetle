@@ -14,6 +14,7 @@ const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
+    pub const ListenOptions = common.ListenOptions;
 
     iocp: os.windows.HANDLE,
     time_os: TimeOS = .{},
@@ -1156,7 +1157,7 @@ pub const IO = struct {
         _: *IO,
         fd: socket_t,
         address: std.net.Address,
-        options: common.ListenOptions,
+        options: ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
     }
