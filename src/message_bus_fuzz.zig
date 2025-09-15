@@ -53,6 +53,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .send_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
+        .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
     });
     defer io.deinit();
 
@@ -177,6 +178,7 @@ const IO = struct {
         seed: u64 = 0,
         recv_partial_probability: Ratio,
         send_partial_probability: Ratio,
+        send_corrupt_probability: Ratio,
     };
 
     const SocketServer = struct {
@@ -333,7 +335,17 @@ const IO = struct {
                     const result: SendError!usize = error.BrokenPipe;
                     completion.callback(completion.context, completion, &result);
                 } else {
-                    try sender.sending.appendSlice(gpa, operation.buffer[0..send_size]);
+                    const send_buffer = operation.buffer[0..send_size];
+                    try sender.sending.appendSlice(gpa, send_buffer);
+
+                    if (send_buffer.len > 0) {
+                        if (io.prng.chance(io.options.send_corrupt_probability)) {
+                            const corrupt_byte = io.prng.index(send_buffer);
+                            const corrupt_bit = io.prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
+                            sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
+                                @as(u8, 1) << corrupt_bit;
+                        }
+                    }
 
                     const result: SendError!usize = send_size;
                     completion.callback(completion.context, completion, &result);
