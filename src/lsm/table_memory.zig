@@ -78,18 +78,20 @@ pub fn TableMemoryType(comptime Table: type) type {
         const MergeContext = struct {
             streams: [sorted_runs_max][]const Value,
             streams_count: u32,
-            origin: [sorted_runs_max]RunOrigin,
+            stream_origins: [sorted_runs_max]RunOrigin,
 
             fn stream_peek(
                 context: *const MergeContext,
                 stream_index: u32,
             ) error{ Empty, Drained }!Key {
+                assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
                 if (stream.len == 0) return error.Empty;
                 return key_from_value(&stream[0]);
             }
 
             fn stream_pop(context: *MergeContext, stream_index: u32) Value {
+                assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
                 context.streams[stream_index] = stream[1..];
                 return stream[0];
@@ -98,7 +100,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Prefer immutable over mutable on ties; otherwise stable by index.
             // This preserves the correct order for deduplication and annihilation.
             fn stream_precedence(context: *const MergeContext, a: u32, b: u32) bool {
-                if (context.origin[a] != context.origin[b]) return context.origin[a] == .immutable;
+                assert(a < context.streams_count);
+                assert(b < context.streams_count);
+                if (context.stream_origins[a] != context.stream_origins[b])
+                    return context.stream_origins[a] == .immutable;
                 return a < b;
             }
         };
@@ -140,7 +145,10 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
 
             fn reset(tracker: *SortedRunTracker) void {
-                tracker.runs_count = 0;
+                tracker.* = .{
+                    .runs = undefined,
+                    .runs_count = 0,
+                };
             }
 
             fn count(tracker: *const SortedRunTracker) u32 {
@@ -150,21 +158,16 @@ pub fn TableMemoryType(comptime Table: type) type {
             fn merge_context(tracker: *const SortedRunTracker, values: []const Value) MergeContext {
                 var context = MergeContext{
                     .streams = undefined,
-                    .streams_count = 0,
-                    .origin = undefined,
+                    .streams_count = undefined,
+                    .stream_origins = undefined,
                 };
 
                 for (tracker.runs[0..tracker.count()], 0..) |run, i| {
                     context.streams[i] = values[run.min..run.max];
-                    context.origin[i] = run.origin;
+                    context.stream_origins[i] = run.origin;
                 }
                 context.streams_count = tracker.count();
                 return context;
-            }
-
-            fn last_ref(tracker: *SortedRunTracker) ?*SortedRun {
-                if (tracker.count() == 0) return null;
-                return &tracker.runs[tracker.count() - 1];
             }
 
             fn last(tracker: *const SortedRunTracker) ?*const SortedRun {
@@ -172,18 +175,19 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return &tracker.runs[tracker.count() - 1];
             }
 
-            fn invariant(tracker: *const SortedRunTracker, table_count: u32) void {
-                if (tracker.count() == 0) return;
+            fn assert_invariants(tracker: *const SortedRunTracker, table_count: u32) void {
+                const runs_count = tracker.count();
+
+                if (runs_count == 0) return;
 
                 assert(tracker.runs[0].min == 0);
+                assert(tracker.runs[runs_count - 1].max == table_count);
 
-                const runs_count = tracker.count();
                 for (tracker.runs[0 .. runs_count - 1], tracker.runs[1..runs_count]) |a, b| {
                     assert(a.min < b.min); // Ordered and we ignore empty runs.
                     assert(a.max == b.min); // No gaps.
                 }
 
-                assert(tracker.runs[runs_count - 1].max == table_count);
                 var immutable_runs: u1 = 0;
                 for (tracker.runs[0..runs_count]) |run| {
                     immutable_runs += @intFromBool(run.origin == .immutable);
@@ -208,7 +212,7 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Streamed equivalent of `deduplicate`.
             pub fn push(self: *DedupSink, value: Value) void {
                 const pending = self.pending orelse {
-                    // Starting a new run with `v`.
+                    // Starting a new run with a pending `value`.
                     self.pending = value;
                     return;
                 };
@@ -333,13 +337,14 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(table.mutability == .mutable);
             assert(table.count() < table.values.len);
 
-            if (table.value_context.run_tracker.last_ref()) |last_run| {
-                if (last_run.max == table.count()) {
-                    const expand: bool = table.count() == 0 or
-                        key_from_value(&table.values[table.count() - 1]) <
-                            key_from_value(value);
-                    last_run.max += @intFromBool(expand);
-                }
+            const run_count = table.value_context.run_tracker.count();
+            if (run_count > 0 and
+                table.value_context.run_tracker.runs[run_count - 1].max == table.count())
+            {
+                const expand: bool = table.count() == 0 or
+                    key_from_value(&table.values[table.count() - 1]) <
+                        key_from_value(value);
+                table.value_context.run_tracker.runs[run_count - 1].max += @intFromBool(expand);
             }
 
             table.values[table.count()] = value.*;
@@ -366,6 +371,8 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         fn finalize(table_immutable: *TableMemory, snapshot_min: u64) void {
+            assert(table_immutable.mutability == .immutable);
+
             table_immutable.mutability = .{ .immutable = .{
                 .flushed = table_immutable.count() == 0,
                 .snapshot_min = snapshot_min,
@@ -391,38 +398,33 @@ pub fn TableMemoryType(comptime Table: type) type {
             defer assert(table_immutable.sorted());
             defer assert(table_mutable.count() == 0);
 
-            table_mutable.value_context.run_tracker.invariant(table_mutable.count());
+            table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
-            // Fast-path: single contiguous sorted run: swap buffers.
             if (table_mutable.sorted()) {
+                // Fast-path: single contiguous sorted run: swap buffers.
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
 
                 table_immutable.value_context.count = table_mutable.count();
-                table_immutable.finalize(snapshot_min);
-                table_mutable.reset();
-                return;
+            } else {
+                var merge_context = table_mutable.value_context
+                    .run_tracker.merge_context(table_mutable.values_used());
+                var merge_iterator = KWayMergeIterator.init(
+                    &merge_context,
+                    @intCast(merge_context.streams_count),
+                    .ascending,
+                );
+
+                // Deduplicate values in streaming fashion.
+                var dedup_sink = DedupSink.init(table_immutable.values);
+                while (merge_iterator.pop() catch unreachable) |value| {
+                    dedup_sink.push(value);
+                }
+                table_immutable.value_context.count = dedup_sink.finish();
             }
-
-            var merge_context = table_mutable.value_context
-                .run_tracker.merge_context(table_mutable.values_used());
-            var merge_iterator = KWayMergeIterator.init(
-                &merge_context,
-                @intCast(merge_context.streams_count),
-                .ascending,
-            );
-
-            // Deduplicate values in streaming fashion.
-            var dedup_sink = DedupSink.init(table_immutable.values);
-            while (merge_iterator.pop() catch unreachable) |value| {
-                dedup_sink.push(value);
-            }
-            table_immutable.value_context.count = dedup_sink.finish();
-
-            table_immutable.finalize(snapshot_min);
-
-            assert(table_immutable.sorted());
 
             table_mutable.reset();
+            table_immutable.finalize(snapshot_min);
+            assert(table_immutable.sorted());
         }
 
         // Absorb the current immutable table into the mutable one,
@@ -462,16 +464,18 @@ pub fn TableMemoryType(comptime Table: type) type {
             });
             table_mutable.value_context.count = tables_combined_count;
 
+            table_immutable.mutability.immutable.absorbed = true;
             table_immutable.compact(table_mutable, snapshot_min);
 
-            assert(table_immutable.value_context.run_tracker.count() == 1);
+            // One fully sorted run or all keys are annihilated.
+            assert(table_immutable.value_context.run_tracker.count() <= 1);
             assert(table_mutable.value_context.run_tracker.count() == 0);
         }
 
         // Fully sort the table if needed. Produces a single run [0..count).
         pub fn sort(table: *TableMemory) void {
             assert(table.mutability == .mutable);
-            defer table.value_context.run_tracker.invariant(table.count());
+            defer table.value_context.run_tracker.assert_invariants(table.count());
 
             if (!table.sorted()) {
                 _ = table.mutable_sort_suffix_from_offset(0);
@@ -501,7 +505,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
         pub fn sort_suffix(table: *TableMemory) void {
             assert(table.mutability == .mutable);
-            defer table.value_context.run_tracker.invariant(table.count());
+            defer table.value_context.run_tracker.assert_invariants(table.count());
 
             if (table.sorted()) return;
 
