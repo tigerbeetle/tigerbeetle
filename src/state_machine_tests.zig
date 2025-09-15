@@ -894,14 +894,14 @@ fn check(test_table: []const u8) !void {
             },
             .commit => |commit_operation| {
                 assert(operation == null or operation.? == switch (commit_operation) {
-                    .deprecated_create_accounts => .create_accounts,
-                    .deprecated_create_transfers => .create_transfers,
-                    .deprecated_lookup_accounts => .lookup_accounts,
-                    .deprecated_lookup_transfers => .lookup_transfers,
-                    .deprecated_get_account_transfers => .get_account_transfers,
-                    .deprecated_get_account_balances => .get_account_balances,
-                    .deprecated_query_accounts => .query_accounts,
-                    .deprecated_query_transfers => .query_transfers,
+                    .deprecated_create_accounts_unbatched => .create_accounts,
+                    .deprecated_create_transfers_unbatched => .create_transfers,
+                    .deprecated_lookup_accounts_unbatched => .lookup_accounts,
+                    .deprecated_lookup_transfers_unbatched => .lookup_transfers,
+                    .deprecated_get_account_transfers_unbatched => .get_account_transfers,
+                    .deprecated_get_account_balances_unbatched => .get_account_balances,
+                    .deprecated_query_accounts_unbatched => .query_accounts,
+                    .deprecated_query_transfers_unbatched => .query_transfers,
                     else => commit_operation,
                 });
                 assert(!context.busy);
@@ -2786,53 +2786,53 @@ test "deprecated operations" {
     try check(
         \\ account A1  0  0  0  0  _  _  _ _ L1 C1   _   _   _ HIST _ _ _ _ ok
         \\ account A2  0  0  0  0  _  _  _ _ L1 C2   _   _   _ _    _ _ _ _ ok
-        \\ commit deprecated_create_accounts
+        \\ commit deprecated_create_accounts_unbatched
         \\
         \\ transfer T1 A1 A2 1   _  _  _  _    _ L1 C1   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ transfer T2 A2 A1 2   _  _  _  _    _ L1 C2   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ transfer T3 A1 A2 3   _  _  _  _    _ L1 C3   _   _   _   _   _   _ _  _ _ _ _ ok
         \\ transfer T4 A1 A2 0   _  _  _  _    _ L2 C4   _   _   _   _   _   _ _  _ _ _ _ transfer_must_have_the_same_ledger_as_accounts
-        \\ commit deprecated_create_transfers
+        \\ commit deprecated_create_transfers_unbatched
         \\
         \\ lookup_account A1 0  4  0  2  _
         \\ lookup_account A2 0  2  0  4  _
-        \\ commit deprecated_lookup_accounts
+        \\ commit deprecated_lookup_accounts_unbatched
         \\
         \\ lookup_transfer T1 exists true
         \\ lookup_transfer T2 exists true
         \\ lookup_transfer T3 exists true
         \\ lookup_transfer T4 exists false
         \\ lookup_transfer -0 exists false
-        \\ commit deprecated_lookup_transfers
+        \\ commit deprecated_lookup_transfers_unbatched
         \\
         \\ get_account_transfers A1 _ _ _ _ _  _ L-0 DR CR  _
         \\ get_account_transfers_result T1
         \\ get_account_transfers_result T2
         \\ get_account_transfers_result T3
-        \\ commit deprecated_get_account_transfers
+        \\ commit deprecated_get_account_transfers_unbatched
         \\
         \\ get_account_balances A1 _ _ _ _  _  _ L-0 DR CR  _
         \\ get_account_balances_result T1 0 1 0 0
         \\ get_account_balances_result T2 0 1 0 2
         \\ get_account_balances_result T3 0 4 0 2
-        \\ commit deprecated_get_account_balances
+        \\ commit deprecated_get_account_balances_unbatched
         \\
         \\ query_accounts U0 U0 U0 L1 C0 _ _ L-0 _
         \\ query_accounts_result A1 0  4  0  2  _
         \\ query_accounts_result A2 0  2  0  4  _
-        \\ commit deprecated_query_accounts
+        \\ commit deprecated_query_accounts_unbatched
         \\
         \\ query_transfers U0 U0 U0 L1 C0 _ _ L-0 _
         \\ query_transfers_result T1
         \\ query_transfers_result T2
         \\ query_transfers_result T3
-        \\ commit deprecated_query_transfers
+        \\ commit deprecated_query_transfers_unbatched
         \\
         // Zero-sized body:
-        \\ commit deprecated_create_accounts
-        \\ commit deprecated_create_transfers
-        \\ commit deprecated_lookup_accounts
-        \\ commit deprecated_lookup_transfers
+        \\ commit deprecated_create_accounts_unbatched
+        \\ commit deprecated_create_transfers_unbatched
+        \\ commit deprecated_lookup_accounts_unbatched
+        \\ commit deprecated_lookup_transfers_unbatched
     );
 }
 
@@ -2856,19 +2856,19 @@ test "StateMachine: batch_elements_max" {
 
     // No multi-batch encode.
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_accounts,
+        .deprecated_create_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_accounts,
+        .deprecated_lookup_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_transfers,
+        .deprecated_create_transfers_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_transfers,
+        .deprecated_lookup_transfers_unbatched,
         message_body_size_max,
     ));
 
