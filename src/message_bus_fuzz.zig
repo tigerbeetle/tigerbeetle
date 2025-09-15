@@ -54,6 +54,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .send_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
+        .send_now_probability = ratio(prng.int_inclusive(u64, 100), 100),
     });
     defer io.deinit();
 
@@ -179,6 +180,7 @@ const IO = struct {
         recv_partial_probability: Ratio,
         send_partial_probability: Ratio,
         send_corrupt_probability: Ratio,
+        send_now_probability: Ratio,
     };
 
     const SocketServer = struct {
@@ -270,7 +272,6 @@ const IO = struct {
         }
     }
 
-    // FIXME inject corruption / data loss
     fn complete(io: *IO, completion: *Completion) !enum { done, retry } {
         const gpa = io.gpa;
         switch (completion.operation) {
@@ -547,13 +548,20 @@ const IO = struct {
         io.enqueue(completion);
     }
 
-    /// Best effort to synchronously transfer bytes to the kernel.
     pub fn send_now(io: *IO, socket: socket_t, buffer: []const u8) ?usize {
-        _ = io;
-        _ = socket;
-        _ = buffer;
-        // FIXME
-        return null;
+        const sender = io.connections.getPtr(socket).?;
+        assert(!sender.closed);
+        assert(!sender.shutdown_send);
+
+        if (!io.prng.chance(io.options.send_now_probability)) return null;
+
+        const send_size = if (io.prng.chance(io.options.send_partial_probability))
+            io.prng.index(buffer)
+        else
+            buffer.len;
+
+        sender.sending.appendSlice(io.gpa, buffer[0..send_size]) catch unreachable;
+        return send_size;
     }
 
     pub fn timeout(
