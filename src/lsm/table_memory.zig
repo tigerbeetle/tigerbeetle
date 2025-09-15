@@ -384,13 +384,12 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable: *TableMemory,
             snapshot_min: u64,
         ) void {
-            defer assert(table_immutable.sorted());
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.sorted());
-
             defer assert(table_immutable.sorted());
+            defer assert(table_mutable.count() == 0);
 
             table_mutable.value_context.run_tracker.invariant(table_mutable.count());
 
@@ -433,22 +432,19 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable: *TableMemory,
             snapshot_min: u64,
         ) void {
-            defer assert(table_immutable.sorted());
             assert(table_immutable.mutability == .immutable);
             maybe(table_immutable.mutability.immutable.absorbed);
             assert(table_immutable.sorted());
             assert(table_mutable.mutability == .mutable);
             maybe(table_mutable.sorted());
+            defer assert(table_immutable.sorted());
 
             const values_count_limit = table_immutable.values.len;
             assert(table_immutable.count() <= values_count_limit);
             assert(table_mutable.count() <= values_count_limit);
             assert(table_immutable.count() + table_mutable.count() <= values_count_limit);
 
-            if (table_mutable.count() == 0) {
-                table_mutable.reset();
-                return;
-            }
+            if (table_mutable.count() == 0) return;
 
             // Copy immutable after the current mutable tail and mark as an immutable run,
             // so the merge prefers its entries on key ties.
