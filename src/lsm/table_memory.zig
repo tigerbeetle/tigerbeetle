@@ -49,7 +49,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         const Mutability = union(enum) {
-            mutable: struct {},
+            mutable,
             immutable: struct {
                 // An empty table has nothing to flush.
                 flushed: bool = true,
@@ -69,7 +69,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             min: u32,
             max: u32, // exclusive.
             origin: RunOrigin, // Where the run originated; affects merge precedence on equal keys.
-
         };
 
         // At most: LSM compactions + one sort() call + one immutable run for `absorb`.
@@ -119,6 +118,10 @@ pub fn TableMemoryType(comptime Table: type) type {
         );
 
         const SortedRunTracker = struct {
+            /// Invariants:
+            /// - Runs are in ascending order.
+            /// - Runs have no gaps between them.
+            /// - There is at most one run with run.origin=.immutable
             runs: [sorted_runs_max]SortedRun,
             runs_count: u8,
 
@@ -183,7 +186,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                 assert(tracker.runs[runs_count - 1].max == table_count);
                 var immutable_runs: u1 = 0;
                 for (tracker.runs[0..runs_count]) |run| {
-                    immutable_runs += if (run.origin == .immutable) 1 else 0;
+                    immutable_runs += @intFromBool(run.origin == .immutable);
                 }
                 assert(immutable_runs == 0 or immutable_runs == 1);
             }
@@ -281,7 +284,7 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .run_tracker = SortedRunTracker.init(),
                 },
                 .mutability = switch (mutability) {
-                    .mutable => .{ .mutable = .{} },
+                    .mutable => .mutable,
                     .immutable => .{ .immutable = .{} },
                 },
                 .name = name,
@@ -301,7 +304,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         pub fn reset(table: *TableMemory) void {
             const mutability: Mutability = switch (table.mutability) {
                 .immutable => .{ .immutable = .{} },
-                .mutable => .{ .mutable = .{} },
+                .mutable => .mutable,
             };
 
             table.value_context.run_tracker.reset();
@@ -391,7 +394,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             table_mutable.value_context.run_tracker.invariant(table_mutable.count());
 
-            // Fast-path: single contiguous sorted run:  swap buffers.
+            // Fast-path: single contiguous sorted run: swap buffers.
             if (table_mutable.sorted()) {
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
 
@@ -464,6 +467,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             table_mutable.value_context.count = tables_combined_count;
 
             table_immutable.compact(table_mutable, snapshot_min);
+
+            assert(table_immutable.value_context.run_tracker.count() == 1);
+            assert(table_mutable.value_context.run_tracker.count() == 0);
         }
 
         // Fully sort the table if needed. Produces a single run [0..count).
