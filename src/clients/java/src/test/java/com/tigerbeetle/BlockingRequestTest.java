@@ -141,8 +141,6 @@ public class BlockingRequestTest {
 
         var result = request.waitForResult();
         assertEquals(0, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
     }
 
     @Test(expected = AssertionError.class)
@@ -275,10 +273,12 @@ public class BlockingRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(100);
         dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
+        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(101);
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_ACCOUNTS.value, PacketStatus.Ok.value,
@@ -287,15 +287,13 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
+        assertEquals(100, result.getTimestamp());
         assertEquals(CreateAccountResult.IdMustNotBeZero, result.getResult());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
+        assertEquals(101, result.getTimestamp());
         assertEquals(CreateAccountResult.Exists, result.getResult());
     }
 
@@ -311,10 +309,12 @@ public class BlockingRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(100);
         dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
+        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(101);
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         request.setReplyBuffer(dummyReplyBuffer.position(0).array());
         request.endRequest(Request.Operations.CREATE_TRANSFERS.value, PacketStatus.Ok.value,
@@ -323,15 +323,13 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
+        assertEquals(100, result.getTimestamp());
         assertEquals(CreateTransferResult.IdMustNotBeZero, result.getResult());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
+        assertEquals(101, result.getTimestamp());
         assertEquals(CreateTransferResult.Exists, result.getResult());
     }
 
@@ -357,8 +355,6 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -391,8 +387,6 @@ public class BlockingRequestTest {
         assertTrue(request.isDone());
         var result = request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
@@ -427,8 +421,6 @@ public class BlockingRequestTest {
         // Wait for completion
         var result = callback.request.waitForResult();
         assertEquals(2, result.getLength());
-        assertNotNull(result.getHeader());
-        assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
         assertEquals(100L, result.getId(UInt128.LeastSignificant));
