@@ -338,8 +338,10 @@ const IO = struct {
                     const send_buffer = operation.buffer[0..send_size];
                     try sender.sending.appendSlice(gpa, send_buffer);
 
-                    if (send_buffer.len > 0) {
-                        if (io.prng.chance(io.options.send_corrupt_probability)) {
+                    if (io.prng.chance(io.options.send_corrupt_probability)) {
+                        if (send_buffer.len == 0) {
+                            try sender.sending.append(gpa, io.prng.int(u8));
+                        } else {
                             const corrupt_byte = io.prng.index(send_buffer);
                             const corrupt_bit = io.prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
                             sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
