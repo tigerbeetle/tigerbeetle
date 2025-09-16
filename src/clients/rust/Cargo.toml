@@ -25,9 +25,7 @@ futures-channel = "0.3.31"
 
 [build-dependencies]
 anyhow = "1.0.93"
-# Versions newer than 0.4.20 prohibit Rust <1.70 due to use of OnceLock
-# Versions newer than 0.4.1 prohibit Rust <1.65 due to regex deps
-ignore = "0.4.1"
+walkdir = "2.5.0"
 
 [dev-dependencies]
 anyhow = "1.0.93"

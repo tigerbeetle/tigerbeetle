@@ -1,5 +1,14 @@
-use ignore::Walk;
 use std::{env, fs, path::Path};
+use walkdir::{DirEntry, WalkDir};
+
+/// Returns true if the directory entry is hidden (starts with a dot).
+fn is_hidden(entry: &DirEntry) -> bool {
+    entry
+        .file_name()
+        .to_str()
+        .map(|s| s.starts_with('.'))
+        .unwrap_or(false)
+}
 
 fn main() -> anyhow::Result<()> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
@@ -119,8 +128,11 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
 
 fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
-    for entry in Walk::new(&tigerbeetle_root) {
-        let entry = entry?;
+    for entry in WalkDir::new(&tigerbeetle_root)
+        .into_iter()
+        .filter_entry(|e| !is_hidden(e))
+        .filter_map(|e| e.ok())
+    {
         if let Some(ext) = entry.path().extension() {
             if ext == "zig" {
                 println!("cargo:rerun-if-changed={}", entry.path().display());
@@ -132,12 +144,15 @@ fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    for entry in Walk::new(src) {
-        let entry = entry?;
+    for entry in WalkDir::new(src)
+        .into_iter()
+        .filter_entry(|e| !is_hidden(e))
+        .filter_map(|e| e.ok())
+    {
         let relative_path = entry.path().strip_prefix(src)?;
         let target_path = dst.join(relative_path);
 
-        if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+        if entry.file_type().is_dir() {
             fs::create_dir_all(&target_path)?;
         } else {
             fs::copy(entry.path(), &target_path)?;
