@@ -29,17 +29,25 @@ pub fn sort(
     assert(values.len == values_scratch.len);
     assert(values.len <= std.math.maxInt(u32));
 
-    const count: u32 = @intCast(values.len);
-
-    if (count == 0) return;
-    if (count <= 32) {
+    if (values.len == 0) return;
+    if (values.len <= 32) {
         return std.sort.insertion(Value, values, {}, struct {
             fn lessThan(_: void, a: Value, b: Value) bool {
                 return key_from_value(&a) < key_from_value(&b);
             }
         }.lessThan);
     }
+    radix_sort(Key, Value, key_from_value, values, values_scratch);
+}
 
+fn radix_sort(
+    comptime Key: type,
+    comptime Value: type,
+    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    values: []Value,
+    values_scratch: []Value,
+) void {
+    const count: u32 = @intCast(values.len);
     // Heuristic: use more bits for larger value sizes to reduce the number of passes.
     const radix_bits_heuristic = if (@sizeOf(Value) >= 128) 11 else 8;
     const radix_bits = @min(@bitSizeOf(Key), radix_bits_heuristic);
@@ -48,19 +56,22 @@ pub fn sort(
     const radix_mask = radix_partitions - 1;
 
     const BitsKey = std.math.Log2Int(Key); // Used to shift the key for each pass.
+    const Histograms: type = [radix_passes][radix_partitions]u32;
+    comptime assert(@sizeOf(Histograms) <= 200 * stdx.KiB);
 
     // Create histograms per radix pass in a single iteration over `values`.
     const histograms = blk: {
-        var histogram: [radix_passes][radix_partitions]u32 align(64) = @splat(@splat(0));
+        var histograms: Histograms align(64) = @splat(@splat(0));
+
         for (values) |*value| {
             const key = key_from_value(value);
             inline for (0..radix_passes) |pass| {
                 const pass_bit_offset: BitsKey = @intCast(pass * radix_bits);
                 const partition_id: u32 = @intCast((key >> pass_bit_offset) & radix_mask);
-                histogram[pass][partition_id] += 1;
+                histograms[pass][partition_id] += 1;
             }
         }
-        break :blk histogram;
+        break :blk histograms;
     };
 
     var source: []Value = values;
@@ -69,12 +80,9 @@ pub fn sort(
 
     inline for (0..radix_passes) |pass| {
         // Determine if a pass is trivial if exactly one partition has all `count` elements.
-        const pass_trivial: bool = blk: {
-            for (histograms[pass]) |partition_count| {
-                if (partition_count == count) break :blk true;
-            }
-            break :blk false;
-        };
+        const pass_trivial: bool = for (histograms[pass]) |partition_count| {
+            if (partition_count == count) break true;
+        } else false;
 
         if (!pass_trivial) {
             // Build prefix sums.
@@ -136,7 +144,7 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
 test "radix_sort_stable" {
     inline for (.{
         u3, //  Smaller than radix bits.
-        u64, // Requires multiple passes.
+        u256, // Max histogram size.
     }) |Key| {
         inline for (.{
             0,
@@ -158,7 +166,7 @@ test "radix_sort_stable" {
             const values_all_scratch = try allocator.alloc(Value, values_max);
             defer allocator.free(values_all_scratch);
 
-            for (0..256) |_| {
+            for (0..64) |_| {
                 const values_count = prng.range_inclusive(u32, 2, values_max);
                 const values_expected = values_all_expected[0..values_count];
                 const values = values_all[0..values_count];
@@ -244,7 +252,7 @@ test "radix_sort_stable" {
                     }
                 }
 
-                sort(Key, Value, Value.key_from_value, values, values_scratch);
+                radix_sort(Key, Value, Value.key_from_value, values, values_scratch);
 
                 for (values, values_expected) |value, value_expected| {
                     try std.testing.expectEqual(value.x, value_expected.x);
