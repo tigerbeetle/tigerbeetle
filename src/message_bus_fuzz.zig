@@ -161,6 +161,10 @@ const IO = struct {
 
     servers: std.AutoArrayHashMapUnmanaged(socket_t, SocketServer) = .{},
     connections: std.AutoArrayHashMapUnmanaged(socket_t, SocketConnection) = .{},
+    /// Current number of events with event.completion.operation == .close
+    /// (We cache this separately since it is used in deinit(), so the Completion references are
+    /// invalid.)
+    connections_closing: u32 = 0,
     events: EventQueue,
     ticks: u64 = 0,
     fd: socket_t = 1,
@@ -251,10 +255,12 @@ const IO = struct {
         // Servers were already cleaned up by io.close_socket().
         assert(io.servers.count() == 0);
 
+        var connections_open: u32 = 0;
         for (io.connections.values()) |*connection| {
-            assert(connection.closed);
+            connections_open += @intFromBool(!connection.closed);
             connection.sending.deinit(io.gpa);
         }
+        assert(connections_open == io.connections_closing);
 
         io.events.deinit();
         io.connections.deinit(io.gpa);
@@ -314,6 +320,7 @@ const IO = struct {
             .close => |operation| {
                 const local = io.connections.getPtr(operation.fd).?;
                 local.closed = true;
+                io.connections_closing -= 1;
                 if (io.prng.chance(io.options.close_error_probability)) {
                     const result: CloseError!void = io.prng.error_uniform(CloseError);
                     completion.callback(completion.context, completion, &result);
@@ -513,6 +520,7 @@ const IO = struct {
             .operation = .{ .close = .{ .fd = fd } },
         };
         io.enqueue(completion);
+        io.connections_closing += 1;
     }
 
     pub fn connect(
