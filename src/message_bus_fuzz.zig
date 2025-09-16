@@ -55,6 +55,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .send_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
         .send_now_probability = ratio(prng.int_inclusive(u64, 100), 100),
+        .close_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
     });
     defer io.deinit();
 
@@ -181,6 +182,7 @@ const IO = struct {
         send_partial_probability: Ratio,
         send_corrupt_probability: Ratio,
         send_now_probability: Ratio,
+        close_error_probability: Ratio,
     };
 
     const SocketServer = struct {
@@ -308,9 +310,13 @@ const IO = struct {
             .close => |operation| {
                 const local = io.connections.getPtr(operation.fd).?;
                 local.closed = true;
-                // FIXME sometimes error
-                const result: CloseError!void = {};
-                completion.callback(completion.context, completion, &result);
+                if (io.prng.chance(io.options.close_error_probability)) {
+                    const result: CloseError!void = io.prng.error_uniform(CloseError);
+                    completion.callback(completion.context, completion, &result);
+                } else {
+                    const result: CloseError!void = {};
+                    completion.callback(completion.context, completion, &result);
+                }
             },
             .connect => |operation| {
                 for (io.servers.values()) |*server| {
