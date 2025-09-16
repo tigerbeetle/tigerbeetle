@@ -58,6 +58,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .send_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
         .send_now_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .close_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
+        .shutdown_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
     });
     defer io.deinit();
 
@@ -191,6 +192,7 @@ const IO = struct {
         send_error_probability: Ratio,
         send_now_probability: Ratio,
         close_error_probability: Ratio,
+        shutdown_error_probability: Ratio,
     };
 
     const SocketServer = struct {
@@ -479,8 +481,12 @@ const IO = struct {
     }
 
     pub fn shutdown(io: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
-        if (how == .both or how == .recv) io.connections.getPtr(socket).?.shutdown_recv = false;
-        if (how == .both or how == .send) io.connections.getPtr(socket).?.shutdown_send = false;
+        if (io.prng.chance(io.options.shutdown_error_probability)) {
+            return io.prng.error_uniform(posix.ShutdownError);
+        } else {
+            if (how == .both or how == .recv) io.connections.getPtr(socket).?.shutdown_recv = false;
+            if (how == .both or how == .send) io.connections.getPtr(socket).?.shutdown_send = false;
+        }
     }
 
     pub fn accept(
