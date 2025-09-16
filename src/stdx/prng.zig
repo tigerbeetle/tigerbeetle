@@ -408,6 +408,15 @@ test chances {
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
 }
 
+pub fn error_uniform(prng: *PRNG, Error: type) Error {
+    const errors = @typeInfo(Error).error_set.?;
+    const error_index = prng.index(errors);
+    inline for (0..errors.len) |i| {
+        if (i == error_index) return @field(Error, errors[i].name);
+    }
+    unreachable;
+}
+
 /// Returns a random value of an enum.
 pub fn enum_uniform(prng: *PRNG, Enum: type) Enum {
     const values = std.enums.values(Enum);
