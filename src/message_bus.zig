@@ -880,8 +880,9 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
                     // can send back to them.
                     .replica => {
                         while (connection.recv_buffer.?.next_header()) |header| {
-                            connection.recv_buffer.?.suspend_message(&header);
-                            if (!connection.set_and_verify_peer(bus, header.peer_type())) {
+                            if (connection.set_and_verify_peer(bus, header.peer_type())) {
+                                connection.recv_buffer.?.suspend_message(&header);
+                            } else {
                                 log.warn("{}: on_recv: invalid peer transition {any} -> {any}", .{
                                     bus.id,
                                     connection.peer,
