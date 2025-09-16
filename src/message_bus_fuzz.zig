@@ -21,8 +21,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     const replica_count = 3;
     const clients_limit = 2;
-    const message_bus_send_probability = ratio(@max(1, prng.int_inclusive(u64, 10)), 10);
-    const message_bus_tick_probability = ratio(@max(1, prng.int_inclusive(u64, 10)), 10);
+    const message_bus_send_probability = ratio(prng.range_inclusive(u64, 1, 10), 10);
+    const message_bus_tick_probability = ratio(prng.range_inclusive(u64, 1, 10), 10);
 
     const configuration = &.{
         try std.net.Address.parseIp4("127.0.0.1", 3000),
@@ -51,13 +51,13 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     var io = try IO.init(gpa, .{
         .seed = prng.int(u64),
-        .recv_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
-        .recv_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
-        .send_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
+        .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
+        .recv_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
+        .send_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
-        .send_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
-        .send_now_probability = ratio(prng.int_inclusive(u64, 100), 100),
-        .close_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
+        .send_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
+        .send_now_probability = ratio(prng.int_inclusive(u64, 10), 10),
+        .close_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
     });
     defer io.deinit();
 
@@ -202,13 +202,14 @@ const IO = struct {
     const SocketConnection = struct {
         shutdown_recv: bool = false,
         shutdown_send: bool = false,
+        /// There is at most one send() and at most one recv() pending per socket.
+        pending_send: bool = false,
+        pending_recv: bool = false,
+
         closed: bool = false,
         remote: ?socket_t,
         sending: std.ArrayListUnmanaged(u8) = .empty,
         sending_offset: u32 = 0,
-        /// There is at most one send() and at most one recv() pending per socket.
-        pending_send: bool = false,
-        pending_recv: bool = false,
     };
 
     const Event = struct {
@@ -420,7 +421,7 @@ const IO = struct {
                         sender.sending.items.len - sender.sending_offset,
                     );
                     const recv_size = if (io.prng.chance(io.options.recv_partial_probability))
-                        @max(1, io.prng.int_inclusive(u64, recv_size_max))
+                        io.prng.range_inclusive(u64, 1, recv_size_max)
                     else
                         recv_size_max;
                     assert(recv_size > 0);
@@ -643,7 +644,6 @@ const IO = struct {
         return .{ .ns = io.ticks * constants.tick_ms * std.time.ns_per_ms };
     }
 
-    // FIXME randomize distribution per operation type
     fn enqueue(io: *IO, completion: *Completion) void {
         const tick_ns = constants.tick_ms * std.time.ns_per_ms;
         const delay_ns = fuzz.random_int_exponential(&io.prng, u64, 10 * tick_ns);
