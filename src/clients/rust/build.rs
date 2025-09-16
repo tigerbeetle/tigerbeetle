@@ -38,6 +38,7 @@ fn main() -> anyhow::Result<()> {
     if unix {
         println!("cargo:rerun-if-changed={libdir}/lib{libname}.a");
     } else if windows {
+        println!("cargo:rustc-link-lib=advapi32");
         println!("cargo:rerun-if-changed={libdir}/{libname}.lib");
     } else {
         todo!();
