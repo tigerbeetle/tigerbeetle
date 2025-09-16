@@ -52,8 +52,10 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var io = try IO.init(gpa, .{
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
+        .recv_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
         .send_partial_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
+        .send_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
         .send_now_probability = ratio(prng.int_inclusive(u64, 100), 100),
         .close_error_probability = ratio(prng.int_inclusive(u64, 20), 100),
     });
@@ -179,8 +181,10 @@ const IO = struct {
     pub const Options = struct {
         seed: u64 = 0,
         recv_partial_probability: Ratio,
+        recv_error_probability: Ratio,
         send_partial_probability: Ratio,
         send_corrupt_probability: Ratio,
+        send_error_probability: Ratio,
         send_now_probability: Ratio,
         close_error_probability: Ratio,
     };
@@ -332,6 +336,12 @@ const IO = struct {
                 }
             },
             .send => |operation| {
+                if (io.prng.chance(io.options.send_error_probability)) {
+                    const result: SendError!usize = io.prng.error_uniform(SendError);
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                }
+
                 const send_size = if (io.prng.chance(io.options.send_partial_probability))
                     io.prng.index(operation.buffer)
                 else
@@ -365,6 +375,12 @@ const IO = struct {
                 }
             },
             .recv => |operation| {
+                if (io.prng.chance(io.options.recv_error_probability)) {
+                    const result: RecvError!usize = io.prng.error_uniform(RecvError);
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                }
+
                 const receiver = io.connections.getPtr(operation.socket).?;
                 assert(!receiver.closed);
                 assert(receiver.pending_recv);
@@ -534,6 +550,7 @@ const IO = struct {
         buffer: []u8,
     ) void {
         const connection = io.connections.getPtr(socket).?;
+        assert(!connection.closed);
         assert(!connection.pending_recv);
         connection.pending_recv = true;
 
@@ -559,6 +576,7 @@ const IO = struct {
         buffer: []const u8,
     ) void {
         const connection = io.connections.getPtr(socket).?;
+        assert(!connection.closed);
         assert(!connection.pending_send);
         connection.pending_send = true;
 
