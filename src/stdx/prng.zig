@@ -410,11 +410,10 @@ test chances {
 
 pub fn error_uniform(prng: *PRNG, Error: type) Error {
     const errors = @typeInfo(Error).error_set.?;
-    const error_index = prng.index(errors);
-    inline for (0..errors.len) |i| {
-        if (i == error_index) return @field(Error, errors[i].name);
-    }
-    unreachable;
+    return switch (prng.index(errors)) {
+        inline 0...(errors.len - 1) => |i| @field(Error, errors[i].name),
+        else => unreachable,
+    };
 }
 
 /// Returns a random value of an enum.
