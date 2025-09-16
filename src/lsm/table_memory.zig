@@ -144,6 +144,28 @@ pub fn TableMemoryType(comptime Table: type) type {
                 tracker.runs_count += 1;
             }
 
+            // Adds a new run at the front and shifts the other runs by the offset to maintain
+            // the invariant that no run overlaps and they have no gaps.
+            fn add_front_and_propagate_offset(tracker: *SortedRunTracker, run: SortedRun) void {
+                if (run.min == run.max) return; // Ignore empty runs.
+                assert(tracker.runs_count + 1 <= tracker.runs.len);
+                stdx.copy_right(
+                    .exact,
+                    SortedRun,
+                    tracker.runs[1 .. tracker.runs_count + 1],
+                    tracker.runs[0..tracker.runs_count],
+                );
+
+                tracker.runs[0] = run;
+                tracker.runs_count += 1;
+
+                //Propagate the new offset to the remaining runs.
+                for (tracker.runs[1..tracker.count()]) |*run_old| {
+                    run_old.min += run.max;
+                    run_old.max += run.max;
+                }
+            }
+
             fn reset(tracker: *SortedRunTracker) void {
                 tracker.* = .{
                     .runs = undefined,
@@ -451,18 +473,27 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Copy immutable after the current mutable tail and mark as an immutable run,
             // so the merge prefers its entries on key ties.
             const tables_combined_count = table_immutable.count() + table_mutable.count();
+
+            // Because `table_mutable` is likely to be smaller then `tabel_immutable` we:
+            // 1. Copy the values from `table_mutable` into `table_immutable`.
+            // 2. We swap the backing arrays so that `table_mutable` has all the values.
+            // 3. We add the new run from `table_immutable` at the beginning.
             stdx.copy_disjoint(
                 .inexact,
                 Value,
-                table_mutable.values[table_mutable.count()..],
-                table_immutable.values[0..table_immutable.count()],
+                table_immutable.values[table_immutable.count()..],
+                table_mutable.values[0..table_mutable.count()],
             );
-            table_mutable.value_context.run_tracker.add(.{
-                .min = table_mutable.count(),
-                .max = tables_combined_count,
+            std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
+
+            table_mutable.value_context.run_tracker.add_front_and_propagate_offset(.{
+                .min = 0,
+                .max = table_immutable.count(),
                 .origin = .immutable,
             });
+
             table_mutable.value_context.count = tables_combined_count;
+            table_mutable.value_context.run_tracker.assert_invariants(table_mutable.count());
 
             table_immutable.mutability.immutable.absorbed = true;
             table_immutable.compact(table_mutable, snapshot_min);
