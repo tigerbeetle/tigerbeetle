@@ -59,21 +59,16 @@ fn main() -> anyhow::Result<()> {
 fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
     let build_in_tree = is_build_in_tree(manifest_dir)?;
     if build_in_tree {
+        // Build tigerbeetle will place the static libs in assets/lib.
         build_tigerbeetle(manifest_dir)?;
 
         let tb_client_h = format!("{manifest_dir}/../c/tb_client.h");
-        let tb_client_libs_dir = format!("{manifest_dir}/../c/lib");
         let tb_client_dest = format!("{manifest_dir}/assets");
-        let tb_client_libs_dest = format!("{manifest_dir}/assets/lib");
         let tb_client_h_dest = format!("{manifest_dir}/assets/tb_client.h");
 
         fs::create_dir_all(&tb_client_dest)?;
         fs::copy(&tb_client_h, tb_client_h_dest)?;
 
-        copy_dir_recursive(
-            Path::new(&tb_client_libs_dir),
-            Path::new(&tb_client_libs_dest),
-        )?;
         emit_tigerbeetle_rerun_if_changed(manifest_dir)?;
 
         Ok(())
@@ -109,8 +104,7 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
     }
 
     let build_targets = [
-        "clients:c",    // Build the tb_client library and tb_client.h
-        "clients:rust", // Build the tb_client library and tb_client.rs
+        "clients:rust", // Build the tb_client library, tb_client.h, and tb_client.rs
         "install",      // Build tigerbeetle binary for testing
     ];
 
@@ -141,23 +135,5 @@ fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
         }
     }
 
-    Ok(())
-}
-
-fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    for entry in WalkDir::new(src)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .filter_map(|e| e.ok())
-    {
-        let relative_path = entry.path().strip_prefix(src)?;
-        let target_path = dst.join(relative_path);
-
-        if entry.file_type().is_dir() {
-            fs::create_dir_all(&target_path)?;
-        } else {
-            fs::copy(entry.path(), &target_path)?;
-        }
-    }
     Ok(())
 }
