@@ -44,13 +44,20 @@ fn main() -> anyhow::Result<()> {
     println!("cargo:rustc-link-search=native={libdir}");
     println!("cargo:rustc-link-lib=static={libname}");
 
-    if unix {
-        println!("cargo:rerun-if-changed={libdir}/lib{libname}.a");
+    let libfile = if unix {
+        format!("lib{libname}.a")
     } else if windows {
-        println!("cargo:rustc-link-lib=advapi32");
-        println!("cargo:rerun-if-changed={libdir}/{libname}.lib");
+        format!("{libname}.lib")
     } else {
-        todo!();
+        todo!()
+    };
+    let libpath = format!("{libdir}/{libfile}");
+
+    println!("cargo:rerun-if-changed={libpath}");
+
+    if windows {
+        // tb_client needs access to the random number generator in here.
+        println!("cargo:rustc-link-lib=advapi32");
     }
 
     Ok(())
