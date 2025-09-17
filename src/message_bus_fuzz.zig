@@ -59,6 +59,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .send_now_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .close_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
         .shutdown_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
+        .accept_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
+        .connect_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
     });
     defer io.deinit();
 
@@ -154,7 +156,6 @@ fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
     }
 }
 
-// TODO Inject connection failures.
 const IO = struct {
     gpa: std.mem.Allocator,
     prng: stdx.PRNG,
@@ -193,6 +194,8 @@ const IO = struct {
         send_now_probability: Ratio,
         close_error_probability: Ratio,
         shutdown_error_probability: Ratio,
+        accept_error_probability: Ratio,
+        connect_error_probability: Ratio,
     };
 
     const SocketServer = struct {
@@ -263,7 +266,9 @@ const IO = struct {
             connections_open += @intFromBool(!connection.closed);
             connection.sending.deinit(io.gpa);
         }
-        assert(connections_open == io.connections_closing);
+        // "<=" instead of "==" since MessageBus may try to close() a connection which never
+        // successfully connected due to a connect() error.
+        assert(connections_open <= io.connections_closing);
 
         io.events.deinit();
         io.connections.deinit(io.gpa);
@@ -293,6 +298,12 @@ const IO = struct {
         const gpa = io.gpa;
         switch (completion.operation) {
             .accept => |operation| {
+                if (io.prng.chance(io.options.accept_error_probability)) {
+                    const result: AcceptError!socket_t = io.prng.error_uniform(AcceptError);
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                }
+
                 const server = io.servers.getPtr(operation.socket).?;
                 if (server.backlog.items.len == 0) return .retry;
 
@@ -321,9 +332,17 @@ const IO = struct {
                 );
             },
             .close => |operation| {
-                const local = io.connections.getPtr(operation.fd).?;
-                local.closed = true;
                 io.connections_closing -= 1;
+
+                const local = io.connections.getPtr(operation.fd) orelse {
+                    // close() was called but we didn't ever connect.
+                    // (This happens when we injected an error into connect()).
+                    const result: CloseError!void = {};
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                };
+
+                local.closed = true;
                 if (io.prng.chance(io.options.close_error_probability)) {
                     const result: CloseError!void = io.prng.error_uniform(CloseError);
                     completion.callback(completion.context, completion, &result);
@@ -333,6 +352,12 @@ const IO = struct {
                 }
             },
             .connect => |operation| {
+                if (io.prng.chance(io.options.connect_error_probability)) {
+                    const result: ConnectError!void = io.prng.error_uniform(ConnectError);
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                }
+
                 for (io.servers.values()) |*server| {
                     if (server.address.eql(operation.address)) {
                         try server.backlog.append(gpa, completion);
