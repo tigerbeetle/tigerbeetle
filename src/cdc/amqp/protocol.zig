@@ -817,7 +817,7 @@ test "amqp: Encoder/Decoder primitives" {
         long_string,
     };
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var encoder = Encoder.init(buffer);
 
@@ -941,7 +941,7 @@ test "amqp: BasicProperties encode/decode" {
     var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -974,7 +974,7 @@ test "amqp: Table encode/decode" {
     var buffer = try testing.allocator.alloc(u8, 64 * KiB);
     defer testing.allocator.free(buffer);
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();

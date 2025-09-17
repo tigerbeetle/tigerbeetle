@@ -310,7 +310,7 @@ pub fn ewah(comptime Word: type) type {
 
 test "ewah encode→decode cycle" {
     const fuzz = @import("./ewah_fuzz.zig");
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     inline for (.{ u8, u16, u32, u64, usize }) |Word| {
         const Context = fuzz.ContextType(Word);

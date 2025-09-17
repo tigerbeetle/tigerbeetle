@@ -112,6 +112,11 @@ pub fn from_seed(seed: u64) PRNG {
     } };
 }
 
+pub fn from_seed_testing() PRNG {
+    comptime assert(@import("builtin").is_test);
+    return .from_seed(std.testing.random_seed);
+}
+
 fn split_mix_64(s: *u64) u64 {
     s.* +%= 0x9e3779b97f4a7c15;
 

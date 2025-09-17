@@ -1301,7 +1301,7 @@ test "amqp: SendBuffer" {
     const buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
-    var prng: stdx.PRNG = stdx.PRNG.from_seed(42);
+    var prng: stdx.PRNG = stdx.PRNG.from_seed_testing();
     var send_buffer = SendBuffer.init(buffer);
     for (0..4096) |_| {
         const Element = u64;
@@ -1368,7 +1368,7 @@ test "amqp: ReceiveBuffer" {
     try testing.expect(receive_buffer.state == .receiving);
     try testing.expectEqual(buffer.len, receive_slice.len);
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     prng.fill(receive_slice);
 
     var decoded_remain: usize = 0;

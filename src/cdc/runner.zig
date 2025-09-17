@@ -1491,7 +1491,7 @@ test "amqp: RateLimit" {
 test "amqp: DualBuffer" {
     const event_count_max = Runner.constants.event_count_max;
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     var dual_buffer = try DualBuffer.init(testing.allocator, event_count_max);
     defer dual_buffer.deinit(testing.allocator);
 
