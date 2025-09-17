@@ -143,121 +143,118 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
 
 test "radix_sort_stable" {
     inline for (.{
-        u3, //  Smaller than radix bits.
-        u256, // Max histogram size.
-    }) |Key| {
-        inline for (.{
-            0,
-            130, // Test heuristic with larger values.
-        }) |value_size_min| {
-            const allocator = std.testing.allocator;
+        .{ u3, 0 }, // Smaller than radix bits.
+        .{ u256, 130 }, // Largest histogram, requires multiple passes and bit heuristic.
+    }) |pair| {
+        const Key = pair.@"0";
+        const value_size_min = pair.@"1";
+        const allocator = std.testing.allocator;
 
-            const Value = TestValueType(Key, value_size_min);
+        const Value = TestValueType(Key, value_size_min);
 
-            var prng = stdx.PRNG.from_seed(0);
+        var prng = stdx.PRNG.from_seed(0);
 
-            const values_max = 1 << 18; // Explores uneven and even passes to test copy back.
-            const values_all = try allocator.alloc(Value, values_max);
-            defer allocator.free(values_all);
+        const values_max = 1 << 18; // Explores uneven and even passes to test copy back.
+        const values_all = try allocator.alloc(Value, values_max);
+        defer allocator.free(values_all);
 
-            const values_all_expected = try allocator.alloc(Value, values_max);
-            defer allocator.free(values_all_expected);
+        const values_all_expected = try allocator.alloc(Value, values_max);
+        defer allocator.free(values_all_expected);
 
-            const values_all_scratch = try allocator.alloc(Value, values_max);
-            defer allocator.free(values_all_scratch);
+        const values_all_scratch = try allocator.alloc(Value, values_max);
+        defer allocator.free(values_all_scratch);
 
-            for (0..64) |_| {
-                const values_count = prng.range_inclusive(u32, 2, values_max);
-                const values_expected = values_all_expected[0..values_count];
-                const values = values_all[0..values_count];
-                const values_scratch = values_all_scratch[0..values_count];
+        for (0..64) |_| {
+            const values_count = prng.range_inclusive(u32, 2, values_max);
+            const values_expected = values_all_expected[0..values_count];
+            const values = values_all[0..values_count];
+            const values_scratch = values_all_scratch[0..values_count];
 
-                {
-                    // Set up `values`.
-                    for (values) |*value| {
-                        value.* = .{
-                            .x = prng.int_inclusive(Key, @min(
-                                std.math.maxInt(Key),
-                                values_count * 2 - 1,
-                            )),
-                            .y = undefined,
-                        };
-                    }
+            {
+                // Set up `values`.
+                for (values) |*value| {
+                    value.* = .{
+                        .x = prng.int_inclusive(Key, @min(
+                            std.math.maxInt(Key),
+                            values_count * 2 - 1,
+                        )),
+                        .y = undefined,
+                    };
+                }
 
-                    // Sort algorithms often optimize the case of already-sorted
-                    // (or already-reverse-sorted) sub-arrays.
-                    const partitions_count = prng.range_inclusive(
-                        u32,
-                        1,
-                        @max(values_count, 64) - 1,
-                    );
-                    // The `partition_reverse_probability` is a subset of the partitions sorted by
-                    // `partition_sort_percent`.
-                    const partition_sort_probability = ratio(prng.int_inclusive(u8, 100), 100);
-                    const partition_reverse_probability = ratio(prng.int_inclusive(u8, 100), 100);
+                // Sort algorithms often optimize the case of already-sorted
+                // (or already-reverse-sorted) sub-arrays.
+                const partitions_count = prng.range_inclusive(
+                    u32,
+                    1,
+                    @max(values_count, 64) - 1,
+                );
+                // The `partition_reverse_probability` is a subset of the partitions sorted by
+                // `partition_sort_percent`.
+                const partition_sort_probability = ratio(prng.int_inclusive(u8, 100), 100);
+                const partition_reverse_probability = ratio(prng.int_inclusive(u8, 100), 100);
 
-                    var partitions_remaining: u32 = partitions_count;
-                    var partition_offset: u32 = 0;
-                    while (partition_offset < values_count) {
-                        const partition_size = size: {
-                            if (partitions_remaining == 1) {
-                                break :size values_count - partition_offset;
-                            } else {
-                                break :size prng.range_inclusive(
-                                    u32,
-                                    1,
-                                    values_count - partition_offset,
-                                );
-                            }
-                        };
-
-                        if (prng.chance(partition_sort_probability)) {
-                            const partition = values[partition_offset..][0..partition_size];
-                            if (prng.chance(partition_reverse_probability)) {
-                                std.mem.sortUnstable(
-                                    Value,
-                                    partition,
-                                    {},
-                                    Value.compare_x_descending,
-                                );
-                            } else {
-                                std.mem.sortUnstable(
-                                    Value,
-                                    partition,
-                                    {},
-                                    Value.compare_x_ascending,
-                                );
-                            }
+                var partitions_remaining: u32 = partitions_count;
+                var partition_offset: u32 = 0;
+                while (partition_offset < values_count) {
+                    const partition_size = size: {
+                        if (partitions_remaining == 1) {
+                            break :size values_count - partition_offset;
+                        } else {
+                            break :size prng.range_inclusive(
+                                u32,
+                                1,
+                                values_count - partition_offset,
+                            );
                         }
+                    };
 
-                        partitions_remaining -= 1;
-                        partition_offset += partition_size;
+                    if (prng.chance(partition_sort_probability)) {
+                        const partition = values[partition_offset..][0..partition_size];
+                        if (prng.chance(partition_reverse_probability)) {
+                            std.mem.sortUnstable(
+                                Value,
+                                partition,
+                                {},
+                                Value.compare_x_descending,
+                            );
+                        } else {
+                            std.mem.sortUnstable(
+                                Value,
+                                partition,
+                                {},
+                                Value.compare_x_ascending,
+                            );
+                        }
                     }
 
-                    for (values, 0..) |*value, i| value.y = @intCast(i);
+                    partitions_remaining -= 1;
+                    partition_offset += partition_size;
                 }
 
-                {
-                    // Set up `values_expected`.
-                    stdx.copy_disjoint(.exact, Value, values_expected, values);
-                    std.mem.sortUnstable(Value, values_expected, {}, Value.compare_xy_ascending);
+                for (values, 0..) |*value, i| value.y = @intCast(i);
+            }
 
-                    // Sanity-check the expected values' order.
-                    for (
-                        values_expected[0 .. values_count - 1],
-                        values_expected[1..],
-                    ) |a, b| {
-                        assert(a.x <= b.x);
-                        if (a.x == b.x) assert(a.y < b.y);
-                    }
+            {
+                // Set up `values_expected`.
+                stdx.copy_disjoint(.exact, Value, values_expected, values);
+                std.mem.sortUnstable(Value, values_expected, {}, Value.compare_xy_ascending);
+
+                // Sanity-check the expected values' order.
+                for (
+                    values_expected[0 .. values_count - 1],
+                    values_expected[1..],
+                ) |a, b| {
+                    assert(a.x <= b.x);
+                    if (a.x == b.x) assert(a.y < b.y);
                 }
+            }
 
-                radix_sort(Key, Value, Value.key_from_value, values, values_scratch);
+            radix_sort(Key, Value, Value.key_from_value, values, values_scratch);
 
-                for (values, values_expected) |value, value_expected| {
-                    try std.testing.expectEqual(value.x, value_expected.x);
-                    try std.testing.expectEqual(value.y, value_expected.y);
-                }
+            for (values, values_expected) |value, value_expected| {
+                try std.testing.expectEqual(value.x, value_expected.x);
+                try std.testing.expectEqual(value.y, value_expected.y);
             }
         }
     }
