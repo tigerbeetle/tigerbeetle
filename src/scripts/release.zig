@@ -29,7 +29,7 @@ const MiB = stdx.MiB;
 
 const multiversion_binary_size_max = multiversion.multiversion_binary_size_max;
 
-const Language = enum { dotnet, go, java, node, python, zig, docker };
+const Language = enum { dotnet, go, java, node, python, rust, zig, docker };
 const LanguageSet = std.enums.EnumSet(Language);
 pub const CLIArgs = struct {
     sha: []const u8,
@@ -228,6 +228,13 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
         defer dist_dir_python.close();
 
         try build_python(shell, info, dist_dir_python);
+    }
+
+    if (languages.contains(.rust)) {
+        var dist_dir_rust = try dist_dir.makeOpenPath("rust", .{});
+        defer dist_dir_rust.close();
+
+        try build_rust(shell, info, dist_dir_rust);
     }
 }
 
@@ -542,6 +549,67 @@ fn build_python(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
         try shell.fmt("tigerbeetle-{s}-py3-none-any.whl", .{info.tag}),
     );
 }
+
+fn build_rust(shell: *Shell, info: VersionInfo, dist_dir: std.fs.Dir) !void {
+    var section = try shell.open_section("build rust");
+    defer section.close();
+
+    try shell.pushd("./src/clients/rust");
+    defer shell.popd();
+
+    const cargo_version = shell.exec_stdout("cargo --version", .{}) catch {
+        return error.NoRust;
+    };
+    log.info("{s}", .{cargo_version});
+
+    // `cargo check` will put all pre-compiled assets are in place.
+    // It will call `zig build clients:rust` itself.
+    // Do this before `cargo package`.
+    try shell.exec("cargo check", .{});
+
+    try backup_create(shell.cwd, "Cargo.toml");
+    defer backup_restore(shell.cwd, "Cargo.toml");
+    // Changeng the version will modify the lockfile.
+    try backup_create(shell.cwd, "Cargo.lock");
+    defer backup_restore(shell.cwd, "Cargo.lock");
+
+    const cargo_toml = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "Cargo.toml",
+        1 * MiB,
+    );
+    const version_line = try shell.fmt(
+        "version = \"{s}\"",
+        .{info.tag},
+    );
+    const cargo_toml_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        cargo_toml,
+        "version = \"0.1.0\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, cargo_toml_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "Cargo.toml",
+        .data = cargo_toml_updated,
+    });
+
+    // --allow-dirty is needed because the rust crate is packaging
+    // static libraries that are not committed to git, and because
+    // the lockfile is dirty from changing the crate version.
+    try shell.exec("cargo package --allow-dirty", .{});
+
+    // This isn't used by publish_rust but we do it anyway as a smoke test.
+    try Shell.copy_path(
+        shell.cwd,
+        try shell.fmt("target/package/tigerbeetle-{s}.crate", .{info.tag}),
+        dist_dir,
+        try shell.fmt("tigerbeetle-{s}.crate", .{info.tag}),
+    );
+}
+
 fn publish(
     shell: *Shell,
     languages: LanguageSet,
@@ -689,6 +757,7 @@ fn publish(
     if (languages.contains(.java)) try publish_java(shell, info);
     if (languages.contains(.node)) try publish_node(shell, info);
     if (languages.contains(.python)) try publish_python(shell, info);
+    if (languages.contains(.rust)) try publish_rust(shell, info);
 
     if (languages.contains(.zig)) {
         try shell.exec(
@@ -862,6 +931,87 @@ fn publish_python(shell: *Shell, info: VersionInfo) !void {
             info.tag,
         }),
     });
+}
+
+fn publish_rust(shell: *Shell, info: VersionInfo) !void {
+    var section = try shell.open_section("publish rust");
+    defer section.close();
+
+    assert(try shell.dir_exists("zig-out/dist/rust"));
+
+    const token = try shell.env_get("CRATES_IO_TOKEN");
+
+    try shell.pushd("./src/clients/rust");
+    defer shell.popd();
+
+    const cargo_version = shell.exec_stdout("cargo --version", .{}) catch {
+        return error.NoRust;
+    };
+    log.info("{s}", .{cargo_version});
+
+    // `cargo check` will put all pre-compiled assets are in place.
+    // It will call `zig build clients:rust` itself.
+    // Do this before `cargo package`.
+    try shell.exec("cargo check", .{});
+
+    try backup_create(shell.cwd, "Cargo.toml");
+    defer backup_restore(shell.cwd, "Cargo.toml");
+    // Changeng the version will modify the lockfile.
+    try backup_create(shell.cwd, "Cargo.lock");
+    defer backup_restore(shell.cwd, "Cargo.lock");
+
+    const cargo_toml = try shell.cwd.readFileAlloc(
+        shell.arena.allocator(),
+        "Cargo.toml",
+        1 * MiB,
+    );
+    const version_line = try shell.fmt(
+        "version = \"{s}\"",
+        .{info.tag},
+    );
+    const cargo_toml_updated = try std.mem.replaceOwned(
+        u8,
+        shell.arena.allocator(),
+        cargo_toml,
+        "version = \"0.1.0\"",
+        version_line,
+    );
+    assert(std.mem.indexOf(u8, cargo_toml_updated, version_line) != null);
+
+    try shell.cwd.writeFile(.{
+        .sub_path = "Cargo.toml",
+        .data = cargo_toml_updated,
+    });
+
+    // --allow-dirty is needed because the rust crate is packaging
+    // static libraries that are not committed to git, and because
+    // the lockfile is dirty from changing the crate version.
+    try shell.exec("cargo publish --token {token} --allow-dirty", .{
+        .token = token,
+    });
+
+    // The cargo we publish with (rust 1.63) does not wait for
+    // the package to be available like modern cargo.
+    // For reliability of later release verification, we would like to wait.
+    // Curl can't do this in a one-liner sadly.
+    const curl_command = "curl --http2 -I -L -s https://crates.io/api/v1/crates/tigerbeetle/{version}/download";
+    const sleeps_max = 10;
+    const sleep_seconds = 5;
+    _ = for (0..sleeps_max) |_| {
+        log.info("waiting {}s for rust crate to be available", .{sleep_seconds});
+        std.time.sleep(sleep_seconds * std.time.ns_per_s);
+        const stdout = try shell.exec_stdout(curl_command, .{
+            .version = info.tag,
+        });
+        if (std.mem.indexOf(u8, stdout, "\nHTTP/2 403\n") != null) {
+            // 403 forbidden seems to be what crates.io returns for unpublished crates.
+            continue;
+        }
+        log.info("rust crate available on crates.io", .{});
+        break;
+    } else {
+        log.err("rust crate not yet available on crates.io", .{});
+    };
 }
 
 // Docker is not required and not recommended for running TigerBeetle. A container is published
