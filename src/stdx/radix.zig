@@ -135,6 +135,33 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
     };
 }
 
+test "radix_sort: smoke" {
+    const Value = TestValueType(u8, 0);
+    var values: [5]Value = .{
+        Value{ .x = 3, .y = 0 },
+        Value{ .x = 2, .y = 0 },
+        Value{ .x = 3, .y = 1 },
+        Value{ .x = 1, .y = 0 },
+        Value{ .x = 5, .y = 0 },
+    };
+    const values_expected: [5]Value = .{
+        Value{ .x = 1, .y = 0 },
+        Value{ .x = 2, .y = 0 },
+        Value{ .x = 3, .y = 0 },
+        Value{ .x = 3, .y = 1 },
+        Value{ .x = 5, .y = 0 },
+    };
+    var values_scratch: [5]Value = undefined;
+    radix_sort(
+        u8,
+        Value,
+        Value.key_from_value,
+        &values,
+        &values_scratch,
+    );
+    try std.testing.expectEqual(values_expected, values);
+}
+
 //  Ascending order + stability against a (x,y) baseline, with a large Value
 //  payload to exercise the 11-bit radix path (since @sizeOf(Value) >= 128).
 test "radix_sort: ascending & stable on many duplicates" {
