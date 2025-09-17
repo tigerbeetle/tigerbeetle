@@ -1,4 +1,8 @@
 //! Extensions to the standard library -- things which could have been in std, but aren't.
+//!
+//! Unlike std, the namespacing is relatively flat: `stdx.PRNG` rather than `stdx.random.PRNG`.
+//! We don't care about backwards compatability and prefer directness to scalability. Hierarchy can
+//! always be introduced later, when/if stdx grows too large.
 
 const std = @import("std");
 const builtin = @import("builtin");
