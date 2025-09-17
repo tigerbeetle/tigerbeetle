@@ -132,12 +132,6 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
         fn compare_x_descending(_: void, a: Value, b: Value) bool {
             return a.x > b.x;
         }
-
-        fn compare_xy_ascending(_: void, a: Value, b: Value) bool {
-            if (a.x < b.x) return true;
-            if (a.x > b.x) return false;
-            return a.y < b.y;
-        }
     };
 }
 
