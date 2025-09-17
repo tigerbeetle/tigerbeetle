@@ -14,6 +14,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
 
         try shell.exec("cargo fmt --check", .{});
         try shell.exec("cargo clippy -- -D clippy::all", .{});
+        try shell.exec("cargo audit", .{});
 
         var tmp_beetle = try TmpTigerBeetle.init(gpa, .{
             .development = true,
