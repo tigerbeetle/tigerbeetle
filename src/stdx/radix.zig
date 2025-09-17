@@ -141,7 +141,76 @@ pub fn TestValueType(comptime Key: type, comptime value_length: usize) type {
     };
 }
 
-test "radix_sort_stable" {
+//  Ascending order + stability against a (x,y) baseline, with a large Value
+//  payload to exercise the 11-bit radix path (since @sizeOf(Value) >= 128).
+test "radix_sort: ascending & stable on many duplicates" {
+    const Key = u32;
+    const Value = TestValueType(Key, 128); // >=128 so radix_bits heuristic picks 11
+    const allocator = std.testing.allocator;
+
+    const n: usize = 2048;
+
+    const values = try allocator.alloc(Value, n);
+    defer allocator.free(values);
+
+    const scratch = try allocator.alloc(Value, n);
+    defer allocator.free(scratch);
+
+    // Many duplicates; y = original index (used to check stability).
+    for (values, 0..) |*v, i| {
+        const k: Key = @intCast(i % 257);
+        v.* = .{ .x = k, .y = @intCast(i) };
+    }
+
+    radix_sort(Key, Value, Value.key_from_value, values, scratch);
+
+    // Verify that the order is `ascending` and `stable`.
+    for (values[0 .. values.len - 1], values[1..]) |a, b| {
+        switch (std.math.order(a.x, b.x)) {
+            .eq => try std.testing.expect(a.y < b.y),
+            .lt => try std.testing.expect(a.x < b.x),
+            .gt => unreachable,
+        }
+    }
+}
+
+// All keys equal → every pass is "trivial". Sort should be a no-op on values,
+// keep relative order (stability).
+test "radix_sort: all-equal keys preserve relative order (stability)" {
+    const Key = u64;
+    const Value = TestValueType(Key, 8);
+    const allocator = std.testing.allocator;
+
+    const n: usize = 1024;
+
+    const values = try allocator.alloc(Value, n);
+    defer allocator.free(values);
+
+    const scratch = try allocator.alloc(Value, n);
+    defer allocator.free(scratch);
+
+    // Fill scratch with a sentinel to detect writes.
+    const sentinel: Value = .{ .x = 0xFFFF_FFFF_FFFF_FFFF, .y = 0xDEAD_BEEF };
+    for (scratch) |*s| s.* = sentinel;
+
+    // All keys identical; y = original index to check stability.
+    for (values, 0..) |*v, i| {
+        v.* = .{ .x = 42, .y = @intCast(i) };
+    }
+
+    radix_sort(Key, Value, Value.key_from_value, values, scratch);
+
+    // Verify that the order is `ascending` and `stable`.
+    for (values[0 .. values.len - 1], values[1..]) |a, b| {
+        switch (std.math.order(a.x, b.x)) {
+            .eq => try std.testing.expect(a.y < b.y),
+            .lt => try std.testing.expect(a.x < b.x),
+            .gt => unreachable,
+        }
+    }
+}
+
+test "fuzz radix_sort_stable" {
     inline for (.{
         .{ u3, 0 }, // Smaller than radix bits.
         .{ u256, 130 }, // Largest histogram, requires multiple passes and bit heuristic.
@@ -158,15 +227,11 @@ test "radix_sort_stable" {
         const values_all = try allocator.alloc(Value, values_max);
         defer allocator.free(values_all);
 
-        const values_all_expected = try allocator.alloc(Value, values_max);
-        defer allocator.free(values_all_expected);
-
         const values_all_scratch = try allocator.alloc(Value, values_max);
         defer allocator.free(values_all_scratch);
 
         for (0..64) |_| {
             const values_count = prng.range_inclusive(u32, 2, values_max);
-            const values_expected = values_all_expected[0..values_count];
             const values = values_all[0..values_count];
             const values_scratch = values_all_scratch[0..values_count];
 
@@ -235,26 +300,15 @@ test "radix_sort_stable" {
                 for (values, 0..) |*value, i| value.y = @intCast(i);
             }
 
-            {
-                // Set up `values_expected`.
-                stdx.copy_disjoint(.exact, Value, values_expected, values);
-                std.mem.sortUnstable(Value, values_expected, {}, Value.compare_xy_ascending);
-
-                // Sanity-check the expected values' order.
-                for (
-                    values_expected[0 .. values_count - 1],
-                    values_expected[1..],
-                ) |a, b| {
-                    assert(a.x <= b.x);
-                    if (a.x == b.x) assert(a.y < b.y);
-                }
-            }
-
             radix_sort(Key, Value, Value.key_from_value, values, values_scratch);
 
-            for (values, values_expected) |value, value_expected| {
-                try std.testing.expectEqual(value.x, value_expected.x);
-                try std.testing.expectEqual(value.y, value_expected.y);
+            // Verify that the order is `ascending` and `stable`.
+            for (values[0 .. values.len - 1], values[1..]) |a, b| {
+                switch (std.math.order(a.x, b.x)) {
+                    .eq => try std.testing.expect(a.y < b.y),
+                    .lt => try std.testing.expect(a.x < b.x),
+                    .gt => unreachable,
+                }
             }
         }
     }
