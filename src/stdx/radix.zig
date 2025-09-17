@@ -53,7 +53,7 @@ fn radix_sort(
     const radix_bits = @min(@bitSizeOf(Key), radix_bits_heuristic);
     const radix_passes = stdx.div_ceil(@bitSizeOf(Key), radix_bits);
     const radix_partitions = 1 << radix_bits;
-    const radix_mask = radix_partitions - 1;
+    const radix_mask: u32 = radix_partitions - 1;
 
     const BitsKey = std.math.Log2Int(Key); // Used to shift the key for each pass.
     const Histograms: type = [radix_passes][radix_partitions]u32;
