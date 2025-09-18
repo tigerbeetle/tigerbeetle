@@ -387,6 +387,17 @@ padding). Each tree can be specialized for specific value size. This improves pe
 and storage efficiency. Zig's `comptime` makes it particularly easy to configure the LSM Forest
 through meta programming.
 
+### Grid
+
+The bulk of the data file is organized as a uniform grid of equally-sized blocks. Each block is
+0.5MiB large. Although LSM trees are type-specialized, they all use the same grid of blocks. Various
+auxiliary persistent data structures (for example, `ManifestLog`) also build on top of the `Grid`.
+
+Each `Grid` block is also valid network [`Message`](#message-passing). Blocks are
+[hash-chained](#hash-chaining) and [deterministic](#determinism) across replicas. This allows for
+physical repair --- if a block gets corrupted, TigerBeetle uses its checksum to transparently
+request the data from a peer replica.
+
 ### Control Plane / Data Plane Separation
 
 Batching is a special case of the more general principle of separating control plane and data plane.
@@ -458,6 +469,15 @@ levels. That's more or less exactly what io_uring exposes as an interface to the
 io_uring is _also_ the only reasonable way to have truly asynchronous disk io on Linux and comes
 with improved throughput to boot. But these benefits are secondary to the interface being a natural
 fit for the problem.
+
+io_uring interacts with static allocation in an interesting way. Any asynchronous operation requires
+saving a resumption context somewhere. Usually the context is heap allocated, but this is
+incompatible with static allocation. In TigerBeetle, each component stores its own resumption
+contexts. For example, the `Journal` holds a fixed-size array of `Write` structures with callback
+contexts. The contexts from different components are organized by `IO` into a single intrusive
+linked list. This way, `IO` can manage arbitrary many in-flight IO operations without a hard-coded
+upper bound. And yet, the total amount of concurrency is limited. The limit is implicit, it is the
+sum of per-component explicit limits.
 
 ### Time
 
@@ -577,6 +597,14 @@ the hash chain.
 **Requests**. Each client request includes a checksum of the reply to the previous request. While
 these checksums are not as crucial for data validation, they provide a strong proof that the proper
 ordering of requests is observed.
+
+### Message Passing
+
+TigerBeetle is agnostic of the underlying transport protocol and requires only a very weak message
+passing semantics. TigerBeetle assumes that messages might be dropped, duplicated, reordered, and
+corrupted (in non-byzantine way). Although specific `MessageBus` is not tested in
+[VOPR](#simulation-testing), bugs in `MessageBus` are unlikely to affect correctness, because the
+contract for the transport layer is intentionally very weak.
 
 ### Adaptive Routing
 
