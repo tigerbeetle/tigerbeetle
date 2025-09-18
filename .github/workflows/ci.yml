@@ -129,8 +129,8 @@ jobs:
       - run: ./zig/download.ps1 && ./zig/zig build ci -- ${{ matrix.language }}
 
   devhub:
-    runs-on: ubuntu-22.04
-    environment: ${{ github.ref == 'refs/heads/main' && 'devhub' || '' }}
+    runs-on: devhub-runner 
+    environment: ${{ github.ref == 'refs/heads/tobi/devhub-runner' && 'devhub' || '' }}
     permissions:
       pages: write
       id-token: write
@@ -138,12 +138,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2147483647 }
-      - run: sudo apt-get update && sudo apt-get install -y kcov
       - run: ./zig/download.ps1
 
       # Dummy devhub run - checks that all the devhub tests pass in CI. They are run again, in main
       # once merged. Kcov is skipped to avoid adding to the pipeline time.
-      - if: github.ref != 'refs/heads/main'
+      - if: github.ref != 'refs/heads/tobi/devhub-runner'
         run: sudo -E ./zig/zig build ci -- devhub-dry-run
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -151,19 +150,19 @@ jobs:
           # it still runs everything.
 
       # Run under sudo to enable memory locking for accurate RSS stats.
-      - if: github.ref == 'refs/heads/main'
+      - if: github.ref == 'refs/heads/tobi/devhub-runner'
         run: sudo -E ./zig/zig build ci -- devhub
         env:
           DEVHUBDB_PAT: ${{ secrets.DEVHUBDB_PAT }}
           NYRKIO_TOKEN: ${{ secrets.NYRKIO_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with: { path: ./src/devhub }
+      ##- if: github.ref == 'refs/heads/main'
+      ##  uses: actions/upload-pages-artifact@v3
+      ##  with: { path: ./src/devhub }
 
-      - if: github.ref == 'refs/heads/main'
-        uses: actions/deploy-pages@v4
+      ##- if: github.ref == 'refs/heads/main'
+      ##  uses: actions/deploy-pages@v4
 
 
   # Work around GitHub considering Skipped jobs success for "Require status checks before merging"
