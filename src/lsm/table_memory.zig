@@ -84,14 +84,16 @@ pub fn TableMemoryType(comptime Table: type) type {
                 context: *const MergeContext,
                 stream_index: u32,
             ) error{ Empty, Drained }!Key {
-                assert(stream_index < context.streams_count);
+                // TODO: Enable the asserts once `constants.verify` is disabled on release.
+                //assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
                 if (stream.len == 0) return error.Empty;
                 return key_from_value(&stream[0]);
             }
 
             fn stream_pop(context: *MergeContext, stream_index: u32) Value {
-                assert(stream_index < context.streams_count);
+                // TODO: Enable the asserts once `constants.verify` is disabled on release.
+                //assert(stream_index < context.streams_count);
                 const stream = context.streams[stream_index];
                 context.streams[stream_index] = stream[1..];
                 return stream[0];
@@ -100,8 +102,9 @@ pub fn TableMemoryType(comptime Table: type) type {
             // Prefer immutable over mutable on ties; otherwise stable by index.
             // This preserves the correct order for deduplication and annihilation.
             fn stream_precedence(context: *const MergeContext, a: u32, b: u32) bool {
-                assert(a < context.streams_count);
-                assert(b < context.streams_count);
+                // TODO: Enable the asserts once `constants.verify` is disabled on release.
+                //assert(a < context.streams_count);
+                //assert(b < context.streams_count);
                 if (context.stream_origins[a] != context.stream_origins[b])
                     return context.stream_origins[a] == .immutable;
                 return a < b;
