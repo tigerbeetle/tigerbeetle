@@ -232,7 +232,7 @@ const IO = struct {
         connect: struct { socket: socket_t, address: std.net.Address },
         recv: struct { socket: socket_t, buffer: []u8 },
         send: struct { socket: socket_t, buffer: []const u8 },
-        timeout: stdx.Duration,
+        timeout,
     };
 
     pub const Completion = struct {
@@ -518,11 +518,7 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: AcceptError!socket_t,
-        ) void,
+        comptime callback: fn (Context, *Completion, AcceptError!socket_t) void,
         completion: *Completion,
         socket: socket_t,
     ) void {
@@ -538,11 +534,7 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: CloseError!void,
-        ) void,
+        comptime callback: fn (Context, *Completion, CloseError!void) void,
         completion: *Completion,
         fd: fd_t,
     ) void {
@@ -559,11 +551,7 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: ConnectError!void,
-        ) void,
+        comptime callback: fn (Context, *Completion, ConnectError!void) void,
         completion: *Completion,
         socket: socket_t,
         address: std.net.Address,
@@ -580,11 +568,7 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: RecvError!usize,
-        ) void,
+        comptime callback: fn (Context, *Completion, RecvError!usize) void,
         completion: *Completion,
         socket: socket_t,
         buffer: []u8,
@@ -606,11 +590,7 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: SendError!usize,
-        ) void,
+        comptime callback: fn (Context, *Completion, SendError!usize) void,
         completion: *Completion,
         socket: socket_t,
         buffer: []const u8,
@@ -649,18 +629,14 @@ const IO = struct {
         io: *IO,
         comptime Context: type,
         context: Context,
-        comptime callback: fn (
-            context: Context,
-            completion: *Completion,
-            result: TimeoutError!void,
-        ) void,
+        comptime callback: fn (Context, *Completion, TimeoutError!void) void,
         completion: *Completion,
         nanoseconds: u63,
     ) void {
         completion.* = .{
             .context = context,
             .callback = erase_types(Context, TimeoutError!void, callback),
-            .operation = .{ .timeout = .{ .ns = nanoseconds } },
+            .operation = .timeout,
         };
 
         const jitter_mean = 1_000;
