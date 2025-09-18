@@ -124,7 +124,7 @@ test "Stack: fuzz" {
 
     const allocator = std.testing.allocator;
 
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const Item = struct {
         id: u32,

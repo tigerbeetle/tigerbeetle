@@ -495,7 +495,7 @@ pub const MultiBatchEncoder = struct {
 
 // The maximum number of batches, all with zero elements.
 test "batch: maximum batches with no elements" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const batch_count = Postamble.batch_count_max;
     const element_size = 128;
@@ -522,7 +522,7 @@ test "batch: maximum batches with no elements" {
 
 // The maximum number of batches, when each one has one single element.
 test "batch: maximum batches with a single element" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
     const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
@@ -551,7 +551,7 @@ test "batch: maximum batches with a single element" {
 
 // The maximum number of elements on a single batch.
 test "batch: maximum elements on a single batch" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
     const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
@@ -571,7 +571,7 @@ test "batch: maximum elements on a single batch" {
 }
 
 test "batch: invalid format" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
     const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.

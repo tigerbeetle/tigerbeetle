@@ -685,7 +685,7 @@ test "binary search: duplicates" {
 }
 
 test "binary search: random" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     inline for (.{ .lower_bound, .upper_bound }) |mode| {
         var i: usize = 0;
         while (i < 2048) : (i += 1) {
@@ -842,7 +842,7 @@ test "binary search: duplicated range" {
 }
 
 test "binary search: random range" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     var i: usize = 0;
     while (i < 2048) : (i += 1) {
         try test_binary_search.random_range_search(&prng, i);

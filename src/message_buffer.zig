@@ -348,7 +348,7 @@ test "MessageBuffer fuzz" {
     // are received unless a fault is detected.
     const messages_max = 100;
 
-    var prng = stdx.PRNG.from_seed(92);
+    var prng = stdx.PRNG.from_seed_testing();
     const gpa = std.testing.allocator;
 
     var buffer: []u8 = try gpa.alloc(u8, 5 * constants.message_size_max);
