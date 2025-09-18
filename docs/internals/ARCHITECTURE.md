@@ -391,9 +391,9 @@ through meta programming.
 
 The bulk of the data file is organized as a uniform grid of equally-sized blocks. Each block is
 0.5MiB large. Although LSM trees are type-specialized, they all use the same grid of blocks. Various
-auxiliary persistent data structures (for example, `ManifestLog`) also build on top of the `Grid`.
+auxiliary persistent data structures (for example, `ManifestLog`) are also built on top of the `Grid`.
 
-Each `Grid` block is also valid network [`Message`](#message-passing). Blocks are
+Each `Grid` block is also a valid network [`Message`](#message-passing). Blocks are
 [hash-chained](#hash-chaining) and [deterministic](#determinism) across replicas. This allows for
 physical repair --- if a block gets corrupted, TigerBeetle uses its checksum to transparently
 request the data from a peer replica.
