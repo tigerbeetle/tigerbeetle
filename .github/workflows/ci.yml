@@ -129,7 +129,7 @@ jobs:
       - run: ./zig/download.ps1 && ./zig/zig build ci -- ${{ matrix.language }}
 
   devhub:
-    runs-on: ubuntu-22.04
+    runs-on: devhub-runner 
     environment: ${{ github.ref == 'refs/heads/main' && 'devhub' || '' }}
     permissions:
       pages: write
@@ -138,7 +138,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 2147483647 }
-      - run: sudo apt-get update && sudo apt-get install -y kcov
+        # Already installed on our self-hosted since it is not in the ubuntu-24 repositories.
+        #- run: sudo apt-get update && sudo apt-get install -y kcov 
       - run: ./zig/download.ps1
 
       # Dummy devhub run - checks that all the devhub tests pass in CI. They are run again, in main
