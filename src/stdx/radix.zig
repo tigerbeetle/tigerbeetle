@@ -242,7 +242,7 @@ test "fuzz radix_sort_stable" {
 
         const Value = TestValueType(Key, value_size_min);
 
-        var prng = stdx.PRNG.from_seed(0);
+        var prng = stdx.PRNG.from_seed_testing();
 
         const values_max = 1 << 18; // Explores uneven and even passes to test copy back.
         const values_all = try allocator.alloc(Value, values_max);
