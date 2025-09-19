@@ -40,6 +40,11 @@ pub fn TableMemoryType(comptime Table: type) type {
     return struct {
         const TableMemory = @This();
 
+        values: []Value,
+        value_context: ValueContext,
+        mutability: Mutability,
+        name: []const u8,
+
         // Maintains per-table mutable state that must be snapshotted for “scopes”.
         // When a scope is opened (e.g., in `tree.zig`), we copy `ValueContext` so we can
         // roll back both the count and the sorted-run tracker if the scope is discarded.
@@ -49,7 +54,9 @@ pub fn TableMemoryType(comptime Table: type) type {
         };
 
         const Mutability = union(enum) {
-            mutable,
+            mutable: struct {
+                values_scratch: []Value, // Temporary buffer for radix sort.
+            },
             immutable: struct {
                 // An empty table has nothing to flush.
                 flushed: bool = true,
@@ -292,11 +299,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             }
         };
 
-        values: []Value,
-        value_context: ValueContext,
-        mutability: Mutability,
-        name: []const u8,
-
         pub fn init(
             table: *TableMemory,
             allocator: mem.Allocator,
@@ -313,7 +315,9 @@ pub fn TableMemoryType(comptime Table: type) type {
                     .run_tracker = SortedRunTracker.init(),
                 },
                 .mutability = switch (mutability) {
-                    .mutable => .mutable,
+                    .mutable => .{ .mutable = .{
+                        .values_scratch = undefined,
+                    } },
                     .immutable => .{ .immutable = .{} },
                 },
                 .name = name,
@@ -324,16 +328,32 @@ pub fn TableMemoryType(comptime Table: type) type {
             // ensure that memory table coalescing is deterministic even if the batch limit changes.
             table.values = try allocator.alloc(Value, Table.value_count_max);
             errdefer allocator.free(table.values);
+
+            if (table.mutability == .mutable) {
+                table.mutability.mutable.values_scratch = try allocator.alloc(
+                    Value,
+                    Table.value_count_max,
+                );
+            }
+
+            errdefer if (table.mutability == .mutable) {
+                allocator.free(table.mutability.mutable.values_scratch);
+            };
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
+            if (table.mutability == .mutable) {
+                allocator.free(table.mutability.mutable.values_scratch);
+            }
             allocator.free(table.values);
         }
 
         pub fn reset(table: *TableMemory) void {
             const mutability: Mutability = switch (table.mutability) {
                 .immutable => .{ .immutable = .{} },
-                .mutable => .mutable,
+                .mutable => .{ .mutable = .{
+                    .values_scratch = table.mutability.mutable.values_scratch,
+                } },
             };
 
             table.value_context.run_tracker.reset();
@@ -427,6 +447,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table_mutable.sorted()) {
                 // Fast-path: single contiguous sorted run: swap buffers.
+                assert(table_mutable.values.len == table_immutable.values.len);
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
 
                 table_immutable.value_context.count = table_mutable.count();
@@ -564,17 +585,22 @@ pub fn TableMemoryType(comptime Table: type) type {
             assert(offset == 0 or offset == table.value_context.run_tracker.last().?.max);
             assert(offset <= table.count());
 
-            const target_count = sort_suffix_from_offset(table.values_used(), offset);
+            const target_count = sort_suffix_from_offset(
+                table.values_used(),
+                table.mutability.mutable.values_scratch[0..table.count()],
+                offset,
+            );
             table.value_context.count = target_count;
             return .{ .min = offset, .max = target_count, .origin = .mutable };
         }
 
         // Returns the new length of `values`. Values are deduplicated after sorting, so the
         // returned count may be less than or equal to the original `values.len`.
-        fn sort_suffix_from_offset(values: []Value, offset: u32) u32 {
+        fn sort_suffix_from_offset(values: []Value, values_scratch: []Value, offset: u32) u32 {
+            assert(values.len == values_scratch.len);
             assert(offset <= values.len);
 
-            std.mem.sort(Value, values[offset..], {}, sort_values_by_key_in_ascending_order);
+            stdx.radix_sort(Key, Value, key_from_value, values[offset..], values_scratch[offset..]);
 
             // Deduplicate values in streaming fashion.
             var dedup_sink = DedupSink.init(values[offset..]);
@@ -584,10 +610,6 @@ pub fn TableMemoryType(comptime Table: type) type {
             const target_count = offset + dedup_sink.finish();
 
             return target_count;
-        }
-
-        fn sort_values_by_key_in_ascending_order(_: void, a: Value, b: Value) bool {
-            return key_from_value(&a) < key_from_value(&b);
         }
 
         pub fn key_range_contains(table: *const TableMemory, key: Key) bool {
