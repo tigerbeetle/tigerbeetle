@@ -342,10 +342,10 @@ pub fn TableMemoryType(comptime Table: type) type {
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
-            allocator.free(table.values);
             if (table.mutability == .mutable) {
                 allocator.free(table.mutability.mutable.values_scratch);
             }
+            allocator.free(table.values);
         }
 
         pub fn reset(table: *TableMemory) void {
