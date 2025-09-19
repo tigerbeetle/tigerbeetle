@@ -243,7 +243,7 @@ pub fn KWayMergeIteratorType(
         }
 
         fn next_contender(self: *KWayMergeIterator, stream_id: u32) error{Drained}!Node {
-            assert(stream_id < options.streams_max);
+            assert(stream_id < self.streams_count);
             const next_key = stream_peek(self.context, stream_id) catch |err| switch (err) {
                 error.Drained => return error.Drained,
                 error.Empty => {
