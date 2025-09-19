@@ -873,9 +873,11 @@ pub fn ReplType(comptime MessageBus: type) type {
         }
 
         fn display_object(repl: *Repl, object: anytype) !void {
-            assert(@TypeOf(object.*) == tb.Account or
+            comptime assert(@TypeOf(object.*) == tb.Account or
                 @TypeOf(object.*) == tb.Transfer or
-                @TypeOf(object.*) == tb.AccountBalance);
+                @TypeOf(object.*) == tb.AccountBalance or
+                @TypeOf(object.*) == tb.CreateAccountsResult or
+                @TypeOf(object.*) == tb.CreateTransfersResult);
 
             try repl.terminal.print("{{\n", .{});
             inline for (@typeInfo(@TypeOf(object.*)).@"struct".fields, 0..) |object_field, i| {
@@ -942,12 +944,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                         tb.CreateAccountsResult,
                         result,
                     );
-                    if (create_account_results.len > 0) {
-                        for (create_account_results) |*reason| {
-                            try repl.terminal.print(
-                                "Failed to create account ({}): {any}.\n",
-                                .{ reason.index, reason.result },
-                            );
+                    if (create_account_results.len == 0) {
+                        try repl.fail("No accounts were created.\n", .{});
+                    } else {
+                        for (create_account_results) |*create_result| {
+                            try repl.display_object(create_result);
                         }
                     }
                 },
@@ -971,12 +972,11 @@ pub fn ReplType(comptime MessageBus: type) type {
                         tb.CreateTransfersResult,
                         result,
                     );
-                    if (create_transfer_results.len > 0) {
-                        for (create_transfer_results) |*reason| {
-                            try repl.terminal.print(
-                                "Failed to create transfer ({}): {any}.\n",
-                                .{ reason.index, reason.result },
-                            );
+                    if (create_transfer_results.len == 0) {
+                        try repl.fail("No transfers were created.\n", .{});
+                    } else {
+                        for (create_transfer_results) |*create_result| {
+                            try repl.display_object(create_result);
                         }
                     }
                 },

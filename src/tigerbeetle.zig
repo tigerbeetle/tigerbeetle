@@ -446,23 +446,49 @@ pub const CreateTransferResult = enum(u32) {
 };
 
 pub const CreateAccountsResult = extern struct {
-    index: u32,
+    timestamp: u64,
     result: CreateAccountResult,
+    reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateAccountsResult) == 8);
+        assert(@sizeOf(CreateAccountsResult) == 16);
+        assert(@alignOf(CreateAccountsResult) == 8);
         assert(stdx.no_padding(CreateAccountsResult));
     }
+
+    // Deprecated: does not return a result on success.
+    pub const Deprecated = extern struct {
+        index: u32,
+        result: CreateAccountResult,
+
+        comptime {
+            assert(@sizeOf(Deprecated) == 8);
+            assert(stdx.no_padding(Deprecated));
+        }
+    };
 };
 
 pub const CreateTransfersResult = extern struct {
-    index: u32,
+    timestamp: u64,
     result: CreateTransferResult,
+    reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateTransfersResult) == 8);
+        assert(@sizeOf(CreateTransfersResult) == 16);
+        assert(@alignOf(CreateTransfersResult) == 8);
         assert(stdx.no_padding(CreateTransfersResult));
     }
+
+    // Deprecated: does not return a result on success.
+    pub const Deprecated = extern struct {
+        index: u32,
+        result: CreateTransferResult,
+
+        comptime {
+            assert(@sizeOf(Deprecated) == 8);
+            assert(stdx.no_padding(Deprecated));
+        }
+    };
 };
 
 pub const QueryFilter = extern struct {
@@ -632,32 +658,38 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
-// Looking to make backwards incompatible changes here? Make sure to check release.zig for
-// `release_triple_client_min`.
+/// Operations exported by TigerBeetle:
 pub const Operation = enum(u8) {
-    /// Operations exported by TigerBeetle:
+    // Looking to make backwards incompatible changes here?
+    // Make sure to check release.zig for `release_triple_client_min`.
+
     pulse = constants.vsr_operations_reserved + 0,
 
     // Deprecated operations not encoded as multi-batch:
-    deprecated_create_accounts = constants.vsr_operations_reserved + 1,
-    deprecated_create_transfers = constants.vsr_operations_reserved + 2,
-    deprecated_lookup_accounts = constants.vsr_operations_reserved + 3,
-    deprecated_lookup_transfers = constants.vsr_operations_reserved + 4,
-    deprecated_get_account_transfers = constants.vsr_operations_reserved + 5,
-    deprecated_get_account_balances = constants.vsr_operations_reserved + 6,
-    deprecated_query_accounts = constants.vsr_operations_reserved + 7,
-    deprecated_query_transfers = constants.vsr_operations_reserved + 8,
+    deprecated_create_accounts_unbatched = constants.vsr_operations_reserved + 1,
+    deprecated_create_transfers_unbatched = constants.vsr_operations_reserved + 2,
+    deprecated_lookup_accounts_unbatched = constants.vsr_operations_reserved + 3,
+    deprecated_lookup_transfers_unbatched = constants.vsr_operations_reserved + 4,
+    deprecated_get_account_transfers_unbatched = constants.vsr_operations_reserved + 5,
+    deprecated_get_account_balances_unbatched = constants.vsr_operations_reserved + 6,
+    deprecated_query_accounts_unbatched = constants.vsr_operations_reserved + 7,
+    deprecated_query_transfers_unbatched = constants.vsr_operations_reserved + 8,
 
     get_change_events = constants.vsr_operations_reserved + 9,
 
-    create_accounts = constants.vsr_operations_reserved + 10,
-    create_transfers = constants.vsr_operations_reserved + 11,
+    // Deprecated `create_` operations that do not return a result on success.
+    deprecated_create_accounts_noreturn = constants.vsr_operations_reserved + 10,
+    deprecated_create_transfers_noreturn = constants.vsr_operations_reserved + 11,
+
     lookup_accounts = constants.vsr_operations_reserved + 12,
     lookup_transfers = constants.vsr_operations_reserved + 13,
     get_account_transfers = constants.vsr_operations_reserved + 14,
     get_account_balances = constants.vsr_operations_reserved + 15,
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
+
+    create_accounts = constants.vsr_operations_reserved + 18,
+    create_transfers = constants.vsr_operations_reserved + 19,
 };
 
 comptime {
