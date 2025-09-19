@@ -334,8 +334,11 @@ pub fn TableMemoryType(comptime Table: type) type {
                     Value,
                     Table.value_count_max,
                 );
-                errdefer allocator.free(table.mutability.mutable.values_scratch);
             }
+
+            errdefer if (table.mutability == .mutable) {
+                allocator.free(table.mutability.mutable.values_scratch);
+            };
         }
 
         pub fn deinit(table: *TableMemory, allocator: mem.Allocator) void {
