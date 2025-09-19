@@ -444,6 +444,7 @@ pub fn TableMemoryType(comptime Table: type) type {
 
             if (table_mutable.sorted()) {
                 // Fast-path: single contiguous sorted run: swap buffers.
+                assert(table_mutable.values.len == table_immutable.values.len);
                 std.mem.swap([]Value, &table_mutable.values, &table_immutable.values);
 
                 table_immutable.value_context.count = table_mutable.count();
@@ -593,6 +594,7 @@ pub fn TableMemoryType(comptime Table: type) type {
         // Returns the new length of `values`. Values are deduplicated after sorting, so the
         // returned count may be less than or equal to the original `values.len`.
         fn sort_suffix_from_offset(values: []Value, values_scratch: []Value, offset: u32) u32 {
+            assert(values.len == values_scratch.len);
             assert(offset <= values.len);
 
             stdx.radix_sort(Key, Value, key_from_value, values[offset..], values_scratch[offset..]);
