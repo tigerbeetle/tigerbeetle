@@ -1091,22 +1091,11 @@ pub fn ReplicaType(
             self.node_count = node_count;
             self.replica = replica_index;
 
-            // Ensure each replica can have a maximum of two inflight WAL repair messages
-            // (`request_headers` and `request_prepares`) per remote replica, at any point of time.
-            //
-            // This is merely an approximation that is loosely enforced by randomizing the remote
-            // replica we choose for repair, instead of strictly by ensuring that there is *exactly*
-            // two inflight repair messages to a specific replica. It also applies to
-            // `grid_repair_message_budget_max` below.
-            const journal_repair_message_budget_max =
-                2 * (replica_count - @intFromBool(!self.standby()));
-            const journal_repair_message_budget_refill =
-                @divFloor(journal_repair_message_budget_max, 2);
             self.journal_repair_message_budget = try RepairBudgetJournal.init(
                 allocator,
                 .{
-                    .capacity = journal_repair_message_budget_max,
-                    .refill_max = journal_repair_message_budget_refill,
+                    .replica_count = replica_count,
+                    .replica_index = replica_index,
                 },
             );
             errdefer self.journal_repair_message_budget.deinit(allocator);
@@ -1115,7 +1104,10 @@ pub fn ReplicaType(
                 self.journal_repair_message_budget.capacity);
 
             // Ensure each replica can have a maximum of two inflight grid repair messages
-            // (`request_blocks`) per remote replica, at any point of time.
+            // (`request_blocks`) per remote replica, at any point of time. This is merely an
+            // approximation that is loosely enforced by randomizing the remote replica we choose
+            // for repair, instead of strictly by ensuring that there is *exactly* two inflight
+            // repair messages to a specific replica.
             // We track the number of requested blocks instead of the number of inflight
             // `request_blocks` messages, since the response for each `request_blocks` message is
             // potentially multiple blocks (up to `grid_repair_request_max`).
@@ -1141,7 +1133,6 @@ pub fn ReplicaType(
                 assert(self.grid_repair_message_budget.capacity == 0);
             } else {
                 assert(self.journal_repair_message_budget.capacity > 0);
-                assert(self.journal_repair_message_budget.refill_max > 0);
 
                 assert(self.grid_repair_message_budget.capacity > 0);
                 assert(self.grid_repair_message_budget.capacity >=
@@ -1386,9 +1377,9 @@ pub fn ReplicaType(
                     .after = 1_000 / constants.tick_ms,
                 },
                 .journal_repair_budget_timeout = Timeout{
-                    .name = "repair_timeout",
+                    .name = "journal_repair_budget_timeout",
                     .id = replica_index,
-                    .after = 100 / constants.tick_ms,
+                    .after = 25 / constants.tick_ms,
                 },
                 .repair_sync_timeout = Timeout{
                     .name = "repair_sync_timeout",
@@ -2403,28 +2394,29 @@ pub fn ReplicaType(
                 self.cache_prepare(message);
             }
 
-            if (self.repair_header(message.header)) {
+            if (self.repair_header(message.header) and self.write_prepare(message)) {
                 assert(self.journal.has_dirty(message.header));
 
-                log.debug("{}: on_repair: repairing journal", .{self.log_prefix()});
-                const write_initiated = self.write_prepare(message, .repair);
+                log.debug("{}: on_repair: repairing journal op={}", .{
+                    self.log_prefix(),
+                    message.header.op,
+                });
 
-                if (write_initiated) {
-                    self.journal_repair_message_budget.increment(.{
-                        .view = message.header.view,
-                        .op = message.header.op,
-                    });
+                self.journal_repair_message_budget.increment(.{
+                    .op = message.header.op,
+                    .replica_index = message.header.replica,
+                    .repaired_at = self.clock.monotonic_instant(),
+                });
 
-                    // Write prepare adds it synchronously to in-memory pipeline cache.
-                    // Optimistically start committing without waiting for the disk write to finish.
-                    if (self.status == .normal and self.backup()) {
-                        self.commit_journal();
-                    }
-
-                    // Initiate repair so `repair_header`/`request_prepare` network messages can be
-                    // sent concurrently while writing this prepare.
-                    self.repair();
+                // Write prepare adds it synchronously to in-memory pipeline cache.
+                // Optimistically start committing without waiting for the disk write to finish.
+                if (self.status == .normal and self.backup()) {
+                    self.commit_journal();
                 }
+
+                // Initiate repair so `repair_header`/`request_prepare` network messages can be
+                // sent concurrently while writing this prepare.
+                self.repair();
             }
         }
 
@@ -3667,9 +3659,10 @@ pub fn ReplicaType(
         fn on_journal_repair_budget_timeout(self: *Replica) void {
             assert(self.status == .normal or self.status == .view_change);
 
-            self.journal_repair_message_budget.refill();
             self.journal_repair_budget_timeout.reset();
-
+            self.journal_repair_message_budget.maybe_expire_requested_prepares(
+                self.clock.monotonic_instant(),
+            );
             self.repair();
         }
 
@@ -4107,7 +4100,7 @@ pub fn ReplicaType(
                     message.header.op,
                 });
 
-                _ = self.write_prepare(message, .append);
+                _ = self.write_prepare(message);
             }
         }
 
@@ -4291,7 +4284,7 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
 
-                    self.commit_started = self.clock.time.monotonic_instant();
+                    self.commit_started = self.clock.monotonic_instant();
                     self.trace.start(.{ .replica_commit = .{
                         .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
@@ -4770,7 +4763,7 @@ pub fn ReplicaType(
                             self.log_prefix(),
                             next.message.header.op,
                         });
-                        _ = self.write_prepare(next.message, .append);
+                        _ = self.write_prepare(next.message);
                     }
                 }
 
@@ -5126,7 +5119,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_local = self.clock.time.monotonic_instant()
+            const commit_completion_time_local = self.clock.monotonic_instant()
                 .duration_since(self.commit_started.?);
             self.commit_started = null;
             if (commit_completion_time_local.to_ms() >
@@ -7208,7 +7201,7 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
-            self.routing.op_prepare(message.header.op, self.clock.time.monotonic_instant());
+            self.routing.op_prepare(message.header.op, self.clock.monotonic_instant());
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -8154,14 +8147,17 @@ pub fn ReplicaType(
                         op,
                         checksum,
                     });
-                    _ = self.write_prepare(prepare, .pipeline);
+                    _ = self.write_prepare(prepare);
                     return true;
                 }
             }
 
-            if (self.journal_repair_message_budget.decrement(
-                .{ .view = self.view, .op = op },
-            )) {
+            if (self.journal_repair_message_budget.decrement(.{
+                .op = op,
+                .requested_at = self.clock.monotonic_instant(),
+                .prng = &self.prng,
+            })) |replica_index| {
+                assert(replica_index != self.replica);
                 const request_prepare = Header.RequestPrepare{
                     .command = .request_prepare,
                     .cluster = self.cluster,
@@ -8182,11 +8178,12 @@ pub fn ReplicaType(
                 };
 
                 log.debug(
-                    "{}: repair_prepare: op={} checksum={} ({s}, {s}, {s})",
+                    "{}: repair_prepare: op={} checksum={} remote_replica={} ({s}, {s}, {s})",
                     .{
                         self.log_prefix(),
                         op,
                         checksum,
+                        replica_index,
                         nature,
                         reason,
                         @tagName(self.status),
@@ -8199,7 +8196,7 @@ pub fn ReplicaType(
                     self.send_header_to_other_replicas(@bitCast(request_prepare));
                 } else {
                     self.send_header_to_replica(
-                        self.choose_any_other_replica(),
+                        replica_index,
                         @bitCast(request_prepare),
                     );
                 }
@@ -10030,6 +10027,10 @@ pub fn ReplicaType(
             self.view_change_status_timeout.start();
             self.do_view_change_message_timeout.start();
             self.journal_repair_budget_timeout.stop();
+            // It is crucial that we clear out `requested_prepare` map in the budget while
+            // transitioning to view change, since we don't accept any repairs in view_change
+            // status. So, we would not be able to free up the budget while in view change.
+            self.journal_repair_message_budget.refill();
             self.repair_sync_timeout.stop();
             self.prepare_timeout.stop();
             self.primary_abdicate_timeout.stop();
@@ -10978,11 +10979,7 @@ pub fn ReplicaType(
             if (prepare_evicted) |m| self.message_bus.unref(m);
         }
 
-        fn write_prepare(
-            self: *Replica,
-            message: *Message.Prepare,
-            trigger: Journal.Write.Trigger,
-        ) bool {
+        fn write_prepare(self: *Replica, message: *Message.Prepare) bool {
             assert(self.status == .normal or self.status == .view_change);
             assert(self.status == .normal or self.primary_index(self.view) == self.replica);
             assert(self.status == .normal or self.do_view_change_quorum);
@@ -11018,16 +11015,12 @@ pub fn ReplicaType(
                 },
             }
 
-            self.journal.write_prepare(write_prepare_callback, message, trigger);
+            self.journal.write_prepare(write_prepare_callback, message);
 
             return true;
         }
 
-        fn write_prepare_callback(
-            self: *Replica,
-            wrote: ?*Message.Prepare,
-            trigger: Journal.Write.Trigger,
-        ) void {
+        fn write_prepare_callback(self: *Replica, wrote: ?*Message.Prepare) void {
             self.message_bus.resume_receive();
 
             // `null` indicates that we did not complete the write for some reason.
@@ -11037,13 +11030,6 @@ pub fn ReplicaType(
             // the loopback queue immediately.
             self.send_prepare_ok(message.header);
             self.flush_loopback_queue();
-
-            switch (trigger) {
-                .append, .repair => {},
-                // Continue repairing the primary's pipeline.
-                .pipeline => self.repair(),
-                .fix => unreachable,
-            }
         }
 
         fn send_request_blocks(self: *Replica) void {
