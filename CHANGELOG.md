@@ -3,6 +3,46 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.59
+
+Released: 2025-09-19
+
+### Safety And Performance
+
+- [#3257](https://github.com/tigerbeetle/tigerbeetle/pull/3257)
+
+  Introduce Least Significant Digit (LSD) radix sort in stdx.
+
+- [#3268](https://github.com/tigerbeetle/tigerbeetle/pull/3268)
+
+  Use radix sort in the memory tables to get more performance improvements.
+
+- [#3250](https://github.com/tigerbeetle/tigerbeetle/pull/3250)
+
+  Reduce tail latencies by tracking sorted runs and use k-way merge to sort them.
+
+  Collectively, these changes result in the following performance improvements on modern servers
+  (Hetzner AX102):
+
+  | Metric | Before | After |
+  |--------|--------|-------|
+  | Load accepted (tx/s) | 414,375 | 606,258 |
+  | Batch latency p100 | 115ms | 75ms |
+
+### Internals
+
+- [#3262](https://github.com/tigerbeetle/tigerbeetle/pull/3262)
+
+  Use Zig's new `std.testing.random_seed` to introduce genuine randomness in tests.
+
+- [#3260](https://github.com/tigerbeetle/tigerbeetle/pull/3260)
+
+  Fix a crash due to corruption and misdirection found by the WIP message bus fuzzer.
+
+### TigerTracks 🎧
+
+- [Autobahn](https://open.spotify.com/track/31uidLEHAcF8Cw1cX1VCS8?si=3cefba6d35124ed9)
+
 ## TigerBeetle 0.16.58
 
 Released: 2025-09-12
