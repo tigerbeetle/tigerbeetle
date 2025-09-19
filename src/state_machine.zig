@@ -3139,8 +3139,11 @@ pub fn StateMachineType(
             var chain: ?usize = null;
             var chain_broken = false;
 
-            for (events, 0..) |*event_, index| {
-                var event = event_.*;
+            // The first event determines the batch behavior for
+            // importing events with past timestamp.
+            const batch_imported = events.len > 0 and events[0].flags.imported;
+            for (events, 0..) |*event_const, index| {
+                var event = event_const.*;
 
                 const result = blk: {
                     if (event.flags.linked) {
@@ -3155,9 +3158,7 @@ pub fn StateMachineType(
 
                     if (chain_broken) break :blk .linked_event_failed;
 
-                    // The first event determines the batch behavior for
-                    // importing events with past timestamp.
-                    if (events[0].flags.imported != event.flags.imported) {
+                    if (batch_imported != event.flags.imported) {
                         if (event.flags.imported) {
                             break :blk .imported_event_not_expected;
                         } else {
@@ -3684,7 +3685,7 @@ pub fn StateMachineType(
 
         fn create_transfer(
             self: *StateMachine,
-            t: *const Transfer,
+            t: *Transfer,
         ) CreateTransferResult {
             assert(t.timestamp > self.commit_timestamp or
                 t.flags.imported or
@@ -3774,8 +3775,10 @@ pub fn StateMachineType(
             if (dr_account.flags.closed) return .debit_account_already_closed;
             if (cr_account.flags.closed) return .credit_account_already_closed;
 
-            const amount = amount: {
-                var amount = t.amount;
+            const amount_requested = t.amount;
+            maybe(amount_requested == 0);
+            t.amount = amount: {
+                var amount = amount_requested;
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_account.debits_posted + dr_account.debits_pending;
                     amount = @min(amount, dr_account.credits_posted -| dr_balance);
@@ -3787,33 +3790,33 @@ pub fn StateMachineType(
                 }
                 break :amount amount;
             };
-            maybe(amount == 0);
+            maybe(t.amount == 0);
 
             if (t.flags.pending) {
-                if (sum_overflows(u128, amount, dr_account.debits_pending)) {
+                if (sum_overflows(u128, t.amount, dr_account.debits_pending)) {
                     return .overflows_debits_pending;
                 }
-                if (sum_overflows(u128, amount, cr_account.credits_pending)) {
+                if (sum_overflows(u128, t.amount, cr_account.credits_pending)) {
                     return .overflows_credits_pending;
                 }
             }
-            if (sum_overflows(u128, amount, dr_account.debits_posted)) {
+            if (sum_overflows(u128, t.amount, dr_account.debits_posted)) {
                 return .overflows_debits_posted;
             }
-            if (sum_overflows(u128, amount, cr_account.credits_posted)) {
+            if (sum_overflows(u128, t.amount, cr_account.credits_posted)) {
                 return .overflows_credits_posted;
             }
             // We assert that the sum of the pending and posted balances can never overflow:
             if (sum_overflows(
                 u128,
-                amount,
+                t.amount,
                 dr_account.debits_pending + dr_account.debits_posted,
             )) {
                 return .overflows_debits;
             }
             if (sum_overflows(
                 u128,
-                amount,
+                t.amount,
                 cr_account.credits_pending + cr_account.credits_posted,
             )) {
                 return .overflows_credits;
@@ -3836,38 +3839,36 @@ pub fn StateMachineType(
                 return .overflows_timeout;
             }
 
-            if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
-            if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
+            if (dr_account.debits_exceed_credits(t.amount)) return .exceeds_credits;
+            if (cr_account.credits_exceed_debits(t.amount)) return .exceeds_debits;
 
             // After this point, the transfer must succeed.
             defer assert(self.commit_timestamp == t.timestamp);
 
-            var t2 = t.*;
-            t2.amount = amount;
-            self.forest.grooves.transfers.insert(&t2);
+            self.forest.grooves.transfers.insert(t);
 
             var dr_account_new = dr_account;
             var cr_account_new = cr_account;
             if (t.flags.pending) {
-                dr_account_new.debits_pending += amount;
-                cr_account_new.credits_pending += amount;
+                dr_account_new.debits_pending += t.amount;
+                cr_account_new.credits_pending += t.amount;
 
                 self.forest.grooves.transfers_pending.insert(&.{
-                    .timestamp = t2.timestamp,
+                    .timestamp = t.timestamp,
                     .status = .pending,
                 });
             } else {
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                dr_account_new.debits_posted += t.amount;
+                cr_account_new.credits_posted += t.amount;
             }
 
             // Closing accounts:
             assert(!dr_account_new.flags.closed);
             assert(!cr_account_new.flags.closed);
-            if (t2.flags.closing_debit) dr_account_new.flags.closed = true;
-            if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
+            if (t.flags.closing_debit) dr_account_new.flags.closed = true;
+            if (t.flags.closing_credit) cr_account_new.flags.closed = true;
 
-            const dr_updated = amount > 0 or dr_account_new.flags.closed;
+            const dr_updated = t.amount > 0 or dr_account_new.flags.closed;
             assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
                 self.forest.grooves.accounts.update(.{
@@ -3876,7 +3877,7 @@ pub fn StateMachineType(
                 });
             }
 
-            const cr_updated = amount > 0 or cr_account_new.flags.closed;
+            const cr_updated = t.amount > 0 or cr_account_new.flags.closed;
             assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
                 self.forest.grooves.accounts.update(.{
@@ -3886,26 +3887,26 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = t2.timestamp,
+                .event_timestamp = t.timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
-                .transfer_flags = t2.flags,
-                .transfer_pending_status = if (t2.flags.pending) .pending else .none,
+                .transfer_flags = t.flags,
+                .transfer_pending_status = if (t.flags.pending) .pending else .none,
                 .transfer_pending = null,
-                .amount_requested = t.amount,
-                .amount = t2.amount,
+                .amount_requested = amount_requested,
+                .amount = t.amount,
             });
 
-            if (t2.timeout > 0) {
-                assert(t2.flags.pending);
-                assert(!t2.flags.imported);
-                const expires_at = t2.timestamp + t2.timeout_ns();
+            if (t.timeout > 0) {
+                assert(t.flags.pending);
+                assert(!t.flags.imported);
+                const expires_at = t.timestamp + t.timeout_ns();
                 if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
                     self.expire_pending_transfers.pulse_next_timestamp = expires_at;
                 }
             }
 
-            self.commit_timestamp = t2.timestamp;
+            self.commit_timestamp = t.timestamp;
             return .ok;
         }
 
@@ -3976,7 +3977,7 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
-            t: *const Transfer,
+            t: *Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
@@ -4025,18 +4026,23 @@ pub fn StateMachineType(
             }
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
-            const amount = amount: {
+            const amount_requested = t.amount;
+            maybe(amount_requested == 0);
+            t.amount = amount: {
                 if (t.flags.void_pending_transfer) {
-                    break :amount if (t.amount == 0) p.amount else t.amount;
+                    break :amount if (t.amount == 0) p.amount else amount_requested;
                 } else {
-                    break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
+                    break :amount if (t.amount == std.math.maxInt(u128))
+                        p.amount
+                    else
+                        amount_requested;
                 }
             };
-            maybe(amount == 0);
+            maybe(t.amount == 0);
 
-            if (amount > p.amount) return .exceeds_pending_transfer_amount;
+            if (t.amount > p.amount) return .exceeds_pending_transfer_amount;
 
-            if (t.flags.void_pending_transfer and amount < p.amount) {
+            if (t.flags.void_pending_transfer and t.amount < p.amount) {
                 return .pending_transfer_has_different_amount;
             }
 
@@ -4096,7 +4102,7 @@ pub fn StateMachineType(
             // After this point, the transfer must succeed.
             defer assert(self.commit_timestamp == t.timestamp);
 
-            const t2 = Transfer{
+            t.* = .{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -4109,9 +4115,9 @@ pub fn StateMachineType(
                 .timeout = 0,
                 .timestamp = t.timestamp,
                 .flags = t.flags,
-                .amount = amount,
+                .amount = t.amount,
             };
-            self.forest.grooves.transfers.insert(&t2);
+            self.forest.grooves.transfers.insert(t);
 
             if (expires_at) |timestamp| {
                 // Removing the pending `expires_at` index.
@@ -4129,8 +4135,8 @@ pub fn StateMachineType(
             }
 
             const transfer_pending_status: TransferPendingStatus = status: {
-                if (t2.flags.post_pending_transfer) break :status .posted;
-                if (t2.flags.void_pending_transfer) break :status .voided;
+                if (t.flags.post_pending_transfer) break :status .posted;
+                if (t.flags.void_pending_transfer) break :status .voided;
                 unreachable;
             };
             self.transfer_update_pending_status(&transfer_pending, transfer_pending_status);
@@ -4140,15 +4146,15 @@ pub fn StateMachineType(
             dr_account_new.debits_pending -= p.amount;
             cr_account_new.credits_pending -= p.amount;
 
-            if (t2.flags.post_pending_transfer) {
+            if (t.flags.post_pending_transfer) {
                 assert(!p.flags.closing_debit);
                 assert(!p.flags.closing_credit);
-                assert(amount <= p.amount);
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                assert(t.amount <= p.amount);
+                dr_account_new.debits_posted += t.amount;
+                cr_account_new.credits_posted += t.amount;
             }
-            if (t2.flags.void_pending_transfer) {
-                assert(t2.amount == p.amount);
+            if (t.flags.void_pending_transfer) {
+                assert(t.amount == p.amount);
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
@@ -4160,7 +4166,7 @@ pub fn StateMachineType(
                 }
             }
 
-            const dr_updated = amount > 0 or p.amount > 0 or
+            const dr_updated = t.amount > 0 or p.amount > 0 or
                 dr_account_new.flags.closed != dr_account.flags.closed;
             assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
@@ -4170,7 +4176,7 @@ pub fn StateMachineType(
                 });
             }
 
-            const cr_updated = amount > 0 or p.amount > 0 or
+            const cr_updated = t.amount > 0 or p.amount > 0 or
                 cr_account_new.flags.closed != cr_account.flags.closed;
             assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
@@ -4181,17 +4187,17 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = t2.timestamp,
+                .event_timestamp = t.timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
-                .transfer_flags = t2.flags,
+                .transfer_flags = t.flags,
                 .transfer_pending_status = transfer_pending_status,
                 .transfer_pending = &p,
-                .amount_requested = t.amount,
-                .amount = t2.amount,
+                .amount_requested = amount_requested,
+                .amount = t.amount,
             });
 
-            self.commit_timestamp = t2.timestamp;
+            self.commit_timestamp = t.timestamp;
 
             return .ok;
         }
