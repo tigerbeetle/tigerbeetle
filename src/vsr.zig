@@ -900,6 +900,15 @@ pub fn parse_addresses(
     return out_buffer[0..address_count];
 }
 
+/// Parses a string containing an address with optional port.
+/// Supports IPv4, IPv6 (bracketed), DNS hostnames, and port-only strings.
+/// 
+/// Examples:
+/// - "192.168.1.1:8080" → IPv4 with port
+/// - "[::1]:9000" → IPv6 with port  
+/// - "example.com:5672" → DNS hostname with port
+/// - "example.com" → DNS hostname with default port
+/// - "8080" → default address (127.0.0.1) with specified port
 pub fn parse_address_and_port(
     options: struct {
         string: []const u8,
@@ -936,17 +945,52 @@ pub fn parse_address_and_port(
     }
 }
 
+/// Parses an address string as IPv4, IPv6, or DNS hostname.
+/// Attempts parsing in order: IPv6 (if bracketed) → IPv4 → DNS resolution.
+/// DNS resolution prefers IPv4 addresses when available.
 fn parse_address(string: []const u8, port: u16) !std.net.Address {
     if (string.len == 0) return error.AddressInvalid;
     if (string[string.len - 1] == ':') return error.AddressHasMoreThanOneColon;
 
+    // First, try parsing as IPv6 address (if bracketed)
     if (string[0] == '[' and string[string.len - 1] == ']') {
         return std.net.Address.parseIp6(string[1 .. string.len - 1], port) catch {
             return error.AddressInvalid;
         };
-    } else {
-        return std.net.Address.parseIp4(string, port) catch return error.AddressInvalid;
     }
+    
+    // Next, try parsing as IPv4 address, fall back to DNS resolution
+    return std.net.Address.parseIp4(string, port) catch 
+        resolve_hostname(string, port) catch error.AddressInvalid; // TODO: should this be a different error?
+}
+
+/// Resolves a hostname to an IP address using DNS resolution.
+/// Prefers IPv4 addresses for compatibility, falls back to IPv6 if needed.
+/// Essential for AMQP connections using hostnames like "rabbitmq.example.com".
+fn resolve_hostname(hostname: []const u8, port: u16) !std.net.Address {
+    // TODO: is this a good allocator to use?
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+    
+    // Resolve the hostname to get a list of addresses
+    const address_list = std.net.getAddressList(allocator, hostname, port) catch |err| switch (err) {
+        error.UnknownHostName => return error.AddressInvalid, // TODO: should this be a different error?
+        else => return err,
+    };
+    defer address_list.deinit();
+    
+    if (address_list.addrs.len == 0) return error.AddressInvalid; // TODO: should this be a different error?
+    
+    // Prefer IPv4 addresses for compatibility
+    for (address_list.addrs) |address| {
+        if (address.any.family == std.posix.AF.INET) {
+            return address;
+        }
+    }
+    
+    // If no IPv4 found, use the first available address (likely IPv6)
+    return address_list.addrs[0];
 }
 
 test parse_addresses {
@@ -1095,6 +1139,32 @@ test "parse_addresses: fuzz" {
             assert(addresses.len <= 3);
         } else |_| {}
     }
+}
+
+test "parse_address with DNS resolution" {
+    const ip4_addr = try parse_address("192.168.1.1", 8080);
+    try std.testing.expectEqual(@as(u16, 8080), ip4_addr.getPort());
+    
+    const ip6_addr = try parse_address("[::1]", 9000);
+    try std.testing.expectEqual(@as(u16, 9000), ip6_addr.getPort());
+    
+    // TODO: should I be testing using localhost?
+    // Test DNS resolution with localhost - this should work on all systems
+    const localhost_addr = try parse_address("localhost", 3000);
+    try std.testing.expectEqual(@as(u16, 3000), localhost_addr.getPort());
+    
+    // Test that invalid hostnames fail gracefully
+    try std.testing.expectError(error.AddressInvalid, parse_address("invalid.hostname.does.not.exist.example", 5432));
+}
+
+test "parse_address with real world DNS hostname" {
+    // TODO: should I remove this test? Hostname only works locally just trying
+    // to make it work locally first, please direct me here.
+    const test_hostname = "rabbitmq.live-api.orb.local";
+    const test_port = 5672;
+    
+    const resolved_addr = try parse_address(test_hostname, test_port);
+    try std.testing.expectEqual(@as(u16, test_port), resolved_addr.getPort());
 }
 
 pub fn sector_floor(offset: u64) u64 {
