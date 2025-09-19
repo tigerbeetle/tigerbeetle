@@ -40,6 +40,11 @@ pub fn TableMemoryType(comptime Table: type) type {
     return struct {
         const TableMemory = @This();
 
+        values: []Value,
+        value_context: ValueContext,
+        mutability: Mutability,
+        name: []const u8,
+
         // Maintains per-table mutable state that must be snapshotted for “scopes”.
         // When a scope is opened (e.g., in `tree.zig`), we copy `ValueContext` so we can
         // roll back both the count and the sorted-run tracker if the scope is discarded.
@@ -293,11 +298,6 @@ pub fn TableMemoryType(comptime Table: type) type {
                 return self.target_index;
             }
         };
-
-        values: []Value,
-        value_context: ValueContext,
-        mutability: Mutability,
-        name: []const u8,
 
         pub fn init(
             table: *TableMemory,
