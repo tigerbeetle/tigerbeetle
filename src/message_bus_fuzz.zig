@@ -12,18 +12,23 @@ const log = std.log.scoped(.message_bus_fuzz);
 const vsr = @import("vsr.zig");
 const constants = vsr.constants;
 const stdx = vsr.stdx;
-const MessageBus = vsr.message_bus.MessageBusType(IO, .replica);
+const MessageBusReplica = vsr.message_bus.MessageBusType(IO, .replica);
+const MessageBusClient = vsr.message_bus.MessageBusType(IO, .client);
 const MessagePool = vsr.message_pool.MessagePool;
+const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
 const fuzz = @import("testing/fuzz.zig");
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
 
-/// TODO Fuzz client MessageBus too.
+const NodeReplica = NodeType(MessageBusReplica);
+const NodeClient = NodeType(MessageBusClient);
+
 /// TODO Test suspend/resume.
 /// TODO If we remove type-level distinction between MessageBusReplica and MessageBusClient, then we
-/// can simplify erase_types()/Context handling in the fuzzer's IO implementation to avoid some
-/// `*any opaque`s.
+/// can simplify erase_types()/Context handling in the fuzzers IO implementation to avoid some
+/// `*any opaque`s. We can also remove Node's helper methods in favor of accessing the message_bus
+/// directly.
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 100;
     // Usually we don't need nearly this many ticks, but certain combinations of errors can make
@@ -34,14 +39,13 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
 
     const replica_count = 3;
     const clients_limit = 2;
+    const node_count = replica_count + clients_limit;
     const message_bus_send_probability = ratio(prng.range_inclusive(u64, 1, 10), 10);
     const message_bus_tick_probability = ratio(prng.range_inclusive(u64, 2, 10), 10);
     // Ping often so that listener→connector connections are eventually identified correctly.
     // (Otherwise those messages could stall forever with "no connection to..." errors).
     // Note that this probability is conditional on sending a message.
-    const message_bus_ping_replica_probability = ratio(prng.range_inclusive(u64, 2, 5), 10);
-    // Occasionally inject a ping_client, causing the connection peer type to be misidentified.
-    const message_bus_ping_client_probability = ratio(prng.range_inclusive(u64, 0, 3), 10);
+    const message_bus_ping_probability = ratio(prng.range_inclusive(u64, 2, 5), 10);
 
     const configuration = &.{
         try std.net.Address.parseIp4("127.0.0.1", 3000),
@@ -93,69 +97,114 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var messages_pending = std.AutoArrayHashMapUnmanaged(u128, MessagePending).empty;
     defer messages_pending.deinit(gpa);
 
-    var nodes = try gpa.alloc(Node, replica_count);
+    var nodes = try gpa.alloc(NodeAny, replica_count + clients_limit);
     defer gpa.free(nodes);
 
-    for (nodes, 0..) |*node, i| {
-        errdefer for (nodes[0..i]) |*n| n.message_bus.deinit(gpa);
+    for (nodes[0..replica_count], 0..) |*node, i| {
+        errdefer for (nodes[0..i]) |*n| n.deinit(gpa);
 
-        node.* = .{
+        node.* = .{ .replica = .{
             .messages_pending = &messages_pending,
-            .message_bus = try MessageBus.init(
+            .message_bus = try MessageBusReplica.init(
                 gpa,
                 .{ .replica = @intCast(i) },
                 &message_pool,
-                on_messages_callback,
+                NodeReplica.on_messages_callback,
                 .{ .configuration = configuration, .io = &io, .clients_limit = clients_limit },
             ),
-            .replica = @intCast(i),
-        };
+            .id = @intCast(i),
+        } };
     }
-    defer for (nodes) |*node| node.message_bus.deinit(gpa);
+    defer for (nodes[0..replica_count]) |*node| node.deinit(gpa);
 
-    const messages = try gpa.alignedAlloc(
+    for (nodes[replica_count..], 0..) |*node, i| {
+        errdefer for (nodes[replica_count..][0..i]) |*n| n.deinit(gpa);
+
+        node.* = .{ .client = .{
+            .messages_pending = &messages_pending,
+            .message_bus = try MessageBusClient.init(
+                gpa,
+                .{ .client = replica_count + i },
+                &message_pool,
+                NodeClient.on_messages_callback,
+                .{ .configuration = configuration, .io = &io, .clients_limit = null },
+            ),
+            .id = @intCast(replica_count + i),
+        } };
+    }
+    defer for (nodes[replica_count..]) |*node| node.deinit(gpa);
+
+    // Allocate extra for the pings and ping_clients, which are not counted by messages_max since we
+    // don't track their delivery. (Pings/ping_clients are used to identify (or misidentify!) the
+    // peer type of nodes).
+    var messages = try std.ArrayListAlignedUnmanaged(
         [constants.message_size_max]u8,
         constants.sector_size,
-        // Allocate extra for the pings and ping_clients, which are not part of messages_max.
-        messages_max + replica_count * 2,
-    );
-    defer gpa.free(messages);
+    ).initCapacity(gpa, messages_max + node_count);
+    defer messages.deinit(gpa);
 
-    for (messages, 0..) |*message, i| {
-        const message_header = std.mem.bytesAsValue(vsr.Header, message[0..@sizeOf(vsr.Header)]);
+    for (0..replica_count) |replica| {
+        const message = messages.addOneAssumeCapacity();
+        const message_header: *vsr.Header =
+            @alignCast(std.mem.bytesAsValue(vsr.Header, message[0..@sizeOf(vsr.Header)]));
+        message_header.* = random_header(&prng, .ping);
+        message_header.replica = @intCast(replica);
+        message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
+        message_header.set_checksum();
+    }
 
-        if (i < replica_count) {
-            message_header.* = random_header(&prng, .ping, @intCast(i));
-        } else if (i < 2 * replica_count) {
-            message_header.* = random_header(&prng, .ping_client, @intCast(i - replica_count));
+    for (0..clients_limit) |i| {
+        const client = replica_count + i;
+        const message = messages.addOneAssumeCapacity();
+        const message_header: *vsr.Header =
+            @alignCast(std.mem.bytesAsValue(vsr.Header, message[0..@sizeOf(vsr.Header)]));
+        message_header.* = random_header(&prng, .ping_client);
+        message_header.into(.ping_client).?.client = client;
+        message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
+        message_header.set_checksum();
+    }
+
+    for (0..messages_max) |_| {
+        const message = messages.addOneAssumeCapacity();
+        const message_header: *vsr.Header =
+            @alignCast(std.mem.bytesAsValue(vsr.Header, message[0..@sizeOf(vsr.Header)]));
+        const node_source: u8 = @intCast(prng.index(nodes));
+
+        const message_body_size: u32 =
+            @min(fuzz.random_int_exponential(&prng, u32, 256), constants.message_body_size_max);
+        const message_body = message[@sizeOf(vsr.Header)..][0..message_body_size];
+
+        message_header.* = random_header(&prng, .reserved);
+        message_header.size += message_body_size;
+        prng.fill(message_body);
+
+        // invalid() is only checked by replica, not message bus, so we can mostly ignore the
+        // command-specific header data. However, we need to keep it valid enough for peer_type() to
+        // be useful, otherwise the "replicas" will never actually connect.
+        if (nodes[node_source] == .replica) {
+            message_header.replica = node_source;
+            message_header.command = prng.enum_weighted(vsr.Command, command_weights);
+            if (message_header.into(.request)) |request_header| {
+                request_header.client = @max(1, fuzz.random_int_exponential(&prng, u128, 3));
+            }
         } else {
-            const replica_send: u8 = @intCast(prng.index(nodes));
-
-            const message_command = prng.enum_weighted(vsr.Command, command_weights);
-            const message_body_size: u32 =
-                @min(fuzz.random_int_exponential(&prng, u32, 256), constants.message_body_size_max);
-            const message_body = message[@sizeOf(vsr.Header)..][0..message_body_size];
-
-            message_header.* = random_header(&prng, message_command, replica_send);
-            message_header.size += message_body_size;
-            prng.fill(message_body);
+            message_header.replica = @intCast(prng.index(nodes[0..replica_count]));
+            message_header.command = .request;
+            message_header.into(.request).?.client = node_source;
         }
         message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
         message_header.set_checksum();
 
-        if (message_header.command != .ping and
-            message_header.command != .ping_client)
-        {
-            const replica_receive: u8 =
-                (message_header.replica + prng.range_inclusive(u8, 1, replica_count - 1)) %
-                replica_count;
-            assert(replica_receive != message_header.replica);
-            assert(replica_receive < replica_count);
-            try messages_pending.putNoClobber(gpa, message_header.checksum, .{
-                .buffer = message[0..message_header.size],
-                .target = replica_receive,
-            });
-        }
+        const node_target: u8 = if (nodes[node_source] == .replica)
+            (message_header.replica + prng.range_inclusive(u8, 1, node_count - 1)) %
+                node_count
+        else
+            @intCast(prng.index(nodes[0..replica_count]));
+        try messages_pending.putNoClobber(gpa, message_header.checksum, .{
+            .buffer = message[0..message_header.size],
+            .source = node_source,
+            .target = node_target,
+        });
     }
 
     for (0..ticks_max) |_| {
@@ -165,36 +214,30 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             const message = message_pool.get_message(.reserved).base();
             defer message_pool.unref(message);
 
-            var target: ?u8 = null;
-            if (prng.chance(message_bus_ping_replica_probability)) {
-                const pings = messages[0..replica_count];
-                const ping_index = prng.index(pings);
-                stdx.copy_disjoint(.inexact, u8, message.buffer, &pings[ping_index]);
-                assert(message.header.command == .ping);
+            if (prng.chance(message_bus_ping_probability)) {
+                const node_index = prng.index(nodes);
+                stdx.copy_disjoint(.inexact, u8, message.buffer, &messages.items[node_index]);
+                assert(message.header.command == .ping or message.header.command == .ping_client);
 
-                target = (message.header.replica + prng.range_inclusive(u8, 1, replica_count - 1)) %
-                    replica_count;
-            } else if (prng.chance(message_bus_ping_client_probability)) {
-                const ping_clients = messages[replica_count..][0..replica_count];
-                const ping_index = prng.index(ping_clients);
-                stdx.copy_disjoint(.inexact, u8, message.buffer, &ping_clients[ping_index]);
-                assert(message.header.command == .ping_client);
+                const target: u8 = if (message.header.command == .ping)
+                    (message.header.replica + prng.range_inclusive(u8, 1, node_count - 1)) %
+                        node_count
+                else
+                    @intCast(prng.index(nodes[0..replica_count]));
 
-                target = (message.header.replica + prng.range_inclusive(u8, 1, replica_count - 1)) %
-                    replica_count;
+                nodes[node_index].send_message(target, message);
             } else {
                 const message_pending_index = prng.index(messages_pending.keys());
                 const message_pending = &messages_pending.values()[message_pending_index];
                 stdx.copy_disjoint(.inexact, u8, message.buffer, message_pending.buffer);
 
-                target = message_pending.target;
+                nodes[message_pending.source].send_message(message_pending.target, message);
             }
-            nodes[message.header.replica].message_bus.send_message_to_replica(target.?, message);
         }
 
         for (nodes) |*node| {
             if (prng.chance(message_bus_tick_probability)) {
-                node.message_bus.tick();
+                node.tick();
             }
         }
         try io.run();
@@ -209,8 +252,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     log.info("Passed!", .{});
 }
 
-fn random_header(prng: *stdx.PRNG, command: vsr.Command, replica: u8) vsr.Header {
-    var header = vsr.Header{
+fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
+    return .{
         .checksum = 0,
         .checksum_padding = 0,
         .checksum_body = 0,
@@ -223,65 +266,107 @@ fn random_header(prng: *stdx.PRNG, command: vsr.Command, replica: u8) vsr.Header
         .release = vsr.Release.zero,
         .protocol = vsr.Version,
         .command = command,
-        .replica = replica,
+        .replica = 0,
         .reserved_frame = @splat(0),
         .reserved_command = @splat(0),
     };
-    // invalid() is only checked by replica, not message bus, so we can mostly ignore the
-    // command-specific header data. However, we need to keep it valid enough for peer_type() to
-    // be useful, otherwise the "replicas" will never actually connect.
-    switch (command) {
-        inline else => |command_comptime| {
-            const command_header = header.into(command_comptime).?;
-            if (@hasField(@TypeOf(command_header.*), "client")) {
-                // set_and_verify_peer asserts a nonzero client id.
-                command_header.client = @max(1, fuzz.random_int_exponential(prng, u128, 3));
-            }
-        },
-    }
-    return header;
 }
 
-const Node = struct {
-    messages_pending: *std.AutoArrayHashMapUnmanaged(u128, MessagePending),
-    message_bus: MessageBus,
-    replica: u8,
+const NodeAny = union(enum) {
+    replica: NodeReplica,
+    client: NodeClient,
+
+    fn deinit(node: *NodeAny, allocator: std.mem.Allocator) void {
+        switch (node.*) {
+            inline else => |*node_any| node_any.message_bus.deinit(allocator),
+        }
+    }
+
+    fn send_message(node: *NodeAny, target: u8, message: *Message) void {
+        switch (node.*) {
+            inline else => |*node_any| node_any.send_message(target, message),
+        }
+    }
+
+    fn tick(node: *NodeAny) void {
+        switch (node.*) {
+            inline else => |*node_any| node_any.message_bus.tick(),
+        }
+    }
 };
+
+fn NodeType(comptime MessageBus: type) type {
+    return struct {
+        const Node = @This();
+
+        messages_pending: *std.AutoArrayHashMapUnmanaged(u128, MessagePending),
+        message_bus: MessageBus,
+        id: u8,
+
+        fn send_message(node: *Node, target: u8, message: *Message) void {
+            if (target < node.message_bus.configuration.len) {
+                node.message_bus.send_message_to_replica(target, message);
+            } else {
+                if (MessageBus == MessageBusReplica) {
+                    node.message_bus.send_message_to_client(target, message);
+                } else {
+                    unreachable;
+                }
+            }
+        }
+
+        fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+            const node: *Node = @fieldParentPtr("message_bus", message_bus);
+            while (buffer.next_header()) |header| {
+                const message = buffer.consume_message(message_bus.pool, &header);
+                defer message_bus.unref(message);
+
+                assert(message.header.valid_checksum());
+                assert(message.header.valid_checksum_body(message.body_used()));
+
+                if (node.messages_pending.get(message.header.checksum)) |message_pending| {
+                    const message_checksum =
+                        std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(vsr.Header)]).*;
+                    assert(message_checksum == message.header.checksum);
+
+                    if (message_pending.target == node.id) {
+                        const message_removed =
+                            node.messages_pending.swapRemove(message.header.checksum);
+                        assert(message_removed);
+                    } else {
+                        // We aren't the intended recipient of this message.
+                        // We are a replica that was misidentified as a client, either due to:
+                        // - accidental misidentification due to a request we sent, or
+                        // - deliberate misidentification a ping_client we sent.
+                        switch (MessageBus) {
+                            MessageBusReplica => {},
+                            MessageBusClient => unreachable,
+                            else => unreachable,
+                        }
+                    }
+                } else {
+                    // Ignore duplicate messages.
+                }
+            }
+        }
+    };
+}
 
 const MessagePending = struct {
     buffer: []const u8,
+    source: u8,
     target: u8,
 };
-
-fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
-    const node: *Node = @fieldParentPtr("message_bus", message_bus);
-    while (buffer.next_header()) |header| {
-        const message = buffer.consume_message(message_bus.pool, &header);
-        defer message_bus.unref(message);
-
-        assert(message.header.valid_checksum());
-        assert(message.header.valid_checksum_body(message.body_used()));
-
-        if (node.messages_pending.get(message.header.checksum)) |message_pending| {
-            const message_checksum =
-                std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(vsr.Header)]).*;
-            assert(message_checksum == message.header.checksum);
-            assert(message_pending.target == node.replica);
-
-            const message_removed = node.messages_pending.swapRemove(message.header.checksum);
-            assert(message_removed);
-        } else {
-            // Ignore duplicate messages.
-        }
-
-        log.debug("{}: received {s}", .{ message_bus.process.replica, @tagName(header.command) });
-    }
-}
 
 const IO = struct {
     gpa: std.mem.Allocator,
     prng: stdx.PRNG,
     options: Options,
+
+    //// This is only used for the OnMessagesCallbackType hack, to retreive the Node reference from a
+    //// given message bus.
+    //// TODO Once message bus replica/client types are unified, we can use @fieldParentPtr instead.
+    //nodes: ?[]Node = null,
 
     servers: std.AutoArrayHashMapUnmanaged(socket_t, SocketServer) = .{},
     connections: std.AutoArrayHashMapUnmanaged(socket_t, SocketConnection) = .{},
@@ -496,6 +581,7 @@ const IO = struct {
                 const sender = io.connections.getPtr(operation.socket).?;
                 assert(!sender.closed);
                 assert(sender.pending_send);
+                sender.pending_send = false;
 
                 if (io.prng.chance(io.options.send_error_probability)) {
                     const result: SendError!usize = io.prng.error_uniform(SendError);
@@ -507,33 +593,33 @@ const IO = struct {
                     return .done;
                 }
 
+                if (sender.shutdown_send) {
+                    const result: SendError!usize = error.BrokenPipe;
+                    completion.callback(completion.context, completion, &result);
+                    return .done;
+                }
+
                 const send_size = if (io.prng.chance(io.options.send_partial_probability))
                     io.prng.range_inclusive(usize, 0, operation.buffer.len)
                 else
                     operation.buffer.len;
 
-                sender.pending_send = false;
-                if (sender.shutdown_send) {
-                    const result: SendError!usize = error.BrokenPipe;
-                    completion.callback(completion.context, completion, &result);
-                } else {
-                    const send_buffer = operation.buffer[0..send_size];
-                    try sender.sending.appendSlice(gpa, send_buffer);
+                const send_buffer = operation.buffer[0..send_size];
+                try sender.sending.appendSlice(gpa, send_buffer);
 
-                    if (io.prng.chance(io.options.send_corrupt_probability)) {
-                        if (send_buffer.len == 0) {
-                            try sender.sending.append(gpa, io.prng.int(u8));
-                        } else {
-                            const corrupt_byte = io.prng.index(send_buffer);
-                            const corrupt_bit = io.prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
-                            sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
-                                @as(u8, 1) << corrupt_bit;
-                        }
+                if (io.prng.chance(io.options.send_corrupt_probability)) {
+                    if (send_buffer.len == 0) {
+                        try sender.sending.append(gpa, io.prng.int(u8));
+                    } else {
+                        const corrupt_byte = io.prng.index(send_buffer);
+                        const corrupt_bit = io.prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
+                        sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
+                            @as(u8, 1) << corrupt_bit;
                     }
-
-                    const result: SendError!usize = send_size;
-                    completion.callback(completion.context, completion, &result);
                 }
+
+                const result: SendError!usize = send_size;
+                completion.callback(completion.context, completion, &result);
             },
             .recv => |operation| {
                 const receiver = io.connections.getPtr(operation.socket).?;
