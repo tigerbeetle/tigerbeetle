@@ -1,9 +1,14 @@
 //! Fuzz message bus.
 //!
 //! Here's how it works:
-//! 1. Generate ping messages, ping_client messages, and then a bunch of random non-ping messages.
+//! 1. Generate ping messages, ping_client messages, and many random non-ping messages.
 //! 2. Each of the non-ping messages has an intended source and destination.
-//! 3. Until all of those messages are delivered, nodes try to deliver their undelivered messages.
+//! 3. Until all of those non-ping messages are successfully delivered to their intended
+//!    destinations:
+//!    - nodes try to deliver their undelivered messages,
+//!    - replicas and clients send pings and ping_clients (respectively), to ensure peer
+//!      identification,
+//!    - replica nodes occasionally send ping_clients, to test peer misidentification handling.
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -46,6 +51,9 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // (Otherwise those messages could stall forever with "no connection to..." errors).
     // Note that this probability is conditional on sending a message.
     const message_bus_ping_probability = ratio(prng.range_inclusive(u64, 2, 5), 10);
+    // Occasionally inject an incorrect ping, causing the connection peer type to be misidentified.
+    // Note that this probability is conditional on sending a ping.
+    const message_bus_ping_misdirect_probability = ratio(prng.range_inclusive(u64, 0, 3), 10);
 
     const configuration = &.{
         try std.net.Address.parseIp4("127.0.0.1", 3000),
@@ -196,8 +204,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         message_header.set_checksum();
 
         const node_target: u8 = if (nodes[node_source] == .replica)
-            (message_header.replica + prng.range_inclusive(u8, 1, node_count - 1)) %
-                node_count
+            random_node(&prng, message_header.replica, node_count)
         else
             @intCast(prng.index(nodes[0..replica_count]));
         try messages_pending.putNoClobber(gpa, message_header.checksum, .{
@@ -220,12 +227,17 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
                 assert(message.header.command == .ping or message.header.command == .ping_client);
 
                 const target: u8 = if (message.header.command == .ping)
-                    (message.header.replica + prng.range_inclusive(u8, 1, node_count - 1)) %
-                        node_count
+                    random_node(&prng, message.header.replica, node_count)
                 else
                     @intCast(prng.index(nodes[0..replica_count]));
 
-                nodes[node_index].send_message(target, message);
+                if (message.header.command == .ping_client and
+                    prng.chance(message_bus_ping_misdirect_probability))
+                {
+                    nodes[random_node(&prng, target, node_count)].send_message(target, message);
+                } else {
+                    nodes[node_index].send_message(target, message);
+                }
             } else {
                 const message_pending_index = prng.index(messages_pending.keys());
                 const message_pending = &messages_pending.values()[message_pending_index];
@@ -270,6 +282,10 @@ fn random_header(prng: *stdx.PRNG, command: vsr.Command) vsr.Header {
         .reserved_frame = @splat(0),
         .reserved_command = @splat(0),
     };
+}
+
+fn random_node(prng: *stdx.PRNG, node_exclude: u8, node_count: u8) u8 {
+    return (node_exclude + prng.range_inclusive(u8, 1, node_count - 1)) % node_count;
 }
 
 const NodeAny = union(enum) {
@@ -325,9 +341,9 @@ fn NodeType(comptime MessageBus: type) type {
                 assert(message.header.valid_checksum_body(message.body_used()));
 
                 if (node.messages_pending.get(message.header.checksum)) |message_pending| {
-                    const message_checksum =
-                        std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(vsr.Header)]).*;
-                    assert(message_checksum == message.header.checksum);
+                    const message_pending_checksum =
+                        std.mem.bytesAsValue(u128, message_pending.buffer[0..@sizeOf(u128)]).*;
+                    assert(message_pending_checksum == message.header.checksum);
 
                     if (message_pending.target == node.id) {
                         const message_removed =
@@ -335,14 +351,13 @@ fn NodeType(comptime MessageBus: type) type {
                         assert(message_removed);
                     } else {
                         // We aren't the intended recipient of this message.
-                        // We are a replica that was misidentified as a client, either due to:
-                        // - accidental misidentification due to a request we sent, or
-                        // - deliberate misidentification a ping_client we sent.
-                        switch (MessageBus) {
-                            MessageBusReplica => {},
-                            MessageBusClient => unreachable,
-                            else => unreachable,
-                        }
+                        //
+                        // One of the following is true:
+                        // - We are a replica that was misidentified as a client, either due to:
+                        //   - accidental misidentification due to a request we sent, or
+                        //   - deliberate misidentification a ping_client we sent.
+                        // - We are a client that was misidentified as a *different* client, due to
+                        //   a "misdirected" ping_client we sent.
                     }
                 } else {
                     // Ignore duplicate messages.
