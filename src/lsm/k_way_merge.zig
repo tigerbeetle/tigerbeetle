@@ -692,9 +692,6 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
 }
 
 test "k_way_merge: fuzz" {
-    const seed = std.crypto.random.int(u64);
-    errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
-
-    var prng = stdx.PRNG.from_seed(seed);
+    var prng = stdx.PRNG.from_seed_testing();
     try FuzzTestContextType(32).fuzz(&prng, 1024);
 }
