@@ -112,7 +112,7 @@ jobs:
         with: { go-version: "${{ matrix.language_version }}" }
 
       - if: matrix.language == 'rust'
-        run: rustup default ${{ matrix.language_version }} && rustup component add clippy rustfmt && cargo +stable install cargo-audit
+        run: rustup default ${{ matrix.language_version }} && rustup component add clippy rustfmt
 
       - if: matrix.language == 'java'
         uses: actions/setup-java@v4
