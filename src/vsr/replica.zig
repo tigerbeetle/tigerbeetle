@@ -1821,7 +1821,7 @@ pub fn ReplicaType(
 
             const m0 = message.header.ping_timestamp_monotonic;
             const t1: i64 = @bitCast(message.header.pong_timestamp_wall);
-            const m2 = self.clock.monotonic();
+            const m2 = self.clock.monotonic().ns;
 
             self.clock.learn(message.header.replica, m0, t1, m2);
             if (self.clock.round_trip_time_median_ns()) |rtt_ns| {
@@ -2152,7 +2152,7 @@ pub fn ReplicaType(
             self.routing.op_prepare_ok(
                 message.header.op,
                 message.header.replica,
-                self.clock.monotonic_instant(),
+                self.clock.monotonic(),
             );
 
             const prepare = self.pipeline.queue.prepare_by_prepare_ok(message) orelse {
@@ -3457,7 +3457,7 @@ pub fn ReplicaType(
                 .release = self.release,
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
                 .checkpoint_op = self.op_checkpoint(),
-                .ping_timestamp_monotonic = self.clock.monotonic(),
+                .ping_timestamp_monotonic = self.clock.monotonic().ns,
                 .route = ping_route,
                 .release_count = releases.count,
             };
@@ -4291,7 +4291,7 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
 
-                    self.commit_started = self.clock.time.monotonic_instant();
+                    self.commit_started = self.clock.time.monotonic();
                     self.trace.start(.{ .replica_commit = .{
                         .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
@@ -5126,7 +5126,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_local = self.clock.time.monotonic_instant()
+            const commit_completion_time_local = self.clock.time.monotonic()
                 .duration_since(self.commit_started.?);
             self.commit_started = null;
             if (commit_completion_time_local.to_ms() >
@@ -7208,7 +7208,7 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
-            self.routing.op_prepare(message.header.op, self.clock.time.monotonic_instant());
+            self.routing.op_prepare(message.header.op, self.clock.time.monotonic());
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
@@ -11163,7 +11163,7 @@ pub fn ReplicaType(
                 .view = self.view,
                 .commit = self.commit_max,
                 .commit_checksum = latest_committed_entry,
-                .timestamp_monotonic = self.clock.monotonic(),
+                .timestamp_monotonic = self.clock.monotonic().ns,
                 .checkpoint_op = self.superblock.working.vsr_state.checkpoint.header.op,
                 .checkpoint_id = self.superblock.working.checkpoint_id(),
             }));

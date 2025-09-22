@@ -214,7 +214,7 @@ pub fn init(
         .events_metric = events_metric,
         .events_timing = events_timing,
 
-        .time_start = time.monotonic_instant(),
+        .time_start = time.monotonic(),
     };
 }
 
@@ -264,7 +264,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
     const event_timing = event.as(EventTiming);
     const stack = event_tracing.stack();
 
-    const time_now = tracer.time.monotonic_instant();
+    const time_now = tracer.time.monotonic();
 
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
@@ -321,7 +321,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     const stack = event_tracing.stack();
 
     const event_start = tracer.events_started[stack].?;
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     const event_duration = event_end.duration_since(event_start);
 
     assert(tracer.events_started[stack] != null);
@@ -348,7 +348,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     const stack_base = EventTracing.stack_bases.get(event_tag);
     const cardinality = EventTracing.stack_limits.get(event_tag);
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
             log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });

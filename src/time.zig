@@ -26,12 +26,8 @@ pub const Time = struct {
     /// Always use a monotonic timestamp if the goal is to measure elapsed time.
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
-    pub fn monotonic(self: Time) u64 {
-        return self.vtable.monotonic(self.context);
-    }
-
-    pub fn monotonic_instant(self: Time) Instant {
-        return Instant{ .ns = self.monotonic() };
+    pub fn monotonic(self: Time) Instant {
+        return .{ .ns = self.vtable.monotonic(self.context) };
     }
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
@@ -179,8 +175,8 @@ pub const TimeOS = struct {
 test "Time monotonic smoke" {
     var time_os: TimeOS = .{};
     const time = time_os.time();
-    const instant_1 = time.monotonic_instant();
-    const instant_2 = time.monotonic_instant();
+    const instant_1 = time.monotonic();
+    const instant_2 = time.monotonic();
     assert(instant_1.duration_since(instant_1).ns == 0);
     assert(instant_2.duration_since(instant_1).ns >= 0);
 }
@@ -194,20 +190,20 @@ pub const Timer = struct {
     pub fn init(time: Time) Timer {
         return .{
             .time = time,
-            .started = time.monotonic_instant(),
+            .started = time.monotonic(),
         };
     }
 
     /// Reads the timer value since start or the last reset.
     pub fn read(self: *Timer) stdx.Duration {
-        const current = self.time.monotonic_instant();
+        const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
         return current.duration_since(self.started);
     }
 
     /// Resets the timer.
     pub fn reset(self: *Timer) void {
-        const current = self.time.monotonic_instant();
+        const current = self.time.monotonic();
         assert(current.ns >= self.started.ns);
         self.started = current;
     }

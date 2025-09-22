@@ -515,7 +515,7 @@ pub fn ContextType(
             if (self.client.request_inflight == null) {
                 assert(self.pending.count() == 0);
                 packet.phase = .pending;
-                packet.multi_batch_time_monotonic = self.client.time.monotonic();
+                packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
                 packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -573,7 +573,7 @@ pub fn ContextType(
 
             // Couldn't batch with existing packet so push to pending directly.
             packet.phase = .pending;
-            packet.multi_batch_time_monotonic = self.client.time.monotonic();
+            packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
             packet.multi_batch_count = 1;
             packet.multi_batch_event_count = @intCast(batch.event_count);
             packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -778,7 +778,7 @@ pub fn ContextType(
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
 
-            const current_timestamp = self.client.time.monotonic_instant();
+            const current_timestamp = self.client.time.monotonic();
             self.previous_request_latency =
                 current_timestamp.duration_since(self.previous_request_instant.?);
 

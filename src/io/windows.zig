@@ -151,7 +151,7 @@ pub const IO = struct {
         var timeouts_iterator = self.timeouts.iterate();
         while (timeouts_iterator.next()) |completion| {
             // Lazily get the current time.
-            const now = current_time orelse self.time_os.time().monotonic();
+            const now = current_time orelse self.time_os.time().monotonic().ns;
             current_time = now;
 
             // Move the completion to completed if it expired.
@@ -1019,7 +1019,7 @@ pub const IO = struct {
             callback,
             completion,
             .timeout,
-            .{ .deadline = self.time_os.time().monotonic() + nanoseconds },
+            .{ .deadline = self.time_os.time().monotonic().ns + nanoseconds },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) TimeoutError!void {
                     _ = ctx;

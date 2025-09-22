@@ -294,7 +294,7 @@ test "timeout" {
         fn run_test() !void {
             var time_os: TimeOS = .{};
             const timer = time_os.time();
-            const start_time = timer.monotonic();
+            const start_time = timer.monotonic().ns;
             var self: Context = .{
                 .timer = timer,
                 .io = try IO.init(32, 0),
@@ -331,7 +331,7 @@ test "timeout" {
             _ = completion;
             _ = result catch @panic("timeout error");
 
-            if (self.stop_time == 0) self.stop_time = self.timer.monotonic();
+            if (self.stop_time == 0) self.stop_time = self.timer.monotonic().ns;
             self.count += 1;
         }
     }.run_test();
@@ -376,8 +376,8 @@ test "event" {
             assert(self.count == events_count);
 
             // Make sure at least some time has passed.
-            const elapsed = timer.monotonic() - start;
-            assert(elapsed >= delay);
+            const elapsed = timer.monotonic().duration_since(start);
+            assert(elapsed.ns >= delay);
         }
 
         fn trigger_event(self: *Context) void {
