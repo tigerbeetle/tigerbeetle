@@ -35,10 +35,10 @@ const NodeClient = NodeType(MessageBusClient);
 /// `*any opaque`s. We can also remove Node's helper methods in favor of accessing the message_bus
 /// directly.
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
-    const messages_max = args.events_max orelse 100;
+    const messages_max = args.events_max orelse 200;
     // Usually we don't need nearly this many ticks, but certain combinations of errors can make
     // delivering messages quite time consuming.
-    const ticks_max = messages_max * 32_000;
+    const ticks_max = messages_max * 5_000;
 
     var prng = stdx.PRNG.from_seed(args.seed);
 
@@ -46,7 +46,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const clients_limit = 2;
     const node_count = replica_count + clients_limit;
     const message_bus_send_probability = ratio(prng.range_inclusive(u64, 1, 10), 10);
-    const message_bus_tick_probability = ratio(prng.range_inclusive(u64, 2, 10), 10);
+    const message_bus_tick_probability = ratio(prng.range_inclusive(u64, 3, 10), 10);
     // Ping often so that listener→connector connections are eventually identified correctly.
     // (Otherwise those messages could stall forever with "no connection to..." errors).
     // Note that this probability is conditional on sending a message.
@@ -90,7 +90,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .recv_error_probability = ratio(prng.int_inclusive(u64, 1), 10),
-        .send_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
+        .send_partial_probability = ratio(prng.int_inclusive(u64, 5), 10),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
         .send_error_probability = ratio(prng.int_inclusive(u64, 1), 10),
         .send_now_probability = ratio(prng.int_inclusive(u64, 10), 10),
@@ -159,6 +159,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         message_header.replica = @intCast(replica);
         message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
         message_header.set_checksum();
+
+        assert(std.meta.eql(message_header.peer_type(), .{ .replica = @intCast(replica) }));
     }
 
     for (0..clients_limit) |i| {
@@ -170,6 +172,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         message_header.into(.ping_client).?.client = client;
         message_header.set_checksum_body(message[@sizeOf(vsr.Header)..message_header.size]);
         message_header.set_checksum();
+
+        assert(std.meta.eql(message_header.peer_type(), .{ .client = client }));
     }
 
     for (0..messages_max) |_| {
@@ -378,11 +382,6 @@ const IO = struct {
     prng: stdx.PRNG,
     options: Options,
 
-    //// This is only used for the OnMessagesCallbackType hack, to retreive the Node reference from a
-    //// given message bus.
-    //// TODO Once message bus replica/client types are unified, we can use @fieldParentPtr instead.
-    //nodes: ?[]Node = null,
-
     servers: std.AutoArrayHashMapUnmanaged(socket_t, SocketServer) = .{},
     connections: std.AutoArrayHashMapUnmanaged(socket_t, SocketConnection) = .{},
     /// Current number of events with event.completion.operation == .close
@@ -394,6 +393,9 @@ const IO = struct {
     fd: socket_t = 1,
 
     const posix = std.posix;
+    // We can't specify io/linux.zig since it won't compile on windows, which means that we are
+    // potentially using different error sets for different OS's, which means that fuzzer seeds are
+    // only reproducible on the same OS.
     const RealIO = @import("io.zig").IO;
     pub const AcceptError = RealIO.AcceptError;
     pub const CloseError = RealIO.CloseError;
@@ -401,9 +403,9 @@ const IO = struct {
     pub const RecvError = RealIO.RecvError;
     pub const SendError = RealIO.SendError;
     pub const TimeoutError = RealIO.TimeoutError;
-    pub const socket_t = RealIO.socket_t;
-    pub const fd_t = RealIO.fd_t;
-    pub const INVALID_SOCKET = RealIO.INVALID_SOCKET;
+    pub const socket_t = i32;
+    pub const fd_t = i32;
+    pub const INVALID_SOCKET: socket_t = -1;
     const EventQueue = std.PriorityQueue(Event, void, Event.less_than);
 
     pub const Options = struct {

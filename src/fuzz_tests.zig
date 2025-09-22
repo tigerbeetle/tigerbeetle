@@ -16,6 +16,7 @@ comptime {
 pub const std_options: std.Options = .{
     .log_level = .info,
     .log_scope_levels = &[_]std.log.ScopeLevel{
+        .{ .scope = .message_bus, .level = .err },
         .{ .scope = .storage, .level = .err },
         .{ .scope = .superblock_quorums, .level = .err },
         .{ .scope = .state_machine, .level = .err },
