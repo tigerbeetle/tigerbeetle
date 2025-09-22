@@ -4291,7 +4291,7 @@ pub fn ReplicaType(
                 if (self.commit_stage == .check_prepare) {
                     self.commit_stage = .prefetch;
 
-                    self.commit_started = self.clock.time.monotonic();
+                    self.commit_started = self.clock.monotonic();
                     self.trace.start(.{ .replica_commit = .{
                         .stage = self.commit_stage,
                         .op = self.commit_prepare.?.header.op,
@@ -5126,7 +5126,7 @@ pub fn ReplicaType(
             assert(self.commit_prepare.?.header.op == self.commit_min);
             assert(self.commit_prepare.?.header.op < self.op_checkpoint_next_trigger());
 
-            const commit_completion_time_local = self.clock.time.monotonic()
+            const commit_completion_time_local = self.clock.monotonic()
                 .duration_since(self.commit_started.?);
             self.commit_started = null;
             if (commit_completion_time_local.to_ms() >
@@ -7208,7 +7208,7 @@ pub fn ReplicaType(
                 self.pulse_timeout.reset();
             }
 
-            self.routing.op_prepare(message.header.op, self.clock.time.monotonic());
+            self.routing.op_prepare(message.header.op, self.clock.monotonic());
             self.pipeline.queue.push_prepare(message);
             self.on_prepare(message);
 
