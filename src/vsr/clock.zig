@@ -135,7 +135,7 @@ const Epoch = struct {
     learned: bool = false,
 
     fn elapsed(epoch: *Epoch, clock: *Clock) u64 {
-        return clock.monotonic() - epoch.monotonic;
+        return clock.monotonic().ns - epoch.monotonic;
     }
 
     fn reset(epoch: *Epoch, clock: *Clock) void {
@@ -147,7 +147,7 @@ const Epoch = struct {
             .one_way_delay = 0,
         };
         epoch.samples = 1;
-        epoch.monotonic = clock.monotonic();
+        epoch.monotonic = clock.monotonic().ns;
         epoch.realtime = clock.realtime();
         epoch.synchronized = null;
         epoch.learned = false;
@@ -324,12 +324,8 @@ pub fn learn(self: *Clock, replica: u8, m0: u64, t1: i64, m2: u64) void {
 /// Called by `Replica.on_pong()` to provide `m2` when we receive a pong.
 /// Called by `Replica.on_commit_message_timeout()` to allow backups to discard
 /// duplicate/misdirected heartbeats.
-pub fn monotonic(self: *Clock) u64 {
+pub fn monotonic(self: *Clock) Instant {
     return self.time.monotonic();
-}
-
-pub fn monotonic_instant(self: *Clock) Instant {
-    return self.time.monotonic_instant();
 }
 
 /// Called by `Replica.on_ping()` when responding to a ping with a pong.
@@ -633,7 +629,7 @@ const ClockUnitTestContainer = struct {
             self.clock.time.tick();
 
             if (@mod(self.time.ticks, self.learn_interval) == 0) {
-                const on_pong_time = self.clock.monotonic();
+                const on_pong_time = self.clock.monotonic().ns;
                 const m0 = on_pong_time - self.rtt;
                 const t1: i64 = @intCast(on_pong_time - self.owd);
 
@@ -732,7 +728,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_constant_drift_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @as(i64, @intCast(ideal_constant_drift_clock.clock.monotonic())) -
+            @as(i64, @intCast(ideal_constant_drift_clock.clock.monotonic().ns)) -
                 ideal_constant_drift_clock.clock.realtime_synchronized().?,
         );
     }
@@ -750,7 +746,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_periodic_drift_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @as(i64, @intCast(ideal_periodic_drift_clock.clock.monotonic())) -
+            @as(i64, @intCast(ideal_periodic_drift_clock.clock.monotonic().ns)) -
                 ideal_periodic_drift_clock.clock.realtime_synchronized().?,
         );
     }
@@ -767,7 +763,7 @@ test "ideal clocks get clamped to cluster time" {
         ideal_jumping_clock.run_till_tick(point.tick);
         try testing.expectEqual(
             point.expected_offset,
-            @as(i64, @intCast(ideal_jumping_clock.clock.monotonic())) -
+            @as(i64, @intCast(ideal_jumping_clock.clock.monotonic().ns)) -
                 ideal_jumping_clock.clock.realtime_synchronized().?,
         );
     }
@@ -866,7 +862,7 @@ const ClockSimulator = struct {
 
         for (self.clocks, self.times) |*clock, *time| {
             if (time.ticks % self.options.ping_timeout == 0) {
-                const m0 = clock.monotonic();
+                const m0 = clock.monotonic().ns;
                 for (self.clocks, 0..) |_, target| {
                     if (target != clock.replica) {
                         self.network.submit_packet(
@@ -904,7 +900,7 @@ const ClockSimulator = struct {
                 path.source,
                 packet.m0,
                 t1,
-                target.monotonic(),
+                target.monotonic().ns,
             );
         } else {
             self.network.submit_packet(
