@@ -48,7 +48,7 @@ test "tidy" {
 
         if (tidy_control_characters(source_file)) |control_character| {
             std.debug.print(
-                "{s} error: contains control character: code={} symbol='{c}'\n",
+                "{s}: error: contains control character: code={} symbol='{c}'\n",
                 .{ source_file.path, control_character, control_character },
             );
             return error.BannedControlCharacter;
@@ -65,7 +65,7 @@ test "tidy" {
 
             if (try tidy_long_line(source_file)) |line_index| {
                 std.debug.print(
-                    "{s}:{d} error: line exceeds 100 columns\n",
+                    "{s}:{d}: error: line exceeds 100 columns\n",
                     .{ source_file.path, line_index + 1 },
                 );
                 return error.LineTooLong;
@@ -86,7 +86,7 @@ test "tidy" {
 
             if (tidy_generic_functions(source_file)) |function| {
                 std.debug.print(
-                    "{s}:{d} error: '{s}' should end with the 'Type' suffix\n",
+                    "{s}:{d}: error: '{s}' should end with the 'Type' suffix\n",
                     .{
                         source_file.path,
                         function.line,
@@ -102,7 +102,7 @@ test "tidy" {
         if (mem.endsWith(u8, source_file.path, ".md")) {
             tidy_markdown_title(source_file.text) catch |err| {
                 std.debug.print(
-                    "{s} error: invalid markdown headings, {}\n",
+                    "{s}: error: invalid markdown headings, {}\n",
                     .{ source_file.path, err },
                 );
                 return err;
