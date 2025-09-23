@@ -48,7 +48,7 @@ test "tidy" {
 
         if (tidy_control_characters(source_file)) |control_character| {
             std.debug.print(
-                "{s} error: contains control character: code={} symbol='{c}'\n",
+                "{s}: error: contains control character: code={} symbol='{c}'\n",
                 .{ source_file.path, control_character, control_character },
             );
             return error.BannedControlCharacter;
@@ -65,7 +65,7 @@ test "tidy" {
 
             if (try tidy_long_line(source_file)) |line_index| {
                 std.debug.print(
-                    "{s}:{d} error: line exceeds 100 columns\n",
+                    "{s}:{d}: error: line exceeds 100 columns\n",
                     .{ source_file.path, line_index + 1 },
                 );
                 return error.LineTooLong;
@@ -86,7 +86,7 @@ test "tidy" {
 
             if (tidy_generic_functions(source_file)) |function| {
                 std.debug.print(
-                    "{s}:{d} error: '{s}' should end with the 'Type' suffix\n",
+                    "{s}:{d}: error: '{s}' should end with the 'Type' suffix\n",
                     .{
                         source_file.path,
                         function.line,
@@ -102,7 +102,7 @@ test "tidy" {
         if (mem.endsWith(u8, source_file.path, ".md")) {
             tidy_markdown_title(source_file.text) catch |err| {
                 std.debug.print(
-                    "{s} error: invalid markdown headings, {}\n",
+                    "{s}: error: invalid markdown headings, {}\n",
                     .{ source_file.path, err },
                 );
                 return err;
@@ -748,6 +748,41 @@ test "tidy no large blobs" {
         }
     }
     if (has_large_blobs) return error.HasLargeBlobs;
+}
+
+test "tidy unix permissions" {
+    const executable_files = [_][]const u8{
+        "zig/download.ps1",
+        "zig/download.sh",
+        ".github/ci/test_aof.sh",
+        "src/scripts/cfo_supervisor.sh",
+    };
+
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const files = try shell.exec_stdout("git ls-files -z --format {format}", .{
+        .format = "%(objectmode) %(path)",
+    });
+    assert(files[files.len - 1] == 0);
+    var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
+    while (lines.next()) |line| {
+        const mode, const path = stdx.cut(line, " ").?;
+        errdefer std.debug.print("{s}: error: unexpected mode={s}\n", .{ path, mode });
+
+        if (std.mem.eql(u8, mode, "100644")) {
+            // Expected for most files.
+        } else if (std.mem.eql(u8, mode, "100755")) {
+            const expected = for (executable_files) |executable_file| {
+                if (std.mem.eql(u8, path, executable_file)) break true;
+            } else false;
+
+            if (!expected) return error.UnexpectedExecutable;
+        } else {
+            return error.UnexpectedMode;
+        }
+    }
 }
 
 // Sanity check for "unexpected" files in the repository.
