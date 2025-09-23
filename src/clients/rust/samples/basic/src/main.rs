@@ -1,10 +1,10 @@
 use tigerbeetle as tb;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    futures::executor::block_on(run())
+    futures::executor::block_on(main_async())
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     let port = std::env::var("TB_ADDRESS").unwrap_or_else(|_| "3000".to_string());
     let client = tb::Client::new(0, &port)?;
 

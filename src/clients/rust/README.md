@@ -35,10 +35,10 @@ Now, create `src/main.rs` and copy this into it:
 use tigerbeetle as tb;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    futures::executor::block_on(run())
+    futures::executor::block_on(main_async())
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
     println!("hello world");
 }
 ```
