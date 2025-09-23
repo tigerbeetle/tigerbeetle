@@ -80,6 +80,8 @@ async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
             .create_accounts(&[account0, account1, account2])
             .await?;
 
+        assert!(account_errors.len() <= 3);
+
         for err in account_errors {
             match err.result {
                 tb::CreateAccountResult::Exists => {
