@@ -750,6 +750,41 @@ test "tidy no large blobs" {
     if (has_large_blobs) return error.HasLargeBlobs;
 }
 
+test "tidy unix permissions" {
+    const executable_files = [_][]const u8{
+        "zig/download.ps1",
+        "zig/download.sh",
+        ".github/ci/test_aof.sh",
+        "src/scripts/cfo_supervisor.sh",
+    };
+
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const files = try shell.exec_stdout("git ls-files -z --format {format}", .{
+        .format = "%(objectmode) %(path)",
+    });
+    assert(files[files.len - 1] == 0);
+    var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
+    while (lines.next()) |line| {
+        const mode, const path = stdx.cut(line, " ").?;
+        errdefer std.debug.print("{s}: error: unexpected mode={s}\n", .{ path, mode });
+
+        if (std.mem.eql(u8, mode, "100644")) {
+            // Expected for most files.
+        } else if (std.mem.eql(u8, mode, "100755")) {
+            const expected = for (executable_files) |executable_file| {
+                if (std.mem.eql(u8, path, executable_file)) break true;
+            } else false;
+
+            if (!expected) return error.UnexpectedExecutable;
+        } else {
+            return error.UnexpectedMode;
+        }
+    }
+}
+
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
