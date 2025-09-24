@@ -10,6 +10,7 @@ const assert = std.debug.assert;
 
 pub const BitSetType = @import("bit_set.zig").BitSetType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
+pub const CountingAllocator = @import("counting_allocator.zig");
 pub const PRNG = @import("prng.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const Snap = @import("testing/snaptest.zig").Snap;
