@@ -3139,10 +3139,11 @@ pub fn StateMachineType(
             var chain: ?usize = null;
             var chain_broken = false;
 
-            for (events, 0..) |*event_, index| {
-                var event = event_.*;
-
-                const result = blk: {
+            // The first event determines the batch behavior for
+            // importing events with past timestamp.
+            const batch_imported = events.len > 0 and events[0].flags.imported;
+            for (events, 0..) |*event, index| {
+                const result = result: {
                     if (event.flags.linked) {
                         if (chain == null) {
                             chain = index;
@@ -3150,42 +3151,41 @@ pub fn StateMachineType(
                             self.scope_open(operation);
                         }
 
-                        if (index == events.len - 1) break :blk .linked_event_chain_open;
+                        if (index == events.len - 1) break :result .linked_event_chain_open;
                     }
 
-                    if (chain_broken) break :blk .linked_event_failed;
+                    if (chain_broken) break :result .linked_event_failed;
 
-                    // The first event determines the batch behavior for
-                    // importing events with past timestamp.
-                    if (events[0].flags.imported != event.flags.imported) {
+                    if (batch_imported != event.flags.imported) {
                         if (event.flags.imported) {
-                            break :blk .imported_event_not_expected;
+                            break :result .imported_event_not_expected;
                         } else {
-                            break :blk .imported_event_expected;
+                            break :result .imported_event_expected;
                         }
                     }
 
-                    if (event.flags.imported) {
-                        if (!TimestampRange.valid(event.timestamp)) {
-                            break :blk .imported_event_timestamp_out_of_range;
+                    const timestamp_event = timestamp: {
+                        if (event.flags.imported) {
+                            if (!TimestampRange.valid(event.timestamp)) {
+                                break :result .imported_event_timestamp_out_of_range;
+                            }
+                            if (event.timestamp >= timestamp) {
+                                break :result .imported_event_timestamp_must_not_advance;
+                            }
+                            break :timestamp event.timestamp;
                         }
-                        if (event.timestamp >= timestamp) {
-                            break :blk .imported_event_timestamp_must_not_advance;
-                        }
-                    } else {
-                        if (event.timestamp != 0) break :blk .timestamp_must_be_zero;
-                        event.timestamp = timestamp - events.len + index + 1;
-                    }
+                        if (event.timestamp != 0) break :result .timestamp_must_be_zero;
+                        break :timestamp timestamp - events.len + index + 1;
+                    };
+                    assert(TimestampRange.valid(timestamp_event));
 
-                    assert(TimestampRange.valid(event.timestamp));
-
-                    break :blk switch (operation) {
+                    break :result switch (operation) {
                         .deprecated_create_accounts,
                         .create_accounts,
-                        => self.create_account(&event),
+                        => self.create_account(timestamp_event, event),
                         .deprecated_create_transfers,
                         .create_transfers,
-                        => self.create_transfer(&event),
+                        => self.create_transfer(timestamp_event, event),
                         else => comptime unreachable,
                     };
                 };
@@ -3620,10 +3620,19 @@ pub fn StateMachineType(
             };
         }
 
-        fn create_account(self: *StateMachine, a: *const Account) CreateAccountResult {
-            assert(a.timestamp > self.commit_timestamp or
+        fn create_account(
+            self: *StateMachine,
+            timestamp: u64,
+            a: *const Account,
+        ) CreateAccountResult {
+            assert(timestamp > self.commit_timestamp or
                 a.flags.imported or
                 constants.aof_recovery);
+            if (a.flags.imported) {
+                assert(a.timestamp == timestamp);
+            } else {
+                assert(a.timestamp == 0);
+            }
 
             if (a.reserved != 0) return .reserved_field;
             if (a.flags.padding != 0) return .reserved_flag;
@@ -3654,17 +3663,31 @@ pub fn StateMachineType(
                 // This validation must be called _after_ the idempotency checks so the user
                 // can still handle `exists` results when importing.
                 if (self.forest.grooves.accounts.objects.key_range) |*key_range| {
-                    if (a.timestamp <= key_range.key_max) {
+                    if (timestamp <= key_range.key_max) {
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
-                if (self.forest.grooves.transfers.exists(a.timestamp)) {
+                if (self.forest.grooves.transfers.exists(timestamp)) {
                     return .imported_event_timestamp_must_not_regress;
                 }
             }
 
-            self.forest.grooves.accounts.insert(a);
-            self.commit_timestamp = a.timestamp;
+            self.forest.grooves.accounts.insert(&.{
+                .id = a.id,
+                .debits_pending = 0,
+                .debits_posted = 0,
+                .credits_pending = 0,
+                .credits_posted = 0,
+                .user_data_128 = a.user_data_128,
+                .user_data_64 = a.user_data_64,
+                .user_data_32 = a.user_data_32,
+                .reserved = 0,
+                .ledger = a.ledger,
+                .code = a.code,
+                .flags = a.flags,
+                .timestamp = timestamp,
+            });
+            self.commit_timestamp = timestamp;
             return .ok;
         }
 
@@ -3684,11 +3707,17 @@ pub fn StateMachineType(
 
         fn create_transfer(
             self: *StateMachine,
+            timestamp: u64,
             t: *const Transfer,
         ) CreateTransferResult {
-            assert(t.timestamp > self.commit_timestamp or
+            assert(timestamp > self.commit_timestamp or
                 t.flags.imported or
                 constants.aof_recovery);
+            if (t.flags.imported) {
+                assert(t.timestamp == timestamp);
+            } else {
+                assert(t.timestamp == 0);
+            }
 
             if (t.flags.padding != 0) return .reserved_flag;
 
@@ -3696,13 +3725,13 @@ pub fn StateMachineType(
             if (t.id == math.maxInt(u128)) return .id_must_not_be_int_max;
 
             switch (self.forest.grooves.transfers.get(t.id)) {
-                .found_object => |e| return self.create_transfer_exists(t, &e),
+                .found_object => |*e| return self.create_transfer_exists(t, e),
                 .found_orphaned_id => return .id_already_failed,
                 .not_found => {},
             }
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(t);
+                return self.post_or_void_pending_transfer(timestamp, t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -3749,18 +3778,18 @@ pub fn StateMachineType(
                 // This validation must be called _after_ the idempotency checks so the user
                 // can still handle `exists` results when importing.
                 if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
-                    if (t.timestamp <= key_range.key_max) {
+                    if (timestamp <= key_range.key_max) {
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
-                if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                if (self.forest.grooves.accounts.exists(timestamp)) {
                     return .imported_event_timestamp_must_not_regress;
                 }
 
-                if (t.timestamp <= dr_account.timestamp) {
+                if (timestamp <= dr_account.timestamp) {
                     return .imported_event_timestamp_must_postdate_debit_account;
                 }
-                if (t.timestamp <= cr_account.timestamp) {
+                if (timestamp <= cr_account.timestamp) {
                     return .imported_event_timestamp_must_postdate_credit_account;
                 }
                 if (t.timeout != 0) {
@@ -3768,13 +3797,14 @@ pub fn StateMachineType(
                     return .imported_event_timeout_must_be_zero;
                 }
             }
-            assert(t.timestamp > dr_account.timestamp);
-            assert(t.timestamp > cr_account.timestamp);
+            assert(timestamp > dr_account.timestamp);
+            assert(timestamp > cr_account.timestamp);
 
             if (dr_account.flags.closed) return .debit_account_already_closed;
             if (cr_account.flags.closed) return .credit_account_already_closed;
 
-            const amount = amount: {
+            maybe(t.amount == 0);
+            const amount_actual = amount: {
                 var amount = t.amount;
                 if (t.flags.balancing_debit) {
                     const dr_balance = dr_account.debits_posted + dr_account.debits_pending;
@@ -3787,33 +3817,33 @@ pub fn StateMachineType(
                 }
                 break :amount amount;
             };
-            maybe(amount == 0);
+            maybe(amount_actual == 0);
 
             if (t.flags.pending) {
-                if (sum_overflows(u128, amount, dr_account.debits_pending)) {
+                if (sum_overflows(u128, amount_actual, dr_account.debits_pending)) {
                     return .overflows_debits_pending;
                 }
-                if (sum_overflows(u128, amount, cr_account.credits_pending)) {
+                if (sum_overflows(u128, amount_actual, cr_account.credits_pending)) {
                     return .overflows_credits_pending;
                 }
             }
-            if (sum_overflows(u128, amount, dr_account.debits_posted)) {
+            if (sum_overflows(u128, amount_actual, dr_account.debits_posted)) {
                 return .overflows_debits_posted;
             }
-            if (sum_overflows(u128, amount, cr_account.credits_posted)) {
+            if (sum_overflows(u128, amount_actual, cr_account.credits_posted)) {
                 return .overflows_credits_posted;
             }
             // We assert that the sum of the pending and posted balances can never overflow:
             if (sum_overflows(
                 u128,
-                amount,
+                amount_actual,
                 dr_account.debits_pending + dr_account.debits_posted,
             )) {
                 return .overflows_debits;
             }
             if (sum_overflows(
                 u128,
-                amount,
+                amount_actual,
                 cr_account.credits_pending + cr_account.credits_posted,
             )) {
                 return .overflows_credits;
@@ -3830,44 +3860,56 @@ pub fn StateMachineType(
             )));
             if (sum_overflows(
                 u63,
-                @intCast(t.timestamp),
+                @intCast(timestamp),
                 @as(u63, t.timeout) * std.time.ns_per_s,
             )) {
                 return .overflows_timeout;
             }
 
-            if (dr_account.debits_exceed_credits(amount)) return .exceeds_credits;
-            if (cr_account.credits_exceed_debits(amount)) return .exceeds_debits;
+            if (dr_account.debits_exceed_credits(amount_actual)) return .exceeds_credits;
+            if (cr_account.credits_exceed_debits(amount_actual)) return .exceeds_debits;
 
             // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == t.timestamp);
+            defer assert(self.commit_timestamp == timestamp);
 
-            var t2 = t.*;
-            t2.amount = amount;
-            self.forest.grooves.transfers.insert(&t2);
+            self.forest.grooves.transfers.insert(&.{
+                .id = t.id,
+                .debit_account_id = t.debit_account_id,
+                .credit_account_id = t.credit_account_id,
+                .amount = amount_actual,
+                .pending_id = t.pending_id,
+                .user_data_128 = t.user_data_128,
+                .user_data_64 = t.user_data_64,
+                .user_data_32 = t.user_data_32,
+                .timeout = t.timeout,
+                .ledger = t.ledger,
+                .code = t.code,
+                .flags = t.flags,
+                .timestamp = timestamp,
+            });
 
             var dr_account_new = dr_account;
             var cr_account_new = cr_account;
             if (t.flags.pending) {
-                dr_account_new.debits_pending += amount;
-                cr_account_new.credits_pending += amount;
+                dr_account_new.debits_pending += amount_actual;
+                cr_account_new.credits_pending += amount_actual;
 
                 self.forest.grooves.transfers_pending.insert(&.{
-                    .timestamp = t2.timestamp,
+                    .timestamp = timestamp,
                     .status = .pending,
                 });
             } else {
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                dr_account_new.debits_posted += amount_actual;
+                cr_account_new.credits_posted += amount_actual;
             }
 
             // Closing accounts:
             assert(!dr_account_new.flags.closed);
             assert(!cr_account_new.flags.closed);
-            if (t2.flags.closing_debit) dr_account_new.flags.closed = true;
-            if (t2.flags.closing_credit) cr_account_new.flags.closed = true;
+            if (t.flags.closing_debit) dr_account_new.flags.closed = true;
+            if (t.flags.closing_credit) cr_account_new.flags.closed = true;
 
-            const dr_updated = amount > 0 or dr_account_new.flags.closed;
+            const dr_updated = amount_actual > 0 or dr_account_new.flags.closed;
             assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
                 self.forest.grooves.accounts.update(.{
@@ -3876,7 +3918,7 @@ pub fn StateMachineType(
                 });
             }
 
-            const cr_updated = amount > 0 or cr_account_new.flags.closed;
+            const cr_updated = amount_actual > 0 or cr_account_new.flags.closed;
             assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
                 self.forest.grooves.accounts.update(.{
@@ -3886,26 +3928,26 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = t2.timestamp,
+                .event_timestamp = timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
-                .transfer_flags = t2.flags,
-                .transfer_pending_status = if (t2.flags.pending) .pending else .none,
+                .transfer_flags = t.flags,
+                .transfer_pending_status = if (t.flags.pending) .pending else .none,
                 .transfer_pending = null,
                 .amount_requested = t.amount,
-                .amount = t2.amount,
+                .amount = amount_actual,
             });
 
-            if (t2.timeout > 0) {
-                assert(t2.flags.pending);
-                assert(!t2.flags.imported);
-                const expires_at = t2.timestamp + t2.timeout_ns();
+            if (t.timeout > 0) {
+                assert(t.flags.pending);
+                assert(!t.flags.imported);
+                const expires_at = timestamp + t.timeout_ns();
                 if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
                     self.expire_pending_transfers.pulse_next_timestamp = expires_at;
                 }
             }
 
-            self.commit_timestamp = t2.timestamp;
+            self.commit_timestamp = timestamp;
             return .ok;
         }
 
@@ -3976,13 +4018,19 @@ pub fn StateMachineType(
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
+            timestamp: u64,
             t: *const Transfer,
         ) CreateTransferResult {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
             assert(self.forest.grooves.transfers.get(t.id) == .not_found);
             assert(t.flags.padding == 0);
-            assert(t.timestamp > self.commit_timestamp or t.flags.imported);
+            assert(timestamp > self.commit_timestamp or t.flags.imported);
+            if (t.flags.imported) {
+                assert(t.timestamp == timestamp);
+            } else {
+                assert(t.timestamp == 0);
+            }
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
@@ -4001,7 +4049,7 @@ pub fn StateMachineType(
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
             assert(p.id == t.pending_id);
-            assert(p.timestamp < t.timestamp);
+            assert(p.timestamp < timestamp);
             if (!p.flags.pending) return .pending_transfer_not_pending;
 
             const dr_account = self.get_account(p.debit_account_id).?;
@@ -4010,7 +4058,6 @@ pub fn StateMachineType(
             assert(cr_account.id == p.credit_account_id);
             assert(p.timestamp > dr_account.timestamp);
             assert(p.timestamp > cr_account.timestamp);
-            maybe(p.amount == 0);
 
             if (t.debit_account_id > 0 and t.debit_account_id != p.debit_account_id) {
                 return .pending_transfer_has_different_debit_account_id;
@@ -4025,18 +4072,20 @@ pub fn StateMachineType(
             }
             if (t.code > 0 and t.code != p.code) return .pending_transfer_has_different_code;
 
-            const amount = amount: {
+            maybe(t.amount == 0);
+            maybe(p.amount == 0);
+            const amount_actual = amount: {
                 if (t.flags.void_pending_transfer) {
                     break :amount if (t.amount == 0) p.amount else t.amount;
                 } else {
                     break :amount if (t.amount == std.math.maxInt(u128)) p.amount else t.amount;
                 }
             };
-            maybe(amount == 0);
+            maybe(amount_actual == 0);
 
-            if (amount > p.amount) return .exceeds_pending_transfer_amount;
+            if (amount_actual > p.amount) return .exceeds_pending_transfer_amount;
 
-            if (t.flags.void_pending_transfer and amount < p.amount) {
+            if (t.flags.void_pending_transfer and amount_actual < p.amount) {
                 return .pending_transfer_has_different_amount;
             }
 
@@ -4050,7 +4099,7 @@ pub fn StateMachineType(
                 .expired => {
                     assert(p.timeout > 0);
                     assert(!p.flags.imported);
-                    assert(t.timestamp >= p.timestamp + p.timeout_ns());
+                    assert(timestamp >= p.timestamp + p.timeout_ns());
                     return .pending_transfer_expired;
                 },
             }
@@ -4058,7 +4107,7 @@ pub fn StateMachineType(
             const expires_at: ?u64 = if (p.timeout == 0) null else expires_at: {
                 assert(!p.flags.imported);
                 const expires_at: u64 = p.timestamp + p.timeout_ns();
-                if (expires_at <= t.timestamp) {
+                if (expires_at <= timestamp) {
                     // TODO: It's still possible for an operation to see an expired transfer
                     // if there's more than one batch of transfers to expire in a single `pulse`
                     // and the current operation was pipelined before the expiration commits.
@@ -4074,16 +4123,16 @@ pub fn StateMachineType(
                 // This validation must be called _after_ the idempotency checks so the user
                 // can still handle `exists` results when importing.
                 if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
-                    if (t.timestamp <= key_range.key_max) {
+                    if (timestamp <= key_range.key_max) {
                         return .imported_event_timestamp_must_not_regress;
                     }
                 }
-                if (self.forest.grooves.accounts.exists(t.timestamp)) {
+                if (self.forest.grooves.accounts.exists(timestamp)) {
                     return .imported_event_timestamp_must_not_regress;
                 }
             }
-            assert(t.timestamp > dr_account.timestamp);
-            assert(t.timestamp > cr_account.timestamp);
+            assert(timestamp > dr_account.timestamp);
+            assert(timestamp > cr_account.timestamp);
 
             // The only movement allowed in a closed account is voiding a pending transfer.
             if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
@@ -4094,9 +4143,9 @@ pub fn StateMachineType(
             }
 
             // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == t.timestamp);
+            defer assert(self.commit_timestamp == timestamp);
 
-            const t2 = Transfer{
+            self.forest.grooves.transfers.insert(&.{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
@@ -4107,16 +4156,15 @@ pub fn StateMachineType(
                 .code = p.code,
                 .pending_id = t.pending_id,
                 .timeout = 0,
-                .timestamp = t.timestamp,
+                .timestamp = timestamp,
                 .flags = t.flags,
-                .amount = amount,
-            };
-            self.forest.grooves.transfers.insert(&t2);
+                .amount = amount_actual,
+            });
 
-            if (expires_at) |timestamp| {
+            if (expires_at) |expiry| {
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
-                    .field = timestamp,
+                    .field = expiry,
                     .timestamp = p.timestamp,
                 });
 
@@ -4129,8 +4177,8 @@ pub fn StateMachineType(
             }
 
             const transfer_pending_status: TransferPendingStatus = status: {
-                if (t2.flags.post_pending_transfer) break :status .posted;
-                if (t2.flags.void_pending_transfer) break :status .voided;
+                if (t.flags.post_pending_transfer) break :status .posted;
+                if (t.flags.void_pending_transfer) break :status .voided;
                 unreachable;
             };
             self.transfer_update_pending_status(&transfer_pending, transfer_pending_status);
@@ -4140,15 +4188,15 @@ pub fn StateMachineType(
             dr_account_new.debits_pending -= p.amount;
             cr_account_new.credits_pending -= p.amount;
 
-            if (t2.flags.post_pending_transfer) {
+            if (t.flags.post_pending_transfer) {
                 assert(!p.flags.closing_debit);
                 assert(!p.flags.closing_credit);
-                assert(amount <= p.amount);
-                dr_account_new.debits_posted += amount;
-                cr_account_new.credits_posted += amount;
+                assert(amount_actual <= p.amount);
+                dr_account_new.debits_posted += amount_actual;
+                cr_account_new.credits_posted += amount_actual;
             }
-            if (t2.flags.void_pending_transfer) {
-                assert(t2.amount == p.amount);
+            if (t.flags.void_pending_transfer) {
+                assert(amount_actual == p.amount);
                 // Reverts the closing account operation:
                 if (p.flags.closing_debit) {
                     assert(dr_account.flags.closed);
@@ -4160,7 +4208,7 @@ pub fn StateMachineType(
                 }
             }
 
-            const dr_updated = amount > 0 or p.amount > 0 or
+            const dr_updated = amount_actual > 0 or p.amount > 0 or
                 dr_account_new.flags.closed != dr_account.flags.closed;
             assert(dr_updated == !stdx.equal_bytes(Account, &dr_account, &dr_account_new));
             if (dr_updated) {
@@ -4170,7 +4218,7 @@ pub fn StateMachineType(
                 });
             }
 
-            const cr_updated = amount > 0 or p.amount > 0 or
+            const cr_updated = amount_actual > 0 or p.amount > 0 or
                 cr_account_new.flags.closed != cr_account.flags.closed;
             assert(cr_updated == !stdx.equal_bytes(Account, &cr_account, &cr_account_new));
             if (cr_updated) {
@@ -4181,17 +4229,17 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = t2.timestamp,
+                .event_timestamp = timestamp,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
-                .transfer_flags = t2.flags,
+                .transfer_flags = t.flags,
                 .transfer_pending_status = transfer_pending_status,
                 .transfer_pending = &p,
                 .amount_requested = t.amount,
-                .amount = t2.amount,
+                .amount = amount_actual,
             });
 
-            self.commit_timestamp = t2.timestamp;
+            self.commit_timestamp = timestamp;
 
             return .ok;
         }
