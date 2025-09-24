@@ -354,7 +354,7 @@ func main() {
 			Ledger:       0,  // No filter by Ledger
 			TimestampMin: 0,  // No filter by Timestamp.
 			TimestampMax: 0,  // No filter by Timestamp.
-			Limit:        10, // Limit to ten balances at most.
+			Limit:        10, // Limit to ten accounts at most.
 			Flags: QueryFilterFlags{
 				Reversed: true, // Sort by timestamp in reverse-chronological order.
 			}.ToUint32(),
@@ -375,7 +375,7 @@ func main() {
 			Ledger:       0,  // No filter by Ledger.
 			TimestampMin: 0,  // No filter by Timestamp.
 			TimestampMax: 0,  // No filter by Timestamp.
-			Limit:        10, // Limit to ten balances at most.
+			Limit:        10, // Limit to ten transfers at most.
 			Flags: QueryFilterFlags{
 				Reversed: true, // Sort by timestamp in reverse-chronological order.
 			}.ToUint32(),
