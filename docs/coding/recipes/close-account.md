@@ -6,7 +6,7 @@ another account.
 
 Additionally, it may be desirable to forbid further transfers on this account (i.e. at the end of
 an accounting period, upon account termination, or even temporarily freezing the account for audit
-purposes.
+purposes). This doesn't affect existing [pending transfers](../two-phase-transfers.md) which can still time out but can't be posted or voided.
 
 ### Example
 
