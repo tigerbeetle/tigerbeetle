@@ -36,6 +36,7 @@ function main_release_rotation() {
       "cb22",
       "chaitanyabhandari",
       "fabioarnold",
+      "GeorgKreuzmayr",
       "lewisdaly",
       "matklad",
       "sentientwaffle",
