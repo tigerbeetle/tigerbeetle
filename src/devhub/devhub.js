@@ -29,18 +29,18 @@ function main_release_rotation() {
   }
 
   function get_release_manager() {
-    const shift = 4; // Adjust when changing the set of candidates to avoid shifts.
+    const shift = 1; // Adjust when changing the set of candidates to avoid shifts.
     const week = get_week(new Date()) + shift;
     const candidates = [
       "batiati",
       "cb22",
       "chaitanyabhandari",
       "fabioarnold",
-      "GeorgKreuzmayr",
       "lewisdaly",
       "matklad",
       "sentientwaffle",
       "toziegler",
+      "GeorgKreuzmayr",
     ];
     candidates.sort();
 
