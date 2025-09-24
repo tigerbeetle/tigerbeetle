@@ -100,7 +100,8 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.trace);
 
 const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
+const KiB = stdx.KiB;
 const Duration = stdx.Duration;
 const IO = @import("io.zig").IO;
 const Time = @import("time.zig").Time;
@@ -112,7 +113,7 @@ pub const EventTiming = @import("trace/event.zig").EventTiming;
 pub const EventTimingAggregate = @import("trace/event.zig").EventTimingAggregate;
 pub const EventMetricAggregate = @import("trace/event.zig").EventMetricAggregate;
 
-const trace_span_size_max = 1024;
+const trace_span_size_max = 1 * KiB;
 
 pub const Tracer = @This();
 
@@ -134,8 +135,6 @@ pub const ProcessID = union(enum) {
         cluster: u128,
         replica: u8,
     },
-
-    pub const replica_test: ProcessID = .{ .replica = .{ .cluster = 0, .replica = 0 } };
 
     pub fn format(
         self: ProcessID,
@@ -215,7 +214,7 @@ pub fn init(
         .events_metric = events_metric,
         .events_timing = events_timing,
 
-        .time_start = time.monotonic_instant(),
+        .time_start = time.monotonic(),
     };
 }
 
@@ -265,7 +264,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
     const event_timing = event.as(EventTiming);
     const stack = event_tracing.stack();
 
-    const time_now = tracer.time.monotonic_instant();
+    const time_now = tracer.time.monotonic();
 
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
@@ -295,7 +294,7 @@ pub fn start(tracer: *Tracer, event: Event) void {
         .thread_id = event_tracing.stack(),
         .category = @tagName(event),
         .event = 'B',
-        .timestamp = time_elapsed.us(),
+        .timestamp = time_elapsed.to_us(),
         .event_tracing = event_tracing,
         .event_timing = event_timing,
         .args = std.json.Formatter(Event){ .value = event, .options = .{} },
@@ -322,7 +321,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     const stack = event_tracing.stack();
 
     const event_start = tracer.events_started[stack].?;
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     const event_duration = event_end.duration_since(event_start);
 
     assert(tracer.events_started[stack] != null);
@@ -335,9 +334,9 @@ pub fn stop(tracer: *Tracer, event: Event) void {
         event_tracing,
         event_timing,
         if (event_duration.ns < us_log_threshold_ns)
-            event_duration.us()
+            event_duration.to_us()
         else
-            event_duration.ms(),
+            event_duration.to_ms(),
         if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
     });
 
@@ -349,7 +348,7 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     const stack_base = EventTracing.stack_bases.get(event_tag);
     const cardinality = EventTracing.stack_limits.get(event_tag);
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
             log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
@@ -377,7 +376,7 @@ fn write_stop(tracer: *Tracer, stack: u32, time_elapsed: stdx.Duration) void {
             .process_id = tracer.process_id.json(),
             .thread_id = stack,
             .event = 'E',
-            .timestamp = time_elapsed.us(),
+            .timestamp = time_elapsed.to_us(),
         },
     ) catch unreachable;
 
@@ -437,22 +436,30 @@ pub fn timing(tracer: *Tracer, event_timing: EventTiming, duration: Duration) vo
     }
 }
 
+const fixtures = @import("testing/fixtures.zig");
+
 test "trace json" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
-    const Snap = @import("testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
+    const gpa = std.testing.allocator;
 
-    var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer trace_buffer.deinit();
+    var trace_buffer: std.ArrayListUnmanaged(u8) = .empty;
+    defer trace_buffer.deinit(gpa);
 
-    var time_sim = TimeSim.init_simple();
+    var time_sim = fixtures.init_time(.{});
 
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
-        .writer = trace_buffer.writer().any(),
+    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{
+        .writer = trace_buffer.writer(gpa).any(),
+        .process_id = .unknown,
     });
-    defer trace.deinit(std.testing.allocator);
+    defer trace.deinit(gpa);
 
-    trace.set_replica(.{ .cluster = 0, .replica = 0 });
+    // Check that JSON is valid even while process id not known.
+    trace.start(.metrics_emit);
+    time_sim.ticks += 1;
+    trace.stop(.metrics_emit);
+
+    trace.set_replica(.{ .cluster = 1, .replica = 1 });
 
     trace.start(.{ .replica_commit = .{ .stage = .idle, .op = 123 } });
     time_sim.ticks += 1;
@@ -464,25 +471,22 @@ test "trace json" {
 
     try snap(@src(),
         \\[
-        \\{"pid":0,"tid":0,"ph":"B","ts":0,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":0,"tid":8,"ph":"B","ts":10000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
-        \\{"pid":0,"tid":8,"ph":"E","ts":30000},
-        \\{"pid":0,"tid":0,"ph":"E","ts":60000},
+        \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
+        \\{"pid":0,"tid":208,"ph":"E","ts":10000},
+        \\{"pid":1,"tid":0,"ph":"B","ts":10000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
+        \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":1,"tid":8,"ph":"E","ts":40000},
+        \\{"pid":1,"tid":0,"ph":"E","ts":70000},
         \\
     ).diff(trace_buffer.items);
 }
 
 test "timing overflow" {
-    const TimeSim = @import("testing/time.zig").TimeSim;
+    const gpa = std.testing.allocator;
 
-    var trace_buffer = std.ArrayList(u8).init(std.testing.allocator);
-    defer trace_buffer.deinit();
-
-    var time_sim = TimeSim.init_simple();
-    var trace = try Tracer.init(std.testing.allocator, time_sim.time(), .unknown, .{
-        .writer = trace_buffer.writer().any(),
-    });
-    defer trace.deinit(std.testing.allocator);
+    var time_sim = fixtures.init_time(.{});
+    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{});
+    defer trace.deinit(gpa);
 
     trace.set_replica(.{ .cluster = 0, .replica = 0 });
 

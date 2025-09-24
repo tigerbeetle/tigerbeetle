@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 const constants = @import("./constants.zig");
@@ -124,7 +124,7 @@ test "Stack: fuzz" {
 
     const allocator = std.testing.allocator;
 
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const Item = struct {
         id: u32,

@@ -25,7 +25,7 @@ const assert = std.debug.assert;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const BlockReference = vsr.BlockReference;
 

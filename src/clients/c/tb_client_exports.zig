@@ -94,7 +94,7 @@ pub fn init(
     addresses_len: u32,
     completion_ctx: usize,
     completion_callback: tb_completion_t,
-) callconv(.C) tb_init_status {
+) callconv(.c) tb_init_status {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
 
     // Passing u128 by value is prone to ABI issues. Pass as a [16]u8, and explicitly copy into
@@ -126,7 +126,7 @@ pub fn init_echo(
     addresses_len: u32,
     completion_ctx: usize,
     completion_callback: tb_completion_t,
-) callconv(.C) tb_init_status {
+) callconv(.c) tb_init_status {
     const addresses = @as([*]const u8, @ptrCast(addresses_ptr))[0..addresses_len];
 
     // See explanation in init().
@@ -148,7 +148,7 @@ pub fn init_echo(
     return .success;
 }
 
-pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.C) tb_client_status {
+pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.c) tb_client_status {
     const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
     client.submit(packet) catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
@@ -156,7 +156,7 @@ pub fn submit(tb_client: ?*tb_client_t, packet: *tb_packet_t) callconv(.C) tb_cl
     return .ok;
 }
 
-pub fn deinit(tb_client: ?*tb_client_t) callconv(.C) tb_client_status {
+pub fn deinit(tb_client: ?*tb_client_t) callconv(.c) tb_client_status {
     const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
     client.deinit() catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
@@ -167,7 +167,7 @@ pub fn deinit(tb_client: ?*tb_client_t) callconv(.C) tb_client_status {
 pub fn init_parameters(
     tb_client: ?*tb_client_t,
     out_parameters: *tb_init_parameters,
-) callconv(.C) tb_client_status {
+) callconv(.c) tb_client_status {
     const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
     client.init_parameters(out_parameters) catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
@@ -178,7 +178,7 @@ pub fn init_parameters(
 pub fn completion_context(
     tb_client: ?*tb_client_t,
     completion_ctx_out: *usize,
-) callconv(.C) tb_client_status {
+) callconv(.c) tb_client_status {
     const client: *tb.ClientInterface = if (tb_client) |ptr| ptr.cast() else return .invalid;
     completion_ctx_out.* = client.completion_context() catch |err| switch (err) {
         error.ClientInvalid => return .invalid,
@@ -189,7 +189,7 @@ pub fn completion_context(
 pub fn register_log_callback(
     callback_maybe: ?Logging.Callback,
     debug: bool,
-) callconv(.C) tb_register_log_callback_status {
+) callconv(.c) tb_register_log_callback_status {
     Logging.global.mutex.lock();
     defer Logging.global.mutex.unlock();
     if (Logging.global.callback == null) {
@@ -216,7 +216,7 @@ pub const Logging = struct {
         message_level: tb_log_level,
         message_ptr: [*]const u8,
         message_len: u32,
-    ) callconv(.C) void;
+    ) callconv(.c) void;
 
     const log_line_max = 8192;
 

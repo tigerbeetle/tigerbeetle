@@ -29,7 +29,8 @@ function main_release_rotation() {
   }
 
   function get_release_manager() {
-    const week = get_week(new Date());
+    const shift = 1; // Adjust when changing the set of candidates to avoid shifts.
+    const week = get_week(new Date()) + shift;
     const candidates = [
       "batiati",
       "cb22",
@@ -38,6 +39,8 @@ function main_release_rotation() {
       "lewisdaly",
       "matklad",
       "sentientwaffle",
+      "toziegler",
+      "GeorgKreuzmayr",
     ];
     candidates.sort();
 
@@ -112,6 +115,10 @@ async function main_seeds() {
       !open_pull_requests.has(pull_request_number(record))
     ) {
       include = false;
+    } else if (record.fuzzer === "canary" && !is_main(record)) {
+      include = false;
+    } else if (record.fuzzer === "vopr" && is_release(record)) {
+      include = true;
     } else {
       include = (!record.ok || pull_request_number(record) !== undefined) &&
         !fuzzers_with_failures.has(record.branch + record.fuzzer);
@@ -337,6 +344,8 @@ function plot_series(series_list, root_node, batch_count) {
         text: series.name,
       },
       chart: {
+        id: series.name,
+        group: "devhub",
         type: "line",
         height: "400px",
         animations: {

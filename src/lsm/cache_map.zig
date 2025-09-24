@@ -1,7 +1,7 @@
 const std = @import("std");
 const constants = @import("../constants.zig");
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
@@ -26,10 +26,10 @@ const ScopeCloseMode = @import("tree.zig").ScopeCloseMode;
 pub fn CacheMapType(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
-    comptime hash_from_key: fn (Key) callconv(.Inline) u64,
-    comptime tombstone_from_key: fn (Key) callconv(.Inline) Value,
-    comptime tombstone: fn (*const Value) callconv(.Inline) bool,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
+    comptime hash_from_key: fn (Key) callconv(.@"inline") u64,
+    comptime tombstone_from_key: fn (Key) callconv(.@"inline") Value,
+    comptime tombstone: fn (*const Value) callconv(.@"inline") bool,
 ) type {
     return struct {
         const CacheMap = @This();

@@ -22,7 +22,12 @@ const benchmark_load = @import("./benchmark_load.zig");
 
 const log = std.log;
 
-pub fn main(allocator: Allocator, time: vsr.time.Time, args: *const cli.Command.Benchmark) !void {
+pub fn command_benchmark(
+    allocator: Allocator,
+    io: *vsr.io.IO,
+    time: vsr.time.Time,
+    args: *const cli.Command.Benchmark,
+) !void {
     // Note: we intentionally don't use a temporary directory for this data file, and instead just
     // put it into CWD, as performance of TigerBeetle very much depends on a specific file system.
     const data_file = args.file orelse data_file: {
@@ -83,7 +88,7 @@ pub fn main(allocator: Allocator, time: vsr.time.Time, args: *const cli.Command.
         addresses.const_slice()
     else
         &.{tigerbeetle_process.?.address};
-    try benchmark_load.main(allocator, time, addresses, args);
+    try benchmark_load.main(allocator, io, time, addresses, args);
 
     if (tigerbeetle_process) |*p| {
         const rusage = p.deinit();

@@ -5,13 +5,14 @@ const vsr = @import("../vsr.zig");
 const constants = vsr.constants;
 const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
+const MiB = stdx.MiB;
 const fuzz = @import("../testing/fuzz.zig");
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);
     const message_body_size_min = constants.sector_size - @sizeOf(vsr.Header);
-    const message_body_size_max = (1024 * 1024) - @sizeOf(vsr.Header);
+    const message_body_size_max = (1 * MiB) - @sizeOf(vsr.Header);
     const buffer_expected = try gpa.alignedAlloc(
         u8,
         @alignOf(vsr.Header),

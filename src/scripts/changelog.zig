@@ -1,15 +1,17 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
-const Release = @import("../multiversioning.zig").Release;
-const ReleaseTriple = @import("../multiversioning.zig").ReleaseTriple;
+const Release = @import("../multiversion.zig").Release;
+const ReleaseTriple = @import("../multiversion.zig").ReleaseTriple;
+
+const MiB = stdx.MiB;
 
 const log = std.log;
 
-const changelog_bytes_max = 10 * 1024 * 1024;
+const changelog_bytes_max = 10 * MiB;
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator) !void {
     _ = gpa;

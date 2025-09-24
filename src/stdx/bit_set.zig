@@ -1,4 +1,4 @@
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 const std = @import("std");
 const assert = std.debug.assert;
 
@@ -89,7 +89,7 @@ pub fn BitSetType(comptime with_capacity: u9) type {
 }
 
 test BitSetType {
-    var prng = stdx.PRNG.from_seed(92);
+    var prng = stdx.PRNG.from_seed_testing();
     inline for (.{ 0, 1, 8, 32, 65, 255, 256 }) |N| {
         const BitSet = BitSetType(N);
 

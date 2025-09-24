@@ -8,7 +8,7 @@ const builtin = @import("builtin");
 const log = std.log;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
 
 const client_readmes = @import("./client_readmes.zig");
@@ -21,6 +21,11 @@ const LanguageCI = .{
     .java = @import("../clients/java/ci.zig"),
     .node = @import("../clients/node/ci.zig"),
     .python = @import("../clients/python/ci.zig"),
+};
+
+const LanguageCIVortex = .{
+    .rust = @import("../testing/vortex/rust_driver/ci.zig"),
+    .java = @import("../testing/vortex/java_driver/ci.zig"),
 };
 
 pub const CLIArgs = struct {
@@ -51,15 +56,34 @@ fn generate_readmes(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
 fn run_tests(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?Language) !void {
     inline for (comptime std.enums.values(Language)) |language| {
         if (language_requested == language or language_requested == null) {
-            const ci = @field(LanguageCI, @tagName(language));
-            var section = try shell.open_section(@tagName(language) ++ " ci");
-            defer section.close();
-
             {
-                try shell.pushd("./src/clients/" ++ @tagName(language));
-                defer shell.popd();
+                const ci = @field(LanguageCI, @tagName(language));
+                var section = try shell.open_section(@tagName(language) ++ " ci");
+                defer section.close();
 
-                try ci.tests(shell, gpa);
+                {
+                    try shell.pushd("./src/clients/" ++ @tagName(language));
+                    defer shell.popd();
+
+                    try ci.tests(shell, gpa);
+                }
+            }
+
+            // Test the vortex drivers.
+            // These may expect the above driver tests to have run,
+            // in order to build the driver.
+            // They expect the vortex and tigerbeetle drivers to be built.
+            if (@hasField(@TypeOf(LanguageCIVortex), @tagName(language))) {
+                const ci = @field(LanguageCIVortex, @tagName(language));
+                var section = try shell.open_section(@tagName(language) ++ " vortex ci");
+                defer section.close();
+
+                {
+                    try shell.pushd("./src/testing/vortex/" ++ @tagName(language) ++ "_driver");
+                    defer shell.popd();
+
+                    try ci.tests(shell, gpa);
+                }
             }
         }
     }
@@ -105,51 +129,41 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         assert(shell.file_exists(artifact));
     }
 
-    // Enable this once deterministic zip generation has been merged in and released.
-    // const raw_run_number = stdx.cut(stdx.cut(tag, ".").?.suffix, ".").?.suffix;
+    const git_sha = try shell.exec_stdout("git rev-parse HEAD", .{});
+    try shell.exec_zig_options(.{ .timeout = .minutes(20) }, "build scripts -- release --build " ++
+        "--sha={git_sha} --language=zig", .{
+        .git_sha = git_sha,
+    });
+    for (artifacts) |artifact| {
+        // Zig only guarantees release builds to be deterministic.
+        if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
-    // // The +188 comes from how release.zig calculates the version number.
-    // const run_number = try std.fmt.allocPrint(
-    //     shell.arena.allocator(),
-    //     "{}",
-    //     .{try std.fmt.parseInt(u32, raw_run_number, 10) + 188},
-    // );
+        const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
+            .artifact = artifact,
+        });
 
-    // const sha = try shell.exec_stdout("git rev-parse HEAD", .{});
-    // try shell.exec_zig("build scripts -- release --build  --run-number={run_number} " ++
-    //     "--sha={sha} --language=zig", .{
-    //     .run_number = run_number,
-    //     .sha = sha,
-    // });
-    // for (artifacts) |artifact| {
-    //     // Zig only guarantees release builds to be deterministic.
-    //     if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
+        shell.popd();
+        const checksum_built = try shell.exec_stdout(
+            "sha256sum zig-out/dist/tigerbeetle/{artifact}",
+            .{
+                .artifact = artifact,
+            },
+        );
+        try shell.pushd_dir(tmp_dir.dir);
 
-    //     // TODO(Zig): Determinism is broken on Windows:
-    //     // https://github.com/ziglang/zig/issues/9432
-    //     if (std.mem.indexOf(u8, artifact, "-windows.zip") != null) continue;
+        // Slice the output to suppress the names.
+        if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
+            // Still run the code, but suppress failing until a release cycle has taken place.
+            std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+                artifact,
+                checksum_downloaded[0..64],
+                checksum_built[0..64],
+            });
+        }
+    }
 
-    //     const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
-    //         .artifact = artifact,
-    //     });
+    try shell.unzip_executable("tigerbeetle-x86_64-linux.zip", "tigerbeetle");
 
-    //     shell.popd();
-    //     const checksum_built = try shell.exec_stdout("sha256sum dist/tigerbeetle/{artifact}", .{
-    //         .artifact = artifact,
-    //     });
-    //     try shell.pushd_dir(tmp_dir.dir);
-
-    //     // Slice the output to suppress the names.
-    //     if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
-    //         std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
-    //             artifact,
-    //             checksum_downloaded[0..64],
-    //             checksum_built[0..64],
-    //         });
-    //     }
-    // }
-
-    try shell.exec("unzip tigerbeetle-x86_64-linux.zip", .{});
     const version = try shell.exec_stdout("./tigerbeetle version --verbose", .{});
     assert(std.mem.indexOf(u8, version, tag) != null);
     assert(std.mem.indexOf(u8, version, "ReleaseSafe") != null);

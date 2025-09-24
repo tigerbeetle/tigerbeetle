@@ -13,11 +13,11 @@ a series of loosely connected guides which can be read in any order.
 - [Two-Phase Transfers](./two-phase-transfers.md) introduces pending transfers, one of the most
   powerful primitives built into TigerBeetle.
 - [Linked Events](./linked-events.md) shows how several transfers can be chained together into a
-  larger transaction, which success or fails atomically.
+  larger transaction, which succeeds or fails atomically.
 - [Time](./time.md) lists the guarantees provided by the TigerBeetle cluster clock.
 - [Recipes](./recipes/) is a library of ready-made solutions for common business requirements such
   as a currency exchange.
-- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .Net, Go, Java, Node.js, or
+- [Clients](./clients/) shows how to use TigerBeetle from the comfort of .NET, Go, Java, Node.js, or
   Python.
 
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)

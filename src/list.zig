@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("constants.zig");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 
 /// An intrusive doubly-linked list.
 /// Currently it is LIFO for simplicity because its consumer (IO.awaiting) doesn't care about order.
@@ -13,11 +13,11 @@ pub fn DoublyLinkedListType(
 ) type {
     assert(@typeInfo(Node) == .@"struct");
     assert(field_back_enum != field_next_enum);
-    assert(std.meta.FieldType(Node, field_back_enum) == ?*Node);
-    assert(std.meta.FieldType(Node, field_next_enum) == ?*Node);
 
     const field_back = @tagName(field_back_enum);
     const field_next = @tagName(field_next_enum);
+    assert(@FieldType(Node, field_back) == ?*Node);
+    assert(@FieldType(Node, field_next) == ?*Node);
 
     return struct {
         const DoublyLinkedList = @This();
@@ -164,7 +164,7 @@ test "DoublyLinkedList fuzz" {
 
     const allocator = std.testing.allocator;
 
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const Node = struct { id: u32, back: ?*@This() = null, next: ?*@This() = null };
     const List = DoublyLinkedListType(Node, .back, .next);

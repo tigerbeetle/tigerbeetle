@@ -198,5 +198,4 @@ you might have!
 Would you like the TigerBeetle team to help you design your chart of accounts and leverage the power
 of TigerBeetle in your architecture?
 
-Let us help you get it right. Contact our CEO, Joran Dirk Greef, at <joran@tigerbeetle.com> to set
-up a call.
+Let us help you get it right. Contact us at <sales@tigerbeetle.com> to set up a call.

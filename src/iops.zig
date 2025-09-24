@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 /// Take a u8 to limit to 255 items max (maxInt(u8) == 255).

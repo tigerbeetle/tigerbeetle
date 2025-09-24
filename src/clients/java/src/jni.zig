@@ -13,10 +13,6 @@
 ///!
 ///! Additionally, each function is unit tested against a real JVM to validate if they are
 ///! calling the correct vtable entry with the expected arguments.
-const std = @import("std");
-
-/// JNI calling convention.
-pub const JNICALL: std.builtin.CallingConvention = .C;
 
 // https://docs.oracle.com/en/java/javase/17/docs/specs/jni/functions.html#getversion.
 pub const jni_version_1_1: JInt = 0x00010001;
@@ -723,7 +719,7 @@ pub const JNIEnv = opaque {
         get_module = 233,
     };
 
-    usingnamespace JniInterfaceType(JNIEnv);
+    const JNIInterface = JNIInterfaceType(JNIEnv);
 
     /// Returns the major version number in the higher 16 bits
     /// and the minor version number in the lower 16 bits.
@@ -731,7 +727,7 @@ pub const JNIEnv = opaque {
     pub inline fn get_version(
         env: *JNIEnv,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_version,
             .{},
@@ -746,7 +742,7 @@ pub const JNIEnv = opaque {
         buf: [*]const JByte,
         buf_len: JSize,
     ) JClass {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .define_class,
             .{ name, loader, buf, buf_len },
@@ -761,7 +757,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         name: [*:0]const u8,
     ) JClass {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .find_class,
             .{name},
@@ -773,7 +769,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         jobject: JObject,
     ) JMethodID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .from_reflected_method,
             .{jobject},
@@ -785,7 +781,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         jobject: JObject,
     ) JFieldID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .from_feflected_field,
             .{jobject},
@@ -799,7 +795,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         is_static: JBoolean,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .to_reflected_method,
             .{ cls, method_id, is_static },
@@ -811,7 +807,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         clazz: JClass,
     ) JClass {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_super_class,
             .{clazz},
@@ -824,7 +820,7 @@ pub const JNIEnv = opaque {
         clazz_1: JClass,
         clazz_2: JClass,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .is_assignable_from,
             .{ clazz_1, clazz_2 },
@@ -838,7 +834,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         is_static: JBoolean,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .to_reflected_field,
             .{ cls, field_id, is_static },
@@ -850,7 +846,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JThrowable,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .throw,
             .{obj},
@@ -863,7 +859,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         message: ?[*:0]const u8,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .throw_new,
             .{ clazz, message },
@@ -876,7 +872,7 @@ pub const JNIEnv = opaque {
     pub inline fn exception_occurred(
         env: *JNIEnv,
     ) JThrowable {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .exception_occurred,
             .{},
@@ -889,7 +885,7 @@ pub const JNIEnv = opaque {
     pub inline fn exception_describe(
         env: *JNIEnv,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .exception_describe,
             .{},
@@ -902,7 +898,7 @@ pub const JNIEnv = opaque {
     pub inline fn exception_clear(
         env: *JNIEnv,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .exception_clear,
             .{},
@@ -916,7 +912,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         msg: [*:0]const u8,
     ) noreturn {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .fatal_error,
             .{msg},
@@ -929,7 +925,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         capacity: JInt,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .push_local_frame,
             .{capacity},
@@ -941,7 +937,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         result: JObject,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .pop_local_frame,
             .{result},
@@ -958,7 +954,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JObject,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_global_ref,
             .{obj},
@@ -970,7 +966,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         global_ref: JObject,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .delete_global_ref,
             .{global_ref},
@@ -982,7 +978,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         local_ref: JObject,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .delete_local_ref,
             .{local_ref},
@@ -995,7 +991,7 @@ pub const JNIEnv = opaque {
         ref_1: JObject,
         ref_2: JObject,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .is_same_object,
             .{ ref_1, ref_2 },
@@ -1008,7 +1004,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         ref: JObject,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_local_ref,
             .{ref},
@@ -1020,7 +1016,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         capacity: JInt,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .ensure_local_capacity,
             .{capacity},
@@ -1034,7 +1030,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         clazz: JClass,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .alloc_object,
             .{clazz},
@@ -1049,7 +1045,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_object,
             .{ clazz, method_id, args },
@@ -1061,7 +1057,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         jobject: JObject,
     ) JClass {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_object_class,
             .{jobject},
@@ -1074,7 +1070,7 @@ pub const JNIEnv = opaque {
         jobject: JObject,
         clazz: JClass,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .is_instance_of,
             .{ jobject, clazz },
@@ -1088,7 +1084,7 @@ pub const JNIEnv = opaque {
         name: [*:0]const u8,
         sig: [*:0]const u8,
     ) JMethodID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_method_id,
             .{ clazz, name, sig },
@@ -1102,7 +1098,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_object_method,
             .{ obj, method_id, args },
@@ -1116,7 +1112,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_boolean_method,
             .{ obj, method_id, args },
@@ -1130,7 +1126,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_byte_method,
             .{ obj, method_id, args },
@@ -1144,7 +1140,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_char_method,
             .{ obj, method_id, args },
@@ -1158,7 +1154,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_short_method,
             .{ obj, method_id, args },
@@ -1172,7 +1168,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_int_method,
             .{ obj, method_id, args },
@@ -1186,7 +1182,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_long_method,
             .{ obj, method_id, args },
@@ -1200,7 +1196,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_float_method,
             .{ obj, method_id, args },
@@ -1214,7 +1210,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_double_method,
             .{ obj, method_id, args },
@@ -1228,7 +1224,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .call_void_method,
             .{ obj, method_id, args },
@@ -1243,7 +1239,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_object_method,
             .{ obj, clazz, method_id, args },
@@ -1258,7 +1254,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_boolean_method,
             .{ obj, clazz, method_id, args },
@@ -1273,7 +1269,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_byte_method,
             .{ obj, clazz, method_id, args },
@@ -1288,7 +1284,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_char_method,
             .{ obj, clazz, method_id, args },
@@ -1303,7 +1299,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_short_method,
             .{ obj, clazz, method_id, args },
@@ -1318,7 +1314,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_int_method,
             .{ obj, clazz, method_id, args },
@@ -1333,7 +1329,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_long_method,
             .{ obj, clazz, method_id, args },
@@ -1348,7 +1344,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_float_method,
             .{ obj, clazz, method_id, args },
@@ -1363,7 +1359,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_nonvirtual_double_method,
             .{ obj, clazz, method_id, args },
@@ -1378,7 +1374,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .call_nonvirtual_void_method,
             .{ obj, clazz, method_id, args },
@@ -1392,7 +1388,7 @@ pub const JNIEnv = opaque {
         name: [*:0]const u8,
         sig: [*:0]const u8,
     ) JFieldID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_field_id,
             .{ clazz, name, sig },
@@ -1405,7 +1401,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_object_field,
             .{ obj, field_id },
@@ -1418,7 +1414,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_boolean_field,
             .{ obj, field_id },
@@ -1431,7 +1427,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_byte_field,
             .{ obj, field_id },
@@ -1444,7 +1440,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_char_field,
             .{ obj, field_id },
@@ -1457,7 +1453,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_short_field,
             .{ obj, field_id },
@@ -1470,7 +1466,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_int_field,
             .{ obj, field_id },
@@ -1483,7 +1479,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_long_field,
             .{ obj, field_id },
@@ -1496,7 +1492,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_float_field,
             .{ obj, field_id },
@@ -1509,7 +1505,7 @@ pub const JNIEnv = opaque {
         obj: JObject,
         field_id: JFieldID,
     ) JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_double_field,
             .{ obj, field_id },
@@ -1523,7 +1519,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JObject,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_object_field,
             .{ obj, field_id, value },
@@ -1537,7 +1533,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JBoolean,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_boolean_field,
             .{ obj, field_id, value },
@@ -1551,7 +1547,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JByte,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_byte_field,
             .{ obj, field_id, value },
@@ -1565,7 +1561,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_char_field,
             .{ obj, field_id, value },
@@ -1579,7 +1575,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JShort,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_short_field,
             .{ obj, field_id, value },
@@ -1593,7 +1589,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JInt,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_int_field,
             .{ obj, field_id, value },
@@ -1607,7 +1603,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JLong,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_long_field,
             .{ obj, field_id, value },
@@ -1621,7 +1617,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JFloat,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_float_field,
             .{ obj, field_id, value },
@@ -1635,7 +1631,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JDouble,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_double_field,
             .{ obj, field_id, value },
@@ -1649,7 +1645,7 @@ pub const JNIEnv = opaque {
         name: [*:0]const u8,
         sig: [*:0]const u8,
     ) JMethodID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_method_id,
             .{ clazz, name, sig },
@@ -1663,7 +1659,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_object_method,
             .{ clazz, method_id, args },
@@ -1677,7 +1673,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_boolean_method,
             .{ clazz, method_id, args },
@@ -1691,7 +1687,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_byte_method,
             .{ clazz, method_id, args },
@@ -1705,7 +1701,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_char_method,
             .{ clazz, method_id, args },
@@ -1719,7 +1715,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_short_method,
             .{ clazz, method_id, args },
@@ -1733,7 +1729,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_int_method,
             .{ clazz, method_id, args },
@@ -1747,7 +1743,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_long_method,
             .{ clazz, method_id, args },
@@ -1761,7 +1757,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_float_method,
             .{ clazz, method_id, args },
@@ -1775,7 +1771,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .call_static_double_method,
             .{ clazz, method_id, args },
@@ -1789,7 +1785,7 @@ pub const JNIEnv = opaque {
         method_id: JMethodID,
         args: ?[*]const JValue,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .call_static_void_method,
             .{ clazz, method_id, args },
@@ -1804,7 +1800,7 @@ pub const JNIEnv = opaque {
         name: [*:0]const u8,
         sig: [*:0]const u8,
     ) JFieldID {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_field_id,
             .{ clazz, name, sig },
@@ -1817,7 +1813,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_object_field,
             .{ clazz, field_id },
@@ -1830,7 +1826,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_boolean_field,
             .{ clazz, field_id },
@@ -1843,7 +1839,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_byte_field,
             .{ clazz, field_id },
@@ -1856,7 +1852,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_char_field,
             .{ clazz, field_id },
@@ -1869,7 +1865,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_short_field,
             .{ clazz, field_id },
@@ -1882,7 +1878,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_int_field,
             .{ clazz, field_id },
@@ -1895,7 +1891,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_long_field,
             .{ clazz, field_id },
@@ -1908,7 +1904,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_float_field,
             .{ clazz, field_id },
@@ -1921,7 +1917,7 @@ pub const JNIEnv = opaque {
         clazz: JClass,
         field_id: JFieldID,
     ) JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_static_double_field,
             .{ clazz, field_id },
@@ -1935,7 +1931,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JObject,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_object_field,
             .{ clazz, field_id, value },
@@ -1949,7 +1945,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JBoolean,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_boolean_field,
             .{ clazz, field_id, value },
@@ -1963,7 +1959,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JByte,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_byte_field,
             .{ clazz, field_id, value },
@@ -1977,7 +1973,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_char_field,
             .{ clazz, field_id, value },
@@ -1991,7 +1987,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JShort,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_short_field,
             .{ clazz, field_id, value },
@@ -2005,7 +2001,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JInt,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_int_field,
             .{ clazz, field_id, value },
@@ -2019,7 +2015,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JLong,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_long_field,
             .{ clazz, field_id, value },
@@ -2033,7 +2029,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JFloat,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_float_field,
             .{ clazz, field_id, value },
@@ -2047,7 +2043,7 @@ pub const JNIEnv = opaque {
         field_id: JFieldID,
         value: JDouble,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_static_double_field,
             .{ clazz, field_id, value },
@@ -2060,7 +2056,7 @@ pub const JNIEnv = opaque {
         unicode_chars: [*]const JChar,
         size: JSize,
     ) JString {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_string,
             .{ unicode_chars, size },
@@ -2072,7 +2068,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         string: JString,
     ) JSize {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_string_length,
             .{string},
@@ -2089,7 +2085,7 @@ pub const JNIEnv = opaque {
         string: JString,
         is_copy: ?*JBoolean,
     ) ?[*]const JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_string_chars,
             .{ string, is_copy },
@@ -2102,7 +2098,7 @@ pub const JNIEnv = opaque {
         string: JString,
         chars: [*]const JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_string_chars,
             .{ string, chars },
@@ -2114,7 +2110,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         bytes: [*:0]const u8,
     ) JString {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_string_utf,
             .{bytes},
@@ -2126,7 +2122,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         string: JString,
     ) JSize {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_string_utf_length,
             .{string},
@@ -2143,7 +2139,7 @@ pub const JNIEnv = opaque {
         string: JString,
         is_copy: ?*JBoolean,
     ) ?[*:0]const u8 {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_string_utf_chars,
             .{ string, is_copy },
@@ -2156,7 +2152,7 @@ pub const JNIEnv = opaque {
         string: JString,
         utf: [*:0]const u8,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_string_utf_chars,
             .{ string, utf },
@@ -2168,7 +2164,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         array: JArray,
     ) JSize {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_array_length,
             .{array},
@@ -2185,7 +2181,7 @@ pub const JNIEnv = opaque {
         element_class: JClass,
         initial_element: JObject,
     ) JObjectArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_object_array,
             .{ length, element_class, initial_element },
@@ -2198,7 +2194,7 @@ pub const JNIEnv = opaque {
         array: JObjectArray,
         index: JSize,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_object_array_element,
             .{ array, index },
@@ -2212,7 +2208,7 @@ pub const JNIEnv = opaque {
         index: JSize,
         value: JObject,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_object_array_element,
             .{ array, index, value },
@@ -2225,7 +2221,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JBooleanArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_boolean_array,
             .{length},
@@ -2238,7 +2234,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JByteArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_byte_array,
             .{length},
@@ -2251,7 +2247,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JCharArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_char_array,
             .{length},
@@ -2264,7 +2260,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JShortArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_short_array,
             .{length},
@@ -2277,7 +2273,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JIntArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_int_array,
             .{length},
@@ -2290,7 +2286,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JLongArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_long_array,
             .{length},
@@ -2303,7 +2299,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JFloatArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_float_array,
             .{length},
@@ -2316,7 +2312,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         length: JSize,
     ) JDoubleArray {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_double_array,
             .{length},
@@ -2333,7 +2329,7 @@ pub const JNIEnv = opaque {
         array: JBooleanArray,
         is_copy: ?*JBoolean,
     ) ?[*]JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_boolean_array_elements,
             .{ array, is_copy },
@@ -2350,7 +2346,7 @@ pub const JNIEnv = opaque {
         array: JByteArray,
         is_copy: ?*JBoolean,
     ) ?[*]JByte {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_byte_array_elements,
             .{ array, is_copy },
@@ -2367,7 +2363,7 @@ pub const JNIEnv = opaque {
         array: JCharArray,
         is_copy: ?*JBoolean,
     ) ?[*]JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_char_array_elements,
             .{ array, is_copy },
@@ -2384,7 +2380,7 @@ pub const JNIEnv = opaque {
         array: JShortArray,
         is_copy: ?*JBoolean,
     ) ?[*]JShort {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_short_array_elements,
             .{ array, is_copy },
@@ -2401,7 +2397,7 @@ pub const JNIEnv = opaque {
         array: JIntArray,
         is_copy: ?*JBoolean,
     ) ?[*]JInt {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_int_array_elements,
             .{ array, is_copy },
@@ -2418,7 +2414,7 @@ pub const JNIEnv = opaque {
         array: JLongArray,
         is_copy: ?*JBoolean,
     ) ?[*]JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_long_array_elements,
             .{ array, is_copy },
@@ -2435,7 +2431,7 @@ pub const JNIEnv = opaque {
         array: JFloatArray,
         is_copy: ?*JBoolean,
     ) ?[*]JFloat {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_float_array_elements,
             .{ array, is_copy },
@@ -2453,7 +2449,7 @@ pub const JNIEnv = opaque {
         array: JDoubleArray,
         is_copy: ?*JBoolean,
     ) ?[*]JDouble {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_double_array_elements,
             .{ array, is_copy },
@@ -2467,7 +2463,7 @@ pub const JNIEnv = opaque {
         elems: [*]JBoolean,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_boolean_array_elements,
             .{ array, elems, mode },
@@ -2481,7 +2477,7 @@ pub const JNIEnv = opaque {
         elems: [*]JByte,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_byte_array_elements,
             .{ array, elems, mode },
@@ -2495,7 +2491,7 @@ pub const JNIEnv = opaque {
         elems: [*]JChar,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_char_array_elements,
             .{ array, elems, mode },
@@ -2509,7 +2505,7 @@ pub const JNIEnv = opaque {
         elems: [*]JShort,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_short_array_elements,
             .{ array, elems, mode },
@@ -2523,7 +2519,7 @@ pub const JNIEnv = opaque {
         elems: [*]JInt,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_int_array_elements,
             .{ array, elems, mode },
@@ -2537,7 +2533,7 @@ pub const JNIEnv = opaque {
         elems: [*]JLong,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_long_array_elements,
             .{ array, elems, mode },
@@ -2551,7 +2547,7 @@ pub const JNIEnv = opaque {
         elems: [*]JFloat,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_float_array_elements,
             .{ array, elems, mode },
@@ -2565,7 +2561,7 @@ pub const JNIEnv = opaque {
         elems: [*]JDouble,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_double_array_elements,
             .{ array, elems, mode },
@@ -2580,7 +2576,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JBoolean,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_boolean_array_region,
             .{ array, start, len, buf },
@@ -2595,7 +2591,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JByte,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_byte_array_region,
             .{ array, start, len, buf },
@@ -2610,7 +2606,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_char_array_region,
             .{ array, start, len, buf },
@@ -2625,7 +2621,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JShort,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_short_array_region,
             .{ array, start, len, buf },
@@ -2640,7 +2636,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JInt,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_int_array_region,
             .{ array, start, len, buf },
@@ -2655,7 +2651,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JLong,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_long_array_region,
             .{ array, start, len, buf },
@@ -2670,7 +2666,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JFloat,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_float_array_region,
             .{ array, start, len, buf },
@@ -2685,7 +2681,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JDouble,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_double_array_region,
             .{ array, start, len, buf },
@@ -2700,7 +2696,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JBoolean,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_boolean_array_region,
             .{ array, start, len, buf },
@@ -2715,7 +2711,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JByte,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_byte_array_region,
             .{ array, start, len, buf },
@@ -2730,7 +2726,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_char_array_region,
             .{ array, start, len, buf },
@@ -2745,7 +2741,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JShort,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_short_array_region,
             .{ array, start, len, buf },
@@ -2760,7 +2756,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JInt,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_int_array_region,
             .{ array, start, len, buf },
@@ -2775,7 +2771,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JLong,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_long_array_region,
             .{ array, start, len, buf },
@@ -2790,7 +2786,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JFloat,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_float_array_region,
             .{ array, start, len, buf },
@@ -2805,7 +2801,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]const JDouble,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .set_double_array_region,
             .{ array, start, len, buf },
@@ -2819,7 +2815,7 @@ pub const JNIEnv = opaque {
         methods: [*]const JNINativeMethod,
         methods_len: JInt,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .register_natives,
             .{ clazz, methods, methods_len },
@@ -2831,7 +2827,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         clazz: JClass,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .unregister_natives,
             .{clazz},
@@ -2843,7 +2839,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JObject,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .monitor_enter,
             .{obj},
@@ -2855,7 +2851,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JObject,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .monitor_exit,
             .{obj},
@@ -2867,7 +2863,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         vm: **JavaVM,
     ) JNIResultType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_java_vm,
             .{vm},
@@ -2882,7 +2878,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_string_region,
             .{ string, start, len, buf },
@@ -2897,7 +2893,7 @@ pub const JNIEnv = opaque {
         len: JSize,
         buf: [*]u8,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .get_string_utf_region,
             .{ string, start, len, buf },
@@ -2910,7 +2906,7 @@ pub const JNIEnv = opaque {
         array: JArray,
         is_copy: ?*JBoolean,
     ) ?*anyopaque {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_primitive_array_critical,
             .{ array, is_copy },
@@ -2924,7 +2920,7 @@ pub const JNIEnv = opaque {
         c_array: *anyopaque,
         mode: JArrayReleaseMode,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_primitive_array_critical,
             .{ array, c_array, mode },
@@ -2937,7 +2933,7 @@ pub const JNIEnv = opaque {
         string: JString,
         is_copy: ?*JBoolean,
     ) ?[*]const JChar {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_string_critical,
             .{ string, is_copy },
@@ -2950,7 +2946,7 @@ pub const JNIEnv = opaque {
         string: JString,
         chars: [*]const JChar,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .release_string_critical,
             .{ string, chars },
@@ -2963,7 +2959,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JObject,
     ) JWeakReference {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_weak_global_ref,
             .{obj},
@@ -2975,7 +2971,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         ref: JWeakReference,
     ) void {
-        JNIEnv.interface_call(
+        JNIInterface.call(
             env,
             .delete_weak_global_ref,
             .{ref},
@@ -2987,7 +2983,7 @@ pub const JNIEnv = opaque {
     pub inline fn exception_check(
         env: *JNIEnv,
     ) JBoolean {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .exception_check,
             .{},
@@ -3003,7 +2999,7 @@ pub const JNIEnv = opaque {
         address: *anyopaque,
         capacity: JLong,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .new_direct_byte_buffer,
             .{ address, capacity },
@@ -3019,7 +3015,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         buf: JObject,
     ) ?[*]u8 {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_direct_buffer_address,
             .{buf},
@@ -3036,7 +3032,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         buf: JObject,
     ) JLong {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_direct_buffer_capacity,
             .{buf},
@@ -3048,7 +3044,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         obj: JObject,
     ) JObjectRefType {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_object_ref_type,
             .{obj},
@@ -3060,7 +3056,7 @@ pub const JNIEnv = opaque {
         env: *JNIEnv,
         clazz: JClass,
     ) JObject {
-        return JNIEnv.interface_call(
+        return JNIInterface.call(
             env,
             .get_module,
             .{clazz},
@@ -3116,7 +3112,7 @@ pub const JavaVM = opaque {
     pub const get_default_java_vm_init_args = struct {
         extern "jvm" fn JNI_GetDefaultJavaVMInitArgs(
             vm_args: ?*JavaVMInitArgs,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_GetDefaultJavaVMInitArgs;
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#jni_get_createdjavavm.
@@ -3125,7 +3121,7 @@ pub const JavaVM = opaque {
             vm_buf: [*]*JavaVM,
             buf_len: JSize,
             vm_len: ?*JSize,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_GetCreatedJavaVMs;
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#jni_createjavavm.
@@ -3134,16 +3130,16 @@ pub const JavaVM = opaque {
             jvm: **JavaVM,
             env: **JNIEnv,
             args: *JavaVMInitArgs,
-        ) callconv(.C) JNIResultType;
+        ) callconv(.c) JNIResultType;
     }.JNI_CreateJavaVM;
 
-    usingnamespace JniInterfaceType(JavaVM);
+    const JNIInterface = JNIInterfaceType(JavaVM);
 
     /// https://docs.oracle.com/en/java/javase/17/docs/specs/jni/invocation.html#destroyjavavm.
     pub inline fn destroy_java_vm(
         vm: *JavaVM,
     ) JNIResultType {
-        return JavaVM.interface_call(
+        return JNIInterface.call(
             vm,
             .destroy_java_vm,
             .{},
@@ -3156,7 +3152,7 @@ pub const JavaVM = opaque {
         env: **JNIEnv,
         args: ?*JavaVMAttachArgs,
     ) JNIResultType {
-        return JavaVM.interface_call(
+        return JNIInterface.call(
             vm,
             .attach_current_thread,
             .{ env, args },
@@ -3167,7 +3163,7 @@ pub const JavaVM = opaque {
     pub inline fn detach_current_thread(
         vm: *JavaVM,
     ) JNIResultType {
-        return JavaVM.interface_call(
+        return JNIInterface.call(
             vm,
             .detach_current_thread,
             .{},
@@ -3180,7 +3176,7 @@ pub const JavaVM = opaque {
         env: **JNIEnv,
         args: ?*JavaVMAttachArgs,
     ) JNIResultType {
-        return JavaVM.interface_call(
+        return JNIInterface.call(
             vm,
             .attach_current_thread_as_daemon,
             .{ env, args },
@@ -3193,7 +3189,7 @@ pub const JavaVM = opaque {
         env: **JNIEnv,
         version: JInt,
     ) JNIResultType {
-        return JavaVM.interface_call(
+        return JNIInterface.call(
             vm,
             .get_env,
             .{ env, version },
@@ -3205,21 +3201,21 @@ pub const JavaVM = opaque {
 /// without the need to declare a VTable layout, where the ordering of fields defines the ABI.
 /// The function index is stored within T.FunctionTable enum, which only holds the index value.
 /// The function signature is declared as an inline function within the T opaque type.
-fn JniInterfaceType(comptime T: type) type {
+fn JNIInterfaceType(comptime T: type) type {
     return struct {
         fn JniFnType(comptime function: T.FunctionTable) type {
             const Fn = @TypeOf(@field(T, @tagName(function)));
             var fn_info = @typeInfo(Fn);
             switch (fn_info) {
                 .@"fn" => {
-                    fn_info.@"fn".calling_convention = JNICALL;
+                    fn_info.@"fn".calling_convention = .c;
                     return @Type(fn_info);
                 },
                 else => @compileError("Expected " ++ @tagName(function) ++ " to be a function"),
             }
         }
 
-        pub inline fn interface_call(
+        pub inline fn call(
             self: *T,
             comptime function: T.FunctionTable,
             args: anytype,

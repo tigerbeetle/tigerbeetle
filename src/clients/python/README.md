@@ -51,7 +51,7 @@ features of TigerBeetle.
 * [Basic](/src/clients/python/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/python/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/python/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](/src/clients/python/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
 ## Creating a Client
 
@@ -61,7 +61,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -73,6 +74,11 @@ environment variable and defaults to port `3000`.
 ```python
 with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
     # Use the client.
+    pass
+
+# Alternatively:
+async with tb.ClientAsync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
+    # Use the client, async!
     pass
 ```
 
@@ -580,7 +586,7 @@ filter = tb.AccountFilter(
     code=0, # No filter by Code.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten transfers at most.
     flags=tb.AccountFilterFlags.DEBITS | # Include transfer from the debit side.
     tb.AccountFilterFlags.CREDITS | # Include transfer from the credit side.
     tb.AccountFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
@@ -641,7 +647,7 @@ query_filter = tb.QueryFilter(
     ledger=0, # No filter by Ledger.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten accounts at most.
     flags=tb.QueryFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
 )
 
@@ -667,7 +673,7 @@ query_filter = tb.QueryFilter(
     ledger=0, # No filter by Ledger.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten transfers at most.
     flags=tb.QueryFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
 )
 

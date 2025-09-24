@@ -7,7 +7,7 @@ The TigerBeetle client for Node.js.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* NodeJS >= `18`
+* Node.js >= `18`
 
 ## Setup
 
@@ -47,7 +47,7 @@ features of TigerBeetle.
 * [Basic](/src/clients/node/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/node/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/node/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](/src/clients/node/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
 ### Sidenote: `BigInt`
 TigerBeetle uses 64-bit integers for many fields while JavaScript's
@@ -65,7 +65,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -613,7 +614,7 @@ const filter = {
   code: 0, // No filter by Code.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
-  limit: 10, // Limit to ten balances at most.
+  limit: 10, // Limit to ten transfers at most.
   flags: AccountFilterFlags.debits | // Include transfer from the debit side.
     AccountFilterFlags.credits | // Include transfer from the credit side.
     AccountFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
@@ -674,7 +675,7 @@ const query_filter = {
   ledger: 0, // No filter by Ledger.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
-  limit: 10, // Limit to ten balances at most.
+  limit: 10, // Limit to ten accounts at most.
   flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
 
@@ -700,7 +701,7 @@ const query_filter = {
   ledger: 0, // No filter by Ledger.
   timestamp_min: 0n, // No filter by Timestamp.
   timestamp_max: 0n, // No filter by Timestamp.
-  limit: 10, // Limit to ten balances at most.
+  limit: 10, // Limit to ten transfers at most.
   flags: QueryFilterFlags.reversed, // Sort by timestamp in reverse-chronological order.
 };
 

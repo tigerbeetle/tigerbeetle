@@ -19,9 +19,9 @@
 //! with whatever chunks of bytes we receive immediately, instead of collecting a buffer with a
 //! full message before piping it through.
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const IO = @import("../../io.zig").IO;
-const constants = @import("./constants.zig");
+const constants = @import("constants.zig");
 
 const assert = std.debug.assert;
 const log = std.log.scoped(.faulty_network);
@@ -60,7 +60,7 @@ const Pipe = struct {
     connection: *Connection,
     input: std.posix.socket_t = IO.INVALID_SOCKET,
     output: std.posix.socket_t = IO.INVALID_SOCKET,
-    buffer: [constants.message_size_max]u8 = undefined,
+    buffer: [constants.vsr.message_size_max]u8 = undefined,
     send_inflight: bool = false,
     recv_inflight: bool = false,
     recv_count: usize = 0,
@@ -454,7 +454,7 @@ const Proxy = struct {
     io: *IO,
     accept_fd: std.posix.socket_t,
     mapping: Mapping,
-    connections: [constants.connections_count_max]Connection,
+    connections: [constants.vortex.connections_count_max]Connection,
 
     fn deinit(proxy: *Proxy) void {
         proxy.io.close_socket(proxy.accept_fd);
@@ -482,12 +482,10 @@ pub const Network = struct {
         address_mappings: []Mapping,
         prng: *stdx.PRNG,
     ) !*Network {
-        assert(address_mappings.len == constants.replica_count);
-
         const network = try allocator.create(Network);
         errdefer allocator.destroy(network);
 
-        const proxies = try allocator.alloc(Proxy, constants.replica_count);
+        const proxies = try allocator.alloc(Proxy, address_mappings.len);
         errdefer allocator.free(proxies);
 
         network.* = .{
@@ -537,7 +535,7 @@ pub const Network = struct {
                 log.err("failed to bind {any}", .{mapping.origin});
                 return err;
             };
-            try std.posix.listen(listen_fd, constants.tcp_backlog);
+            try std.posix.listen(listen_fd, constants.vsr.tcp_backlog);
 
             log.info("proxying {any} -> {any}", .{ mapping.origin, mapping.remote });
             proxies_initialized += 1;

@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 /// Combines a field (the key prefix) with a timestamp (the primary key).
@@ -96,7 +96,7 @@ pub fn is_composite_key(comptime Value: type) bool {
         @hasField(Value, "field") and
         @hasField(Value, "timestamp"))
     {
-        const Field = std.meta.FieldType(Value, .field);
+        const Field = @FieldType(Value, "field");
         return switch (Field) {
             void, u64, u128 => Value == CompositeKeyType(Field),
             else => false,

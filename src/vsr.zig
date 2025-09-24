@@ -20,8 +20,7 @@ pub const tb_client = @import("clients/c/tb_client.zig");
 pub const tigerbeetle = @import("tigerbeetle.zig");
 pub const time = @import("time.zig");
 pub const trace = @import("trace.zig");
-pub const stdx = @import("stdx.zig");
-pub const flags = @import("flags.zig");
+pub const stdx = @import("stdx");
 pub const grid = @import("vsr/grid.zig");
 pub const superblock = @import("vsr/superblock.zig");
 pub const aof = @import("aof.zig");
@@ -35,12 +34,13 @@ pub const lsm = .{
     .TimestampRange = @import("lsm/timestamp_range.zig").TimestampRange,
 };
 pub const testing = .{
-    .snaptest = @import("testing/snaptest.zig"),
     .cluster = @import("testing/cluster.zig"),
     .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
     .parse_seed = @import("testing/fuzz.zig").parse_seed,
 };
+pub const ewah = @import("ewah.zig").ewah;
+pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
 
 pub const multi_batch = @import("vsr/multi_batch.zig");
 
@@ -63,7 +63,6 @@ pub const SuperBlockManifestReferences = superblock.ManifestReferences;
 pub const SuperBlockTrailerReference = superblock.TrailerReference;
 pub const VSRState = superblock.SuperBlockHeader.VSRState;
 pub const CheckpointState = superblock.SuperBlockHeader.CheckpointState;
-pub const CheckpointStateOld = superblock.SuperBlockHeader.CheckpointStateOld;
 pub const checksum = @import("vsr/checksum.zig").checksum;
 pub const ChecksumStream = @import("vsr/checksum.zig").ChecksumStream;
 pub const Header = @import("vsr/message_header.zig").Header;
@@ -77,16 +76,47 @@ pub const CountingAllocator = @import("counting_allocator.zig");
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).
 pub const Version: u16 = 0;
 
-pub const multiversioning = @import("multiversioning.zig");
-pub const ReleaseList = multiversioning.ReleaseList;
-pub const Release = multiversioning.Release;
-pub const ReleaseTriple = multiversioning.ReleaseTriple;
+pub const multiversion = @import("multiversion.zig");
+pub const ReleaseList = multiversion.ReleaseList;
+pub const Release = multiversion.Release;
+pub const ReleaseTriple = multiversion.ReleaseTriple;
 
 pub const ProcessType = enum { replica, client };
 pub const Peer = union(enum) {
     unknown,
     replica: u8,
     client: u128,
+    client_likely: u128,
+
+    pub fn transition(old: Peer, new: Peer) enum { retain, update, reject } {
+        return switch (old) {
+            .unknown => .update,
+            .client_likely => switch (new) {
+                .client_likely => if (std.meta.eql(old, new))
+                    .retain
+                else
+                    // Receiving requests from two different clients on the same connection implies
+                    // that we are talking to a replica. However, as we don't know which one, we
+                    // retain this as a connection to a client, for simplicity.
+                    .retain,
+                .client => if (old.client_likely == new.client) .update else .reject,
+                .replica => .update,
+                .unknown => .retain,
+            },
+
+            .replica => switch (new) {
+                .replica => if (std.meta.eql(old, new)) .retain else .reject,
+                .client => .reject,
+                .client_likely, .unknown => .retain,
+            },
+            .client => switch (new) {
+                .client => if (std.meta.eql(old, new)) .retain else .reject,
+                .client_likely => if (old.client == new.client_likely) .retain else .reject,
+                .replica => .reject,
+                .unknown => .retain,
+            },
+        };
+    }
 };
 
 pub const Zone = enum {
@@ -827,7 +857,7 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const attempts = 1000;
     const max: u64 = std.math.maxInt(u64);
@@ -1050,9 +1080,7 @@ test "parse_addresses: fuzz" {
     const len_max = 32;
     const alphabet = " \t\n,:[]0123456789abcdefgABCDEFGXx";
 
-    const seed = std.crypto.random.int(u64);
-
-    var prng = stdx.PRNG.from_seed(seed);
+    var prng = stdx.PRNG.from_seed_testing();
 
     var input_max: [len_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;
@@ -1233,26 +1261,8 @@ pub fn member_index(members: *const Members, replica_id: u128) ?u8 {
     } else return null;
 }
 
-pub fn verify_release_list(releases: []const Release, release_included: Release) void {
-    assert(releases.len >= 1);
-    assert(releases.len <= constants.vsr_releases_max);
-
-    for (
-        releases[0 .. releases.len - 1],
-        releases[1..],
-    ) |release_a, release_b| {
-        assert(release_a.value < release_b.value);
-    }
-
-    for (releases) |release| {
-        if (release.value == release_included.value) return;
-    } else {
-        @panic("verify_release_list_contains: release not found");
-    }
-}
-
 pub const Headers = struct {
-    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_change_headers_max);
+    pub const Array = stdx.BoundedArrayType(Header.Prepare, constants.view_headers_max);
     /// The SuperBlock's persisted VSR headers.
     /// One of the following:
     ///
@@ -1311,7 +1321,7 @@ const ViewChangeHeadersSlice = struct {
 
     pub fn verify(headers: ViewChangeHeadersSlice) void {
         assert(headers.slice.len > 0);
-        assert(headers.slice.len <= constants.view_change_headers_max);
+        assert(headers.slice.len <= constants.view_headers_max);
 
         const head = &headers.slice[0];
         // A DVC's head op is never a gap or faulty.
@@ -1340,7 +1350,7 @@ const ViewChangeHeadersSlice = struct {
                     // superblock.checkpoint could make .do_view_change headers durable instead of
                     // .start_view headers when view == log_view (see `commit_checkpoint_superblock`
                     // in `replica.zig`). When these headers are loaded from the superblock on
-                    // startup, they are considered to be .start_view headers (see `vsr_headers` in
+                    // startup, they are considered to be .start_view headers (see `view_headers` in
                     // `superblock.zig`).
                     maybe(headers.command == .do_view_change);
                     maybe(headers.command == .start_view);
@@ -1604,8 +1614,8 @@ pub const Checkpoint = struct {
 };
 
 test "Checkpoint ops diagram" {
-    const Snap = @import("./testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     var string = std.ArrayList(u8).init(std.testing.allocator);
     defer string.deinit();
@@ -1711,46 +1721,3 @@ pub const Snapshot = struct {
         return op + 1;
     }
 };
-
-pub const Budget = struct {
-    capacity: u32,
-    available: u32,
-    refill_max: u32,
-
-    pub fn init(options: struct {
-        capacity: u32,
-        refill_max: u32,
-    }) Budget {
-        assert(options.refill_max <= options.capacity);
-        return Budget{
-            .capacity = options.capacity,
-            .available = options.capacity,
-            .refill_max = options.refill_max,
-        };
-    }
-
-    pub fn spend(budget: *Budget, amount: u32) bool {
-        assert(budget.capacity > 0);
-        assert(budget.available <= budget.capacity);
-        assert(amount > 0);
-
-        if (budget.available < amount) return false;
-        budget.available -= amount;
-        return true;
-    }
-
-    pub fn refill(budget: *Budget, amount: u32) void {
-        assert(amount <= budget.refill_max);
-        assert(budget.available <= budget.capacity);
-
-        budget.available = @min((budget.available + amount), budget.capacity);
-    }
-};
-
-pub fn block_count_max(storage_size_limit: u64) usize {
-    const shard_count_limit: usize = @intCast(@divFloor(
-        storage_size_limit - superblock.data_file_size_min,
-        constants.block_size * FreeSet.shard_bits,
-    ));
-    return shard_count_limit * FreeSet.shard_bits;
-}

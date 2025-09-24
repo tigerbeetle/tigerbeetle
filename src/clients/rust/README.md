@@ -53,7 +53,7 @@ features of TigerBeetle.
 * [Basic](/src/clients/rust/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/rust/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/rust/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](/src/clients/rust/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
 ## Creating a Client
 
@@ -63,7 +63,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.

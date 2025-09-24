@@ -33,12 +33,12 @@ pub fn EchoClientType(
 
         pub fn init(
             allocator: mem.Allocator,
+            time: Time,
+            message_pool: *MessagePool,
             options: struct {
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
-                time: Time,
-                message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
                 eviction_callback: ?*const fn (
                     client: *EchoClient,
@@ -53,8 +53,8 @@ pub fn EchoClientType(
             return EchoClient{
                 .id = options.id,
                 .cluster = options.cluster,
-                .message_pool = options.message_pool,
-                .time = options.time,
+                .message_pool = message_pool,
+                .time = time,
             };
         }
 
@@ -210,6 +210,7 @@ fn EchoStateMachineType(comptime StateMachine: type) type {
         pub const operation_event_max = StateMachine.operation_event_max;
         pub const operation_result_max = StateMachine.operation_result_max;
         pub const operation_result_count_expected = StateMachine.operation_result_count_expected;
+        pub const operation_is_multi_batch = StateMachine.operation_is_multi_batch;
 
         // Re-exporting functions where results are equal to events.
         pub const ResultType = StateMachine.EventType;

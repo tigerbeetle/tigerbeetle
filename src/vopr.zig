@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -9,7 +9,6 @@ const Ratio = stdx.PRNG.Ratio;
 const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
 
 const constants = @import("constants.zig");
-const flags = @import("./flags.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
 const fuzz = @import("./testing/fuzz.zig");
@@ -31,6 +30,8 @@ const PartitionSymmetry = @import("testing/packet_simulator.zig").PartitionSymme
 const Core = @import("testing/cluster/network.zig").Network.Core;
 const ReplySequence = @import("testing/reply_sequence.zig").ReplySequence;
 const Message = @import("message_pool.zig").MessagePool.Message;
+
+const MiB = stdx.MiB;
 
 const releases = [_]Release{
     .{
@@ -66,7 +67,6 @@ pub const std_options: std.Options = .{
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 
 const cluster_id = 0;
-const MiB = 1024 * 1024;
 
 const CLIArgs = struct {
     // "lite" mode runs a small cluster and only looks for crashes.
@@ -77,6 +77,8 @@ const CLIArgs = struct {
     ticks_max_convergence: u32 = 10_000_000,
     packet_loss_ratio: ?Ratio = null,
     replica_missing: ?u8 = null,
+    replica_missing_until_request: ?u32 = null,
+    requests_max: ?u32 = null,
 
     positional: struct {
         seed: ?[]const u8 = null,
@@ -102,12 +104,15 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
     if (cli_args.lite and cli_args.performance) {
         return vsr.fatal(.cli, "--lite and --performance are mutually exclusive", .{});
     }
     if (cli_args.replica_missing != null and !cli_args.performance) {
         return vsr.fatal(.cli, "--replica-missing requires --performance", .{});
+    }
+    if (cli_args.replica_missing == null and cli_args.replica_missing_until_request != null) {
+        return vsr.fatal(.cli, "--replica-missing-until-request requires --replica-missing", .{});
     }
 
     log_performance_mode = cli_args.performance;
@@ -145,8 +150,12 @@ pub fn main() !void {
         options_swarm(&prng);
 
     options.replica_missing = cli_args.replica_missing;
+    options.replica_missing_until_request = cli_args.replica_missing_until_request;
     if (cli_args.packet_loss_ratio) |packet_loss_ratio| {
         options.network.packet_loss_probability = packet_loss_ratio;
+    }
+    if (cli_args.requests_max) |requests_max| {
+        options.requests_max = requests_max;
     }
 
     log.info(
@@ -243,6 +252,9 @@ pub fn main() !void {
     // without split-brain.
     var tick_total: u64 = 0;
     var tick: u64 = 0;
+    var requests_done: bool = false;
+    var upgrades_done: bool = false;
+
     while (tick < cli_args.ticks_max_requests) : (tick += 1) {
         const requests_replied_old = simulator.requests_replied;
         simulator.tick();
@@ -250,8 +262,8 @@ pub fn main() !void {
         if (simulator.requests_replied > requests_replied_old) {
             tick = 0;
         }
-        const requests_done = simulator.requests_replied == simulator.options.requests_max;
-        const upgrades_done =
+        requests_done = simulator.requests_replied == simulator.options.requests_max;
+        upgrades_done =
             for (simulator.cluster.replicas, simulator.cluster.replica_health) |*replica, health| {
                 if (health != .up) continue;
                 const release_latest = releases[simulator.replica_releases_limit - 1].release;
@@ -261,50 +273,33 @@ pub fn main() !void {
             } else false;
 
         if (requests_done and upgrades_done) break;
-    } else {
-        if (cli_args.lite) return;
-
-        // Safety mode ran out of ticks without completing its requests, so now we check whether it
-        // was correct to do so.
-        //
-        // Heal current network partitions, disable future process, storage, and network faults
-        // on all replicas. Run this fully-connected core of replicas for 600_000 ticks, which
-        // should enough to ensure all faulty grid blocks, headers, or prepares that can be repaired
-        // are repaired. After this, all we must be left with are correlated faults.
-        {
-            var replica: u8 = 0;
-            var core: Core = .{};
-            while (replica < simulator.options.cluster.replica_count) : (replica += 1) {
-                core.set(replica);
-            }
-
-            simulator.transition_to_liveness_mode(core);
-
-            tick = 0;
-            while (tick < 600_000) : (tick += 1) simulator.tick();
-        }
-
-        log.info(
-            "no liveness, final cluster state (requests_max={} requests_replied={}):",
-            .{ simulator.options.requests_max, simulator.requests_replied },
-        );
-        simulator.cluster.log_cluster();
-        if (try simulator.cluster_recoverable(gpa)) {
-            log.err("you can reproduce this failure with seed={}", .{seed});
-            fatal(.liveness, "unable to complete requests_committed_max before ticks_max", .{});
-        } else return;
     }
 
-    if (cli_args.lite or cli_args.performance) {
+    if (cli_args.lite or
+        (cli_args.performance and cli_args.replica_missing_until_request == null))
+    {
         // Don't care about convergence.
     } else {
-        // Liveness: a core set of replicas is up and fully connected. The rest of replicas might be
-        // crashed or partitioned permanently. The core should converge to the same state.
-        const core = random_core(
-            simulator.prng,
-            simulator.options.cluster.replica_count,
-            simulator.options.cluster.standby_count,
-        );
+        const core = if (requests_done and upgrades_done)
+            // Liveness: a core set of replicas is up and fully connected. The rest of the replicas
+            // might be crashed or partitioned permanently. The core should converge to the same
+            // state.
+            random_core(
+                simulator.prng,
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            )
+        else
+            // Safety mode ran out of ticks without completing its requests, so now we check whether
+            // it was correct to do so.
+            //
+            // Run a fully-connected core of replicas to repair all faulty grid blocks, headers, and
+            // prepares that can be repaired. Thereafter, only correlated faults should remain.
+            full_core(
+                simulator.options.cluster.replica_count,
+                simulator.options.cluster.standby_count,
+            );
+
         simulator.transition_to_liveness_mode(core);
 
         tick = 0;
@@ -438,6 +433,7 @@ fn options_swarm(prng: *stdx.PRNG) Simulator.Options {
     const read_latency_min = range_inclusive_ms(prng, 0, 30);
     const write_latency_min = range_inclusive_ms(prng, 0, 30);
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
         .read_latency_min = read_latency_min,
         .read_latency_mean = range_inclusive_ms(prng, read_latency_min, 100),
@@ -540,11 +536,11 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
 
         .seed = prng.int(u64),
 
-        .one_way_delay_mean = .{ .ns = 50 * std.time.ns_per_ms },
+        .one_way_delay_mean = .ms(50),
         .one_way_delay_min = .{ .ns = 0 },
         .packet_loss_probability = Ratio.zero(),
         .path_maximum_capacity = 10,
-        .path_clog_duration_mean = .{ .ns = 2_000 * std.time.ns_per_ms },
+        .path_clog_duration_mean = .ms(2_000),
         .path_clog_probability = Ratio.zero(),
         .packet_replay_probability = Ratio.zero(),
 
@@ -557,6 +553,7 @@ fn options_performance(prng: *stdx.PRNG) Simulator.Options {
     };
 
     const storage_options: Cluster.Storage.Options = .{
+        .size = cluster_options.storage_size_limit,
         .seed = prng.int(u64),
         .read_latency_min = .{ .ns = 0 },
         .read_latency_mean = .{ .ns = 0 },
@@ -631,8 +628,10 @@ pub const Simulator = struct {
         /// (immediately before being restarted).
         replica_reformat_probability: Ratio,
 
-        // A replica permanently missing from the cluster, used in performance mode.
+        // A replica permanently or temporarily missing from the cluster, used in performance mode.
         replica_missing: ?u8 = null,
+        /// Restart `replica_missing` after the specified request has received its reply.
+        replica_missing_until_request: ?u32 = null,
 
         replica_pause_probability: Ratio,
         replica_pause_stability: u32,
@@ -748,19 +747,12 @@ pub const Simulator = struct {
 
     pub fn pending(simulator: *const Simulator) ?[]const u8 {
         assert(simulator.core.count() > 0);
-        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled ==
+        assert(simulator.requests_sent - simulator.cluster.client_eviction_requests_cancelled <=
             simulator.options.requests_max);
         assert(simulator.reply_sequence.empty());
         for (simulator.cluster.clients) |*client_maybe| {
             if (client_maybe.*) |client| {
-                if (client.request_inflight) |request| {
-                    // Registration and reformatting (noop's) aren't counted by requests_sent, so an
-                    // operation=register|noop may still be in-flight. Any other requests should
-                    // already be complete before done() is called.
-                    assert(request.message.header.operation == .register or
-                        request.message.header.operation == .noop);
-                    return "pending register request";
-                }
+                if (client.request_inflight) |_| return "pending request";
             }
         }
 
@@ -823,8 +815,16 @@ pub const Simulator = struct {
 
         simulator.cluster.tick();
         simulator.tick_requests();
+        simulator.tick_upgrade();
         simulator.tick_crash();
         simulator.tick_pause();
+
+        if (simulator.options.replica_missing_until_request) |request| {
+            if (simulator.requests_replied >= request) {
+                simulator.options.replica_missing_until_request = null;
+                simulator.replica_crash_stability[simulator.options.replica_missing.?] = 1;
+            }
+        }
     }
 
     pub fn cluster_recoverable(simulator: *Simulator, gpa: std.mem.Allocator) !bool {
@@ -1020,9 +1020,9 @@ pub const Simulator = struct {
                             // (e.g. due to "quorum received, awaiting repair") then they may
                             // linger, so if we only looked at the journal headers it would appear
                             // as if the replicas disagreed about the uncommitted headers.
-                            const headers_count = replica.superblock.working.vsr_headers_count;
+                            const headers_count = replica.superblock.working.view_headers_count;
                             const headers =
-                                replica.superblock.working.vsr_headers_all[0..headers_count];
+                                replica.superblock.working.view_headers_all[0..headers_count];
                             for (headers) |*header| {
                                 if (header.op == op) {
                                     break :header switch (vsr.Headers.dvc_header_type(header)) {
@@ -1279,7 +1279,7 @@ pub const Simulator = struct {
         for (eviction_reasons_reformats) |reason_or_null| {
             if (reason_or_null) |reason| {
                 log.err("reformat evicted with {s}", .{@tagName(reason)});
-                assert(reason == .no_session);
+                assert(reason == .no_session or reason == .session_too_low);
                 return true;
             }
         }
@@ -1463,6 +1463,15 @@ pub const Simulator = struct {
             simulator.options.requests_max);
     }
 
+    fn tick_upgrade(simulator: *Simulator) void {
+        for (simulator.cluster.replicas) |*replica| {
+            const upgrade =
+                simulator.replica_releases[replica.replica] < releases.len and
+                simulator.prng.chance(simulator.options.replica_release_advance_probability);
+            if (upgrade) simulator.replica_upgrade(replica.replica);
+        }
+    }
+
     fn tick_crash(simulator: *Simulator) void {
         for (simulator.cluster.replicas) |*replica| {
             simulator.replica_crash_stability[replica.replica] -|= 1;
@@ -1482,17 +1491,12 @@ pub const Simulator = struct {
         const replica_storage = &simulator.cluster.storages[replica.replica];
         const replica_writes = replica_storage.writes.count();
 
-        const crash_upgrade =
-            simulator.replica_releases[replica.replica] < releases.len and
-            simulator.prng.chance(simulator.options.replica_release_advance_probability);
-        if (crash_upgrade) simulator.replica_upgrade(replica.replica);
-
         var crash_probability = simulator.options.replica_crash_probability;
         if (replica_writes > 0) crash_probability.numerator *= 10;
 
         const crash_random = simulator.prng.chance(crash_probability);
 
-        if (!crash_upgrade and !crash_random) return;
+        if (!crash_random) return;
 
         log.debug("{}: crash replica", .{replica.replica});
         simulator.cluster.replica_crash(replica.replica);
@@ -1539,12 +1543,8 @@ pub const Simulator = struct {
             if (reformat_random) {
                 log.debug("{}: reformat replica", .{replica.replica});
 
-                const replica_releases = simulator.replica_release_list(replica.replica);
                 simulator.replica_reformats.set(replica.replica);
-                simulator.cluster.replica_reformat(
-                    replica.replica,
-                    &replica_releases,
-                ) catch unreachable;
+                simulator.cluster.replica_reformat(replica.replica) catch unreachable;
                 return;
             }
         }
@@ -1607,13 +1607,8 @@ pub const Simulator = struct {
             simulator.replica_releases[replica_index],
         });
 
-        const replica_releases = simulator.replica_release_list(replica_index);
-
         replica_storage.faulty = fault;
-        simulator.cluster.replica_restart(
-            replica_index,
-            &replica_releases,
-        ) catch unreachable;
+        simulator.cluster.replica_restart(replica_index) catch unreachable;
 
         if (replica.status == .recovering_head) {
             // Even with faults disabled, a replica may wind up in status=recovering_head.
@@ -1630,14 +1625,18 @@ pub const Simulator = struct {
             @min(simulator.replica_releases[replica_index] + 1, releases.len);
         simulator.replica_releases_limit =
             @max(simulator.replica_releases[replica_index], simulator.replica_releases_limit);
+
+        const replica_releases = simulator.replica_release_list(replica_index);
+        simulator.cluster.replica_set_releases(replica_index, &replica_releases);
     }
 
     fn replica_release_list(simulator: *const Simulator, replica_index: u8) vsr.ReleaseList {
         const replica_releases_count = simulator.replica_releases[replica_index];
-        var release_list = vsr.ReleaseList{};
+        var release_list: vsr.ReleaseList = .empty;
         for (0..replica_releases_count) |i| {
             release_list.push(releases[i].release);
         }
+        release_list.verify();
         return release_list;
     }
 
@@ -1698,14 +1697,14 @@ fn random_core(prng: *stdx.PRNG, replica_count: u8, standby_count: u8) Core {
     const replica_core_count = prng.range_inclusive(u8, quorum_view_change, replica_count);
     const standby_core_count = prng.range_inclusive(u8, 0, standby_count);
 
-    var result: Core = .{};
+    var core: Core = .{};
 
     var combination = stdx.PRNG.Combination.init(.{
         .total = replica_count,
         .sample = replica_core_count,
     });
     for (0..replica_count) |replica| {
-        if (combination.take(prng)) result.set(replica);
+        if (combination.take(prng)) core.set(replica);
     }
     assert(combination.done());
 
@@ -1713,14 +1712,29 @@ fn random_core(prng: *stdx.PRNG, replica_count: u8, standby_count: u8) Core {
         .total = standby_count,
         .sample = standby_core_count,
     });
-    for (replica_count..replica_count + standby_count) |replica| {
-        if (combination.take(prng)) result.set(replica);
+    for (replica_count..replica_count + standby_count) |standby| {
+        if (combination.take(prng)) core.set(standby);
     }
     assert(combination.done());
 
-    assert(result.count() == replica_core_count + standby_core_count);
+    assert(core.count() == replica_core_count + standby_core_count);
 
-    return result;
+    return core;
+}
+
+/// Returns a random fully-connected subgraph which includes all replicas and standbys.
+fn full_core(replica_count: u8, standby_count: u8) Core {
+    assert(replica_count > 0);
+    assert(replica_count <= constants.replicas_max);
+    assert(standby_count <= constants.standbys_max);
+
+    var core: Core = .{};
+
+    for (0..replica_count + standby_count) |replica| core.set(replica);
+
+    assert(core.count() == replica_count + standby_count);
+
+    return core;
 }
 
 var log_buffer: std.io.BufferedWriter(4096, std.fs.File.Writer) = .{
@@ -1740,8 +1754,11 @@ fn log_override(
         // Always print a message for vsr.fatal.
     } else {
         if (vsr_vopr_options.log == .short) {
-            if (scope != .cluster and scope != .simulator) return;
-            if (log_performance_mode and scope != .simulator) return;
+            if (log_performance_mode) {
+                if (scope != .simulator) return;
+            } else {
+                if (scope != .simulator and scope != .cluster) return;
+            }
         }
     }
 

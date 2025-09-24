@@ -3,7 +3,7 @@
 //!
 //! The Auditor expects replies in ascending commit order.
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.test_auditor);
@@ -874,7 +874,7 @@ pub fn IteratorForCreateType(comptime Result: type) type {
         pub fn take(
             self: *IteratorForCreate,
             event_index: usize,
-        ) ?std.meta.fieldInfo(Result, .result).type {
+        ) ?@FieldType(Result, "result") {
             if (self.results.len > 0 and self.results[0].index == event_index) {
                 defer self.results = self.results[1..];
                 return self.results[0].result;

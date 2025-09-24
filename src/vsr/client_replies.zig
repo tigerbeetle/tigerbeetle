@@ -23,7 +23,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const log = std.log.scoped(.client_replies);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const RingBufferType = stdx.RingBufferType;
 const IOPSType = @import("../iops.zig").IOPSType;

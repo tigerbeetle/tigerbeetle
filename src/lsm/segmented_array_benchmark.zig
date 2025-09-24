@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const constants = @import("../constants.zig");
 const NodePoolType = @import("node_pool.zig").NodePoolType;

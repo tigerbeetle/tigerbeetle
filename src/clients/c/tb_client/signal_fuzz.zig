@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const Signal = @import("./signal.zig").Signal;
 const IO = @import("../../../io.zig").IO;
-const stdx = @import("../../../stdx.zig");
+const stdx = @import("stdx");
 const fuzz = @import("../../../testing/fuzz.zig");
 
 const threads_limit = 8;

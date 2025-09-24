@@ -56,7 +56,7 @@ features of TigerBeetle.
 * [Basic](/src/clients/dotnet/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/dotnet/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/dotnet/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](/src/clients/dotnet/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
 ## Creating a Client
 
@@ -66,7 +66,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -84,11 +85,6 @@ using (var client = new Client(clusterID, addresses))
     // Use client
 }
 ```
-
-The `Client` class is thread-safe and for better performance, a
-single instance should be shared between multiple concurrent
-tasks. Multiple clients can be instantiated in case of connecting
-to more than one TigerBeetle cluster.
 
 The following are valid addresses:
 * `3000` (interpreted as `127.0.0.1:3000`)
@@ -597,7 +593,7 @@ var filter = new QueryFilter
     Ledger = 0, // No filter by Ledger.
     TimestampMin = 0, // No filter by Timestamp.
     TimestampMax = 0, // No filter by Timestamp.
-    Limit = 10, // Limit to ten balances at most.
+    Limit = 10, // Limit to ten accounts at most.
     Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 
@@ -624,7 +620,7 @@ var filter = new QueryFilter
     Ledger = 0, // No filter by Ledger
     TimestampMin = 0, // No filter by Timestamp.
     TimestampMax = 0, // No filter by Timestamp.
-    Limit = 10, // Limit to ten balances at most.
+    Limit = 10, // Limit to ten transfers at most.
     Flags = QueryFilterFlags.Reversed, // Sort by timestamp in reverse-chronological order.
 };
 

@@ -5,7 +5,7 @@ const maybe = stdx.maybe;
 const math = std.math;
 const mem = std.mem;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 const TableType = @import("table.zig").TableType;
@@ -23,7 +23,7 @@ const snapshot_latest = @import("tree.zig").snapshot_latest;
 
 fn ObjectTreeHelperType(comptime Object: type) type {
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.fieldInfo(Object, .timestamp).type == u64);
+    assert(@FieldType(Object, "timestamp") == u64);
 
     return struct {
         inline fn key_from_value(value: *const Object) u64 {
@@ -178,11 +178,11 @@ pub fn GrooveType(
     @setEvalBranchQuota(64_000);
 
     const has_id = @hasField(Object, "id");
-    comptime if (has_id) assert(std.meta.FieldType(Object, .id) == u128);
+    comptime if (has_id) assert(@FieldType(Object, "id") == u128);
     comptime if (groove_options.orphaned_ids) assert(has_id);
 
     assert(@hasField(Object, "timestamp"));
-    assert(std.meta.FieldType(Object, .timestamp) == u64);
+    assert(@FieldType(Object, "timestamp") == u64);
 
     comptime var index_fields: []const std.builtin.Type.StructField = &.{};
 
@@ -1088,7 +1088,7 @@ pub fn GrooveType(
 
                 pub const Field = std.meta.FieldEnum(LookupContext);
                 pub fn FieldType(comptime field: Field) type {
-                    return std.meta.fieldInfo(LookupContext, field).type;
+                    return @FieldType(LookupContext, @tagName(field));
                 }
 
                 pub inline fn parent(

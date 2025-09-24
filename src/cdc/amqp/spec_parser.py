@@ -91,7 +91,7 @@ def main(file):
     print(f"//////////////////////////////////////////////////////////")
     print(f"")
     print(f"const std = @import(\"std\");")
-    print(f"const stdx = @import(\"../../stdx.zig\");")
+    print(f"const stdx = @import(\"stdx\");")
     print(f"const protocol = @import(\"protocol.zig\");")
     print(f"const Decoder = protocol.Decoder;")
     print(f"const Encoder = protocol.Encoder;")

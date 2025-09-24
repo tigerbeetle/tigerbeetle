@@ -9,7 +9,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
+const MiB = stdx.MiB;
 const Shell = @import("../shell.zig");
 const Docs = @import("../clients/docs_types.zig").Docs;
 const Sample = @import("../clients/docs_types.zig").Sample;
@@ -45,7 +46,7 @@ pub fn test_freshness(
     const walkthrough = try shell.cwd.readFileAlloc(
         arena.allocator(),
         walkthrough_path,
-        1024 * 1024,
+        1 * MiB,
     );
 
     var ctx = Context{
@@ -169,7 +170,8 @@ fn readme_root(ctx: *Context) !void {
             \\starts the TigerBeetle cluster.
             \\
             \\Clients are thread-safe and a single instance should be shared
-            \\between multiple concurrent tasks.
+            \\between multiple concurrent tasks. This allows events to be 
+            \\[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
             \\
             \\Multiple clients are useful when connecting to more than
             \\one TigerBeetle cluster.

@@ -25,9 +25,7 @@
 //!
 //! Note that the budget/refresh timers do not count time spent cloning or compiling code.
 //!
-//! It is important that the caller arranges for CFO's descendants to be reaped when CFO exits.
-//! It is not possible to reliably wait for (grand) children with POSIX, so its on the call-site to
-//! cleanup any run-away subprocesses. See `./cfo_supervisor.sh` for one way to arrange that.
+//! The CFO uses Linux's process namespaces to ensure that all descendant processes are reaped.
 //!
 //! Every `args.refresh_minutes`, and at the end of the fuzzing loop:
 //! 1. CFO collects a list of seeds (some of which are failing),
@@ -40,7 +38,7 @@
 //! - Prefer fresher commits (based on commit time stamp).
 //! - For each commit and fuzzer combination, keep at most `seed_count_max` seeds.
 //! - Prefer failing seeds to successful seeds.
-//! - Prefer seeds that failed faster
+//! - Prefer seeds that failed faster.
 //! - Prefer older seeds.
 //! - When dropping a non-failing seed, add its count to some other non-failing seeds.
 //!
@@ -53,8 +51,10 @@ const log = std.log;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("../shell.zig");
+
+const MiB = stdx.MiB;
 
 pub const CLIArgs = struct {
     /// How long to run the cfo before exiting (so that cfo_supervisor can refresh our code).
@@ -78,12 +78,12 @@ const Fuzzer = enum {
     lsm_segmented_array,
     lsm_tree,
     storage,
+    vopr_debug,
     vopr_lite,
     vopr_testing_lite,
     vopr_testing,
     vopr,
     vsr_free_set,
-    vsr_journal_format,
     vsr_superblock_quorums,
     vsr_superblock,
     vsr_multi_batch,
@@ -101,12 +101,12 @@ const Fuzzer = enum {
         .lsm_segmented_array = 1,
         .lsm_tree = 2,
         .storage = 1,
+        .vopr_debug = 1,
         .vopr_lite = 8,
         .vopr_testing_lite = 8,
         .vopr_testing = 8,
         .vopr = 8,
         .vsr_free_set = 1,
-        .vsr_journal_format = 1,
         .vsr_superblock_quorums = 1,
         .vsr_superblock = 1,
         .vsr_multi_batch = 1,
@@ -116,23 +116,32 @@ const Fuzzer = enum {
 
     fn args_build(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr, .vopr_lite => &.{"vopr:build"},
-            .vopr_testing, .vopr_testing_lite => &.{ "vopr:build", "-Dvopr-state-machine=testing" },
-            else => &.{"fuzz:build"},
+            .vopr_debug,
+            => &.{"vopr:build"},
+            .vopr,
+            .vopr_lite,
+            => &.{ "vopr:build", "-Drelease" },
+            .vopr_testing,
+            .vopr_testing_lite,
+            => &.{ "vopr:build", "-Drelease", "-Dvopr-state-machine=testing" },
+            else => &.{ "fuzz:build", "-Drelease" },
         };
     }
 
     fn args_run(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            inline .vopr, .vopr_lite => .{"vopr"},
-            inline .vopr_testing, .vopr_testing_lite => .{ "vopr", "-Dvopr-state-machine=testing" },
-            inline else => .{"fuzz"},
+            .vopr_debug => .{"vopr"},
+            .vopr, .vopr_lite => .{ "vopr", "-Drelease" },
+            .vopr_testing,
+            .vopr_testing_lite,
+            => .{ "vopr", "-Drelease", "-Dvopr-state-machine=testing" },
+            else => .{ "fuzz", "-Drelease" },
         } ++ .{"--"} ++ args_exec(fuzzer);
     }
 
     fn args_exec(comptime fuzzer: Fuzzer) []const []const u8 {
         return comptime switch (fuzzer) {
-            .vopr, .vopr_testing => &.{},
+            .vopr, .vopr_debug, .vopr_testing => &.{},
             .vopr_lite, .vopr_testing_lite => &.{"--lite"},
             else => |f| &.{@tagName(f)},
         };
@@ -141,6 +150,7 @@ const Fuzzer = enum {
 
 pub fn main(shell: *Shell, gpa: std.mem.Allocator, cli_args: CLIArgs) !void {
     if (builtin.os.tag == .windows) {
+        log.err("cfo is not supported on Windows", .{});
         return error.NotSupported;
     }
 
@@ -605,12 +615,12 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
         const branch_cfo = try shell.cwd.readFileAlloc(
             shell.arena.allocator(),
             try shell.fmt("{s}/src/scripts/cfo.zig", .{working_directory}),
-            1 * 1024 * 1024,
+            1 * MiB,
         );
 
         for (std.enums.values(Fuzzer)) |fuzzer| {
             const fuzzer_present_on_branch = switch (fuzzer) {
-                .vopr, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
+                .vopr, .vopr_debug, .vopr_lite, .vopr_testing, .vopr_testing_lite => true,
                 else => std.mem.indexOf(
                     u8,
                     branch_cfo,
@@ -717,9 +727,18 @@ fn run_fuzzers_prepare_tasks(tasks: *Tasks, shell: *Shell, gh_token: ?[]const u8
             }
         }
 
+        // When the release was recently pushed (i.e. usually on Friday), give it extra fuzzing
+        // weight for the next few days (i.e. until Monday).
+        const release_soon = for (tasks.list.items) |*task| {
+            if (task.seed_template.branch == .release) {
+                break std.time.timestamp() <
+                    task.seed_template.commit_timestamp + 2 * std.time.s_per_day;
+            }
+        } else false;
+
         const weight_main = 1_000_000;
         const weight_pull = 1_000_000;
-        const weight_release = 500_000;
+        const weight_release = 500_000 * (if (release_soon) @as(u32, 3) else 1);
 
         for (tasks.list.items) |*task| {
             if (task.generation == tasks.generation) {
@@ -792,8 +811,8 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
         }
         assert(arg_max > 0);
 
-        // +4: zig/zig build -Drelease SEED
-        break :arg_count_max arg_max + 4;
+        // +3: zig/zig build <args> SEED
+        break :arg_count_max arg_max + 3;
     };
     var args: stdx.BoundedArrayType([]const u8, arg_count_max) = .{};
 
@@ -804,7 +823,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
     // - build time is excluded from overall runtime,
     // - the exit status of the fuzzer process can be inspected, to determine if OOM happened.
     args.clear();
-    args.push_slice(&.{ "./zig/zig", "build", "-Drelease" });
+    args.push_slice(&.{ "./zig/zig", "build" });
     args.push_slice(switch (options.fuzzer) {
         inline else => |f| comptime f.args_run(),
     });
@@ -814,7 +833,7 @@ fn run_fuzzers_start_fuzzer(shell: *Shell, options: struct {
 
     const exe = exe: {
         args.clear();
-        args.push_slice(&.{ "build", "-Drelease", "-Dprint-exe" });
+        args.push_slice(&.{ "build", "-Dprint-exe" });
         args.push_slice(switch (options.fuzzer) {
             inline else => |f| comptime f.args_build(),
         });
@@ -880,7 +899,7 @@ fn upload_results(
         try shell.exec("git fetch origin main", .{});
         try shell.exec("git reset --hard origin/main", .{});
 
-        const max_size = 1024 * 1024;
+        const max_size = 1 * MiB;
         const data = try shell.cwd.readFileAlloc(
             arena.allocator(),
             "./fuzzing/data.json",
@@ -1088,26 +1107,23 @@ const SeedRecord = struct {
             }
             seed_previous = record.seed;
 
-            seed_count += 1;
-            if (seed_count <= options.seed_count_max) {
-                try result.append(record);
-            } else {
-                if (record.ok) {
-                    // Merge counts with the first ok record for this fuzzer/commit, to make it
-                    // easy for the front-end to show the total count by displaying just the first
-                    // record
-                    var last_ok_index = result.items.len;
-                    while (last_ok_index > 0 and
-                        result.items[last_ok_index - 1].ok and
-                        std.mem.eql(u8, result.items[last_ok_index - 1].fuzzer, record.fuzzer) and
-                        std.meta.eql(result.items[last_ok_index - 1].commit_sha, record.commit_sha))
+            if (record.ok) {
+                // Merge counts with the first ok record for this fuzzer/commit, to make it easy for
+                // the front-end to show the total count by displaying just the first record.
+                if (result.getLastOrNull()) |record_previous| {
+                    if (record_previous.ok and
+                        std.mem.eql(u8, record_previous.fuzzer, record.fuzzer) and
+                        std.meta.eql(record_previous.commit_sha, record.commit_sha))
                     {
-                        last_ok_index -= 1;
-                    }
-                    if (last_ok_index != result.items.len) {
-                        result.items[last_ok_index].count += record.count;
+                        result.items[result.items.len - 1].count += record.count;
+                        continue;
                     }
                 }
+            }
+
+            if (seed_count < options.seed_count_max) {
+                try result.append(record);
+                seed_count += 1;
             }
         }
 
@@ -1115,8 +1131,8 @@ const SeedRecord = struct {
     }
 };
 
-const Snap = @import("../testing/snaptest.zig").Snap;
-const snap = Snap.snap;
+const Snap = stdx.Snap;
+const snap = Snap.snap_fn("src");
 
 test "cfo: deserialization" {
     // Smoke test that we can still deserialize&migrate old devhub data.
@@ -1672,22 +1688,10 @@ test "cfo: SeedRecord.merge" {
             \\    "commit_sha": "1111111111111111111111111111111111111111",
             \\    "fuzzer": "ewah",
             \\    "ok": true,
-            \\    "count": 4,
+            \\    "count": 6,
             \\    "seed_timestamp_start": 1,
             \\    "seed_timestamp_end": 1,
             \\    "seed": 3,
-            \\    "command": "fuzz ewah",
-            \\    "branch": "main"
-            \\  },
-            \\  {
-            \\    "commit_timestamp": 1,
-            \\    "commit_sha": "1111111111111111111111111111111111111111",
-            \\    "fuzzer": "ewah",
-            \\    "ok": true,
-            \\    "count": 2,
-            \\    "seed_timestamp_start": 1,
-            \\    "seed_timestamp_end": 1,
-            \\    "seed": 1,
             \\    "command": "fuzz ewah",
             \\    "branch": "main"
             \\  }

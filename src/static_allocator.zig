@@ -56,25 +56,25 @@ pub fn allocator(self: *StaticAllocator) mem.Allocator {
 }
 
 fn alloc(ctx: *anyopaque, len: usize, ptr_align: Alignment, ret_addr: usize) ?[*]u8 {
-    const self: *StaticAllocator = @alignCast(@ptrCast(ctx));
+    const self: *StaticAllocator = @ptrCast(@alignCast(ctx));
     assert(self.state == .init);
     return self.parent_allocator.rawAlloc(len, ptr_align, ret_addr);
 }
 
 fn resize(ctx: *anyopaque, buf: []u8, buf_align: Alignment, new_len: usize, ret_addr: usize) bool {
-    const self: *StaticAllocator = @alignCast(@ptrCast(ctx));
+    const self: *StaticAllocator = @ptrCast(@alignCast(ctx));
     assert(self.state == .init);
     return self.parent_allocator.rawResize(buf, buf_align, new_len, ret_addr);
 }
 
 fn remap(ctx: *anyopaque, buf: []u8, buf_align: Alignment, new_len: usize, ret_addr: usize) ?[*]u8 {
-    const self: *StaticAllocator = @alignCast(@ptrCast(ctx));
+    const self: *StaticAllocator = @ptrCast(@alignCast(ctx));
     assert(self.state == .init);
     return self.parent_allocator.rawRemap(buf, buf_align, new_len, ret_addr);
 }
 
 fn free(ctx: *anyopaque, buf: []u8, buf_align: Alignment, ret_addr: usize) void {
-    const self: *StaticAllocator = @alignCast(@ptrCast(ctx));
+    const self: *StaticAllocator = @ptrCast(@alignCast(ctx));
     assert(self.state == .init or self.state == .deinit);
     // Once you start freeing, you don't stop.
     self.state = .deinit;

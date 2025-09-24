@@ -5,8 +5,10 @@ const assert = std.debug.assert;
 const fs = std.fs;
 const mem = std.mem;
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const Shell = @import("./shell.zig");
+
+const MiB = stdx.MiB;
 
 const UsedDeclarations = std.StringHashMapUnmanaged(struct {
     count: u32,
@@ -21,7 +23,7 @@ test "tidy" {
 
     const paths = try list_file_paths(shell);
 
-    const buffer_size = 1024 * 1024;
+    const buffer_size = 1 * MiB;
     const buffer = try allocator.alloc(u8, buffer_size);
     defer allocator.free(buffer);
 
@@ -46,7 +48,7 @@ test "tidy" {
 
         if (tidy_control_characters(source_file)) |control_character| {
             std.debug.print(
-                "{s} error: contains control character: code={} symbol='{c}'\n",
+                "{s}: error: contains control character: code={} symbol='{c}'\n",
                 .{ source_file.path, control_character, control_character },
             );
             return error.BannedControlCharacter;
@@ -63,7 +65,7 @@ test "tidy" {
 
             if (try tidy_long_line(source_file)) |line_index| {
                 std.debug.print(
-                    "{s}:{d} error: line exceeds 100 columns\n",
+                    "{s}:{d}: error: line exceeds 100 columns\n",
                     .{ source_file.path, line_index + 1 },
                 );
                 return error.LineTooLong;
@@ -84,7 +86,7 @@ test "tidy" {
 
             if (tidy_generic_functions(source_file)) |function| {
                 std.debug.print(
-                    "{s}:{d} error: '{s}' should end with the 'Type' suffix\n",
+                    "{s}:{d}: error: '{s}' should end with the 'Type' suffix\n",
                     .{
                         source_file.path,
                         function.line,
@@ -100,7 +102,7 @@ test "tidy" {
         if (mem.endsWith(u8, source_file.path, ".md")) {
             tidy_markdown_title(source_file.text) catch |err| {
                 std.debug.print(
-                    "{s} error: invalid markdown headings, {}\n",
+                    "{s}: error: invalid markdown headings, {}\n",
                     .{ source_file.path, err },
                 );
                 return err;
@@ -154,6 +156,11 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use stdx.copy_right instead of std version";
     }
 
+    // TODO(zig): Remove when upgrading to Zig 0.15.x:
+    if (std.mem.indexOf(u8, source, "using" ++ "namespace") != null) {
+        return "using" ++ "namespace was removed from Zig";
+    }
+
     if (std.mem.indexOf(u8, source, "@memcpy(") != null) {
         if (std.mem.indexOf(u8, source, "// Bypass tidy's ban, for stdx.") == null and
             std.mem.indexOf(u8, source, "// Bypass tidy's ban, for go_bindings.") == null)
@@ -201,6 +208,12 @@ fn tidy_banned(source: []const u8) ?[]const u8 {
         return "use unqualified assert()";
     }
 
+    if (std.mem.indexOf(u8, source, "== error" ++ ".") != null or
+        std.mem.indexOf(u8, source, "!= error" ++ ".") != null)
+    {
+        return "switch on error to avoid silent anyerror upcast";
+    }
+
     return null;
 }
 
@@ -222,7 +235,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
                 const string_value_length = try std.unicode.utf8CountCodepoints(string_value);
                 if (string_value_length <= 100) continue;
 
-                if (std.mem.endsWith(u8, file.path, "state_machine.zig") and
+                if (std.mem.endsWith(u8, file.path, "state_machine_tests.zig") and
                     (std.mem.startsWith(u8, string_value, " account A") or
                         std.mem.startsWith(u8, string_value, " transfer T") or
                         std.mem.startsWith(u8, string_value, " transfer   ")))
@@ -237,11 +250,7 @@ fn tidy_long_line(file: SourceFile) !?u32 {
 
                 // trace.zig's JSON snapshot test.
                 if (std.mem.endsWith(u8, file.path, "trace.zig") and
-                    std.mem.startsWith(u8, string_value, "{\"pid\":0,\"tid\":")) continue;
-
-                // AMQP encoder snapshot test.
-                if (std.mem.endsWith(u8, file.path, "cdc/amqp/protocol.zig") and
-                    std.mem.startsWith(u8, string_value, "[1,0,0")) continue;
+                    std.mem.startsWith(u8, string_value, "{\"pid\":1,\"tid\":")) continue;
 
                 // AMQP JSON snapshot test.
                 if (std.mem.endsWith(u8, file.path, "cdc/runner.zig") and
@@ -365,7 +374,7 @@ fn tidy_dead_declarations(
                     }
                 } else {
                     switch (context_tag) {
-                        .keyword_inline => {},
+                        .keyword_inline, .keyword_extern, .string_literal => {},
                         // Public declaration can be used in a different file.
                         .keyword_pub, .keyword_export => continue :next_token,
                         // []const u8 or *const u8, not a declaration.
@@ -517,6 +526,9 @@ fn tidy_generic_functions(
                 const end = std.mem.indexOf(u8, line[begin..], "(") orelse continue;
                 if (end == 0) continue;
 
+                if (std.mem.indexOf(u8, line, "extern \"kernel32\"") != null) {
+                    continue; // Windows use CamelCase functions.
+                }
                 assert(begin + end < line.len);
                 break :function_name line[begin..][0..end];
             }
@@ -645,7 +657,6 @@ const DeadFilesDetector = struct {
             "dotnet_bindings.zig",
             "file_checker.zig",
             "fuzz_tests.zig",
-            "git-review.zig",
             "go_bindings.zig",
             "integration_tests.zig",
             "java_bindings.zig",
@@ -676,7 +687,7 @@ const DeadFilesDetector = struct {
 test "tidy changelog" {
     const allocator = std.testing.allocator;
 
-    const changelog_size_max = 1024 * 1024;
+    const changelog_size_max = 1 * MiB;
     const changelog = try fs.cwd().readFileAlloc(allocator, "CHANGELOG.md", changelog_size_max);
     defer allocator.free(changelog);
 
@@ -711,7 +722,6 @@ test "tidy no large blobs" {
         return error.ShallowRepository;
     }
 
-    const MiB = 1024 * 1024;
     const rev_list = try shell.exec_stdout("git rev-list --objects HEAD", .{});
     const objects = try shell.exec_stdout_options(
         .{ .stdin_slice = rev_list },
@@ -740,14 +750,50 @@ test "tidy no large blobs" {
     if (has_large_blobs) return error.HasLargeBlobs;
 }
 
+test "tidy unix permissions" {
+    const executable_files = [_][]const u8{
+        "zig/download.ps1",
+        "zig/download.sh",
+        ".github/ci/test_aof.sh",
+        "src/scripts/cfo_supervisor.sh",
+    };
+
+    const allocator = std.testing.allocator;
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    const files = try shell.exec_stdout("git ls-files -z --format {format}", .{
+        .format = "%(objectmode) %(path)",
+    });
+    assert(files[files.len - 1] == 0);
+    var lines = std.mem.splitScalar(u8, files[0 .. files.len - 1], 0);
+    while (lines.next()) |line| {
+        const mode, const path = stdx.cut(line, " ").?;
+        errdefer std.debug.print("{s}: error: unexpected mode={s}\n", .{ path, mode });
+
+        if (std.mem.eql(u8, mode, "100644")) {
+            // Expected for most files.
+        } else if (std.mem.eql(u8, mode, "100755")) {
+            const expected = for (executable_files) |executable_file| {
+                if (std.mem.eql(u8, path, executable_file)) break true;
+            } else false;
+
+            if (!expected) return error.UnexpectedExecutable;
+        } else {
+            return error.UnexpectedMode;
+        }
+    }
+}
+
 // Sanity check for "unexpected" files in the repository.
 test "tidy extensions" {
     const allowed_extensions = std.StaticStringMap(void).initComptime(.{
-        .{".bat"},     .{".c"},   .{".cs"},    .{".csproj"}, .{".css"},  .{".go"},
-        .{".h"},       .{".hcl"}, .{".html"},  .{".java"},   .{".js"},   .{".json"},
-        .{".md"},      .{".mod"}, .{".props"}, .{".ps1"},    .{".py"},   .{".rs"},
-        .{".service"}, .{".sln"}, .{".sum"},   .{".svg"},    .{".toml"}, .{".ts"},
-        .{".txt"},     .{".xml"}, .{".yml"},   .{".zig"},    .{".zon"},
+        .{".c"},    .{".cs"},      .{".csproj"}, .{".css"},   .{".go"},
+        .{".h"},    .{".hcl"},     .{".html"},   .{".java"},  .{".js"},
+        .{".json"}, .{".md"},      .{".mod"},    .{".props"}, .{".py"},
+        .{".rs"},   .{".service"}, .{".sln"},    .{".sum"},   .{".svg"},
+        .{".toml"}, .{".ts"},      .{".txt"},    .{".xml"},   .{".yml"},
+        .{".zig"},  .{".zon"},
     });
 
     const exceptions = std.StaticStringMap(void).initComptime(.{
@@ -769,10 +815,14 @@ test "tidy extensions" {
         .{"edit-link-footer.lua"},
         .{"src/docs_website/.vale.ini"},
         .{"zig/download.sh"},
+        .{"zig/download.ps1"},
+        .{"zig/download.win.ps1"},
         .{"src/scripts/cfo_supervisor.sh"},
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
+        .{"src/clients/python/src/tigerbeetle/py.typed"},
         .{"src/clients/rust/Cargo.lock"},
+        .{"src/testing/vortex/rust_driver/Cargo.lock"},
     });
 
     const allocator = std.testing.allocator;

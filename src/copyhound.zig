@@ -30,8 +30,9 @@
 //! column) and the total size of all monorphisations (third column).
 
 const std = @import("std");
-const stdx = @import("./stdx.zig");
-const flags = @import("./flags.zig");
+const stdx = @import("stdx");
+
+const MiB = stdx.MiB;
 
 const log = std.log;
 pub const std_options = .{
@@ -52,9 +53,9 @@ pub fn main() !void {
 
     var args = try std.process.argsWithAllocator(allocator);
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
-    const line_buffer = try allocator.alloc(u8, 1024 * 1024);
+    const line_buffer = try allocator.alloc(u8, MiB);
     const func_buf = try allocator.alloc(u8, 4096);
 
     const stdin = std.io.getStdIn();

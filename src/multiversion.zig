@@ -1,6 +1,6 @@
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const os = std.os;
@@ -16,11 +16,66 @@ pub const checksum = @import("vsr/checksum.zig");
 pub const multiversion_binary_size_max = constants.multiversion_binary_size_max;
 pub const multiversion_binary_platform_size_max = constants.multiversion_binary_platform_size_max;
 
-// Useful for test code, or constructing releases in release.zig.
-pub const ListU32 = stdx.BoundedArrayType(u32, constants.vsr_releases_max);
-pub const ListU128 = stdx.BoundedArrayType(u128, constants.vsr_releases_max);
-pub const ListGitCommit = stdx.BoundedArrayType([20]u8, constants.vsr_releases_max);
-pub const ListFlag = stdx.BoundedArrayType(MultiversionHeader.Flags, constants.vsr_releases_max);
+// Multiversion interface backed by three different implementations:
+// - MultiversionOS implements the real dynamic re-execution logic,
+// - single_version is used when multiversion is disabled (release list of count one),
+// - VOPR simulation.
+pub const Multiversion = struct {
+    context: *anyopaque,
+    vtable: *const VTable,
+
+    pub const VTable = struct {
+        releases_bundled: *const fn (context: *anyopaque) ReleaseList,
+        release_execute: *const fn (context: *anyopaque, release: Release) void,
+        tick: *const fn (context: *anyopaque) void,
+    };
+
+    /// A list of all versions of code that are available in the current binary.
+    /// Includes the current version, newer versions, and older versions.
+    /// Ordered from lowest/oldest to highest/newest.
+    /// Can be updated by multiversioning while running.
+    pub fn releases_bundled(multiversion: Multiversion) ReleaseList {
+        return multiversion.vtable.releases_bundled(multiversion.context);
+    }
+
+    /// Replace the currently-running replica with the given release.
+    ///
+    /// If called with a `release` that is *not* in `releases_bundled`, the replica should shut
+    /// down with a helpful error message to warn the operator that they must upgrade.
+    // NB: this is void for VOPR, but the actual implementation is noreturn.
+    pub fn release_execute(multiversion: Multiversion, release: Release) void {
+        multiversion.vtable.release_execute(multiversion.context, release);
+    }
+
+    pub fn tick(multiversion: Multiversion) void {
+        multiversion.vtable.tick(multiversion.context);
+    }
+
+    /// Multiversion implementation that only has one release available.
+    pub fn single_release(comptime release: Release) Multiversion {
+        const vtable = struct {
+            fn releases_bundled(_: *anyopaque) ReleaseList {
+                var result: ReleaseList = .empty;
+                result.push(release);
+                return result;
+            }
+            fn release_execute(_: *anyopaque, release_next: Release) void {
+                assert(release_next.value != release.value);
+                @panic("multiversion unsupported");
+            }
+            fn tick(_: *anyopaque) void {}
+        };
+
+        return .{
+            .context = @constCast(&{}),
+            .vtable = &.{
+                .releases_bundled = vtable.releases_bundled,
+                .release_execute = vtable.release_execute,
+                .tick = vtable.tick,
+            },
+        };
+    }
+};
 
 /// In order to embed multiversion headers and bodies inside a universal binary, we repurpose some
 /// old CPU Type IDs.
@@ -63,7 +118,57 @@ fn execveat(
 }
 
 /// A ReleaseList is ordered from lowest-to-highest.
-pub const ReleaseList = stdx.BoundedArrayType(Release, constants.vsr_releases_max);
+pub const ReleaseList = struct {
+    buffer: [constants.vsr_releases_max]Release,
+    count: u16,
+
+    pub const empty: ReleaseList = .{
+        .buffer = undefined,
+        .count = 0,
+    };
+
+    pub fn push(release_list: *ReleaseList, release: Release) void {
+        assert(release_list.count < constants.vsr_releases_max);
+        assert(release.value > 0);
+        if (release_list.count > 0) {
+            assert(release_list.last().value < release.value);
+        }
+        release_list.buffer[release_list.count] = release;
+        release_list.count += 1;
+    }
+
+    pub fn slice(release_list: *const ReleaseList) []const Release {
+        return release_list.buffer[0..release_list.count];
+    }
+
+    pub fn verify(release_list: *const ReleaseList) void {
+        assert(release_list.count > 0);
+        for (release_list.slice()) |a| assert(a.value > 0);
+        for (
+            release_list.slice()[0 .. release_list.count - 1],
+            release_list.slice()[1..],
+        ) |a, b| {
+            assert(a.value < b.value); // Sorted and unique.
+        }
+    }
+
+    pub fn contains(release_list: *const ReleaseList, release: Release) bool {
+        for (release_list.slice()) |r| {
+            if (r.value == release.value) return true;
+        }
+        return false;
+    }
+
+    pub fn first(release_list: *const ReleaseList) Release {
+        assert(release_list.count > 0);
+        return release_list.slice()[0];
+    }
+
+    pub fn last(release_list: *const ReleaseList) Release {
+        assert(release_list.count > 0);
+        return release_list.slice()[release_list.count - 1];
+    }
+};
 
 pub const Release = extern struct {
     value: u32,
@@ -204,65 +309,54 @@ pub const MultiversionHeader = extern struct {
 
         count: u32 = 0,
 
-        releases: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
-        checksums: [past_releases_max]u128 = std.mem.zeroes([past_releases_max]u128),
+        releases: [past_releases_max]u32 = @splat(0),
+        checksums: [past_releases_max]u128 = @splat(0),
 
         /// Offsets are relative to the start of the body (`.tb_mvb`) offset.
-        offsets: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        offsets: [past_releases_max]u32 = @splat(0),
 
-        sizes: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        sizes: [past_releases_max]u32 = @splat(0),
 
-        flags: [past_releases_max]Flags = std.mem.zeroes([past_releases_max]Flags),
-        flags_padding: [1]u8 = std.mem.zeroes([1]u8),
+        flags: [past_releases_max]Flags = @splat(.{ .visit = false, .debug = false }),
+        flags_padding: [1]u8 = @splat(0),
 
         // Extra metadata. Not used by any current upgrade processes directly, but useful to know:
-        git_commits: [past_releases_max][20]u8 = std.mem.zeroes([past_releases_max][20]u8),
-        release_client_mins: [past_releases_max]u32 = std.mem.zeroes([past_releases_max]u32),
+        git_commits: [past_releases_max][20]u8 = @splat(@splat(0)),
+        release_client_mins: [past_releases_max]u32 = @splat(0),
 
-        pub fn init(count: u32, past_init: struct {
-            releases: []const u32,
-            checksums: []const u128,
-            offsets: []const u32,
-            sizes: []const u32,
-            flags: []const Flags,
-            git_commits: []const [20]u8,
-            release_client_mins: []const u32,
-        }) PastReleases {
-            assert(past_init.releases.len == count);
-            assert(past_init.checksums.len == count);
-            assert(past_init.offsets.len == count);
-            assert(past_init.sizes.len == count);
-            assert(past_init.flags.len == count);
-            assert(past_init.git_commits.len == count);
-            assert(past_init.release_client_mins.len == count);
+        pub fn add(self: *PastReleases, next: struct {
+            release: u32,
+            checksum: u128,
+            size: u32,
+            flags: Flags,
+            git_commit: [20]u8,
+            release_client_min: u32,
+        }) void {
+            assert(next.release != 0);
+            assert(next.checksum != 0);
+            assert(next.size != 0);
+            assert(next.release_client_min != 0);
 
-            var past_releases = PastReleases{};
-            past_releases.count = count;
+            assert(self.count < past_releases_max);
+            const index = self.count;
 
-            stdx.copy_disjoint(.inexact, u32, &past_releases.releases, past_init.releases);
-            stdx.copy_disjoint(.inexact, u128, &past_releases.checksums, past_init.checksums);
-            stdx.copy_disjoint(.inexact, u32, &past_releases.offsets, past_init.offsets);
-            stdx.copy_disjoint(.inexact, u32, &past_releases.sizes, past_init.sizes);
-            stdx.copy_disjoint(.inexact, Flags, &past_releases.flags, past_init.flags);
-            stdx.copy_disjoint(.inexact, [20]u8, &past_releases.git_commits, past_init.git_commits);
-            stdx.copy_disjoint(
-                .inexact,
-                u32,
-                &past_releases.release_client_mins,
-                past_init.release_client_mins,
-            );
+            if (index > 0) {
+                assert(self.releases[index - 1] < next.release);
+            }
 
-            @memset(std.mem.sliceAsBytes(past_releases.releases[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.checksums[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.offsets[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.sizes[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.flags[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.git_commits[count..]), 0);
-            @memset(std.mem.sliceAsBytes(past_releases.release_client_mins[count..]), 0);
+            const offset = if (index > 0)
+                self.offsets[index - 1] + self.sizes[index - 1]
+            else
+                0;
 
-            past_releases.verify() catch @panic("invalid past_release");
-
-            return past_releases;
+            self.releases[index] = next.release;
+            self.checksums[index] = next.checksum;
+            self.offsets[index] = offset;
+            self.sizes[index] = next.size;
+            self.flags[index] = next.flags;
+            self.git_commits[index] = next.git_commit;
+            self.release_client_mins[index] = next.release_client_min;
+            self.count += 1;
         }
 
         pub fn verify(self: *const PastReleases) !void {
@@ -368,10 +462,10 @@ pub const MultiversionHeader = extern struct {
     current_release: u32,
 
     current_flags: Flags,
-    current_flags_padding: [3]u8 = std.mem.zeroes([3]u8),
+    current_flags_padding: [3]u8 = @splat(0),
 
     past: PastReleases = .{},
-    past_padding: [16]u8 = std.mem.zeroes([16]u8),
+    past_padding: [16]u8 = @splat(0),
 
     current_git_commit: [20]u8,
     current_release_client_min: u32,
@@ -380,7 +474,7 @@ pub const MultiversionHeader = extern struct {
     /// which are required to be zeroed, this is not. This allows adding whole new fields in a
     /// backwards compatible way, while preventing the temptation of changing the meaning of
     /// existing fields without bumping the schema version entirely.
-    reserved: [4744]u8 = std.mem.zeroes([4744]u8),
+    reserved: [4744]u8 = @splat(0),
 
     /// Parses an instance from a slice of bytes and validates its checksum. Returns a copy.
     pub fn init_from_bytes(bytes: *const [@sizeOf(MultiversionHeader)]u8) !MultiversionHeader {
@@ -436,7 +530,7 @@ pub const MultiversionHeader = extern struct {
     /// * Newer than the current from_release, up to and including a newer one with the `visits`
     ///   flag set.
     pub fn advertisable(self: *const MultiversionHeader, from_release: Release) ReleaseList {
-        var release_list: ReleaseList = .{};
+        var release_list: ReleaseList = .empty;
 
         for (0..self.past.count) |i| {
             release_list.push(Release{ .value = self.past.releases[i] });
@@ -451,17 +545,7 @@ pub const MultiversionHeader = extern struct {
 
         // These asserts should be impossible to reach barring a bug; they're checked in verify()
         // so there shouldn't be a way for a corrupt / malformed binary to get this far.
-        assert(release_list.count() > 0);
-        assert(std.sort.isSorted(
-            Release,
-            release_list.const_slice(),
-            {},
-            Release.less_than,
-        ));
-        for (
-            release_list.const_slice()[0 .. release_list.count() - 1],
-            release_list.const_slice()[1..],
-        ) |release, release_next| assert(release.value != release_next.value);
+        release_list.verify();
 
         return release_list;
     }
@@ -480,58 +564,49 @@ pub const MultiversionHeader = extern struct {
 };
 
 test "MultiversionHeader.advertisable" {
-    const tests = [_]struct {
-        releases: []const u32,
-        flags: []const MultiversionHeader.Flags,
+    const tests: []const struct {
+        releases: []const struct { u32, MultiversionHeader.Flags },
         current: u32,
         from: u32,
         expected: []const u32,
-    }{
-        .{ .releases = &.{ 1, 2, 3 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
+    } = &.{
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = false, .debug = false } },
         }, .current = 4, .from = 2, .expected = &.{ 1, 2, 3, 4 } },
-        .{ .releases = &.{ 1, 2, 3 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
         }, .current = 4, .from = 2, .expected = &.{ 1, 2, 3 } },
-        .{ .releases = &.{ 1, 2, 3, 4 }, .flags = &.{
-            .{ .visit = false, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
-            .{ .visit = false, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = false, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
+            .{ 4, .{ .visit = false, .debug = false } },
         }, .current = 5, .from = 2, .expected = &.{ 1, 2, 3 } },
-        .{ .releases = &.{ 1, 2, 3, 4 }, .flags = &.{
-            .{ .visit = true, .debug = false },
-            .{ .visit = false, .debug = false },
-            .{ .visit = true, .debug = false },
-            .{ .visit = true, .debug = false },
+        .{ .releases = &.{
+            .{ 1, .{ .visit = true, .debug = false } },
+            .{ 2, .{ .visit = false, .debug = false } },
+            .{ 3, .{ .visit = true, .debug = false } },
+            .{ 4, .{ .visit = true, .debug = false } },
         }, .current = 5, .from = 5, .expected = &.{ 1, 2, 3, 4, 5 } },
     };
+
     for (tests) |t| {
-        var checksums: ListU128 = .{};
-        var offsets: ListU32 = .{};
-        var sizes: ListU32 = .{};
-        var git_commits: ListGitCommit = .{};
-
-        for (t.releases) |_| {
-            checksums.push(0);
-            offsets.push(@intCast(offsets.count()));
-            sizes.push(1);
-            git_commits.push("00000000000000000000".*);
+        var past_releases: MultiversionHeader.PastReleases = .{};
+        for (t.releases) |release_flags| {
+            past_releases.add(.{
+                .release = release_flags[0],
+                .checksum = 1,
+                .size = 1,
+                .flags = release_flags[1],
+                .git_commit = "00000000000000000000".*,
+                .release_client_min = 1,
+            });
         }
-
-        const past_releases = MultiversionHeader.PastReleases.init(@intCast(t.releases.len), .{
-            .releases = t.releases,
-            .checksums = checksums.const_slice(),
-            .offsets = offsets.const_slice(),
-            .sizes = sizes.const_slice(),
-            .flags = t.flags,
-            .release_client_mins = t.releases,
-            .git_commits = git_commits.const_slice(),
-        });
+        try past_releases.verify();
 
         var header = MultiversionHeader{
             .past = past_releases,
@@ -539,7 +614,7 @@ test "MultiversionHeader.advertisable" {
             .current_checksum = 0,
             .current_flags = .{ .visit = true, .debug = false },
             .checksum_binary_without_header = 1,
-            .current_git_commit = std.mem.zeroes([20]u8),
+            .current_git_commit = @splat(0),
             .current_release_client_min = 0,
         };
         header.checksum_header = header.calculate_header_checksum();
@@ -547,22 +622,25 @@ test "MultiversionHeader.advertisable" {
         try header.verify();
 
         const advertisable = header.advertisable(Release{ .value = t.from });
-        var expected: ReleaseList = .{};
+        var expected: ReleaseList = .empty;
         for (t.expected) |release| {
             expected.push(Release{ .value = release });
         }
         try std.testing.expectEqualSlices(
             Release,
-            expected.const_slice(),
-            advertisable.const_slice(),
+            expected.slice(),
+            advertisable.slice(),
         );
     }
 }
 
 const multiversion_uuid = "tigerbeetle-multiversion-1768a738-ef69-4605-8b5c-c6e63580e345";
 
-pub const Multiversion = struct {
-    const ArgsEnvp = if (builtin.target.os.tag == .windows) void else struct {
+pub const MultiversionOS = struct {
+    const ArgsEnvp = if (builtin.target.os.tag == .windows) struct {
+        target_path_w: [:0]const u16,
+        exe_path_w: [:0]const u16,
+    } else struct {
         // Coerces to [*:null]const ?[*:0]const u8 but lets us keep information to free the memory
         // later.
         args: [:null]?[*:0]const u8,
@@ -586,10 +664,9 @@ pub const Multiversion = struct {
     target_body_offset: ?u32 = null,
     target_body_size: ?u32 = null,
     target_header: ?MultiversionHeader = null,
-    /// This list is referenced by `Replica.releases_bundled`.
-    /// Note that this only contains the advertisable releases, which are a subset of the actual
+    /// This list only contains the advertisable releases, which are a subset of the actual
     /// releases included in the multiversion binary. See MultiversionHeader.advertisable().
-    releases_bundled: ReleaseList = .{},
+    releases_bundled: ReleaseList = .empty,
 
     completion: IO.Completion = undefined,
 
@@ -615,7 +692,7 @@ pub const Multiversion = struct {
         io: *IO,
         exe_path: [:0]const u8,
         exe_path_format: enum { detect, native },
-    ) !Multiversion {
+    ) !MultiversionOS {
         assert(std.fs.path.isAbsolute(exe_path));
 
         const multiversion_binary_size_max_by_format = switch (exe_path_format) {
@@ -709,11 +786,12 @@ pub const Multiversion = struct {
                 };
             },
 
-            // ArgsEnvp is void on Windows, and command line passing is handled directly by
-            // exec_target_fd().
-            .windows => {},
+            .windows => .{
+                .target_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, target_path),
+                .exe_path_w = try std.unicode.wtf8ToWtf16LeAllocZ(allocator, exe_path),
+            },
 
-            else => @panic("unsupported platform"),
+            else => comptime unreachable,
         };
 
         return .{
@@ -725,7 +803,7 @@ pub const Multiversion = struct {
                     .linux => .elf,
                     .windows => .pe,
                     .macos => .macho,
-                    else => @panic("unsupported platform"),
+                    else => comptime unreachable,
                 },
                 .detect => .detect,
             },
@@ -745,21 +823,47 @@ pub const Multiversion = struct {
         };
     }
 
-    pub fn deinit(self: *Multiversion, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *MultiversionOS, allocator: std.mem.Allocator) void {
         posix.close(self.target_fd);
         self.target_fd = IO.INVALID_FILE;
         allocator.free(self.target_path);
 
         allocator.free(self.source_buffer);
 
-        if (builtin.target.os.tag != .windows) {
+        if (builtin.target.os.tag == .windows) {
+            allocator.free(self.args_envp.target_path_w);
+            allocator.free(self.args_envp.exe_path_w);
+        } else {
             allocator.free(std.mem.span(self.args_envp.args[0].?));
             allocator.free(self.args_envp.args);
         }
         self.* = undefined;
     }
 
-    pub fn open_sync(self: *Multiversion) !void {
+    pub fn multiversion(self: *MultiversionOS) Multiversion {
+        return .{ .context = self, .vtable = &.{
+            .releases_bundled = vtable_releases_bundled,
+            .release_execute = vtable_release_execute,
+            .tick = vtable_tick,
+        } };
+    }
+
+    fn vtable_releases_bundled(context: *anyopaque) ReleaseList {
+        const self: *const MultiversionOS = @ptrCast(@alignCast(context));
+        return self.releases_bundled;
+    }
+
+    fn vtable_release_execute(context: *anyopaque, release: Release) void {
+        const self: *MultiversionOS = @ptrCast(@alignCast(context));
+        self.replica_release_execute(release);
+    }
+
+    fn vtable_tick(context: *anyopaque) void {
+        const self: *MultiversionOS = @ptrCast(@alignCast(context));
+        self.tick();
+    }
+
+    pub fn open_sync(self: *MultiversionOS) !void {
         assert(self.stage == .init);
         assert(!self.timeout.ticking);
 
@@ -780,7 +884,7 @@ pub const Multiversion = struct {
         if (self.stage == .err) {
             // If there's been an error starting up multiversioning, don't disable it, but
             // advertise only the current version in memory.
-            self.releases_bundled.clear();
+            self.releases_bundled = .empty;
             self.releases_bundled.push(constants.config.process.release);
 
             return self.stage.err;
@@ -788,19 +892,19 @@ pub const Multiversion = struct {
 
         assert(self.stage == .ready);
         assert(self.target_header != null);
-        assert(self.releases_bundled.count() >= 1);
+        assert(self.releases_bundled.count >= 1);
 
         if (comptime builtin.target.os.tag == .linux) {
             assert(self.timeout_statx_previous != .none);
         }
     }
 
-    pub fn tick(self: *Multiversion) void {
+    fn tick(self: *MultiversionOS) void {
         self.timeout.tick();
         if (self.timeout.fired()) self.on_timeout();
     }
 
-    pub fn timeout_start(self: *Multiversion, replica_index: u8) void {
+    pub fn timeout_start(self: *MultiversionOS, replica_index: u8) void {
         assert(!self.timeout.ticking);
         if (builtin.target.os.tag != .linux) {
             // Checking for new binaries on disk after the replica has been opened is only
@@ -813,7 +917,7 @@ pub const Multiversion = struct {
         log.debug("enabled automatic on-disk version detection.", .{});
     }
 
-    fn on_timeout(self: *Multiversion) void {
+    fn on_timeout(self: *MultiversionOS) void {
         self.timeout.reset();
 
         assert(builtin.target.os.tag == .linux);
@@ -833,12 +937,12 @@ pub const Multiversion = struct {
         self.binary_statx();
     }
 
-    fn binary_statx(self: *Multiversion) void {
+    fn binary_statx(self: *MultiversionOS) void {
         assert(self.stage == .init);
 
         self.stage = .source_stat;
         self.io.statx(
-            *Multiversion,
+            *MultiversionOS,
             self,
             binary_statx_callback,
             &self.completion,
@@ -850,7 +954,7 @@ pub const Multiversion = struct {
         );
     }
 
-    fn binary_statx_callback(self: *Multiversion, _: *IO.Completion, result: anyerror!void) void {
+    fn binary_statx_callback(self: *MultiversionOS, _: *IO.Completion, result: anyerror!void) void {
         assert(self.stage == .source_stat);
 
         _ = result catch |e| {
@@ -886,7 +990,7 @@ pub const Multiversion = struct {
         self.timeout_statx_previous = .{ .previous = self.timeout_statx };
     }
 
-    fn binary_open(self: *Multiversion) void {
+    fn binary_open(self: *MultiversionOS) void {
         assert(self.stage == .init);
         assert(self.source_offset == null);
 
@@ -895,7 +999,7 @@ pub const Multiversion = struct {
 
         switch (builtin.os.tag) {
             .linux => self.io.openat(
-                *Multiversion,
+                *MultiversionOS,
                 self,
                 binary_open_callback,
                 &self.completion,
@@ -914,7 +1018,7 @@ pub const Multiversion = struct {
     }
 
     fn binary_open_callback(
-        self: *Multiversion,
+        self: *MultiversionOS,
         _: *IO.Completion,
         result: IO.OpenatError!posix.fd_t,
     ) void {
@@ -932,14 +1036,14 @@ pub const Multiversion = struct {
         self.binary_read();
     }
 
-    fn binary_read(self: *Multiversion) void {
+    fn binary_read(self: *MultiversionOS) void {
         assert(self.stage == .source_read);
         assert(self.source_fd != null);
         assert(self.source_offset != null);
         assert(self.source_offset.? < self.source_buffer.len);
 
         self.io.read(
-            *Multiversion,
+            *MultiversionOS,
             self,
             binary_read_callback,
             &self.completion,
@@ -950,7 +1054,7 @@ pub const Multiversion = struct {
     }
 
     fn binary_read_callback(
-        self: *Multiversion,
+        self: *MultiversionOS,
         _: *IO.Completion,
         result: IO.ReadError!usize,
     ) void {
@@ -988,7 +1092,7 @@ pub const Multiversion = struct {
         }
     }
 
-    fn target_update(self: *Multiversion, source_buffer: []align(8) u8) !void {
+    fn target_update(self: *MultiversionOS, source_buffer: []align(8) u8) !void {
         assert(self.stage == .target_update);
         const offsets = switch (self.exe_path_format) {
             .elf => try parse_elf(source_buffer),
@@ -1061,43 +1165,25 @@ pub const Multiversion = struct {
         // 2. The existing releases_bundled, of any versions newer than current, is a subset
         //    of the new advertisable releases.
         const advertisable = header.advertisable(constants.config.process.release);
-        const advertisable_includes_running = blk: {
-            for (advertisable.const_slice()) |release| {
-                if (release.value == constants.config.process.release.value) {
-                    break :blk true;
-                }
-            }
-            break :blk false;
-        };
-        const advertisable_is_forward_superset = blk: {
-            for (self.releases_bundled.const_slice()) |existing_release| {
-                // It doesn't matter if older releases don't overlap.
-                if (existing_release.value < constants.config.process.release.value) continue;
+        if (!advertisable.contains(constants.config.process.release)) {
+            return error.RunningVersionNotIncluded;
+        }
 
-                for (advertisable.const_slice()) |release| {
-                    if (existing_release.value == release.value) {
-                        break;
-                    }
-                } else {
-                    break :blk false;
-                }
-            }
-            break :blk true;
-        };
+        for (self.releases_bundled.slice()) |existing_release| {
+            // It doesn't matter if older releases don't overlap.
+            if (existing_release.value < constants.config.process.release.value) continue;
 
-        if (!advertisable_includes_running) return error.RunningVersionNotIncluded;
-        if (!advertisable_is_forward_superset) return error.NotSuperset;
+            if (!advertisable.contains(existing_release)) return error.NotSuperset;
+        }
 
         // Log out the releases bundled; both old and new. Only if this was a change detection run
         // and not from startup.
-        if (self.timeout_statx_previous != .none)
-            log.info("releases_bundled old: {any}", .{
-                self.releases_bundled.const_slice(),
-            });
-        defer if (self.timeout_statx_previous != .none)
-            log.info("releases_bundled new: {any}", .{
-                self.releases_bundled.const_slice(),
-            });
+        if (self.timeout_statx_previous != .none) {
+            log.info("releases_bundled old: {any}", .{self.releases_bundled.slice()});
+        }
+        defer if (self.timeout_statx_previous != .none) {
+            log.info("releases_bundled new: {any}", .{self.releases_bundled.slice()});
+        };
 
         // The below flip needs to happen atomically:
         // * update the releases_bundled to be what's in the source,
@@ -1105,8 +1191,7 @@ pub const Multiversion = struct {
         //
         // Since target_fd points to a memfd on Linux, this is functionally a memcpy. On other
         // platforms, it's blocking IO - which is acceptable for development.
-        self.releases_bundled.clear();
-        self.releases_bundled.push_slice(advertisable.const_slice());
+        self.releases_bundled = advertisable;
 
         // While these look like blocking IO operations, on a memfd they're memory manipulation.
         // TODO: Would panic'ing be a better option? On Linux, these should never fail. On other
@@ -1124,7 +1209,7 @@ pub const Multiversion = struct {
         self.stage = .ready;
     }
 
-    fn handle_error(self: *Multiversion, result: anyerror) void {
+    fn handle_error(self: *MultiversionOS, result: anyerror) void {
         assert(self.stage != .init);
 
         log.err("binary does not contain valid multiversion data: {}", .{result});
@@ -1132,7 +1217,41 @@ pub const Multiversion = struct {
         self.stage = .{ .err = result };
     }
 
-    pub fn exec_current(self: *Multiversion, release_target: Release) !noreturn {
+    fn replica_release_execute(self: *MultiversionOS, release: Release) noreturn {
+        assert(release.value != constants.config.process.release.value);
+        assert(release.value != Release.zero.value);
+        assert(release.value != Release.minimum.value);
+
+        if (!self.releases_bundled.contains(release)) {
+            log.err("release_execute: release {} is not available;" ++
+                " upgrade (or downgrade) the binary", .{
+                release,
+            });
+            @panic("release not available");
+        }
+
+        // We have two paths here, depending on if we're upgrading or downgrading. If we're
+        // downgrading the invariant is that this code is running _before_ we've finished opening,
+        // that is, release_transition is called in open().
+        if (release.value < constants.config.process.release.value) {
+            self.exec_release(
+                release,
+            ) catch |err| {
+                std.debug.panic("failed to execute previous release: {}", .{err});
+            };
+        } else {
+            // For the upgrade case, re-run the latest binary in place. If we need something older
+            // than the latest, that'll be handled when the case above is hit when re-execing:
+            // (current version v1) -> (latest version v4) -> (desired version v2)
+            self.exec_current(release) catch |err| {
+                std.debug.panic("failed to execute latest release: {}", .{err});
+            };
+        }
+
+        comptime unreachable;
+    }
+
+    fn exec_current(self: *MultiversionOS, release_target: Release) !noreturn {
         // target_fd is only modified in target_update() which happens synchronously.
         assert(self.stage != .target_update);
 
@@ -1178,7 +1297,7 @@ pub const Multiversion = struct {
     /// exec_release is called before a replica is fully open, but just after it has transitioned to
     /// static. Therefore, standard `os.read` blocking syscalls are available.
     /// (in any case, using blocking IO on a memfd on Linux is safe.)
-    pub fn exec_release(self: *Multiversion, release_target: Release) !noreturn {
+    fn exec_release(self: *MultiversionOS, release_target: Release) !noreturn {
         // exec_release uses self.source_buffer, but this may be the target of an async read by
         // the kernel (from binary_open_callback). Assert that timeouts are not running, and
         // multiversioning is ready to ensure this can't be the case.
@@ -1190,8 +1309,7 @@ pub const Multiversion = struct {
         if (header.current_release == constants.config.process.release.value) {
             // Normally if we are downgrading, it means that we are running the newest release
             // in the list of bundled releases.
-            assert(constants.config.process.release.value ==
-                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+            assert(constants.config.process.release.value == self.releases_bundled.last().value);
         } else {
             // Scenario:
             // 1. Replica starts on release A.
@@ -1207,8 +1325,7 @@ pub const Multiversion = struct {
                 Release{ .value = header.current_release },
             });
 
-            assert(constants.config.process.release.value !=
-                self.releases_bundled.get(self.releases_bundled.count() - 1).value);
+            assert(constants.config.process.release.value != self.releases_bundled.last().value);
         }
 
         // It should never happen that index is null: the caller must (and does, in the case of
@@ -1262,7 +1379,7 @@ pub const Multiversion = struct {
         try self.exec_target_fd();
     }
 
-    fn exec_target_fd(self: *Multiversion) !noreturn {
+    fn exec_target_fd(self: *MultiversionOS) !noreturn {
         switch (builtin.os.tag) {
             .linux => {
                 if (execveat(
@@ -1284,17 +1401,6 @@ pub const Multiversion = struct {
                 unreachable;
             },
             .windows => {
-                // Includes the null byte, that utf8ToUtf16LeAllocZ needs.
-                var buffer: [std.fs.max_path_bytes]u8 = undefined;
-                var fixed_allocator = std.heap.FixedBufferAllocator.init(&buffer);
-                const allocator = fixed_allocator.allocator();
-
-                const target_path_w = std.unicode.utf8ToUtf16LeAllocZ(
-                    allocator,
-                    self.target_path,
-                ) catch unreachable;
-                defer allocator.free(target_path_w);
-
                 // "The Unicode version of this function, CreateProcessW, can modify the contents of
                 // this string. Therefore, this parameter cannot be a pointer to read-only memory
                 // (such as a const variable or a literal string). If this parameter is a constant
@@ -1303,14 +1409,7 @@ pub const Multiversion = struct {
                 // That said, with how CreateProcessW is called, this should _never_ happen, since
                 // its both provided a full lpApplicationName, and because GetCommandLineW actually
                 // points to a copy of memory from the PEB.
-                const get_command_line_w = @extern(
-                    *const fn () callconv(.C) std.os.windows.LPWSTR,
-                    .{
-                        .library_name = "kernel32",
-                        .name = "GetCommandLineW",
-                    },
-                );
-                const cmd_line_w = get_command_line_w();
+                const cmd_line_w = stdx.windows.GetCommandLineW();
 
                 var lp_startup_info = std.mem.zeroes(std.os.windows.STARTUPINFOW);
                 lp_startup_info.cb = @sizeOf(std.os.windows.STARTUPINFOW);
@@ -1320,11 +1419,48 @@ pub const Multiversion = struct {
                 // Close the handle before trying to execute.
                 posix.close(self.target_fd);
 
+                const pipe_name: [*:0]const u16 =
+                    std.unicode.utf8ToUtf16LeStringLiteral("\\\\.\\pipe\\") ++ random_wstr();
+
+                // Use pipe to send our HANDLE to the child, see `wait_for_parent_to_exit`.
+                const pipe = std.os.windows.kernel32.CreateNamedPipeW(
+                    pipe_name,
+                    std.os.windows.PIPE_ACCESS_OUTBOUND |
+                        0x00080000, // FILE_FLAG_FIRST_PIPE_INSTANCE,
+                    std.os.windows.PIPE_TYPE_BYTE | std.os.windows.PIPE_WAIT,
+                    1, // nMaxInstances
+                    0, // nOutBufferSize
+                    0, // nInBufferSize
+                    0, // nDefaultTimeOut
+                    null, // lpSecurityAttributes
+                );
+                if (pipe == std.os.windows.INVALID_HANDLE_VALUE) {
+                    log.err("CreateNamedPipeW: {}", .{std.os.windows.GetLastError()});
+                    return error.CreateNamedPipeWFailed;
+                }
+                assert(pipe != std.os.windows.INVALID_HANDLE_VALUE);
+                errdefer std.os.windows.CloseHandle(pipe);
+
+                // Pass the name of the pipe and the path to the original executable
+                // via the inherited environment.
+                assert(
+                    std.os.windows.kernel32.SetEnvironmentVariableW(
+                        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_PIPE),
+                        pipe_name,
+                    ) != 0,
+                );
+                assert(
+                    std.os.windows.kernel32.SetEnvironmentVariableW(
+                        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_EXE),
+                        self.args_envp.exe_path_w,
+                    ) != 0,
+                );
+
                 // If bInheritHandles is FALSE, and dwFlags inside STARTUPINFOW doesn't have
                 // STARTF_USESTDHANDLES set, the stdin/stdout/stderr handles of the parent will
                 // be passed through to the child.
                 std.os.windows.CreateProcessW(
-                    target_path_w,
+                    self.args_envp.target_path_w,
                     cmd_line_w,
                     null,
                     null,
@@ -1335,6 +1471,32 @@ pub const Multiversion = struct {
                     &lp_startup_info,
                     &lp_process_information,
                 ) catch return error.CreateProcessWFailed;
+                const child: std.os.windows.HANDLE = lp_process_information.hProcess;
+
+                if (stdx.windows.ConnectNamedPipe(pipe, null) == std.os.windows.FALSE and
+                    std.os.windows.GetLastError() != .PIPE_CONNECTED)
+                {
+                    log.err("ConnectNamedPipe: {}", .{std.os.windows.GetLastError()});
+                    return error.ConnectNamedPipeFailed;
+                }
+
+                var me: std.os.windows.HANDLE = undefined;
+                if (std.os.windows.kernel32.DuplicateHandle(
+                    std.os.windows.GetCurrentProcess(),
+                    std.os.windows.GetCurrentProcess(),
+                    child,
+                    &me,
+                    0,
+                    std.os.windows.FALSE,
+                    std.os.windows.DUPLICATE_SAME_ACCESS,
+                ) != std.os.windows.TRUE) {
+                    log.err("DuplicateHandle: {}", .{std.os.windows.GetLastError()});
+                    return error.DuplicateHandleFailed;
+                }
+
+                const write_size = try std.os.windows.WriteFile(pipe, std.mem.asBytes(&me), null);
+                assert(write_size == @sizeOf(@TypeOf(me)));
+
                 std.process.exit(0);
             },
             else => @panic("unsupported platform"),
@@ -1360,11 +1522,10 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
 
     const native_self_exe_path = try std.fs.selfExePath(&buf);
 
-    if (builtin.target.os.tag == .linux and std.mem.eql(
-        u8,
-        native_self_exe_path,
-        "/memfd:" ++ multiversion_uuid ++ " (deleted)",
-    )) {
+    if (builtin.target.os.tag == .linux and
+        std.mem.eql(u8, native_self_exe_path, "/memfd:" ++ multiversion_uuid ++ " (deleted)"))
+    {
+        comptime assert(builtin.target.os.tag == .linux);
         // Technically, "/memfd:tigerbeetle-multiversion-... (deleted)" is a valid path at which you
         // could place your binary - please don't!
         assert(std.fs.cwd().statFile(native_self_exe_path) catch null == null);
@@ -1374,23 +1535,106 @@ pub fn self_exe_path(allocator: std.mem.Allocator) ![:0]const u8 {
         assert(std.fs.path.isAbsolute(path));
 
         return path;
-    } else if (std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null) {
-        assert(builtin.target.os.tag == .windows or builtin.target.os.tag == .macos);
-        // Similar to above, you _could_ call your binary "tigerbeetle-multiversion-...". This can't
-        // be checked with an assert unfortunately.
+    }
+
+    if (builtin.target.os.tag == .macos and
+        std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null)
+    {
+        comptime assert(builtin.target.os.tag == .macos);
+        // Similarly to the Linux case, assume that UUID-containing name means an upgrade, though
+        // it's not possible to assert this.
 
         // Running from a temp path already; the real path is argv[0].
-        var arg_iterator = try std.process.argsWithAllocator(allocator);
-        defer arg_iterator.deinit();
+        const path = try allocator.dupeZ(u8, std.mem.span(os.argv[0]));
+        assert(std.fs.path.isAbsolute(path));
 
-        const path = arg_iterator.next().?;
+        return path;
+    }
+
+    if (builtin.target.os.tag == .windows and
+        std.mem.indexOf(u8, native_self_exe_path, multiversion_uuid) != null)
+    {
+        comptime assert(builtin.target.os.tag == .windows);
+        // Similarly to the Linux case, assume that UUID-containing name means an upgrade, though
+        // it's not possible to assert this.
+
+        // Windows make it error-prone to set argv[0], so the path is passed via env.
+        const path = try std.process.getEnvVarOwned(allocator, TB_MULTIVERSION_EXE);
+        defer allocator.free(path);
+
         assert(std.fs.path.isAbsolute(path));
 
         return try allocator.dupeZ(u8, path);
-    } else {
-        // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
-        return try allocator.dupeZ(u8, native_self_exe_path);
     }
+
+    // Not running from a memfd or temp path. `native_self_exe_path` is the real path.
+    return try allocator.dupeZ(u8, native_self_exe_path);
+}
+
+pub fn random_wstr() [32]u16 {
+    var result: [32]u16 = @splat(std.unicode.utf8ToUtf16LeStringLiteral("0")[0]);
+
+    var buffer_utf8: [31]u8 = undefined;
+    const name_utf8 = stdx.array_print(31, &buffer_utf8, "{d}", .{std.crypto.random.int(u64)});
+    var fba = std.heap.FixedBufferAllocator.init(std.mem.asBytes(&result));
+    _ = std.unicode.utf8ToUtf16LeAllocZ(fba.allocator(), name_utf8) catch |err| switch (err) {
+        error.InvalidUtf8, error.OutOfMemory => unreachable,
+    };
+    return result;
+}
+
+// During upgrades, tigerbeetle dynamically re-executes itself at a different version.
+// There can be only one tigerbeetle instance running at a time, due to any of:
+// - data file lock,
+// - incoming port,
+// - available RAM.
+// On POSIX, execve semantics of replacing the parent process gives us this for free.
+// On Windows, parent and child cooperate, with the child blocking until the parent exit.
+// Specifically:
+// 1. Parent creates a named pipe with a random name.
+// 2. Parent passes the name of this pipe to the child via inherited env variable.
+// 3. Parent duplicates its own handle into the child process.
+// 4. Parent passes the value of this handle to the child via anonymous pipe
+//    (We don't want to pass parent handle _directly_ to avoid handle inheritance)
+// 5. Child gets the name of the pipe trough env.
+// 6. Child receives the parent's handle through the pipe.
+// 7. Child waits for parent to exit.
+const TB_MULTIVERSION_PIPE = "TB_MULTIVERSION_PIPE";
+const TB_MULTIVERSION_EXE = "TB_MULTIVERSION_EXE";
+pub fn wait_for_parent_to_exit() !void {
+    comptime assert(builtin.os.tag == .windows);
+
+    var pipe_name_buffer: [64]u16 = undefined;
+    const count = std.os.windows.kernel32.GetEnvironmentVariableW(
+        comptime std.unicode.utf8ToUtf16LeStringLiteral(TB_MULTIVERSION_PIPE),
+        &pipe_name_buffer,
+        pipe_name_buffer.len,
+    );
+    if (count == 0) return;
+    assert(pipe_name_buffer[count] == 0);
+
+    const pipe = std.os.windows.kernel32.CreateFileW(
+        @ptrCast(&pipe_name_buffer),
+        std.os.windows.GENERIC_READ,
+        0,
+        null,
+        std.os.windows.OPEN_EXISTING,
+        0,
+        null,
+    );
+    if (pipe == std.os.windows.INVALID_HANDLE_VALUE) {
+        log.err("CreateFileW: {}", .{std.os.windows.GetLastError()});
+        return error.CreateFileWFailed;
+    }
+    assert(pipe != std.os.windows.INVALID_HANDLE_VALUE);
+    defer std.os.windows.CloseHandle(pipe);
+
+    var parent: std.os.windows.HANDLE = undefined;
+    const read_size = try std.os.windows.ReadFile(pipe, std.mem.asBytes(&parent), null);
+    assert(read_size == @sizeOf(@TypeOf(parent)));
+    defer std.os.windows.CloseHandle(parent);
+
+    try std.os.windows.WaitForSingleObject(parent, std.os.windows.INFINITE);
 }
 
 const HeaderBodyOffsets = struct {
@@ -1803,26 +2047,26 @@ test parse_elf {
 }
 
 pub fn print_information(
-    allocator: std.mem.Allocator,
+    gpa: std.mem.Allocator,
     exe_path: []const u8,
     output: std.io.AnyWriter,
 ) !void {
     var io = try IO.init(32, 0);
     defer io.deinit();
 
-    const absolute_exe_path = try std.fs.cwd().realpathAlloc(allocator, exe_path);
-    defer allocator.free(absolute_exe_path);
+    const absolute_exe_path = try std.fs.cwd().realpathAlloc(gpa, exe_path);
+    defer gpa.free(absolute_exe_path);
 
-    const absolute_exe_path_z = try allocator.dupeZ(u8, absolute_exe_path);
-    defer allocator.free(absolute_exe_path_z);
+    const absolute_exe_path_z = try gpa.dupeZ(u8, absolute_exe_path);
+    defer gpa.free(absolute_exe_path_z);
 
-    var multiversion = try Multiversion.init(
-        allocator,
+    var multiversion = try MultiversionOS.init(
+        gpa,
         &io,
         absolute_exe_path_z,
         .detect,
     );
-    defer multiversion.deinit(allocator);
+    defer multiversion.deinit(gpa);
 
     multiversion.open_sync() catch |err| {
         try output.print("multiversioning not enabled: {}\n", .{err});
@@ -1845,73 +2089,75 @@ pub fn print_information(
 
     try output.print(
         "multiversioning.releases_bundled={any}\n",
-        .{multiversion.releases_bundled.const_slice()},
+        .{multiversion.releases_bundled.slice()},
     );
 
-    inline for (comptime std.meta.fieldNames(MultiversionHeader)) |field| {
-        if (std.mem.eql(u8, field, "current_git_commit")) {
-            try output.print("multiversioning.header.{s}={s}\n", .{
-                field,
-                std.fmt.fmtSliceHexLower(&header.current_git_commit),
-            });
-        } else if (!std.mem.eql(u8, field, "past") and
-            !std.mem.eql(u8, field, "current_flags_padding") and
-            !std.mem.eql(u8, field, "past_padding") and
-            !std.mem.eql(u8, field, "reserved"))
-        {
-            try output.print("multiversioning.header.{s}={any}\n", .{
-                field,
-                if (comptime std.mem.eql(u8, field, "current_release"))
-                    Release{ .value = @field(header, field) }
-                else
-                    @field(header, field),
-            });
+    inline for (
+        comptime std.enums.values(std.meta.FieldEnum(MultiversionHeader)),
+    ) |field| {
+        const field_name = @tagName(field);
+        switch (field) {
+            .past, .current_flags_padding, .past_padding, .reserved => continue,
+            .current_git_commit => {
+                try output.print("multiversioning.header.{s}={s}\n", .{
+                    field_name,
+                    std.fmt.fmtSliceHexLower(&header.current_git_commit),
+                });
+            },
+            .current_release, .current_release_client_min => {
+                try output.print("multiversioning.header.{s}={any}\n", .{
+                    field_name,
+                    Release{ .value = @field(header, field_name) },
+                });
+            },
+            .checksum_header,
+            .checksum_binary_without_header,
+            .current_checksum,
+            .schema_version,
+            .vsr_releases_max,
+            .current_flags,
+            => {
+                try output.print("multiversioning.header.{s}={any}\n", .{
+                    field_name,
+                    @field(header, field_name),
+                });
+            },
         }
     }
 
-    try std.fmt.format(
-        output,
-        "multiversioning.header.past.count={}\n",
-        .{header.past.count},
-    );
-    inline for (comptime std.meta.fieldNames(MultiversionHeader.PastReleases)) |field| {
-        if ((comptime std.mem.eql(u8, field, "releases")) or
-            (comptime std.mem.eql(u8, field, "release_client_mins")))
-        {
-            var release_list: ReleaseList = .{};
-            for (@field(header.past, field)[0..header.past.count]) |release| {
-                release_list.push(Release{ .value = release });
-            }
+    try output.print("multiversioning.header.past.count={}\n", .{header.past.count});
+    inline for (
+        comptime std.enums.values(std.meta.FieldEnum(MultiversionHeader.PastReleases)),
+    ) |field| {
+        const field_name = @tagName(field);
+        switch (field) {
+            .count, .flags_padding => {},
+            .releases, .release_client_mins => {
+                comptime assert(@sizeOf(Release) ==
+                    @sizeOf(@TypeOf(@field(header.past, field_name)[0])));
+                const release_list: []const Release =
+                    @ptrCast(@field(header.past, field_name)[0..header.past.count]);
 
-            try output.print("multiversioning.header.past.{s}={any}\n", .{
-                field,
-                release_list.const_slice(),
-            });
-        } else if (comptime std.mem.eql(u8, field, "git_commits")) {
-            for (@field(header.past, field)[0..header.past.count], 0..) |*git_commit, i| {
-                try output.print("multiversioning.header.past.{s}.{}={}\n", .{
-                    field,
-                    Release{ .value = header.past.releases[i] },
-                    std.fmt.fmtSliceHexLower(git_commit),
+                try output.print("multiversioning.header.past.{s}={any}\n", .{
+                    field_name,
+                    release_list,
                 });
-            }
-        } else if ((comptime std.mem.eql(u8, field, "checksums")) or
-            (comptime std.mem.eql(u8, field, "flags")))
-        {
-            for (@field(header.past, field)[0..header.past.count], 0..) |value, i| {
-                try output.print("multiversioning.header.past.{s}.{}={}\n", .{
-                    field,
-                    Release{ .value = header.past.releases[i] },
-                    value,
+            },
+            .git_commits => {
+                for (@field(header.past, field_name)[0..header.past.count], 0..) |*git_commit, i| {
+                    try output.print("multiversioning.header.past.{s}.{}={}\n", .{
+                        field_name,
+                        Release{ .value = header.past.releases[i] },
+                        std.fmt.fmtSliceHexLower(git_commit),
+                    });
+                }
+            },
+            .checksums, .offsets, .sizes, .flags => {
+                try output.print("multiversioning.header.past.{s}={any}\n", .{
+                    field_name,
+                    @field(header.past, field_name)[0..header.past.count],
                 });
-            }
-        } else if (comptime (!std.mem.eql(u8, field, "count") and
-            !std.mem.eql(u8, field, "flags_padding")))
-        {
-            try output.print("multiversioning.header.past.{s}={any}\n", .{
-                field,
-                @field(header.past, field)[0..header.past.count],
-            });
+            },
         }
     }
 }

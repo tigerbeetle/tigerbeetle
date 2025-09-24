@@ -1,9 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
-const meta = std.meta;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const constants = @import("../constants.zig");
 const snapshot_latest = @import("tree.zig").snapshot_latest;
@@ -117,8 +116,11 @@ pub fn ScanTreeType(
                 ScanTree,
                 ScanTree.Key,
                 ScanTree.Value,
+                .{
+                    .streams_max = KWayMergeStreams.streams_count,
+                    .deduplicate = true,
+                },
                 ScanTree.key_from_value,
-                KWayMergeStreams.streams_count,
                 stream.peek,
                 stream.pop,
                 stream.precedence,
@@ -863,8 +865,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             read: *Grid.Read,
             index_block: BlockPtrConst,
         ) void {
-            const State = std.meta.FieldType(ScanTreeLevel, .state);
-            const LoadingIndex = std.meta.FieldType(State, .loading_index);
+            const State = @FieldType(ScanTreeLevel, "state");
+            const LoadingIndex = @FieldType(State, "loading_index");
             const loading_index: *LoadingIndex = @fieldParentPtr("read", read);
             const state: *State = @fieldParentPtr("loading_index", loading_index);
             const self: *ScanTreeLevel = @fieldParentPtr("state", state);
@@ -958,9 +960,9 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
             iterator: *TableValueIterator,
             value_block: BlockPtrConst,
         ) void {
-            const State = std.meta.FieldType(ScanTreeLevel, .state);
-            const Iterating = std.meta.FieldType(State, .iterating);
-            const IteratingValues = std.meta.FieldType(Iterating, .values);
+            const State = @FieldType(ScanTreeLevel, "state");
+            const Iterating = @FieldType(State, "iterating");
+            const IteratingValues = @FieldType(Iterating, "values");
             const iterating_values: *IteratingValues = @fieldParentPtr("iterator", iterator);
             const iterating: *Iterating = @fieldParentPtr("values", iterating_values);
             const state: *State = @fieldParentPtr("iterating", iterating);
@@ -1022,8 +1024,8 @@ fn ScanTreeLevelType(comptime ScanTree: type, comptime Storage: type) type {
         }
 
         fn finished_callback(next_tick: *Grid.NextTick) void {
-            const State = std.meta.FieldType(ScanTreeLevel, .state);
-            const Finished = std.meta.FieldType(State, .finished);
+            const State = @FieldType(ScanTreeLevel, "state");
+            const Finished = @FieldType(State, "finished");
             const finished: *Finished = @fieldParentPtr("next_tick", next_tick);
             const state: *State = @alignCast(@fieldParentPtr("finished", finished));
             const self: *ScanTreeLevel = @fieldParentPtr("state", state);

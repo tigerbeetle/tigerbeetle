@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 const ScanState = @import("scan_state.zig").ScanState;
@@ -94,8 +94,11 @@ fn ScanMergeType(
             ScanMerge,
             u64,
             u64,
+            .{
+                .streams_max = constants.lsm_scans_max,
+                .deduplicate = true,
+            },
             key_from_value,
-            constants.lsm_scans_max,
             merge_stream_peek,
             merge_stream_pop,
             merge_stream_precedence,

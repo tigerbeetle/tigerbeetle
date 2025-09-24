@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 
 const os = std.os;
 const posix = std.posix;
@@ -26,12 +26,8 @@ pub const Time = struct {
     /// Always use a monotonic timestamp if the goal is to measure elapsed time.
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
-    pub fn monotonic(self: Time) u64 {
-        return self.vtable.monotonic(self.context);
-    }
-
-    pub fn monotonic_instant(self: Time) Instant {
-        return Instant{ .ns = self.monotonic() };
+    pub fn monotonic(self: Time) Instant {
+        return .{ .ns = self.vtable.monotonic(self.context) };
     }
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
@@ -157,18 +153,8 @@ pub const TimeOS = struct {
         // TODO(zig): Maybe use `std.time.nanoTimestamp()`.
         // https://github.com/ziglang/zig/pull/22871
         assert(is_windows);
-        const get_system_time_precise_as_file_time = @extern(
-            *const fn (
-                lpFileTime: *os.windows.FILETIME,
-            ) callconv(os.windows.WINAPI) void,
-            .{
-                .library_name = "kernel32",
-                .name = "GetSystemTimePreciseAsFileTime",
-            },
-        );
-
         var ft: os.windows.FILETIME = undefined;
-        get_system_time_precise_as_file_time(&ft);
+        stdx.windows.GetSystemTimePreciseAsFileTime(&ft);
         const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 
         // FileTime is in units of 100 nanoseconds
@@ -189,8 +175,62 @@ pub const TimeOS = struct {
 test "Time monotonic smoke" {
     var time_os: TimeOS = .{};
     const time = time_os.time();
-    const instant_1 = time.monotonic_instant();
-    const instant_2 = time.monotonic_instant();
+    const instant_1 = time.monotonic();
+    const instant_2 = time.monotonic();
     assert(instant_1.duration_since(instant_1).ns == 0);
     assert(instant_2.duration_since(instant_1).ns >= 0);
+}
+
+/// Equivalent to `std.time.Timer`,
+/// but using the `vsr.Time` interface as the source of time.
+pub const Timer = struct {
+    time: Time,
+    started: Instant,
+
+    pub fn init(time: Time) Timer {
+        return .{
+            .time = time,
+            .started = time.monotonic(),
+        };
+    }
+
+    /// Reads the timer value since start or the last reset.
+    pub fn read(self: *Timer) stdx.Duration {
+        const current = self.time.monotonic();
+        assert(current.ns >= self.started.ns);
+        return current.duration_since(self.started);
+    }
+
+    /// Resets the timer.
+    pub fn reset(self: *Timer) void {
+        const current = self.time.monotonic();
+        assert(current.ns >= self.started.ns);
+        self.started = current;
+    }
+};
+
+const fixtures = @import("testing/fixtures.zig");
+const testing = std.testing;
+
+test Timer {
+    var time_sim = fixtures.init_time(.{ .resolution = 1 });
+    const time = time_sim.time();
+
+    var timer = Timer.init(time);
+    // Repeat the cycle read/reset multiple times:
+    for (0..3) |_| {
+        const time_0 = timer.read();
+        try testing.expectEqual(@as(u64, 0), time_0.ns);
+        time.tick();
+
+        const time_1 = timer.read();
+        try testing.expectEqual(@as(u64, 1), time_1.ns);
+        time.tick();
+
+        const time_2 = timer.read();
+        try testing.expectEqual(@as(u64, 2), time_2.ns);
+        time.tick();
+
+        timer.reset();
+    }
 }

@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const maybe = stdx.maybe;
 
 const constants = @import("../constants.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const Command = vsr.Command;
 const Operation = vsr.Operation;
@@ -195,27 +195,24 @@ pub const Header = extern struct {
     /// Some commands such as .request or .prepare may be forwarded on to other replicas so that
     /// Header.replica or Header.client only identifies the ultimate origin, not the latest peer.
     pub fn peer_type(self: *const Header) vsr.Peer {
-        switch (self.into_any()) {
+        return switch (self.into_any()) {
             .reserved => unreachable,
-            // TODO: replicas used to forward requests. They no longer do, and can always return
-            // request.client starting with the next release.
-            .request => |request| {
-                switch (request.operation) {
-                    // However, we do not forward the first .register request sent by a client:
-                    .register => return .{ .client = request.client },
-                    else => return .unknown,
-                }
-            },
-            .prepare => return .unknown,
-            .block => return .unknown,
-            .reply => return .unknown,
-            .deprecated_12 => return .unknown,
-            .deprecated_21 => return .unknown,
-            .deprecated_22 => return .unknown,
-            .deprecated_23 => return .unknown,
-            // These messages identify the peer as either a replica or a client:
-            .ping_client => |ping| return .{ .client = ping.client },
-            // All other messages identify the peer as a replica:
+
+            .reply,
+            .prepare,
+            .block,
+            => .unknown,
+
+            // The peer may be a replica or a client, since replicas forward request messages.
+            // However, we return the client ID, as it is useful for the MessageBus. Specifically,
+            // a replica that receives a request from a client can immediately cache the connection
+            // in its client map, instead of waiting for an infrequent PingClient message to do so.
+            .request => |request| .{ .client_likely = request.client },
+
+            // The peer is certainly a client:
+            .ping_client => |ping| .{ .client = ping.client },
+
+            // The peer is certainly a replica:
             .ping,
             .pong,
             .pong_client,
@@ -231,8 +228,14 @@ pub const Header = extern struct {
             .headers,
             .eviction,
             .request_blocks,
-            => return .{ .replica = self.replica },
-        }
+            => .{ .replica = self.replica },
+
+            .deprecated_12,
+            .deprecated_21,
+            .deprecated_22,
+            .deprecated_23,
+            => .unknown,
+        };
     }
 
     pub fn format(
@@ -295,8 +298,6 @@ pub const Header = extern struct {
     /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
     /// type for each command.
     pub const Reserved = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128,
         checksum_padding: u128 = 0,
         checksum_body: u128,
@@ -314,6 +315,16 @@ pub const Header = extern struct {
 
         reserved: [128]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reserved);
             return "reserved is invalid";
@@ -323,8 +334,6 @@ pub const Header = extern struct {
     /// This type isn't ever actually a constructed, but makes Type() simpler by providing a header
     /// type for each command.
     pub const Deprecated = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128,
         checksum_padding: u128 = 0,
         checksum_body: u128,
@@ -342,14 +351,22 @@ pub const Header = extern struct {
 
         reserved: [128]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(_: *const @This()) ?[]const u8 {
             return "deprecated message type";
         }
     };
 
     pub const Ping = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -379,6 +396,16 @@ pub const Header = extern struct {
 
         reserved: [80]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping);
             if (self.size != @sizeOf(Header) + @sizeOf(vsr.Release) * constants.vsr_releases_max) {
@@ -399,8 +426,6 @@ pub const Header = extern struct {
     };
 
     pub const Pong = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -423,6 +448,16 @@ pub const Header = extern struct {
 
         reserved: [112]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -436,8 +471,6 @@ pub const Header = extern struct {
     };
 
     pub const PingClient = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -457,6 +490,16 @@ pub const Header = extern struct {
         ping_timestamp_monotonic: u64,
         reserved: [104]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .ping_client);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -471,8 +514,6 @@ pub const Header = extern struct {
     };
 
     pub const PongClient = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -491,6 +532,16 @@ pub const Header = extern struct {
         ping_timestamp_monotonic: u64,
         reserved: [120]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .pong_client);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -502,8 +553,6 @@ pub const Header = extern struct {
     };
 
     pub const Request = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -559,6 +608,16 @@ pub const Header = extern struct {
         /// reply.
         previous_request_latency: u32,
         reserved: [52]u8 = @splat(0),
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request);
@@ -629,8 +688,6 @@ pub const Header = extern struct {
     };
 
     pub const Prepare = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -682,6 +739,16 @@ pub const Header = extern struct {
         /// The state machine operation to apply.
         operation: Operation,
         reserved: [3]u8 = @splat(0),
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
 
         fn invalid_header(self: *const Prepare) ?[]const u8 {
             assert(self.command == .prepare);
@@ -797,8 +864,6 @@ pub const Header = extern struct {
     };
 
     pub const PrepareOk = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -830,6 +895,16 @@ pub const Header = extern struct {
         request: u32,
         operation: Operation = .reserved,
         reserved: [3]u8 = @splat(0),
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .prepare_ok);
@@ -877,8 +952,6 @@ pub const Header = extern struct {
     };
 
     pub const Reply = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -919,6 +992,16 @@ pub const Header = extern struct {
         operation: Operation = .reserved,
         reserved: [19]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .reply);
             if (self.release.value == 0) return "release == 0";
@@ -946,8 +1029,6 @@ pub const Header = extern struct {
     };
 
     pub const Commit = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -980,6 +1061,16 @@ pub const Header = extern struct {
 
         reserved: [56]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .commit);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -993,8 +1084,6 @@ pub const Header = extern struct {
     };
 
     pub const StartViewChange = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1012,6 +1101,16 @@ pub const Header = extern struct {
 
         reserved: [128]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view_change);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -1023,8 +1122,6 @@ pub const Header = extern struct {
     };
 
     pub const DoViewChange = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1055,6 +1152,16 @@ pub const Header = extern struct {
         log_view: u32,
         reserved: [68]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .do_view_change);
             if ((self.size - @sizeOf(Header)) % @sizeOf(Header) != 0) {
@@ -1069,8 +1176,6 @@ pub const Header = extern struct {
     };
 
     pub const StartView = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1096,6 +1201,16 @@ pub const Header = extern struct {
         checkpoint_op: u64,
         reserved: [88]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .start_view);
             if (self.release.value != 0) return "release != 0";
@@ -1107,8 +1222,6 @@ pub const Header = extern struct {
     };
 
     pub const RequestStartView = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1127,6 +1240,16 @@ pub const Header = extern struct {
         nonce: u128,
         reserved: [112]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_start_view);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -1139,8 +1262,6 @@ pub const Header = extern struct {
     };
 
     pub const RequestHeaders = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1162,6 +1283,16 @@ pub const Header = extern struct {
         op_max: u64,
         reserved: [112]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_headers);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -1175,8 +1306,6 @@ pub const Header = extern struct {
     };
 
     pub const RequestPrepare = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1185,7 +1314,7 @@ pub const Header = extern struct {
         cluster: u128,
         size: u32 = @sizeOf(Header),
         epoch: u32 = 0,
-        view: u32 = 0, // Always 0.
+        view: u32,
         release: vsr.Release = vsr.Release.zero, // Always 0.
         protocol: u16 = vsr.Version,
         command: Command,
@@ -1197,21 +1326,29 @@ pub const Header = extern struct {
         prepare_op: u64,
         reserved: [88]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_prepare);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
             if (self.checksum_body != checksum_body_empty) return "checksum_body != expected";
+            if (self.view != 0 and self.prepare_checksum != 0) return "view != 0 and checksum != 0";
             if (self.release.value != 0) return "release != 0";
             if (self.prepare_checksum_padding != 0) return "prepare_checksum_padding != 0";
-            if (self.view != 0) return "view == 0";
             if (!stdx.zeroed(&self.reserved)) return "reserved != 0";
             return null;
         }
     };
 
     pub const RequestReply = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1233,6 +1370,16 @@ pub const Header = extern struct {
         reply_op: u64,
         reserved: [72]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_reply);
             if (self.size != @sizeOf(Header)) return "size != @sizeOf(Header)";
@@ -1247,8 +1394,6 @@ pub const Header = extern struct {
     };
 
     pub const Headers = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1266,6 +1411,16 @@ pub const Header = extern struct {
 
         reserved: [128]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .headers);
             if (self.size == @sizeOf(Header)) return "size == @sizeOf(Header)";
@@ -1276,8 +1431,6 @@ pub const Header = extern struct {
     };
 
     pub const Eviction = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1296,6 +1449,16 @@ pub const Header = extern struct {
         client: u128,
         reserved: [111]u8 = @splat(0),
         reason: Reason,
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .eviction);
@@ -1333,8 +1496,6 @@ pub const Header = extern struct {
     };
 
     pub const RequestBlocks = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
-
         checksum: u128 = 0,
         checksum_padding: u128 = 0,
         checksum_body: u128 = 0,
@@ -1352,6 +1513,16 @@ pub const Header = extern struct {
 
         reserved: [128]u8 = @splat(0),
 
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
+
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .request_blocks);
             if (self.view != 0) return "view != 0";
@@ -1366,7 +1537,6 @@ pub const Header = extern struct {
     };
 
     pub const Block = extern struct {
-        pub usingnamespace HeaderFunctionsType(@This());
         pub const metadata_size = 96;
 
         checksum: u128 = 0,
@@ -1393,6 +1563,16 @@ pub const Header = extern struct {
         snapshot: u64,
         block_type: schema.BlockType,
         reserved_block: [15]u8 = @splat(0),
+
+        pub const frame = HeaderFunctionsType(@This()).frame;
+        pub const frame_const = HeaderFunctionsType(@This()).frame_const;
+        pub const invalid = HeaderFunctionsType(@This()).invalid;
+        pub const calculate_checksum = HeaderFunctionsType(@This()).calculate_checksum;
+        pub const calculate_checksum_body = HeaderFunctionsType(@This()).calculate_checksum_body;
+        pub const set_checksum = HeaderFunctionsType(@This()).set_checksum;
+        pub const set_checksum_body = HeaderFunctionsType(@This()).set_checksum_body;
+        pub const valid_checksum = HeaderFunctionsType(@This()).valid_checksum;
+        pub const valid_checksum_body = HeaderFunctionsType(@This()).valid_checksum_body;
 
         fn invalid_header(self: *const @This()) ?[]const u8 {
             assert(self.command == .block);
@@ -1434,6 +1614,16 @@ comptime {
                 assert(@offsetOf(CommandHeader, command_field.name) ==
                     @offsetOf(Header, header_field.name));
             }
+        }
+
+        // Verify that the command's header's re-exports all Header's functions.
+        const HeaderFunctions = Header.HeaderFunctionsType(CommandHeader);
+        for (@typeInfo(HeaderFunctions).@"struct".decls) |decl| {
+            assert(@hasDecl(CommandHeader, decl.name));
+
+            const a = @field(CommandHeader, decl.name);
+            const b = @field(HeaderFunctions, decl.name);
+            assert(a == b);
         }
     }
 }

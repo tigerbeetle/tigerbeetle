@@ -10,7 +10,7 @@ production deployments, TigerBeetle also works on Windows and MacOS.
 ```console
 git clone https://github.com/tigerbeetle/tigerbeetle.git
 cd tigerbeetle
-./zig/download.sh # .bat if you're on Windows.
+./zig/download.ps1 # Yes, .ps1 even on Linux.
 ./zig/zig build -Drelease
 ./tigerbeetle version
 ```
@@ -37,6 +37,12 @@ Fuzzing ([/src/fuzz_tests.zig](/src/fuzz_tests.zig)):
 ```console
 ./zig/zig build fuzz -- smoke
 ./zig/zig build fuzz -- lsm_tree
+```
+
+Continuous Integration entry point (see [ci.yml](/.github/workflows/ci.yml)):
+
+```console
+./zig/zig build ci
 ```
 
 ## Simulation

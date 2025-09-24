@@ -33,7 +33,7 @@ fn RequestContextType(comptime request_size_max: comptime_int) type {
             timestamp: u64,
             result_ptr: ?[*]const u8,
             result_len: u32,
-        ) callconv(.C) void {
+        ) callconv(.c) void {
             var self: *RequestContext = @ptrCast(@alignCast(tb_packet.*.user_data.?));
             defer self.completion.complete();
 

@@ -133,7 +133,7 @@ pub const CompletionCallback = *const fn (
     timestamp: u64,
     result_ptr: ?[*]const u8,
     result_len: u32,
-) callconv(.C) void;
+) callconv(.c) void;
 
 pub const InitError = std.mem.Allocator.Error || error{
     Unexpected,
@@ -163,6 +163,7 @@ pub fn ContextType(
             .get_account_balances,
             .query_accounts,
             .query_transfers,
+            .get_change_events,
         };
 
         const UserData = extern struct {
@@ -293,12 +294,12 @@ pub fn ContextType(
             });
             context.client = Client.init(
                 allocator,
+                time,
+                &context.message_pool,
                 .{
                     .id = context.client_id,
                     .cluster = cluster_id,
                     .replica_count = context.addresses.count_as(u8),
-                    .time = time,
-                    .message_pool = &context.message_pool,
                     .message_bus_options = .{
                         .configuration = context.addresses.const_slice(),
                         .io = &context.io,
@@ -311,9 +312,7 @@ pub fn ContextType(
                     @errorName(err),
                 });
                 return switch (err) {
-                    error.TimerUnsupported => error.Unexpected,
                     error.OutOfMemory => error.OutOfMemory,
-                    else => unreachable,
                 };
             };
             errdefer context.client.deinit(allocator);
@@ -516,7 +515,7 @@ pub fn ContextType(
             if (self.client.request_inflight == null) {
                 assert(self.pending.count() == 0);
                 packet.phase = .pending;
-                packet.multi_batch_time_monotonic = self.client.time.monotonic();
+                packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
                 packet.multi_batch_count = 1;
                 packet.multi_batch_event_count = @intCast(batch.event_count);
                 packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -574,7 +573,7 @@ pub fn ContextType(
 
             // Couldn't batch with existing packet so push to pending directly.
             packet.phase = .pending;
-            packet.multi_batch_time_monotonic = self.client.time.monotonic();
+            packet.multi_batch_time_monotonic = self.client.time.monotonic().ns;
             packet.multi_batch_count = 1;
             packet.multi_batch_event_count = @intCast(batch.event_count);
             packet.multi_batch_result_count_expected = @intCast(batch.result_count_expected);
@@ -601,8 +600,20 @@ pub fn ContextType(
 
             const operation: StateMachine.Operation = operation_from_int(packet_list.operation).?;
             const event_size: u32 = StateMachine.event_size_bytes(operation);
-            const result_size: u32 = StateMachine.result_size_bytes(operation);
             const request_size: u32 = request_size: {
+                if (!StateMachine.operation_is_multi_batch(operation)) {
+                    assert(packet_list.multi_batch_next == null);
+                    const source: []const u8 = packet_list.slice();
+                    stdx.copy_disjoint(
+                        .inexact,
+                        u8,
+                        message.buffer[@sizeOf(Header)..],
+                        source,
+                    );
+                    break :request_size @intCast(source.len);
+                }
+                assert(StateMachine.operation_is_multi_batch(operation));
+
                 var message_encoder = MultiBatchEncoder.init(message.buffer[@sizeOf(Header)..], .{
                     .element_size = event_size,
                 });
@@ -630,22 +641,21 @@ pub fn ContextType(
                 assert(multi_batch_events_count == packet_list.multi_batch_event_count);
                 assert(message_encoder.batch_count == packet_list.multi_batch_count);
 
-                break :request_size message_encoder.finish();
-            };
-            assert(request_size % event_size == 0);
-            assert(request_size <= self.batch_size_limit.?);
-
-            // Check if the reply has enough space for the maximum expected number of results.
-            const reply_size_max: u32 = reply_size: {
+                // Check if the reply has enough space for the maximum expected number of results.
+                const result_size: u32 = StateMachine.result_size_bytes(operation);
                 const trailer_size = vsr.multi_batch.trailer_total_size(.{
                     .element_size = result_size,
                     .batch_count = packet_list.multi_batch_count,
                 });
-                break :reply_size (packet_list.multi_batch_result_count_expected * result_size) +
-                    trailer_size;
+                const reply_size_max: u32 = (result_size *
+                    packet_list.multi_batch_result_count_expected) + trailer_size;
+                assert(reply_size_max % result_size == 0);
+                assert(reply_size_max <= constants.message_body_size_max);
+
+                break :request_size message_encoder.finish();
             };
-            assert(reply_size_max % result_size == 0);
-            assert(reply_size_max <= constants.message_body_size_max);
+            assert(request_size % event_size == 0);
+            assert(request_size <= self.batch_size_limit.?);
 
             // Sending the request.
             const previous_request_latency =
@@ -768,7 +778,7 @@ pub fn ContextType(
             assert(timestamp > 0);
             packet_list.assert_phase(.sent);
 
-            const current_timestamp = self.client.time.monotonic_instant();
+            const current_timestamp = self.client.time.monotonic();
             self.previous_request_latency =
                 current_timestamp.duration_since(self.previous_request_instant.?);
 
@@ -782,6 +792,15 @@ pub fn ContextType(
             // The callback should never be called with an operation not in `allowed_operations`.
             // This also guards from sending an unsupported operation.
             assert(operation_from_int(@intFromEnum(operation)) != null);
+
+            if (!StateMachine.operation_is_multi_batch(operation)) {
+                assert(packet_list.multi_batch_next == null);
+                return self.notify_completion(packet_list, .{
+                    .timestamp = timestamp,
+                    .reply = reply,
+                });
+            }
+            assert(StateMachine.operation_is_multi_batch(operation));
 
             const result_size: u32 = StateMachine.result_size_bytes(operation);
             assert(result_size > 0);

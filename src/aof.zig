@@ -5,12 +5,13 @@ const assert = std.debug.assert;
 const constants = @import("constants.zig");
 const vsr = @import("vsr.zig");
 
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBus = vsr.message_bus.MessageBusClient;
 const Header = vsr.Header;
-const Tracer = vsr.trace.Tracer;
+
+const MiB = stdx.MiB;
 
 const log = std.log.scoped(.aof);
 
@@ -295,7 +296,7 @@ pub fn AOFType(comptime IO: type) type {
         }
 
         pub const ReplayClient = struct {
-            const Storage = vsr.storage.StorageType(IO, Tracer);
+            const Storage = vsr.storage.StorageType(IO);
             const StateMachine = vsr.state_machine.StateMachineType(
                 Storage,
                 constants.state_machine_config,
@@ -327,12 +328,12 @@ pub fn AOFType(comptime IO: type) type {
 
                 client.* = try Client.init(
                     allocator,
+                    time,
+                    message_pool,
                     .{
                         .id = stdx.unique_u128(),
                         .cluster = 0,
                         .replica_count = @intCast(addresses.len),
-                        .time = time,
-                        .message_pool = message_pool,
                         .message_bus_options = .{
                             .configuration = addresses,
                             .io = io,
@@ -527,7 +528,7 @@ pub fn AOFType(comptime IO: type) type {
             /// by searching from our current position for the next magic_number, seeking
             /// to it, and setting our internal position correctly.
             pub fn skip(it: *Iterator, allocator: std.mem.Allocator, count: usize) !void {
-                var skip_buffer = try allocator.alloc(u8, 1024 * 1024);
+                var skip_buffer = try allocator.alloc(u8, 1 * MiB);
                 defer allocator.free(skip_buffer);
 
                 while (it.offset < it.size) {
@@ -881,7 +882,7 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
 
-    var time_os = vsr.time.TimeOS{};
+    var time_os: vsr.time.TimeOS = .{};
     const time = time_os.time();
 
     var args = try std.process.argsWithAllocator(allocator);

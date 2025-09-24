@@ -4,10 +4,10 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
-const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_forest_fuzz);
 const lsm = @import("tree.zig");
@@ -70,10 +70,6 @@ const ScanParams = struct {
 };
 
 const Environment = struct {
-    const cluster = 32;
-    const replica = 4;
-    const replica_count = 6;
-
     const node_count = 1024;
     // This is the smallest size that set_associative_cache will allow us.
     const cache_entries_max = GrooveAccounts.ObjectsCache.Cache.value_count_max_multiple;
@@ -99,9 +95,6 @@ const Environment = struct {
 
     const State = enum {
         init,
-        superblock_format,
-        superblock_open,
-        free_set_open,
         forest_init,
         forest_open,
         fuzzing,
@@ -126,27 +119,14 @@ const Environment = struct {
     fn init(env: *Environment, gpa: std.mem.Allocator, storage: *Storage) !void {
         env.storage = storage;
 
-        env.time_sim = TimeSim.init_simple();
-        env.trace = try Storage.Tracer.init(
-            gpa,
-            env.time_sim.time(),
-            .{ .replica = .{ .cluster = 0, .replica = replica } },
-            .{},
-        );
+        env.time_sim = fixtures.init_time(.{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
 
-        env.superblock = try SuperBlock.init(gpa, .{
-            .storage = env.storage,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
+        env.superblock = try fixtures.init_superblock(gpa, env.storage, .{});
 
-        env.grid = try Grid.init(gpa, .{
-            .superblock = &env.superblock,
-            .trace = &env.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
+        env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
             .blocks_released_prior_checkpoint_durability_max = Forest
-                .compaction_blocks_released_per_pipeline_max() +
-                Grid.free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
+                .compaction_blocks_released_per_pipeline_max(),
         });
 
         env.scan_lookup_buffer = try gpa.alloc(
@@ -172,16 +152,6 @@ const Environment = struct {
         try env.init(gpa, storage);
         defer env.deinit(gpa);
 
-        env.change_state(.init, .superblock_format);
-        env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-            .cluster = cluster,
-            .release = vsr.Release.minimum,
-            .replica = replica,
-            .replica_count = replica_count,
-            .view = null,
-        });
-        try env.tick_until_state_change(.superblock_format, .superblock_open);
-
         try env.open(gpa);
         defer env.close(gpa);
 
@@ -205,12 +175,10 @@ const Environment = struct {
     }
 
     fn open(env: *Environment, gpa: std.mem.Allocator) !void {
-        env.superblock.open(superblock_open_callback, &env.superblock_context);
-        try env.tick_until_state_change(.superblock_open, .free_set_open);
+        fixtures.open_superblock(&env.superblock);
+        fixtures.open_grid(&env.grid);
 
-        env.grid.open(grid_open_callback);
-        try env.tick_until_state_change(.free_set_open, .forest_init);
-
+        env.change_state(.init, .forest_init);
         try env.forest.init(gpa, &env.grid, .{
             // TODO Test that the same sequence of events applied to forests with different
             // compaction_blocks result in identical grids.
@@ -251,21 +219,6 @@ const Environment = struct {
         env.forest.deinit(gpa);
     }
 
-    fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_format, .superblock_open);
-    }
-
-    fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.change_state(.superblock_open, .free_set_open);
-    }
-
-    fn grid_open_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.change_state(.free_set_open, .forest_init);
-    }
-
     fn forest_open_callback(forest: *Forest) void {
         const env: *Environment = @fieldParentPtr("forest", forest);
         env.change_state(.forest_open, .fuzzing);
@@ -295,7 +248,7 @@ const Environment = struct {
 
         env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
             .header = header: {
-                var header = vsr.Header.Prepare.root(cluster);
+                var header = vsr.Header.Prepare.root(fixtures.cluster);
                 header.op = env.checkpoint_op.?;
                 header.set_checksum();
                 break :header header;
@@ -433,7 +386,7 @@ const Environment = struct {
     }
 
     fn ScannerIndexType(comptime index: std.meta.FieldEnum(GrooveAccounts.IndexTrees)) type {
-        const Tree = std.meta.fieldInfo(GrooveAccounts.IndexTrees, index).type;
+        const Tree = @FieldType(GrooveAccounts.IndexTrees, @tagName(index));
         const Value = Tree.Table.Value;
         const Index = GrooveAccounts.IndexTreeFieldHelperType(@tagName(index)).Index;
 
@@ -691,7 +644,6 @@ const Environment = struct {
                 env.state = .init;
                 try env.init(gpa, env.storage);
 
-                env.change_state(.init, .superblock_open);
                 try env.open(gpa);
 
                 // TODO: currently this checks that everything added to the LSM after checkpoint
@@ -861,22 +813,6 @@ const Environment = struct {
         }
     }
 };
-
-pub fn run_fuzz_ops(
-    gpa: std.mem.Allocator,
-    storage_options: Storage.Options,
-    fuzz_ops: []const FuzzOp,
-) !void {
-    // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        storage_options,
-    );
-    defer storage.deinit(gpa);
-
-    try Environment.run(gpa, &storage, fuzz_ops);
-}
 
 fn random_id(prng: *stdx.PRNG, comptime Int: type) Int {
     return fuzz.random_id(prng, Int, .{
@@ -1125,16 +1061,20 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    try run_fuzz_ops(gpa, Storage.Options{
+    // Init mocked storage.
+    var storage = try fixtures.init_storage(gpa, .{
         .seed = prng.int(u64),
+        .size = constants.storage_size_limit_default,
         .read_latency_min = .{ .ns = 0 },
         .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
         .write_latency_min = .{ .ns = 0 },
         .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, io_latency_mean_ms),
-        // We can't actually recover from a crash in this fuzzer since we would need
-        // to transfer state from a different replica to continue.
-        .crash_fault_probability = Ratio.zero(),
-    }, fuzz_ops);
+    });
+    defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
+
+    try Environment.run(gpa, &storage, fuzz_ops);
 
     log.info("Passed!", .{});
 }

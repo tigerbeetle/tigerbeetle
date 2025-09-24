@@ -38,6 +38,7 @@
 //!   caller to manage the lifetime. The caller should be skipping program name.
 
 const std = @import("std");
+const stdx = @import("stdx.zig");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
 
@@ -134,7 +135,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             positional_fields = std.meta.fields(field.type);
             var optional_tail = false;
             for (positional_fields) |positional_field| {
-                if (default_value(positional_field) == null) {
+                if (positional_field.defaultValue() == null) {
                     if (optional_tail) @panic("optional positional arguments must be last");
                 } else {
                     optional_tail = true;
@@ -142,8 +143,8 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                 switch (@typeInfo(positional_field.type)) {
                     .optional => |optional| {
                         // optional flags should have a default
-                        assert(default_value(positional_field) != null);
-                        assert(default_value(positional_field).? == null);
+                        assert(positional_field.defaultValue() != null);
+                        assert(positional_field.defaultValue().? == null);
                         assert_valid_value_type(optional.child);
                     },
                     else => {
@@ -158,13 +159,13 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
             switch (@typeInfo(field.type)) {
                 .bool => {
                     // boolean flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == false);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == false);
                 },
                 .optional => |optional| {
                     // optional flags should have a default
-                    assert(default_value(field) != null);
-                    assert(default_value(field).? == null);
+                    assert(field.defaultValue() != null);
+                    assert(field.defaultValue().? == null);
 
                     assert_valid_value_type(optional.child);
                 },
@@ -255,7 +256,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     inline for (fields[0..field_count]) |field| {
         const flag = flag_name(field);
         switch (@field(counts, field.name)) {
-            0 => if (default_value(field)) |default| {
+            0 => if (field.defaultValue()) |default| {
                 @field(result, field.name) = default;
             } else {
                 fatal("{s}: argument is required", .{flag});
@@ -270,7 +271,7 @@ fn parse_flags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
         inline for (positional_fields, 0..) |positional_field, positional_index| {
             if (positional_index >= counts.positional) {
                 const flag = comptime flag_name_positional(positional_field);
-                if (default_value(positional_field)) |default| {
+                if (positional_field.defaultValue()) |default| {
                     @field(result.positional, positional_field.name) = default;
                 } else {
                     fatal("{s}: argument is required", .{flag});
@@ -359,125 +360,6 @@ fn parse_value(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     comptime unreachable;
 }
 
-pub const ByteUnit = enum(u64) {
-    bytes = 1,
-    kib = 1024,
-    mib = 1024 * 1024,
-    gib = 1024 * 1024 * 1024,
-    tib = 1024 * 1024 * 1024 * 1024,
-};
-
-pub const ByteSize = struct {
-    value: u64,
-    unit: ByteUnit = .bytes,
-
-    pub fn parse_flag_value(value: []const u8) union(enum) { ok: ByteSize, err: []const u8 } {
-        assert(value.len != 0);
-
-        const split: struct {
-            value_input: []const u8,
-            unit_input: []const u8,
-        } = split: for (0..value.len) |i| {
-            if (!std.ascii.isDigit(value[i]) and value[i] != '_') {
-                break :split .{
-                    .value_input = value[0..i],
-                    .unit_input = value[i..],
-                };
-            }
-        } else {
-            break :split .{
-                .value_input = value,
-                .unit_input = "",
-            };
-        };
-
-        const amount = std.fmt.parseUnsigned(u64, split.value_input, 10) catch |err| {
-            switch (err) {
-                error.Overflow => {
-                    return .{ .err = "value exceeds 64-bit unsigned integer:" };
-                },
-                error.InvalidCharacter => {
-                    // The only case this can happen is for the empty string
-                    return .{ .err = "expected a size, but found:" };
-                },
-            }
-        };
-
-        const unit = if (split.unit_input.len > 0)
-            unit: inline for (comptime std.enums.values(ByteUnit)) |tag| {
-                if (std.ascii.eqlIgnoreCase(split.unit_input, @tagName(tag))) {
-                    break :unit tag;
-                }
-            } else {
-                return .{ .err = "invalid unit in size, needed KiB, MiB, GiB or TiB:" };
-            }
-        else
-            ByteUnit.bytes;
-
-        _ = std.math.mul(u64, amount, @intFromEnum(unit)) catch {
-            return .{ .err = "size in bytes exceeds 64-bit unsigned integer:" };
-        };
-
-        return .{ .ok = .{ .value = amount, .unit = unit } };
-    }
-
-    pub fn bytes(size: *const ByteSize) u64 {
-        return std.math.mul(
-            u64,
-            size.value,
-            @intFromEnum(size.unit),
-        ) catch unreachable;
-    }
-
-    pub fn suffix(size: *const ByteSize) []const u8 {
-        return switch (size.unit) {
-            .bytes => "",
-            .kib => "KiB",
-            .mib => "MiB",
-            .gib => "GiB",
-            .tib => "TiB",
-        };
-    }
-};
-
-test "ByteSize.parse_flag_value" {
-    const kib = 1024;
-    const mib = kib * 1024;
-    const gib = mib * 1024;
-    const tib = gib * 1024;
-
-    const cases = .{
-        .{ 0, "0", 0, ByteUnit.bytes },
-        .{ 1, "1", 1, ByteUnit.bytes },
-        .{ 140737488355328, "140737488355328", 140737488355328, ByteUnit.bytes },
-        .{ 140737488355328, "128TiB", 128, ByteUnit.tib },
-        .{ 1 * tib, "1TiB", 1, ByteUnit.tib },
-        .{ 10 * tib, "10tib", 10, ByteUnit.tib },
-        .{ 1 * gib, "1GiB", 1, ByteUnit.gib },
-        .{ 10 * gib, "10gib", 10, ByteUnit.gib },
-        .{ 1 * mib, "1MiB", 1, ByteUnit.mib },
-        .{ 10 * mib, "10mib", 10, ByteUnit.mib },
-        .{ 1 * kib, "1KiB", 1, ByteUnit.kib },
-        .{ 10 * kib, "10kib", 10, ByteUnit.kib },
-        .{ 10 * kib, "1_0kib", 10, ByteUnit.kib },
-    };
-
-    inline for (cases) |case| {
-        const bytes = case[0];
-        const input = case[1];
-        const unit_val = case[2];
-        const unit = case[3];
-        const result = ByteSize.parse_flag_value(input);
-        if (result == .err) {
-            std.debug.panic("expected ok, got: '{s}'", .{result.err});
-        }
-        const got = result.ok;
-        assert(bytes == got.bytes());
-        assert(unit_val == got.value);
-        assert(unit == got.unit);
-    }
-}
-
 /// Parse string value into an integer, providing a nice error message for the user.
 fn parse_value_int(comptime T: type, flag: []const u8, value: [:0]const u8) T {
     assert((flag[0] == '-' and flag[1] == '-') or flag[0] == '<');
@@ -538,7 +420,7 @@ fn fields_to_comma_list(comptime E: type) []const u8 {
     }
 }
 
-pub fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
+fn flag_name(comptime field: std.builtin.Type.StructField) []const u8 {
     return comptime blk: {
         assert(!std.mem.eql(u8, field.name, "positional"));
 
@@ -563,116 +445,109 @@ fn flag_name_positional(comptime field: std.builtin.Type.StructField) []const u8
     return "<" ++ field.name ++ ">";
 }
 
-/// This is essentially `field.default_value`, but with a useful type instead of `?*anyopaque`.
-pub fn default_value(comptime field: std.builtin.Type.StructField) ?field.type {
-    return if (field.default_value_ptr) |default_opaque|
-        @as(*const field.type, @ptrCast(@alignCast(default_opaque))).*
-    else
-        null;
-}
-
 // CLI parsing makes a liberal use of `fatal`, so testing it within the process is impossible. We
 // test it out of process by:
 //   - using Zig compiler to build this very file as an executable in a temporary directory,
 //   - running the following main with various args and capturing stdout, stderr, and the exit code.
 //   - asserting that the captured values are correct.
-pub usingnamespace if (@import("root") != @This()) struct {
-    // For production builds, don't include the main function.
-    // This is `if __name__ == "__main__":` at comptime!
-} else struct {
-    const CLIArgs = union(enum) {
-        empty,
-        prefix: struct {
-            foo: u8 = 0,
-            foo_bar: u8 = 0,
-            opt: bool = false,
-            option: bool = false,
-        },
-        pos: struct { flag: bool = false, positional: struct {
-            p1: []const u8,
-            p2: []const u8,
-            p3: ?u32 = null,
-            p4: ?u32 = null,
-        } },
-        required: struct {
-            foo: u8,
-            bar: u8,
-        },
-        values: struct {
-            int: u32 = 0,
-            size: ByteSize = .{ .value = 0 },
-            boolean: bool = false,
-            path: []const u8 = "not-set",
-            optional: ?[]const u8 = null,
-            choice: enum { marlowe, shakespeare } = .marlowe,
-        },
-        subcommand: union(enum) {
+// For production builds, don't include the main function.
+// This is `if __name__ == "__main__":` at comptime!
+pub const main =
+    if (@import("root") != @This()) {} else struct {
+        const CLIArgs = union(enum) {
+            empty,
+            prefix: struct {
+                foo: u8 = 0,
+                foo_bar: u8 = 0,
+                opt: bool = false,
+                option: bool = false,
+            },
+            pos: struct { flag: bool = false, positional: struct {
+                p1: []const u8,
+                p2: []const u8,
+                p3: ?u32 = null,
+                p4: ?u32 = null,
+            } },
+            required: struct {
+                foo: u8,
+                bar: u8,
+            },
+            values: struct {
+                int: u32 = 0,
+                size: stdx.ByteSize = .{ .value = 0 },
+                boolean: bool = false,
+                path: []const u8 = "not-set",
+                optional: ?[]const u8 = null,
+                choice: enum { marlowe, shakespeare } = .marlowe,
+            },
+            subcommand: union(enum) {
+                pub const help =
+                    \\subcommand help
+                    \\
+                ;
+
+                c1: struct { a: bool = false },
+                c2: struct { b: bool = false },
+            },
+
             pub const help =
-                \\subcommand help
+                \\ flags-test-program [flags]
                 \\
             ;
+        };
 
-            c1: struct { a: bool = false },
-            c2: struct { b: bool = false },
-        },
+        fn main() !void {
+            var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
+            const gpa = gpa_allocator.allocator();
 
-        pub const help =
-            \\ flags-test-program [flags]
-            \\
-        ;
-    };
+            var args = try std.process.argsWithAllocator(gpa);
+            defer args.deinit();
 
-    pub fn main() !void {
-        var gpa_allocator = std.heap.GeneralPurposeAllocator(.{}){};
-        const gpa = gpa_allocator.allocator();
+            const cli_args = parse(&args, CLIArgs);
 
-        var args = try std.process.argsWithAllocator(gpa);
-        defer args.deinit();
-
-        const cli_args = parse(&args, CLIArgs);
-
-        const stdout = std.io.getStdOut();
-        const out_stream = stdout.writer();
-        switch (cli_args) {
-            .empty => try out_stream.print("empty\n", .{}),
-            .prefix => |values| {
-                try out_stream.print("foo: {}\n", .{values.foo});
-                try out_stream.print("foo-bar: {}\n", .{values.foo_bar});
-                try out_stream.print("opt: {}\n", .{values.opt});
-                try out_stream.print("option: {}\n", .{values.option});
-            },
-            .pos => |values| {
-                try out_stream.print("p1: {s}\n", .{values.positional.p1});
-                try out_stream.print("p2: {s}\n", .{values.positional.p2});
-                try out_stream.print("p3: {?}\n", .{values.positional.p3});
-                try out_stream.print("p4: {?}\n", .{values.positional.p4});
-                try out_stream.print("flag: {}\n", .{values.flag});
-            },
-            .required => |required| {
-                try out_stream.print("foo: {}\n", .{required.foo});
-                try out_stream.print("bar: {}\n", .{required.bar});
-            },
-            .values => |values| {
-                try out_stream.print("int: {}\n", .{values.int});
-                try out_stream.print("size: {}\n", .{values.size.bytes()});
-                try out_stream.print("boolean: {}\n", .{values.boolean});
-                try out_stream.print("path: {s}\n", .{values.path});
-                try out_stream.print("optional: {?s}\n", .{values.optional});
-                try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
-            },
-            .subcommand => |values| {
-                switch (values) {
-                    .c1 => |c1| try out_stream.print("c1.a: {}\n", .{c1.a}),
-                    .c2 => |c2| try out_stream.print("c2.b: {}\n", .{c2.b}),
-                }
-            },
+            const stdout = std.io.getStdOut();
+            const out_stream = stdout.writer();
+            switch (cli_args) {
+                .empty => try out_stream.print("empty\n", .{}),
+                .prefix => |values| {
+                    try out_stream.print("foo: {}\n", .{values.foo});
+                    try out_stream.print("foo-bar: {}\n", .{values.foo_bar});
+                    try out_stream.print("opt: {}\n", .{values.opt});
+                    try out_stream.print("option: {}\n", .{values.option});
+                },
+                .pos => |values| {
+                    try out_stream.print("p1: {s}\n", .{values.positional.p1});
+                    try out_stream.print("p2: {s}\n", .{values.positional.p2});
+                    try out_stream.print("p3: {?}\n", .{values.positional.p3});
+                    try out_stream.print("p4: {?}\n", .{values.positional.p4});
+                    try out_stream.print("flag: {}\n", .{values.flag});
+                },
+                .required => |required| {
+                    try out_stream.print("foo: {}\n", .{required.foo});
+                    try out_stream.print("bar: {}\n", .{required.bar});
+                },
+                .values => |values| {
+                    try out_stream.print("int: {}\n", .{values.int});
+                    try out_stream.print("size: {}\n", .{values.size.bytes()});
+                    try out_stream.print("boolean: {}\n", .{values.boolean});
+                    try out_stream.print("path: {s}\n", .{values.path});
+                    try out_stream.print("optional: {?s}\n", .{values.optional});
+                    try out_stream.print("choice: {?s}\n", .{@tagName(values.choice)});
+                },
+                .subcommand => |values| {
+                    switch (values) {
+                        .c1 => |c1| try out_stream.print("c1.a: {}\n", .{c1.a}),
+                        .c2 => |c2| try out_stream.print("c2.b: {}\n", .{c2.b}),
+                    }
+                },
+            }
         }
-    }
-};
+    }.main;
 
 test "flags" {
-    const Snap = @import("./testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const module_path = "src/stdx";
+    const snap = Snap.snap_fn(module_path);
 
     const T = struct {
         const T = @This();
@@ -707,7 +582,7 @@ test "flags" {
 
             { // Compile this file as an executable!
                 const path_relative = try std.fs.path.join(gpa, &.{
-                    "src",
+                    module_path,
                     @src().file,
                 });
                 defer gpa.free(path_relative);

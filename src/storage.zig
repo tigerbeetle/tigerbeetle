@@ -7,8 +7,9 @@ const vsr = @import("vsr.zig");
 const stdx = vsr.stdx;
 const QueueType = vsr.queue.QueueType;
 const constants = vsr.constants;
+const Tracer = vsr.trace.Tracer;
 
-pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
+pub fn StorageType(comptime IO: type) type {
     return struct {
         const Storage = @This();
 
@@ -93,11 +94,10 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
 
         pub const NextTickSource = enum { lsm, vsr };
 
-        pub const Tracer = _Tracer;
-
         io: *IO,
+        tracer: *Tracer,
+        dir_fd: IO.fd_t,
         fd: IO.fd_t,
-        tracer: ?*Tracer = null,
 
         next_tick_queue: QueueType(NextTick) = QueueType(NextTick).init(.{
             .name = "storage_next_tick",
@@ -105,9 +105,33 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         next_tick_completion_scheduled: bool = false,
         next_tick_completion: IO.Completion = undefined,
 
-        pub fn init(io: *IO, fd: IO.fd_t) !Storage {
+        pub fn init(io: *IO, tracer: *Tracer, options: struct {
+            path: []const u8,
+            size_min: u64,
+            purpose: IO.OpenDataFilePurpose,
+            direct_io: vsr.io.DirectIO,
+        }) !Storage {
+            // TODO Resolve the parent directory properly in the presence of .. and symlinks.
+            // TODO Handle physical volumes where there is no directory to fsync.
+            const dirname = std.fs.path.dirname(options.path) orelse ".";
+            const basename = std.fs.path.basename(options.path);
+
+            const dir_fd = try IO.open_dir(dirname);
+            errdefer std.posix.close(dir_fd);
+
+            const fd = try io.open_data_file(
+                dir_fd,
+                basename,
+                options.size_min,
+                options.purpose,
+                options.direct_io,
+            );
+            errdefer std.posix.close(fd);
+
             return .{
                 .io = io,
+                .tracer = tracer,
+                .dir_fd = dir_fd,
                 .fd = fd,
             };
         }
@@ -115,12 +139,13 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
         pub fn deinit(storage: *Storage) void {
             assert(storage.next_tick_queue.empty());
             assert(storage.fd != IO.INVALID_FILE);
-            storage.fd = IO.INVALID_FILE;
-        }
+            assert(storage.dir_fd != IO.INVALID_FILE);
 
-        pub fn set_tracer(storage: *Storage, tracer: *Tracer) void {
-            assert(storage.tracer == null);
-            storage.tracer = tracer;
+            std.posix.close(storage.fd);
+            storage.fd = IO.INVALID_FILE;
+
+            std.posix.close(storage.dir_fd);
+            storage.dir_fd = IO.INVALID_FILE;
         }
 
         pub fn run(storage: *Storage) void {
@@ -206,7 +231,7 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 .offset = offset_in_storage,
                 .target_max = buffer.len,
                 .zone = zone,
-                .start = if (self.tracer) |tracer| tracer.time.monotonic_instant() else null,
+                .start = self.tracer.time.monotonic(),
             };
 
             self.start_read(read, null);
@@ -230,12 +255,10 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 // be reported.
                 assert(bytes_read != null);
 
-                if (self.tracer) |tracer| {
-                    tracer.timing(
-                        .{ .storage_read = .{ .zone = read.zone } },
-                        tracer.time.monotonic_instant().duration_since(read.start.?),
-                    );
-                }
+                self.tracer.timing(
+                    .{ .storage_read = .{ .zone = read.zone } },
+                    self.tracer.time.monotonic().duration_since(read.start.?),
+                );
 
                 read.callback(read);
                 return;
@@ -369,7 +392,7 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
             offset_in_zone: u64,
         ) void {
             zone.verify_iop(buffer, offset_in_zone);
-            maybe(zone == .grid_padding); // Padding is zeroed during format.
+            assert(zone != .grid_padding); // Padding is never touched.
 
             const offset_in_storage = zone.offset(offset_in_zone);
             write.* = .{
@@ -378,7 +401,7 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
                 .buffer = buffer,
                 .offset = offset_in_storage,
                 .zone = zone,
-                .start = if (self.tracer) |tracer| tracer.time.monotonic_instant() else null,
+                .start = self.tracer.time.monotonic(),
             };
 
             self.start_write(write);
@@ -441,12 +464,10 @@ pub fn StorageType(comptime IO: type, comptime _Tracer: type) type {
             write.buffer = write.buffer[bytes_written..];
 
             if (write.buffer.len == 0) {
-                if (self.tracer) |tracer| {
-                    tracer.timing(
-                        .{ .storage_write = .{ .zone = write.zone } },
-                        tracer.time.monotonic_instant().duration_since(write.start.?),
-                    );
-                }
+                self.tracer.timing(
+                    .{ .storage_write = .{ .zone = write.zone } },
+                    self.tracer.time.monotonic().duration_since(write.start.?),
+                );
 
                 write.callback(write);
                 return;

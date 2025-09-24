@@ -3,7 +3,7 @@ const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const QueueType = @import("../queue.zig").QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
@@ -122,6 +122,8 @@ pub const IO = struct {
 
         self.completed.push(completion);
     }
+
+    pub const OpenDataFilePurpose = enum { format, open, inspect };
 
     pub const ReadError = error{
         WouldBlock,

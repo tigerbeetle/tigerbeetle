@@ -2,20 +2,19 @@ const std = @import("std");
 const testing = std.testing;
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
 const vsr = @import("../vsr.zig");
 const schema = @import("schema.zig");
 const ratio = stdx.PRNG.ratio;
-const Ratio = stdx.PRNG.Ratio;
 
 const log = std.log.scoped(.lsm_tree_fuzz);
 
 const Direction = @import("../direction.zig").Direction;
 const TimeSim = @import("../testing/time.zig").TimeSim;
 const Storage = @import("../testing/storage.zig").Storage;
-const ClusterFaultAtlas = @import("../testing/storage.zig").ClusterFaultAtlas;
 const GridType = @import("../vsr/grid.zig").GridType;
 const NodePool = @import("node_pool.zig").NodePoolType(constants.lsm_manifest_node_size, 16);
 const TableUsage = @import("table.zig").TableUsage;
@@ -87,9 +86,6 @@ const value_count_max = constants.lsm_compaction_ops * commit_entries_max;
 const snapshot_latest = @import("tree.zig").snapshot_latest;
 const table_count_max = @import("tree.zig").table_count_max;
 
-const cluster = 32;
-const replica = 4;
-const replica_count = 6;
 const node_count = 1024;
 const scan_results_max = 4096;
 const events_max = 10_000_000;
@@ -118,9 +114,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
 
         const State = enum {
             init,
-            superblock_format,
-            superblock_open,
-            free_set_open,
             tree_init,
             manifest_log_open,
             fuzzing,
@@ -164,30 +157,17 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.state = .init;
             env.storage = storage;
 
-            env.time_sim = TimeSim.init_simple();
-            env.trace = try Storage.Tracer.init(
-                gpa,
-                env.time_sim.time(),
-                .{ .replica = .{ .cluster = 0, .replica = replica } },
-                .{},
-            );
+            env.time_sim = fixtures.init_time(.{});
+            env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
             defer env.trace.deinit(gpa);
 
-            env.superblock = try SuperBlock.init(gpa, .{
-                .storage = env.storage,
-                .storage_size_limit = constants.storage_size_limit_default,
-            });
+            env.superblock = try fixtures.init_superblock(gpa, env.storage, .{});
             defer env.superblock.deinit(gpa);
 
-            env.grid = try Grid.init(gpa, .{
-                .superblock = &env.superblock,
-                .trace = &env.trace,
-                .missing_blocks_max = 0,
-                .missing_tables_max = 0,
+            env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
                 // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
                 // FreeSet.blocks_released_prior_checkpoint_durability.
-                .blocks_released_prior_checkpoint_durability_max = Grid
-                    .free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
+                .blocks_released_prior_checkpoint_durability_max = 0,
             });
             defer env.grid.deinit(gpa);
 
@@ -250,23 +230,10 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             gpa: std.mem.Allocator,
             fuzz_ops: []const FuzzOp,
         ) !void {
-            env.change_state(.init, .superblock_format);
-            env.superblock.format(superblock_format_callback, &env.superblock_context, .{
-                .cluster = cluster,
-                .release = vsr.Release.minimum,
-                .replica = replica,
-                .replica_count = replica_count,
-                .view = null,
-            });
+            fixtures.open_superblock(&env.superblock);
+            fixtures.open_grid(&env.grid);
 
-            env.tick_until_state_change(.superblock_format, .superblock_open);
-            env.superblock.open(superblock_open_callback, &env.superblock_context);
-
-            env.tick_until_state_change(.superblock_open, .free_set_open);
-            env.grid.open(grid_open_callback);
-
-            env.tick_until_state_change(.free_set_open, .tree_init);
-
+            env.change_state(.init, .tree_init);
             // The first checkpoint is trivially durable.
             env.grid.free_set.mark_checkpoint_durable();
 
@@ -287,21 +254,6 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             env.tree.open_complete();
 
             try env.apply(gpa, fuzz_ops);
-        }
-
-        fn superblock_format_callback(superblock_context: *SuperBlock.Context) void {
-            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-            env.change_state(.superblock_format, .superblock_open);
-        }
-
-        fn superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-            const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-            env.change_state(.superblock_open, .free_set_open);
-        }
-
-        fn grid_open_callback(grid: *Grid) void {
-            const env: *Environment = @fieldParentPtr("grid", grid);
-            env.change_state(.free_set_open, .tree_init);
         }
 
         fn manifest_log_open_event(
@@ -416,6 +368,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             }
 
             if (last_beat) {
+                env.tree.compact();
                 env.tree.swap_mutable_and_immutable(
                     snapshot_min_for_table_output(compaction_op_min(op)),
                 );
@@ -445,7 +398,7 @@ fn EnvironmentType(comptime table_usage: TableUsage) type {
             const checkpoint_op = op - constants.lsm_compaction_ops;
             env.superblock.checkpoint(superblock_checkpoint_callback, &env.superblock_context, .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(cluster);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = checkpoint_op;
                     header.set_checksum();
                     break :header header;
@@ -928,27 +881,6 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const table_usage = prng.enum_uniform(TableUsage);
     log.info("table_usage={}", .{table_usage});
 
-    var storage_fault_atlas = try ClusterFaultAtlas.init(gpa, 3, &prng, .{
-        .faulty_superblock = false,
-        .faulty_wal_headers = false,
-        .faulty_wal_prepares = false,
-        .faulty_client_replies = false,
-        .faulty_grid = true,
-    });
-    defer storage_fault_atlas.deinit(gpa);
-
-    const storage_options: Storage.Options = .{
-        .seed = prng.int(u64),
-        .replica_index = 0,
-        .read_latency_min = .{ .ns = 0 },
-        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
-        .write_latency_min = .{ .ns = 0 },
-        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
-        .read_fault_probability = Ratio.zero(),
-        .write_fault_probability = Ratio.zero(),
-        .fault_atlas = &storage_fault_atlas,
-    };
-
     const block_count_min =
         stdx.div_ceil(constants.lsm_levels, 2) * compaction_block_count_beat_min;
 
@@ -965,13 +897,17 @@ pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {
     const fuzz_ops = try generate_fuzz_ops(gpa, &prng, fuzz_op_count);
     defer gpa.free(fuzz_ops);
 
-    // Init mocked storage.
-    var storage = try Storage.init(
-        gpa,
-        constants.storage_size_limit_default,
-        storage_options,
-    );
+    var storage = try fixtures.init_storage(gpa, .{
+        .size = constants.storage_size_limit_default,
+        .seed = prng.int(u64),
+        .read_latency_min = .{ .ns = 0 },
+        .read_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
+        .write_latency_min = .{ .ns = 0 },
+        .write_latency_mean = fuzz.range_inclusive_ms(&prng, 0, 200),
+    });
     defer storage.deinit(gpa);
+
+    try fixtures.storage_format(gpa, &storage, .{});
 
     switch (table_usage) {
         inline else => |usage| {

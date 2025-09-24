@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.superblock_quorums);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
@@ -376,7 +376,7 @@ pub fn QuorumsType(comptime options: Options) type {
 }
 
 test "Quorums.working" {
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;
@@ -387,7 +387,7 @@ test "Quorums.working" {
 }
 
 test "Quorum.repairs" {
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     // Don't print warnings from the Quorums.
     const level = std.testing.log_level;

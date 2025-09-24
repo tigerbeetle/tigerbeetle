@@ -2,12 +2,12 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const PRNG = stdx.PRNG;
 const Duration = stdx.Duration;
 
-const GiB = 1024 * 1024 * 1024;
+const GiB = stdx.GiB;
 
 const log = std.log.scoped(.fuzz);
 

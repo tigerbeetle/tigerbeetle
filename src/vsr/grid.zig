@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const mem = std.mem;
@@ -11,8 +12,9 @@ const SuperBlockType = vsr.SuperBlockType;
 const QueueType = @import("../queue.zig").QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const SetAssociativeCacheType = @import("../lsm/set_associative_cache.zig").SetAssociativeCacheType;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const GridBlocksMissing = @import("./grid_blocks_missing.zig").GridBlocksMissing;
+const Tracer = vsr.trace.Tracer;
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 
@@ -168,7 +170,7 @@ pub fn GridType(comptime Storage: type) type {
         );
 
         superblock: *SuperBlock,
-        trace: *Storage.Tracer,
+        trace: *Tracer,
         free_set: FreeSet,
         free_set_checkpoint_blocks_acquired: CheckpointTrailer,
         free_set_checkpoint_blocks_released: CheckpointTrailer,
@@ -213,21 +215,20 @@ pub fn GridType(comptime Storage: type) type {
 
         pub fn init(allocator: mem.Allocator, options: struct {
             superblock: *SuperBlock,
-            trace: *Storage.Tracer,
+            trace: *Tracer,
             cache_blocks_count: u64 = Cache.value_count_max_multiple,
             missing_blocks_max: usize,
             missing_tables_max: usize,
             blocks_released_prior_checkpoint_durability_max: usize,
         }) !Grid {
-            const blocks_count = vsr.block_count_max(options.superblock.storage_size_limit);
             var free_set = try FreeSet.init(allocator, .{
-                .blocks_count = blocks_count,
+                .grid_size_limit = options.superblock.grid_size_limit(),
                 .blocks_released_prior_checkpoint_durability_max = options
                     .blocks_released_prior_checkpoint_durability_max,
             });
             errdefer free_set.deinit(allocator);
 
-            const free_set_encoded_size_max = FreeSet.encode_size_max(blocks_count);
+            const free_set_encoded_size_max = free_set.encode_size_max();
             var free_set_checkpoint_blocks_acquired =
                 try CheckpointTrailer.init(allocator, .free_set, free_set_encoded_size_max);
             errdefer free_set_checkpoint_blocks_acquired.deinit(allocator);
@@ -355,6 +356,26 @@ pub fn GridType(comptime Storage: type) type {
                 });
                 assert((grid.free_set.count_acquired() > 0) ==
                     (grid.free_set_checkpoint_blocks_acquired.size > 0));
+
+                // Assert that the highest acquired address is compatible with storage_size.
+                const storage_size: u64 = storage_size: {
+                    var storage_size = vsr.superblock.data_file_size_min;
+                    if (grid.free_set.highest_address_acquired()) |address| {
+                        assert(address > 0);
+                        assert(grid.free_set_checkpoint_blocks_acquired.size > 0);
+                        maybe(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        storage_size += address * constants.block_size;
+                    } else {
+                        assert(grid.free_set_checkpoint_blocks_acquired.size == 0);
+                        assert(grid.free_set_checkpoint_blocks_released.size == 0);
+
+                        assert(grid.free_set.count_released() == 0);
+                    }
+                    break :storage_size storage_size;
+                };
+                assert(storage_size == grid.superblock.working.vsr_state.checkpoint.storage_size);
+
                 assert(grid.free_set.count_released() >=
                     (grid.free_set_checkpoint_blocks_acquired.block_count() +
                         grid.free_set_checkpoint_blocks_released.block_count()));
@@ -372,8 +393,7 @@ pub fn GridType(comptime Storage: type) type {
         ///   4. Write the free set blocks to disk.
         ///   5. Mark the free set's own blocks as released (but not yet free).
         ///
-        /// This function handles step 1, and calls CheckpointTrailer.checkpoint, which handles
-        /// 2-4.
+        /// This function handles step 1, and calls CheckpointTrailer.checkpoint, which handles 2-4.
         /// The caller is responsible for calling Grid.mark_checkpoint_not_durable, which handles 5.
         pub fn checkpoint(grid: *Grid, callback: *const fn (*Grid) void) void {
             assert(grid.callback == .none);
@@ -466,7 +486,7 @@ pub fn GridType(comptime Storage: type) type {
             grid.callback = .{ .checkpoint_durable = callback };
 
             grid.blocks_missing.checkpoint_durable_commence(&grid.free_set);
-            if (grid.blocks_missing.checkpoint_durable.?.aborting == 0) {
+            if (grid.blocks_missing.state.checkpoint_durable.aborting == 0) {
                 grid.checkpoint_durable_join();
             }
         }
@@ -706,6 +726,7 @@ pub fn GridType(comptime Storage: type) type {
         }
 
         pub fn fulfill_block(grid: *Grid, block: BlockPtrConst) bool {
+            assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
 
             const block_header = schema.header_from_block(block);
@@ -729,7 +750,7 @@ pub fn GridType(comptime Storage: type) type {
         pub fn repair_block_waiting(grid: *Grid, address: u64, checksum: u128) bool {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
-            return grid.blocks_missing.repair_waiting(address, checksum);
+            return grid.blocks_missing.block_waiting(address, checksum);
         }
 
         /// Write a block that should already exist but (maybe) doesn't because of:
@@ -747,10 +768,10 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.superblock.opened);
             assert(grid.callback != .cancel);
             assert(grid.writing(block_header.address, block.*) == .not_writing);
-            assert(grid.blocks_missing.repair_waiting(block_header.address, block_header.checksum));
+            assert(grid.blocks_missing.block_waiting(block_header.address, block_header.checksum));
             assert(!grid.free_set.is_free(block_header.address));
 
-            grid.blocks_missing.repair_commence(block_header.address, block_header.checksum);
+            grid.blocks_missing.write_commence(block_header.address, block_header.checksum);
             grid.write_block(callback, write, block, .repair);
         }
 
@@ -767,7 +788,7 @@ pub fn GridType(comptime Storage: type) type {
             assert(grid.callback == .none or grid.callback == .checkpoint);
             assert((grid.callback == .checkpoint) == (block_header.block_type == .free_set));
             assert(grid.writing(block_header.address, block.*) == .not_writing);
-            assert(!grid.blocks_missing.repair_waiting(
+            assert(!grid.blocks_missing.block_waiting(
                 block_header.address,
                 block_header.checksum,
             ));
@@ -901,7 +922,7 @@ pub fn GridType(comptime Storage: type) type {
             }
 
             // Precede the write's callback, since the callback takes back ownership of the block.
-            if (completed_write.repair) grid.blocks_missing.repair_complete(cache_block.*);
+            if (completed_write.repair) grid.blocks_missing.write_complete(cache_block.*);
             // This call must come after (logically) releasing the IOP. Otherwise we risk tripping
             // assertions forbidding concurrent writes using the same block/address
             // if the callback calls write_block().
@@ -943,7 +964,7 @@ pub fn GridType(comptime Storage: type) type {
                     options.coherent and
                     grid.superblock.working.vsr_state.sync_op_max == 0)
                 {
-                    grid.verify_read(address, cache_block);
+                    grid.verify_read_from_cache(address, cache_block);
                 }
 
                 return cache_block;
@@ -1160,6 +1181,8 @@ pub fn GridType(comptime Storage: type) type {
                     const removed = grid.cache.remove(read.address);
                     assert(removed != null);
                 }
+
+                if (constants.verify) grid.verify_read_fault(read);
             }
 
             grid.read_block_resolve(read, result);
@@ -1275,63 +1298,13 @@ pub fn GridType(comptime Storage: type) type {
                 read_remote_head.resolves = read_remote_resolves;
                 grid.read_global_queue.push(read_remote_head);
 
-                if (grid.blocks_missing.enqueue_blocks_available() > 0) {
-                    grid.blocks_missing.enqueue_block(
+                if (grid.blocks_missing.repair_blocks_available() > 0) {
+                    grid.blocks_missing.repair_block(
                         read_remote_head.address,
                         read_remote_head.checksum,
                     );
                 }
             }
-        }
-
-        pub fn next_batch_of_block_requests(grid: *Grid, requests: []vsr.BlockRequest) usize {
-            assert(grid.callback != .cancel);
-            assert(requests.len > 0);
-            assert(requests.len == constants.grid_repair_reads_max);
-
-            // Prioritize requests for blocks with stalled Grid reads, so that commit/compaction can
-            // continue. We divide the buffer up between `read_global_queue` and
-            // `blocks_missing.faulty_blocks` so that we always request blocks from both queues.
-            // Surplus from `blocks_missing.faulty_blocks` may be used by `read_global_queue`.
-            const request_faults_count_max = requests.len -
-                @min(@divFloor(requests.len, 2), grid.blocks_missing.faulty_blocks.count());
-            assert(request_faults_count_max > 0);
-            assert(request_faults_count_max <= requests.len);
-            assert(request_faults_count_max >= @divFloor(requests.len, 2));
-
-            const request_faults_count = @min(
-                grid.read_global_queue.count(),
-                request_faults_count_max,
-            );
-            // (Note that many – but not all – of these blocks are also in the GridBlocksMissing.
-            // The `read_global_queue` is a FIFO, whereas the GridBlocksMissing has a fixed
-            // capacity.)
-            for (requests[0..request_faults_count]) |*request| {
-                // Pop-push the FIFO to cycle the faulty queue so that successive requests
-                // rotate through all stalled blocks (approximately) evenly.
-                const read_fault = grid.read_global_queue.pop().?;
-                grid.read_global_queue.push(read_fault);
-
-                request.* = .{
-                    .block_address = read_fault.address,
-                    .block_checksum = read_fault.checksum,
-                };
-            }
-
-            if (request_faults_count == requests.len) {
-                return request_faults_count;
-            } else {
-                const request_repairs_count = grid.blocks_missing.next_batch_of_block_requests(
-                    requests[request_faults_count..],
-                );
-                return request_faults_count + request_repairs_count;
-            }
-        }
-
-        pub fn free_set_checkpoints_blocks_max(storage_size_limit: u64) usize {
-            const block_count = vsr.block_count_max(storage_size_limit);
-            const free_set_encoded_size = FreeSet.encode_size_max(block_count);
-            return 2 * CheckpointTrailer.block_count_for_trailer_size(free_set_encoded_size);
         }
 
         fn block_offset(address: u64) u64 {
@@ -1377,7 +1350,11 @@ pub fn GridType(comptime Storage: type) type {
             }
         }
 
-        fn verify_read(grid: *Grid, address: u64, cached_block: BlockPtrConst) void {
+        fn verify_read_from_cache(
+            grid: *const Grid,
+            address: u64,
+            cached_block: BlockPtrConst,
+        ) void {
             comptime assert(constants.verify);
 
             const TestStorage = @import("../testing/storage.zig").Storage;
@@ -1393,6 +1370,89 @@ pub fn GridType(comptime Storage: type) type {
                 cached_block[0..cached_header.size],
                 actual_block[0..actual_header.size],
             ));
+        }
+
+        /// Called when we fail to read a block.
+        fn verify_read_fault(grid: *const Grid, read: *const Read) void {
+            comptime assert(constants.verify);
+
+            const TestStorage = @import("../testing/storage.zig").Storage;
+            if (Storage != TestStorage) return;
+
+            // Only check coherent reads -- i.e., when we know for certain that the read's
+            // address/checksum belongs in our current checkpoint.
+            if (!read.coherent) return;
+
+            // Check our storage (bypassing faults).
+            if (grid.superblock.storage.grid_block(read.address)) |actual_block| {
+                const actual_header = schema.header_from_block(actual_block);
+                if (actual_header.checksum == read.checksum) {
+                    // Exact block found. Since the read failed anyway, it must have been a
+                    // simulated read fault.
+                    assert(grid.superblock.storage.area_faulty(.{
+                        .grid = .{ .address = read.address },
+                    }));
+                } else {
+                    // Different block found -- since this is a coherent read, we must be syncing.
+                    assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+                }
+            } else {
+                // No block found -- since this is a coherent read, we must by syncing.
+                assert(grid.superblock.working.vsr_state.sync_op_max > 0);
+            }
+        }
+
+        /// Mark all blocks in the grid cache as MADV_DONTDUMP. Must be done after transitioning
+        /// to static, as the combination of madvise() + mremap() can cause an EFAULT.
+        ///
+        /// It's OK that some blocks, such as the blocks used by compaction escape this -- this is
+        /// not to stop sensitive data from appearing in core dumps, but rather to keep the core
+        /// dump size managable even with a large grid cache.
+        pub fn madv_dont_dump(grid: *const Grid) !void {
+            if (builtin.target.os.tag != .linux) return;
+
+            assert(grid.cache_blocks.len > 0);
+
+            // Each block could be its own isolated memory mapping, with how things are done
+            // using allocate_block(), but it's extremely unlikely. Coalesce them where possible to
+            // save on madvise() syscalls.
+            var continuous_cache_start = @intFromPtr(grid.cache_blocks[0]);
+            var continuous_cache_len = grid.cache_blocks[0].len;
+            var madvise_bytes: usize = 0;
+            var madvise_calls: usize = 0;
+
+            for (grid.cache_blocks[1..]) |cache_block| {
+                if (continuous_cache_start + continuous_cache_len == @intFromPtr(cache_block.ptr)) {
+                    continuous_cache_len += cache_block.len;
+                } else {
+                    try std.posix.madvise(
+                        @ptrFromInt(continuous_cache_start),
+                        continuous_cache_len,
+                        std.posix.MADV.DONTDUMP,
+                    );
+                    madvise_bytes += continuous_cache_len;
+                    madvise_calls += 1;
+
+                    continuous_cache_start = @intFromPtr(cache_block.ptr);
+                    continuous_cache_len = cache_block.len;
+                }
+            }
+
+            try std.posix.madvise(
+                @ptrFromInt(continuous_cache_start),
+                continuous_cache_len,
+                std.posix.MADV.DONTDUMP,
+            );
+            madvise_bytes += continuous_cache_len;
+            madvise_calls += 1;
+
+            assert(madvise_bytes == constants.block_size * grid.cache_blocks.len);
+            assert(madvise_calls <= grid.cache_blocks.len);
+
+            log.debug("marked {} bytes as MADV_DONTDUMP with {} calls", .{
+                madvise_bytes,
+                madvise_calls,
+            });
         }
     };
 }

@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const mem = std.mem;
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -82,7 +82,7 @@ pub fn ClientType(
 
         /// Measures the time elapsed between sending a request (in `raw_request`) and receiving the
         /// corresponding reply (in `on_reply`).
-        request_completion_timer: std.time.Timer,
+        request_completion_timer: vsr.time.Timer,
 
         /// The maximum body size for `command=request` messages.
         /// Set by the `register`'s reply.
@@ -127,12 +127,12 @@ pub fn ClientType(
 
         pub fn init(
             allocator: mem.Allocator,
+            time: Time,
+            message_pool: *MessagePool,
             options: struct {
                 id: u128,
                 cluster: u128,
                 replica_count: u8,
-                time: Time,
-                message_pool: *MessagePool,
                 message_bus_options: MessageBus.Options,
                 /// When eviction_callback is null, the client will panic on eviction.
                 ///
@@ -150,7 +150,7 @@ pub fn ClientType(
             var message_bus = try MessageBus.init(
                 allocator,
                 .{ .client = options.id },
-                options.message_pool,
+                message_pool,
                 Client.on_messages,
                 options.message_bus_options,
             );
@@ -158,11 +158,11 @@ pub fn ClientType(
 
             var self = Client{
                 .message_bus = message_bus,
-                .time = options.time,
+                .time = time,
                 .id = options.id,
                 .cluster = options.cluster,
                 .replica_count = options.replica_count,
-                .request_completion_timer = try std.time.Timer.start(),
+                .request_completion_timer = .init(time),
                 .request_timeout = .{
                     .name = "request_timeout",
                     .id = options.id,
@@ -475,7 +475,7 @@ pub fn ClientType(
             }
 
             const ping_timestamp_monotonic = pong.header.ping_timestamp_monotonic;
-            const pong_timestamp_monotonic = self.time.monotonic();
+            const pong_timestamp_monotonic = self.time.monotonic().ns;
             if (ping_timestamp_monotonic <= pong_timestamp_monotonic) {
                 self.replica_round_trip_times_ns[pong.header.replica] =
                     pong_timestamp_monotonic - ping_timestamp_monotonic;
@@ -570,18 +570,15 @@ pub fn ClientType(
             assert(reply.header.op == reply.header.commit);
             assert(reply.header.operation == inflight_vsr_operation);
 
-            const request_completion_time_ms = @divFloor(
-                self.request_completion_timer.read(),
-                std.time.ns_per_ms,
-            );
-            if (request_completion_time_ms > constants.client_request_completion_warn_ms) {
+            const request_completion_duration = self.request_completion_timer.read();
+            if (request_completion_duration.to_ms() > constants.client_request_completion_warn_ms) {
                 log.warn("{}: on_reply: slow request, request={} op={} size={} {s} time={}ms", .{
                     self.id,
                     inflight.message.header.request,
                     reply.header.op,
                     inflight.message.header.size,
                     inflight.message.header.operation.tag_name(StateMachine),
-                    request_completion_time_ms,
+                    request_completion_duration.to_ms(),
                 });
             }
 
@@ -640,7 +637,7 @@ pub fn ClientType(
                 .cluster = self.cluster,
                 .release = self.release,
                 .client = self.id,
-                .ping_timestamp_monotonic = self.time.monotonic(),
+                .ping_timestamp_monotonic = self.time.monotonic().ns,
             };
 
             self.send_header_to_replicas(ping.frame_const());
@@ -665,22 +662,7 @@ pub fn ClientType(
                 message.header.checksum,
             });
 
-            // Retransmit potentially dropped message.
-            const primary: u32 = self.view % self.replica_count;
-            self.send_message_to_replica(@as(u8, @intCast(primary)), message.base());
-
-            // Try to learn the new view.
-            const ping = Header.PingClient{
-                .command = .ping_client,
-                .cluster = self.cluster,
-                .release = self.release,
-                .client = self.id,
-                .ping_timestamp_monotonic = self.time.monotonic(),
-            };
-
-            const next_backup: u32 =
-                (self.view + self.request_timeout.attempts) % self.replica_count;
-            self.send_header_to_replica(@as(u8, @intCast(next_backup)), ping.frame_const());
+            self.send_request_with_hedging(message);
         }
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
@@ -703,13 +685,6 @@ pub fn ClientType(
             defer self.message_bus.unref(message);
 
             self.send_message_to_replicas(message);
-        }
-
-        fn send_header_to_replica(self: *Client, replica: u8, header: *const Header) void {
-            const message = self.create_message_from_header(header);
-            defer self.message_bus.unref(message);
-
-            self.send_message_to_replica(replica, message);
         }
 
         fn send_message_to_replicas(self: *Client, message: *Message) void {
@@ -743,6 +718,22 @@ pub fn ClientType(
             }
 
             self.message_bus.send_message_to_replica(replica, message);
+        }
+
+        // In addition to the primary, each request is also sent to a randomly chosen backup, to
+        // handle the case where the client → primary link is down. This ensures logical
+        // availability of the cluster, i.e., as long the client is connected to a backup that in
+        // turn is connected to the primary, the request will be processed by the cluster.
+        fn send_request_with_hedging(self: *Client, message: *Message.Request) void {
+            const primary: u8 = @intCast(self.view % self.replica_count);
+            self.send_message_to_replica(primary, message.base());
+
+            if (self.replica_count > 1) {
+                const offset_random = self.prng.range_inclusive(u8, 1, self.replica_count - 1);
+                const backup_random = (primary + offset_random) % self.replica_count;
+                assert(backup_random != primary);
+                self.send_message_to_replica(backup_random, message.base());
+            }
         }
 
         fn send_request_for_the_first_time(self: *Client, message: *Message.Request) void {
@@ -780,10 +771,7 @@ pub fn ClientType(
             assert(!self.request_timeout.ticking);
             self.request_timeout.start();
 
-            self.send_message_to_replica(
-                @as(u8, @intCast(self.view % self.replica_count)),
-                message.base(),
-            );
+            self.send_request_with_hedging(message);
         }
     };
 }

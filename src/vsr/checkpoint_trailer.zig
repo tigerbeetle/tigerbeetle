@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const mem = std.mem;
 
 const vsr = @import("../vsr.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const schema = @import("../lsm/schema.zig");
 const GridType = @import("../vsr/grid.zig").GridType;
 const BlockPtr = @import("../vsr/grid.zig").BlockPtr;
@@ -12,6 +12,31 @@ const allocate_block = @import("../vsr/grid.zig").allocate_block;
 const constants = @import("../constants.zig");
 const FreeSet = @import("./free_set.zig").FreeSet;
 const BlockType = schema.BlockType;
+
+// Body of the block which holds encoded trailer data.
+// All chunks except for possibly the last one are full.
+const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
+
+// Chunk describes a slice of encoded trailer that goes into nth block on disk.
+const Chunk = struct {
+    fn size(options: struct {
+        block_index: u32,
+        block_count: u32,
+        trailer_size: u64,
+    }) u32 {
+        assert(options.block_count > 0);
+        assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
+        assert(options.block_index < options.block_count);
+
+        const last_block = options.block_index == options.block_count - 1;
+        const chunk_size: u32 = if (last_block)
+            @intCast(options.trailer_size - (options.block_count - 1) * chunk_size_max)
+        else
+            chunk_size_max;
+
+        return chunk_size;
+    }
+};
 
 /// CheckpointTrailer is the persistent representation of the free set and client sessions.
 /// It defines the layout of the free set and client sessions as stored in the grid between
@@ -35,31 +60,6 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
     return struct {
         const CheckpointTrailer = @This();
-
-        // Body of the block which holds encoded trailer data.
-        // All chunks except for possibly the last one are full.
-        const chunk_size_max = constants.block_size - @sizeOf(vsr.Header);
-
-        // Chunk describes a slice of encoded trailer that goes into nth block on disk.
-        const Chunk = struct {
-            fn size(options: struct {
-                block_index: u32,
-                block_count: u32,
-                trailer_size: u64,
-            }) u32 {
-                assert(options.block_count > 0);
-                assert(options.block_count == stdx.div_ceil(options.trailer_size, chunk_size_max));
-                assert(options.block_index < options.block_count);
-
-                const last_block = options.block_index == options.block_count - 1;
-                const chunk_size: u32 = if (last_block)
-                    @intCast(options.trailer_size - (options.block_count - 1) * chunk_size_max)
-                else
-                    chunk_size_max;
-
-                return chunk_size;
-            }
-        };
 
         // Reference to the grid is late-initialized in `open`, because the free set is part of
         // the grid, which doesn't have access to a stable grid pointer. It is set to null by
@@ -163,10 +163,6 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
 
         pub fn block_count(trailer: *const CheckpointTrailer) u32 {
             return block_count_for_trailer_size(trailer.size);
-        }
-
-        pub fn block_count_for_trailer_size(trailer_size: u64) u32 {
-            return @intCast(stdx.div_ceil(trailer_size, chunk_size_max));
         }
 
         /// Each returned chunk has `chunk.len == chunk_size_max`.
@@ -451,6 +447,10 @@ pub fn CheckpointTrailerType(comptime Storage: type) type {
             callback(trailer);
         }
     };
+}
+
+pub fn block_count_for_trailer_size(trailer_size: u64) u32 {
+    return @intCast(stdx.div_ceil(trailer_size, chunk_size_max));
 }
 
 pub const TrailerType = enum {

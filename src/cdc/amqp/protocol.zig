@@ -43,9 +43,10 @@
 ///! Integers are encoded in network byte order (big endian).
 ///!
 const std = @import("std");
-const stdx = @import("../../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const KiB = stdx.KiB;
 
 const spec = @import("spec.zig");
 
@@ -413,9 +414,9 @@ pub const Decoder = struct {
 pub const Encoder = struct {
     pub const FrameHeader = struct {
         /// Total size in bytes including the `size` field.
-        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .type)) +
-            @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .channel)) +
-            @sizeOf(std.meta.FieldType(Decoder.FrameHeader, .size));
+        pub const size_total = @sizeOf(@FieldType(Decoder.FrameHeader, "type")) +
+            @sizeOf(@FieldType(Decoder.FrameHeader, "channel")) +
+            @sizeOf(@FieldType(Decoder.FrameHeader, "size"));
 
         type: FrameType,
         channel: Channel,
@@ -423,9 +424,9 @@ pub const Encoder = struct {
 
     pub const Header = struct {
         /// Total size in bytes including the `body_size` field.
-        pub const size_total = @sizeOf(std.meta.FieldType(Decoder.Header, .class)) +
-            @sizeOf(std.meta.FieldType(Decoder.Header, .weight)) +
-            @sizeOf(std.meta.FieldType(Decoder.Header, .body_size));
+        pub const size_total = @sizeOf(@FieldType(Decoder.Header, "class")) +
+            @sizeOf(@FieldType(Decoder.Header, "weight")) +
+            @sizeOf(@FieldType(Decoder.Header, "body_size"));
 
         class: u16,
         weight: u16,
@@ -744,47 +745,46 @@ fn BasicPropertiesType(comptime target: enum { encode, decode }) type {
             return @bitReverse(bitset.bits);
         }
 
-        pub usingnamespace switch (target) {
-            .decode => struct {
-                pub fn decode(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
-                    var reader = Decoder.init(content);
-                    var bitset: stdx.BitSetType(16) = .{ .bits = @bitReverse(flags) };
-                    var properties: BasicProperties = .{};
-                    inline for (std.meta.fields(BasicProperties), 0..) |field, index| {
-                        if (bitset.is_set(index)) {
-                            const FieldType = std.meta.Child(field.type);
-                            @field(properties, field.name) = try switch (FieldType) {
-                                []const u8 => reader.read_short_string(),
-                                Decoder.Table => reader.read_table(),
-                                DeliveryMode => reader.read_enum(DeliveryMode),
-                                u64 => reader.read_int(u64),
-                                u8 => reader.read_int(u8),
-                                else => comptime unreachable,
-                            };
-                        }
-                    }
-                    assert(reader.index == content.len);
-                    return properties;
+        pub fn decode(flags: u16, content: []const u8) Decoder.Error!BasicProperties {
+            comptime assert(target == .decode);
+
+            var reader = Decoder.init(content);
+            var bitset: stdx.BitSetType(16) = .{ .bits = @bitReverse(flags) };
+            var properties: BasicProperties = .{};
+            inline for (std.meta.fields(BasicProperties), 0..) |field, index| {
+                if (bitset.is_set(index)) {
+                    const FieldType = std.meta.Child(field.type);
+                    @field(properties, field.name) = try switch (FieldType) {
+                        []const u8 => reader.read_short_string(),
+                        Decoder.Table => reader.read_table(),
+                        DeliveryMode => reader.read_enum(DeliveryMode),
+                        u64 => reader.read_int(u64),
+                        u8 => reader.read_int(u8),
+                        else => comptime unreachable,
+                    };
                 }
-            },
-            .encode => struct {
-                pub fn encode(self: *const BasicProperties, encoder: *Encoder) void {
-                    encoder.write_int(u16, self.property_flags());
-                    inline for (std.meta.fields(BasicProperties)) |field| {
-                        if (@field(self, field.name)) |value| {
-                            switch (@TypeOf(value)) {
-                                []const u8 => encoder.write_short_string(value),
-                                Encoder.Table => encoder.write_table(value),
-                                DeliveryMode => encoder.write_int(u8, @intFromEnum(value)),
-                                u64 => encoder.write_int(u64, value),
-                                u8 => encoder.write_int(u8, value),
-                                else => unreachable,
-                            }
-                        }
+            }
+            assert(reader.index == content.len);
+            return properties;
+        }
+
+        pub fn encode(self: *const BasicProperties, encoder: *Encoder) void {
+            comptime assert(target == .encode);
+
+            encoder.write_int(u16, self.property_flags());
+            inline for (std.meta.fields(BasicProperties)) |field| {
+                if (@field(self, field.name)) |value| {
+                    switch (@TypeOf(value)) {
+                        []const u8 => encoder.write_short_string(value),
+                        Encoder.Table => encoder.write_table(value),
+                        DeliveryMode => encoder.write_int(u8, @intFromEnum(value)),
+                        u64 => encoder.write_int(u64, value),
+                        u8 => encoder.write_int(u8, value),
+                        else => unreachable,
                     }
                 }
-            },
-        };
+            }
+        }
     };
 }
 
@@ -817,7 +817,7 @@ test "amqp: Encoder/Decoder primitives" {
         long_string,
     };
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var encoder = Encoder.init(buffer);
 
@@ -903,7 +903,7 @@ test "amqp: BasicProperties property_flags" {
             var properties: BasicProperties = .{};
             switch (set_field) {
                 inline else => |field| {
-                    const Field = std.meta.Child(std.meta.FieldType(BasicProperties, field));
+                    const Field = std.meta.Child(@FieldType(BasicProperties, @tagName(field)));
                     @field(properties, @tagName(field)) = switch (Field) {
                         []const u8 => "",
                         DeliveryMode => .persistent,
@@ -941,7 +941,7 @@ test "amqp: BasicProperties encode/decode" {
     var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -971,10 +971,10 @@ test "amqp: BasicProperties encode/decode" {
 
 test "amqp: Table encode/decode" {
     // 64k ought to be enough for any random!
-    var buffer = try testing.allocator.alloc(u8, 64 * 1024);
+    var buffer = try testing.allocator.alloc(u8, 64 * KiB);
     defer testing.allocator.free(buffer);
 
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     for (0..4096) |_| {
         var arena = std.heap.ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
@@ -1000,8 +1000,8 @@ test "amqp: Table encode/decode" {
 }
 
 test "amqp: frame and header" {
-    const Snap = @import("../../testing/snaptest.zig").Snap;
-    const snap = Snap.snap;
+    const Snap = stdx.Snap;
+    const snap = Snap.snap_fn("src");
 
     var buffer = try testing.allocator.alloc(u8, frame_min_size);
     defer testing.allocator.free(buffer);
@@ -1013,8 +1013,8 @@ test "amqp: frame and header" {
         encoder.write_method_header(.{ .class = 1, .method = 10 });
         encoder.finish_frame(.method);
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,1,0,10,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  01 00 0a ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 
     {
@@ -1030,8 +1030,9 @@ test "amqp: frame and header" {
         encoder.finish_header(0);
 
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,10,0,100,206,2,0,1,0,0,0,12,0,10,0,0,0,0,0,0,0,0,0,0,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  0a 00 64 ce 02 00 01 00
+            \\00 00 0c 00 0a 00 00 00  00 00 00 00 00 00 00 ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 
     {
@@ -1051,8 +1052,10 @@ test "amqp: frame and header" {
         encoder.finish_frame(.body);
 
         try snap(@src(),
-            \\[1,0,0,0,0,0,4,0,100,3,232,206,2,0,1,0,0,0,12,0,100,0,0,0,0,0,0,0,0,0,4,206,3,0,1,0,0,0,4,98,111,100,121,206]
-        ).diff_json(buffer[0..encoder.index], .{ .emit_strings_as_arrays = true });
+            \\01 00 00 00 00 00 04 00  64 03 e8 ce 02 00 01 00
+            \\00 00 0c 00 64 00 00 00  00 00 00 00 00 00 04 ce
+            \\03 00 01 00 00 00 04 62  6f 64 79 ce
+        ).diff_hex(buffer[0..encoder.index]);
     }
 }
 
@@ -1112,7 +1115,7 @@ const TestingTable = struct {
             const entry_field = std.meta.stringToEnum(FieldEnum, entry.key).?;
             switch (entry_field) {
                 inline else => |field| {
-                    const Field = std.meta.FieldType(TestingTable, field);
+                    const Field = @FieldType(TestingTable, @tagName(field));
                     @field(object, @tagName(field)) = switch (std.meta.Child(Field)) {
                         bool => entry.value.boolean,
                         []const u8 => entry.value.string,

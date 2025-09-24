@@ -42,9 +42,10 @@
 const std = @import("std");
 const testing = std.testing;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
+const MiB = stdx.MiB;
 
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -467,7 +468,7 @@ pub const MultiBatchEncoder = struct {
             TrailerItem.padding,
         );
 
-        const postamble: *Postamble = @alignCast(@ptrCast(
+        const postamble: *Postamble = @ptrCast(@alignCast(
             buffer[self.buffer_index + padding + trailer_size - @sizeOf(Postamble) ..],
         ));
         postamble.* = .{
@@ -481,12 +482,11 @@ pub const MultiBatchEncoder = struct {
             bytes_written % self.options.element_size == 0);
 
         if (constants.verify) {
-            assert(MultiBatchDecoder.init(
-                buffer[0..bytes_written],
-                .{
-                    .element_size = self.options.element_size,
-                },
-            ) != error.MultiBatchInvalid);
+            _ = MultiBatchDecoder.init(buffer[0..bytes_written], .{
+                .element_size = self.options.element_size,
+            }) catch |err| switch (err) {
+                error.MultiBatchInvalid => unreachable,
+            };
         }
 
         return bytes_written;
@@ -495,7 +495,7 @@ pub const MultiBatchEncoder = struct {
 
 // The maximum number of batches, all with zero elements.
 test "batch: maximum batches with no elements" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const batch_count = Postamble.batch_count_max;
     const element_size = 128;
@@ -522,10 +522,10 @@ test "batch: maximum batches with no elements" {
 
 // The maximum number of batches, when each one has one single element.
 test "batch: maximum batches with a single element" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const batch_count_max: u16 = multi_batch_count_max(.{
         .batch_size_min = element_size,
         .batch_size_limit = buffer_size,
@@ -551,10 +551,10 @@ test "batch: maximum batches with a single element" {
 
 // The maximum number of elements on a single batch.
 test "batch: maximum elements on a single batch" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const batch_size_max = 8189; // maximum number of elements in a single-batch request.
     assert(batch_size_max == @divExact(buffer_size - element_size, element_size));
 
@@ -571,10 +571,10 @@ test "batch: maximum elements on a single batch" {
 }
 
 test "batch: invalid format" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const element_size = 128;
-    const buffer_size = (1024 * 1024) - @sizeOf(vsr.Header); // 1MiB message.
+    const buffer_size = (1 * MiB) - @sizeOf(vsr.Header); // 1MiB message.
     const buffer = try testing.allocator.alignedAlloc(u8, @alignOf(vsr.Header), buffer_size);
     defer testing.allocator.free(buffer);
 
@@ -601,10 +601,10 @@ test "batch: invalid format" {
     try testing.expect(encoder.batch_count == batch_count);
     try testing.expect(bytes_written == (element_size * event_total_count) + trailer_size);
 
-    try testing.expect(MultiBatchDecoder.init(
+    _ = try MultiBatchDecoder.init(
         buffer[0..bytes_written],
         .{ .element_size = element_size },
-    ) != error.MultiBatchInvalid);
+    );
 
     try testing.expectError(error.MultiBatchInvalid, MultiBatchDecoder.init(
         buffer[0 .. bytes_written - element_size],
@@ -623,7 +623,7 @@ test "batch: invalid format" {
         .{ .element_size = element_size / 2 },
     ));
 
-    const postamble: *Postamble = @alignCast(@ptrCast(
+    const postamble: *Postamble = @ptrCast(@alignCast(
         buffer[bytes_written - @sizeOf(Postamble) ..],
     ));
     postamble.batch_count = batch_count + 1;

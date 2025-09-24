@@ -7,7 +7,7 @@ Code for this sample is in [./main.js](./main.js).
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* NodeJS >= `18`
+* Node.js >= `18`
 
 ## Setup
 
@@ -83,8 +83,8 @@ that the second transfer had (and still has) a
 
 ## 6. Fetch and validate final account balances
 
-Finally, it fetches both accounts, validates they both exist,
-and checks that credits and debits for both account are now
+Finally, it fetches both accounts, validates that both exist,
+and checks that credits and debits for both accounts are now
 *posted*, not pending.
 
 Specifically, that **account `1`** has:

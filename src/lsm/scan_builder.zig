@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const Allocator = std.mem.Allocator;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const is_composite_key = @import("composite_key.zig").is_composite_key;
 
@@ -265,17 +265,17 @@ pub fn ScanBuilderType(
         }
 
         fn CompositeKeyType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
-            const IndexTree = std.meta.fieldInfo(Groove.IndexTrees, index).type;
+            const IndexTree = @FieldType(Groove.IndexTrees, @tagName(index));
             return IndexTree.Table.Value;
         }
 
         fn CompositeKeyPrefixType(comptime index: std.meta.FieldEnum(Groove.IndexTrees)) type {
             const CompositeKey = CompositeKeyType(index);
-            return std.meta.fieldInfo(CompositeKey, .field).type;
+            return @FieldType(CompositeKey, "field");
         }
 
         fn ScanImplType(comptime field: std.meta.FieldEnum(Scan.Dispatcher)) type {
-            return std.meta.fieldInfo(Scan.Dispatcher, field).type;
+            return @FieldType(Scan.Dispatcher, @tagName(field));
         }
 
         fn key_from_value(
@@ -522,7 +522,7 @@ pub fn ScanType(
 
         inline fn parent(
             comptime field: std.meta.FieldEnum(Dispatcher),
-            impl: *std.meta.FieldType(Dispatcher, field),
+            impl: *@FieldType(Dispatcher, @tagName(field)),
         ) *Scan {
             const dispatcher: *Dispatcher = @alignCast(@fieldParentPtr(
                 @tagName(field),

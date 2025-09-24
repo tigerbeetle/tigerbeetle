@@ -12,8 +12,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.fuzz_lsm_manifest_log);
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
+const fixtures = @import("../testing/fixtures.zig");
 const constants = @import("../constants.zig");
 const SuperBlock = @import("../vsr/superblock.zig").SuperBlockType(Storage);
 const TimeSim = @import("../testing/time.zig").TimeSim;
@@ -60,9 +61,10 @@ fn run_fuzz(
 ) !void {
     const storage_options: Storage.Options = .{
         .seed = prng.int(u64),
-        .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .size = constants.storage_size_limit_default,
+        .read_latency_min = .ms(10),
         .read_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
-        .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
+        .write_latency_min = .ms(10),
         .write_latency_mean = fuzz.range_inclusive_ms(prng, 10, 400),
     };
 
@@ -71,14 +73,8 @@ fn run_fuzz(
     defer env.deinit();
 
     {
-        env.format_superblock();
-        env.wait(&env.manifest_log);
-
-        env.open_superblock();
-        env.wait(&env.manifest_log);
-
-        env.open_grid();
-        env.wait(&env.manifest_log);
+        fixtures.open_superblock(&env.superblock);
+        fixtures.open_grid(&env.grid);
 
         // The first checkpoint is trivially durable.
         env.grid.free_set.mark_checkpoint_durable();
@@ -189,8 +185,8 @@ fn generate_events(
                     .address = table_address,
                     .snapshot_min = 1,
                     .snapshot_max = std.math.maxInt(u64),
-                    .key_min = std.mem.zeroes(TableInfo.KeyPadded),
-                    .key_max = std.mem.zeroes(TableInfo.KeyPadded),
+                    .key_min = @splat(0),
+                    .key_max = @splat(0),
                     .value_count = 1,
                     .tree_id = 1,
                     .label = .{
@@ -283,64 +279,48 @@ const Environment = struct {
         env.gpa = gpa;
 
         fields_initialized += 1;
-        env.storage =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
+        env.storage = try fixtures.init_storage(gpa, storage_options);
         errdefer env.storage.deinit(gpa);
 
+        try fixtures.storage_format(gpa, &env.storage, .{});
+
         fields_initialized += 1;
-        env.storage_verify =
-            try Storage.init(gpa, constants.storage_size_limit_default, storage_options);
+        env.storage_verify = try fixtures.init_storage(gpa, storage_options);
         errdefer env.storage_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.time_sim = TimeSim.init_simple();
+        env.time_sim = fixtures.init_time(.{});
 
         fields_initialized += 1;
-        env.trace = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.trace = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace.deinit(gpa);
 
         fields_initialized += 1;
-        env.trace_verify = try Storage.Tracer.init(gpa, env.time_sim.time(), .replica_test, .{});
+        env.trace_verify = try fixtures.init_tracer(gpa, env.time_sim.time(), .{});
         errdefer env.trace_verify.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock = try SuperBlock.init(gpa, .{
-            .storage = &env.storage,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
+        env.superblock = try fixtures.init_superblock(gpa, &env.storage, .{});
         errdefer env.superblock.deinit(gpa);
 
         fields_initialized += 1;
-        env.superblock_verify = try SuperBlock.init(gpa, .{
-            .storage = &env.storage_verify,
-            .storage_size_limit = constants.storage_size_limit_default,
-        });
+        env.superblock_verify = try fixtures.init_superblock(gpa, &env.storage_verify, .{});
         errdefer env.superblock_verify.deinit(gpa);
 
         fields_initialized += 1;
         env.superblock_context = undefined;
 
         fields_initialized += 1;
-        env.grid = try Grid.init(gpa, .{
-            .superblock = &env.superblock,
-            .trace = &env.trace,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
+        env.grid = try fixtures.init_grid(gpa, &env.trace, &env.superblock, .{
             // Grid.mark_checkpoint_not_durable releases the FreeSet checkpoints blocks into
             // FreeSet.blocks_released_prior_checkpoint_durability.
-            .blocks_released_prior_checkpoint_durability_max = Grid
-                .free_set_checkpoints_blocks_max(constants.storage_size_limit_default),
+            .blocks_released_prior_checkpoint_durability_max = 0,
         });
         errdefer env.grid.deinit(gpa);
 
         fields_initialized += 1;
-        env.grid_verify = try Grid.init(gpa, .{
-            .superblock = &env.superblock_verify,
-            .trace = &env.trace_verify,
-            .missing_blocks_max = 0,
-            .missing_tables_max = 0,
-            .blocks_released_prior_checkpoint_durability_max = 0,
-        });
+        env.grid_verify =
+            try fixtures.init_grid(gpa, &env.trace_verify, &env.superblock_verify, .{});
         errdefer env.grid_verify.deinit(gpa);
 
         fields_initialized += 1;
@@ -387,45 +367,6 @@ const Environment = struct {
         while (env.pending > 0) {
             manifest_log.superblock.storage.run();
         }
-    }
-
-    fn format_superblock(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.manifest_log.superblock.format(format_superblock_callback, &env.superblock_context, .{
-            .cluster = 0,
-            .release = vsr.Release.minimum,
-            .replica = 0,
-            .replica_count = 6,
-            .view = null,
-        });
-    }
-
-    fn format_superblock_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", context);
-        env.pending -= 1;
-    }
-
-    fn open_superblock(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.manifest_log.superblock.open(open_superblock_callback, &env.superblock_context);
-    }
-
-    fn open_superblock_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", context);
-        env.pending -= 1;
-    }
-
-    fn open_grid(env: *Environment) void {
-        assert(env.pending == 0);
-        env.pending += 1;
-        env.grid.open(open_grid_callback);
-    }
-
-    fn open_grid_callback(grid: *Grid) void {
-        const env: *Environment = @fieldParentPtr("grid", grid);
-        env.pending -= 1;
     }
 
     fn open(env: *Environment) void {
@@ -495,7 +436,7 @@ const Environment = struct {
             &env.superblock_context,
             .{
                 .header = header: {
-                    var header = vsr.Header.Prepare.root(0);
+                    var header = vsr.Header.Prepare.root(fixtures.cluster);
                     header.op = vsr.Checkpoint.checkpoint_after(vsr_state.checkpoint.header.op);
                     header.set_checksum();
                     break :header header;
@@ -551,51 +492,36 @@ const Environment = struct {
     /// Verify that the state of a ManifestLog restored from checkpoint matches the state
     /// immediately after the checkpoint was created.
     fn verify(env: *Environment) !void {
-        const test_trace = &env.trace;
-        const test_superblock = env.manifest_log_verify.superblock;
-        const test_storage = test_superblock.storage;
-        const test_grid = env.manifest_log_verify.grid;
-        const test_manifest_log = &env.manifest_log_verify;
-
         {
-            test_storage.copy(env.manifest_log.superblock.storage);
-            test_storage.reset();
+            env.storage_verify.copy(env.manifest_log.superblock.storage);
+            env.storage_verify.reset();
 
-            test_trace.deinit(env.gpa);
-            test_trace.* = try Storage.Tracer.init(
-                env.gpa,
-                env.time_sim.time(),
-                .replica_test,
-                .{},
-            );
+            env.trace_verify.deinit(env.gpa);
+            env.trace_verify = try fixtures.init_tracer(env.gpa, env.time_sim.time(), .{});
 
             // Reset the state so that the manifest log (and dependencies) can be reused.
             // Do not "defer deinit()" because these are cleaned up by Env.deinit().
-            test_superblock.deinit(env.gpa);
-            test_superblock.* = try SuperBlock.init(
-                env.gpa,
-                .{
-                    .storage = test_storage,
-                    .storage_size_limit = constants.storage_size_limit_default,
-                },
-            );
+            env.superblock_verify.deinit(env.gpa);
+            env.superblock_verify = try fixtures.init_superblock(env.gpa, &env.storage_verify, .{});
 
-            test_grid.deinit(env.gpa);
-            test_grid.* = try Grid.init(env.gpa, .{
-                .superblock = test_superblock,
-                .trace = test_trace,
+            env.grid_verify.deinit(env.gpa);
+            env.grid_verify = try Grid.init(env.gpa, .{
+                .superblock = &env.superblock_verify,
+                .trace = &env.trace_verify,
                 .missing_blocks_max = 0,
                 .missing_tables_max = 0,
                 .blocks_released_prior_checkpoint_durability_max = 0,
             });
 
-            test_manifest_log.deinit(env.gpa);
-            try test_manifest_log.init(env.gpa, test_grid, &manifest_log_compaction_pace);
+            env.manifest_log_verify.deinit(env.gpa);
+            try env.manifest_log_verify.init(
+                env.gpa,
+                &env.grid_verify,
+                &manifest_log_compaction_pace,
+            );
         }
 
-        env.pending += 1;
-        test_superblock.open(verify_superblock_open_callback, &env.superblock_context);
-        env.wait(test_manifest_log);
+        fixtures.open_superblock(&env.superblock_verify);
 
         assert(env.manifest_log_opening == null);
         env.manifest_log_opening = try env.manifest_log_model.tables.clone();
@@ -606,20 +532,15 @@ const Environment = struct {
         }
 
         env.pending += 1;
-        test_manifest_log.open(verify_manifest_open_event, verify_manifest_open_callback);
-        env.wait(test_manifest_log);
+        env.manifest_log_verify.open(verify_manifest_open_event, verify_manifest_open_callback);
+        env.wait(&env.manifest_log_verify);
 
         try std.testing.expect(hash_map_equals(
             u64,
             ManifestLog.TableExtent,
             &env.manifest_log.table_extents,
-            &test_manifest_log.table_extents,
+            &env.manifest_log_verify.table_extents,
         ));
-    }
-
-    fn verify_superblock_open_callback(superblock_context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("superblock_context", superblock_context);
-        env.pending -= 1;
     }
 
     fn verify_manifest_open_event(

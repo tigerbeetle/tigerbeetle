@@ -1,5 +1,5 @@
 const std = @import("std");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 /// Permute indices (or other encoded data) into ids to:
 ///
@@ -74,7 +74,7 @@ pub const IdPermutation = union(enum) {
 };
 
 test "IdPermutation" {
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     for ([_]IdPermutation{
         .{ .identity = {} },

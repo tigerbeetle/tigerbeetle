@@ -5,10 +5,11 @@ const std = @import("std");
 const builtin = @import("builtin");
 const log = std.log;
 const testing = std.testing;
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
 const ratio = stdx.PRNG.ratio;
+const KiB = stdx.KiB;
 
 const tb = @import("../tigerbeetle.zig");
 const vsr = @import("../vsr.zig");
@@ -376,7 +377,7 @@ fn run_cdc_test(
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
-    var time_os = vsr.time.TimeOS{};
+    var time_os: vsr.time.TimeOS = .{};
 
     const queue = try std.fmt.allocPrint(arena.allocator(), "queue_{}", .{
         stdx.unique_u128(),
@@ -690,8 +691,7 @@ const AmqpContext = struct {
 const VSRContext = struct {
     const MessagePool = vsr.message_pool.MessagePool;
     const Message = MessagePool.Message;
-    const Tracer = vsr.trace.Tracer;
-    const Storage = vsr.storage.StorageType(vsr.io.IO, Tracer);
+    const Storage = vsr.storage.StorageType(vsr.io.IO);
     const StateMachine = vsr.state_machine.StateMachineType(
         Storage,
         vsr.constants.state_machine_config,
@@ -718,12 +718,12 @@ const VSRContext = struct {
         const address = try std.net.Address.parseIp4("127.0.0.1", port);
         self.client = try Client.init(
             gpa,
+            time,
+            &self.message_pool,
             .{
                 .id = stdx.unique_u128(),
                 .cluster = 0,
                 .replica_count = 1,
-                .time = time,
-                .message_pool = &self.message_pool,
                 .message_bus_options = .{
                     .configuration = &.{address},
                     .io = &self.io,
@@ -909,7 +909,7 @@ const TmpRabbitMQ = struct {
 
 const TestingBasicProperties = @import("../cdc/amqp/protocol.zig").TestingBasicProperties;
 const TestingContent = struct {
-    const size_max = 1024;
+    const size_max = 1 * KiB;
     bytes: []const u8,
 
     fn init(arena: std.mem.Allocator, prng: *stdx.PRNG) !*TestingContent {

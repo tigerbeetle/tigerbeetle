@@ -2,7 +2,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 const math = std.math;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 
 const constants = @import("../constants.zig");
 
@@ -33,7 +33,7 @@ pub const Config = struct {
 pub fn binary_search_values_upsert_index(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -99,17 +99,17 @@ pub fn binary_search_values_upsert_index(
 
         const mid = offset + half;
 
-        // This trick seems to be what's needed to get llvm to emit branchless code for this,
-        // a ternary-style if expression was generated as a jump here for whatever reason.
-        const next_offsets = [_]usize{ offset, mid };
-        offset = next_offsets[
-            // For exact matches, takes the first half if `mode == .lower_bound`,
-            // or the second half if `mode == .upper_bound`.
-            @intFromBool(switch (comptime config.mode) {
-                .lower_bound => key_from_value(&values[mid]) < key,
-                .upper_bound => key_from_value(&values[mid]) <= key,
-            })
-        ];
+        // For exact matches, takes the first half if `mode == .lower_bound`,
+        // or the second half if `mode == .upper_bound`.
+        const take_upper_half: bool = (switch (comptime config.mode) {
+            .lower_bound => key_from_value(&values[mid]) < key,
+            .upper_bound => key_from_value(&values[mid]) <= key,
+        });
+
+        if (take_upper_half) {
+            @branchHint(.unpredictable);
+            offset = mid;
+        }
 
         length -= half;
     }
@@ -174,7 +174,7 @@ const BinarySearchResult = struct {
 pub inline fn binary_search_values(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key: Key,
     comptime config: Config,
@@ -232,7 +232,7 @@ pub const BinarySearchRangeUpsertIndexes = struct {
 pub inline fn binary_search_values_range_upsert_indexes(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key_min: Key,
     key_max: Key,
@@ -302,7 +302,7 @@ pub const BinarySearchRange = struct {
 pub inline fn binary_search_values_range(
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     values: []const Value,
     key_min: Key,
     key_max: Key,
@@ -685,7 +685,7 @@ test "binary search: duplicates" {
 }
 
 test "binary search: random" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     inline for (.{ .lower_bound, .upper_bound }) |mode| {
         var i: usize = 0;
         while (i < 2048) : (i += 1) {
@@ -842,7 +842,7 @@ test "binary search: duplicated range" {
 }
 
 test "binary search: random range" {
-    var prng = stdx.PRNG.from_seed(42);
+    var prng = stdx.PRNG.from_seed_testing();
     var i: usize = 0;
     while (i < 2048) : (i += 1) {
         try test_binary_search.random_range_search(&prng, i);

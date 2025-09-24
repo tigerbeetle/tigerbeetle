@@ -4,11 +4,16 @@ import asyncio
 import ctypes
 import logging
 import os
+import sys
 import threading
 import time
 from collections.abc import Callable  # noqa: TCH003
 from dataclasses import dataclass
 from typing import Any
+if sys.version_info >= (3, 11):
+    from typing import Self
+else:
+    from typing_extensions import Self
 
 from . import bindings
 from .lib import tb_assert, c_uint128
@@ -17,11 +22,11 @@ logger = logging.getLogger("tigerbeetle")
 
 
 class AtomicInteger:
-    def __init__(self, value=0):
+    def __init__(self, value: int = 0) -> None:
         self._value = value
         self._lock = threading.Lock()
 
-    def increment(self):
+    def increment(self) -> int:
         with self._lock:
             self._value += 1
             return self._value
@@ -45,30 +50,43 @@ class InflightPacket:
     operation: bindings.Operation
     c_event_type: Any
     c_result_type: Any
-    on_completion: Callable | None
+    on_completion: Callable[[Self], None] | None
     on_completion_context: CompletionContextSync | CompletionContextAsync | None
 
+class _IDGenerator:
+    """
+    Generator for Universally Unique and Sortable Identifiers as a 128-bit integers, based on ULIDs.
+
+    Keeps a monotonically increasing millisecond timestamp between calls to `.generate()`.
+    """
+    def __init__(self) -> None:
+        self._time_ms_last = time.time_ns() // (1000 * 1000)
+
+    def generate(self) -> int:
+        time_ms = time.time_ns() // (1000 * 1000)
+
+        # Ensure time_ms monotonically increases.
+        if time_ms <= self._time_ms_last:
+            time_ms = self._time_ms_last
+        else:
+            self._time_ms_last = time_ms
+
+        randomness = os.urandom(10)
+
+        return int.from_bytes(
+            time_ms.to_bytes(6, "big") + randomness,
+            "big",
+        )
+
+# Module-level singleton instance.
+_id_generator = _IDGenerator()
 
 
 def id() -> int:
     """
     Generates a Universally Unique and Sortable Identifier as a 128-bit integer. Based on ULIDs.
     """
-    time_ms = time.time_ns() // (1000 * 1000)
-
-    # Ensure time_ms monotonically increases.
-    time_ms_last = getattr(id, "_time_ms_last", 0)
-    if time_ms <= time_ms_last:
-        time_ms = time_ms_last
-    else:
-        id._time_ms_last = time_ms
-
-    randomness = os.urandom(10)
-
-    return int.from_bytes(
-        time_ms.to_bytes(6, "big") + randomness,
-        "big",
-    )
+    return _id_generator.generate()
 
 
 amount_max = (2 ** 128) - 1
@@ -137,15 +155,9 @@ class Client:
             c_event_type=c_event_type,
             c_result_type=c_result_type)
 
-    def close(self):
-        bindings.tb_client_deinit(ctypes.byref(self._client))
-        tb_assert(self._client is not None)
-        tb_assert(len(self._inflight_packets) == 0)
-        del Client._clients[self._client_key]
-
     @staticmethod
-    @bindings.OnCompletion
-    def _c_on_completion(completion_ctx, packet, timestamp, bytes_ptr, len_):
+    @bindings.OnCompletion  # type: ignore[misc]
+    def _c_on_completion(completion_ctx: int, packet: Any, timestamp: int, bytes_ptr: Any, len_: int) -> None:
         """
         Invoked in a separate thread
         """
@@ -156,7 +168,9 @@ class Client:
 
         if packet[0].status != bindings.PacketStatus.OK.value:
             inflight_packet.response = PacketError(repr(bindings.PacketStatus(packet[0].status)))
-            tb_assert(inflight_packet.on_completion is not None)
+            if inflight_packet.on_completion is None:
+                # Can't use tb_assert here, as mypy complains later that it might be None.
+                raise TypeError("inflight_packet.on_completion not set")
             inflight_packet.on_completion(inflight_packet)
             return
 
@@ -174,22 +188,21 @@ class Client:
 
         inflight_packet.response = results
 
-        tb_assert(inflight_packet.on_completion is not None)
+        if inflight_packet.on_completion is None:
+            # Can't use tb_assert here, as mypy complains later that it might be None.
+            raise TypeError("inflight_packet.on_completion not set")
+
         inflight_packet.on_completion(inflight_packet)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
 
 
 class ClientSync(Client, bindings.StateMachineMixin):
-    def _on_completion(self, inflight_packet):
+    def _on_completion(self, inflight_packet: InflightPacket) -> None:
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextSync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.event.set()
 
     def _submit(self, operation: bindings.Operation, operations: list[Any],
-                c_event_type: Any, c_result_type: Any):
+                c_event_type: Any, c_result_type: Any) -> Any:
         inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
@@ -210,24 +223,41 @@ class ClientSync(Client, bindings.StateMachineMixin):
 
         return inflight_packet.response
 
+    def close(self) -> None:
+        tb_assert(self._client is not None)
+        bindings.tb_client_deinit(ctypes.byref(self._client))
+
+        tb_assert(len(self._inflight_packets) == 0)
+        del Client._clients[self._client_key]
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
 
 class ClientAsync(Client, bindings.AsyncStateMachineMixin):
-    def _on_completion(self, inflight_packet):
+    def _on_completion(self, inflight_packet: InflightPacket) -> None:
         """
         Called by Client._c_on_completion, which itself is called from a different thread. Use
         `call_soon_threadsafe` to return to the thread of the event loop the request was invoked
         from, so _trigger_event() can trigger the async event and allow the client to progress.
         """
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.loop.call_soon_threadsafe(
             self._trigger_event,
             inflight_packet
         )
 
-    def _trigger_event(self, inflight_packet):
+    def _trigger_event(self, inflight_packet:InflightPacket) -> None:
+        if not isinstance(inflight_packet.on_completion_context, CompletionContextAsync):
+            raise TypeError(repr(inflight_packet.on_completion_context))
         inflight_packet.on_completion_context.event.set()
 
     async def _submit(self, operation: bindings.Operation, operations: Any,
-                      c_event_type: Any, c_result_type: Any):
+                      c_event_type: Any, c_result_type: Any) -> Any:
         inflight_packet = self._acquire_packet(operation, operations, c_event_type, c_result_type)
         self._inflight_packets[inflight_packet.packet.user_data] = inflight_packet
 
@@ -251,9 +281,35 @@ class ClientAsync(Client, bindings.AsyncStateMachineMixin):
 
         return inflight_packet.response
 
+    async def close(self) -> None:
+        tb_assert(self._client is not None)
+        bindings.tb_client_deinit(ctypes.byref(self._client))
 
-@bindings.LogHandler
-def log_handler(level_zig, message_ptr, message_len):
+        # tb_client_deinit internally clears any inflight requests, and calls their callbacks, so
+        # the client needs to stick around until that's done.
+        #
+        # This isn't a problem for ClientSync, but ClientAsync invokes the callbacks using
+        # call_soon_threadsafe(), so wait for the event to fire on all pending packets.
+        all_events = []
+        for packet in self._inflight_packets.values():
+            if not isinstance(packet.on_completion_context, CompletionContextAsync):
+                raise AssertionError()
+            all_events.append(packet.on_completion_context.event.wait())
+
+        await asyncio.gather(*all_events)
+
+        tb_assert(len(self._inflight_packets) == 0)
+        del Client._clients[self._client_key]
+
+    async def __aenter__(self) -> Self:
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        await self.close()
+
+
+@bindings.LogHandler  # type: ignore[misc]
+def log_handler(level_zig: bindings.LogLevel, message_ptr: Any, message_len: int) -> None:
     level_python = {
         bindings.LogLevel.ERR: logging.ERROR,
         bindings.LogLevel.WARN: logging.WARNING,
@@ -265,10 +321,15 @@ def log_handler(level_zig, message_ptr, message_len):
 tb_assert(bindings.tb_client_register_log_callback(log_handler, True) ==
     bindings.RegisterLogCallbackStatus.SUCCESS)
 
-def configure_logging(*, debug, log_handler=log_handler):
+
+def configure_logging(
+    *,
+    debug: bool,
+    handler: Callable[[bindings.LogLevel, Any, int], None] = log_handler,
+) -> None:
     # First disable the existing log handler, before enabling the new one.
     tb_assert(bindings.tb_client_register_log_callback(None, debug) ==
         bindings.RegisterLogCallbackStatus.SUCCESS)
 
-    tb_assert(bindings.tb_client_register_log_callback(log_handler, debug) ==
+    tb_assert(bindings.tb_client_register_log_callback(handler, debug) ==
         bindings.RegisterLogCallbackStatus.SUCCESS)

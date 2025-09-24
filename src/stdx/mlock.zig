@@ -2,7 +2,9 @@ const builtin = @import("builtin");
 const std = @import("std");
 const os = std.os;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
+
+const MiB = stdx.MiB;
 
 const log = std.log.scoped(.mlock);
 
@@ -49,44 +51,21 @@ fn memory_lock_allocated_windows(allocated_size: usize) MemoryLockError!void {
     // It would be difficult to gather the addresses of non-heap memory that is also
     // faulted in, such as the stack, globals, etc. SetProcessWorkingSetSize can be
     // used instead to lock all existing pages into memory to avoid swapping.
-    const set_process_working_set_size = @extern(
-        *const fn (
-            hProcess: os.windows.HANDLE,
-            dwMinimumWorkingSetSize: os.windows.SIZE_T,
-            dwMaximumWorkingSetSize: os.windows.SIZE_T,
-        ) callconv(os.windows.WINAPI) os.windows.BOOL,
-        .{
-            .library_name = "kernel32",
-            .name = "SetProcessWorkingSetSize",
-        },
-    );
-    const get_process_working_set_size = @extern(
-        *const fn (
-            hProcess: os.windows.HANDLE,
-            lpMinimumWorkingSetSize: *os.windows.SIZE_T,
-            lpMaximumWorkingSetSize: *os.windows.SIZE_T,
-        ) callconv(os.windows.WINAPI) os.windows.BOOL,
-        .{
-            .library_name = "kernel32",
-            .name = "GetProcessWorkingSetSize",
-        },
-    );
-
     const process_handle = os.windows.kernel32.GetCurrentProcess();
     var working_set_min: os.windows.SIZE_T = 0;
     var working_set_max: os.windows.SIZE_T = 0;
 
-    if (get_process_working_set_size(
+    if (stdx.windows.GetProcessWorkingSetSize(
         process_handle,
         &working_set_min,
         &working_set_max,
     ) == os.windows.FALSE) {
         working_set_min = allocated_size; // Count bytes allocated so far.
-        working_set_min += 64 * 1024 * 1024; // 64mb buffer room for stack/globals.
+        working_set_min += 64 * MiB; // 64mb buffer room for stack/globals.
         working_set_max = working_set_min * 2; // Buffer room for new page faults.
     }
 
-    if (set_process_working_set_size(
+    if (stdx.windows.SetProcessWorkingSetSize(
         process_handle,
         working_set_min,
         working_set_max,

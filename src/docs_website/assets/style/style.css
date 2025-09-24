@@ -153,7 +153,7 @@ nav.left-pane {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  width: 300px;
+  width: 310px;
 
   >.top-wrapper {
     position: sticky;

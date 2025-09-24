@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 const constants = @import("../constants.zig");
 const GrooveType = @import("../lsm/groove.zig").GrooveType;
@@ -87,9 +87,11 @@ pub fn StateMachineType(
         pub fn init(
             self: *StateMachine,
             allocator: std.mem.Allocator,
+            time: vsr.time.Time,
             grid: *Grid,
             options: Options,
         ) !void {
+            _ = time;
             self.* = .{
                 .options = options,
                 .forest = undefined,

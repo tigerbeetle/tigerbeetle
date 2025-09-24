@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const flags = @import("./flags.zig");
+const stdx = @import("stdx");
 const constants = @import("./constants.zig");
 const fuzz = @import("./testing/fuzz.zig");
 
@@ -33,7 +33,6 @@ const Fuzzers = .{
     .lsm_tree = @import("./lsm/tree_fuzz.zig"),
     .storage = @import("./storage_fuzz.zig"),
     .vsr_free_set = @import("./vsr/free_set_fuzz.zig"),
-    .vsr_journal_format = @import("./vsr/journal_format_fuzz.zig"),
     .vsr_superblock = @import("./vsr/superblock_fuzz.zig"),
     .vsr_superblock_quorums = @import("./vsr/superblock_quorums_fuzz.zig"),
     .vsr_multi_batch = @import("./vsr/multi_batch_fuzz.zig"),
@@ -90,7 +89,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     switch (cli_args.positional.fuzzer) {
         .smoke => {
@@ -123,7 +122,6 @@ fn main_smoke(gpa: std.mem.Allocator) !void {
             inline .ewah,
             .lsm_segmented_array,
             .lsm_manifest_level,
-            .vsr_journal_format,
             .vsr_superblock_quorums,
             .signal,
             => null,

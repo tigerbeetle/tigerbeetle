@@ -3,6 +3,445 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.59
+
+Released: 2025-09-19
+
+### Safety And Performance
+
+- [#3257](https://github.com/tigerbeetle/tigerbeetle/pull/3257)
+
+  Introduce Least Significant Digit (LSD) radix sort in stdx.
+
+- [#3268](https://github.com/tigerbeetle/tigerbeetle/pull/3268)
+
+  Use radix sort in the memory tables to get more performance improvements.
+
+- [#3250](https://github.com/tigerbeetle/tigerbeetle/pull/3250)
+
+  Reduce tail latencies by tracking sorted runs and use k-way merge to sort them.
+
+  Collectively, these changes result in the following performance improvements on modern servers
+  (Hetzner AX102):
+
+  | Metric | Before | After |
+  |--------|--------|-------|
+  | Load accepted (tx/s) | 414,375 | 606,258 |
+  | Batch latency p100 | 115ms | 75ms |
+
+### Internals
+
+- [#3262](https://github.com/tigerbeetle/tigerbeetle/pull/3262)
+
+  Use Zig's new `std.testing.random_seed` to introduce genuine randomness in tests.
+
+- [#3260](https://github.com/tigerbeetle/tigerbeetle/pull/3260)
+
+  Fix a crash due to corruption and misdirection found by the WIP message bus fuzzer.
+
+### TigerTracks 🎧
+
+- [Autobahn](https://open.spotify.com/track/31uidLEHAcF8Cw1cX1VCS8?si=3cefba6d35124ed9)
+
+## TigerBeetle 0.16.58
+
+Released: 2025-09-12
+
+### Safety And Performance
+
+- [#3248](https://github.com/tigerbeetle/tigerbeetle/pull/3248)
+
+  Fix a bug where grid.cancel was erroneously being invoked during commit_stage=checkpoint_durable.
+
+- [#3245](https://github.com/tigerbeetle/tigerbeetle/pull/3245)
+
+  Remove peer type from MessageBuffer, maintaining it only at MessageBus level.
+
+  This solves a bug introduced by [#3206](https://github.com/tigerbeetle/tigerbeetle/pull/3206),
+  due to divergent peer state between MessageBus and MessageBuffer.
+
+- [#3226](https://github.com/tigerbeetle/tigerbeetle/pull/3226),
+  [#3230](https://github.com/tigerbeetle/tigerbeetle/pull/3230),
+  [#3223](https://github.com/tigerbeetle/tigerbeetle/pull/3223),
+  [#3222](https://github.com/tigerbeetle/tigerbeetle/pull/3222)
+
+  Low-level LSM performance improvements. The k-way merge iterator now uses a tournament tree
+  instead of a heap, we skip sorting of the mutable table if it's not needed, and we skip binary
+  search if possible by min/max key ranges.
+
+- [#3237](https://github.com/tigerbeetle/tigerbeetle/pull/3237)
+
+  Use a different PRNG seed for Replica each time, rather than a fixed seed of the replica ID. This
+  PRNG controls things like exponential backoff jitter and the order of the blocks on which the grid
+  scrubber runs.
+
+### Features
+
+- [#3253](https://github.com/tigerbeetle/tigerbeetle/pull/3253)
+
+  Introduce `--requests-per-second-limit` to throttle CDC requests to TigerBeetle.
+
+  Usage for this option is orthogonal to `--idle-interval-ms` and `--event-count-max`, allowing
+  fine-tuning for low latency without overflowing the AMQP target queue.
+
+- [#3206](https://github.com/tigerbeetle/tigerbeetle/pull/3206)
+
+  In order to avoid bimodality if a replica is down (eg, a client sends a request, doesn't hear
+  anything, eventually times out and tries a different replica) clients now proactively send their
+  requests to the primary and a randomly selected replica.
+
+  Backups can also send replies directly to clients, meaning that a client could be completely
+  partitioned from the primary, but still remain available.
+
+### Internals
+
+- [#3251](https://github.com/tigerbeetle/tigerbeetle/pull/3251)
+
+  Mark grid cache blocks as MADV_DONTDUMP, making core dump size tractable even with large caches.
+
+- [#3227](https://github.com/tigerbeetle/tigerbeetle/pull/3227),
+  [#3231](https://github.com/tigerbeetle/tigerbeetle/pull/3231),
+  [#3242](https://github.com/tigerbeetle/tigerbeetle/pull/3242)
+
+  Preparation for the Zig 0.15.1 upgrade.
+
+- [#3236](https://github.com/tigerbeetle/tigerbeetle/pull/3236),
+  [#3229](https://github.com/tigerbeetle/tigerbeetle/pull/3229),
+  [#3198](https://github.com/tigerbeetle/tigerbeetle/pull/3198)
+
+  A host of multiversion improvements! Multiversioning is now a proper interface, rather than being
+  scattered about. Additionally, Windows support is now significantly more robust, and will be
+  integration tested like the other platforms in the next release.
+
+### TigerTracks 🎧
+
+- [See You Again](https://www.youtube.com/watch?v=RgKAFK5djSk)
+
+## TigerBeetle 0.16.57
+
+Released: 2025-08-29
+
+### Safety And Performance
+
+- [#3200](https://github.com/tigerbeetle/tigerbeetle/pull/3200)
+
+  Improved performance in `set_associative_cache.zig` by using Fastrange and SIMD.
+
+- [#3201](https://github.com/tigerbeetle/tigerbeetle/pull/3201)
+
+  Improved performance and better codegen in `aegis.zig` by avoiding aliasing.
+
+- [#3205](https://github.com/tigerbeetle/tigerbeetle/pull/3205)
+
+  Retain table repair progress across checkpoint boundaries,
+  to reduce the time to complete state sync for active clusters.
+
+- [#3216](https://github.com/tigerbeetle/tigerbeetle/pull/3216)
+
+  Use the `NOSIGNAL` flag with both asynchronous `send` and synchronous `send_now`.
+  This avoids receiving a possible `SIGPIPE` signal raised by the kernel.
+
+- [#3189](https://github.com/tigerbeetle/tigerbeetle/pull/3189)
+
+  Improve the Rust client API to make the returned future thread-safe.
+  Thanks @michabp!
+
+- [#3208](https://github.com/tigerbeetle/tigerbeetle/pull/3208)
+
+  Fix the Go client to make the subfolder with external files required by CGO
+  compatible with `go vendor`.
+  Thanks @itzloop.
+
+- [#3203](https://github.com/tigerbeetle/tigerbeetle/pull/3203)
+
+  Fix the Python client to make `close()` async on `ClientAsync`.
+
+### Internals
+
+- [#3215](https://github.com/tigerbeetle/tigerbeetle/pull/3215)
+
+  Removed support for _closed loop replication_ in repair and sync protocols.
+
+- [#3210](https://github.com/tigerbeetle/tigerbeetle/pull/3210),
+  [#3211](https://github.com/tigerbeetle/tigerbeetle/pull/3211)
+
+  Ban equality and inequality comparisons with `error` values, as they may silently
+  perform an untyped comparison.
+  Enforce handling errors with `switch` blocks instead.
+
+- [#3207](https://github.com/tigerbeetle/tigerbeetle/pull/3207)
+
+  Consolidate all Windows APIs we use (not present in Zig’s `std`) under `stdx.windows`.
+
+- [#3199](https://github.com/tigerbeetle/tigerbeetle/pull/3199),
+  [#3194](https://github.com/tigerbeetle/tigerbeetle/pull/3194)
+
+  Improve upgrade tests.
+
+- [#3202](https://github.com/tigerbeetle/tigerbeetle/pull/3202),
+  [#3140](https://github.com/tigerbeetle/tigerbeetle/pull/3140)
+
+  Improve the documentation to explain adaptive routing and add notes about
+  using CDC in production.
+
+- [#3196](https://github.com/tigerbeetle/tigerbeetle/pull/3196)
+
+  Moves the `unshare` code into `stdx.unshare` and uses it for both Vortex and CFO.
+  Also fixes how `vortex run` was handling the child process error code.
+
+### TigerTracks 🎧
+
+- [American Pie - Catch 22 😈](https://www.youtube.com/watch?v=9SzrN3oGCCw)
+
+## TigerBeetle 0.16.56
+
+Released: 2025-08-22
+
+### Safety And Performance
+
+- [#3185](https://github.com/tigerbeetle/tigerbeetle/pull/3185)
+
+  Improve the speed of trailer repairs by initiating repair requests more proactively.
+
+- [#3017](https://github.com/tigerbeetle/tigerbeetle/pull/3017)
+
+  Add [Vortex](https://tigerbeetle.com/blog/2025-02-13-a-descent-into-the-vortex/) to CI to test clients (Java, Zig, Rust).
+
+- [#3193](https://github.com/tigerbeetle/tigerbeetle/pull/3193)
+
+  Ensure only the primary responds to VSR repeat requests.
+
+### Features
+
+- [#3014](https://github.com/tigerbeetle/tigerbeetle/pull/3014)
+
+  Add a typed Python client (thanks @stenczelt).
+
+### Internals
+
+- [#3195](https://github.com/tigerbeetle/tigerbeetle/pull/3195)
+
+  Simplify budgeting for VSR repairs.
+
+- [#3181](https://github.com/tigerbeetle/tigerbeetle/pull/3181)
+
+  Refactor `ReleaseList` to contain the release logic.
+
+- [#3190](https://github.com/tigerbeetle/tigerbeetle/pull/3190)
+
+  Improve naming for journal and grid message budgets.
+
+### TigerTracks 🎧
+
+- [Boiler Room](https://www.youtube.com/watch?v=bk6Xst6euQk)
+
+## TigerBeetle 0.16.55
+
+Released: 2025-08-15
+
+### Safety And Performance
+
+- [3187](https://github.com/tigerbeetle/tigerbeetle/pull/3187)
+
+  Make repair timeout reliably fire in a loaded cluster processing small batches.
+
+- [#2863](https://github.com/tigerbeetle/tigerbeetle/pull/2863)
+
+  Make `tigerbeetle format` concurrent and only write essential data.
+  This speeds up the time to format considerably.
+
+- [#3145](https://github.com/tigerbeetle/tigerbeetle/pull/3145)
+
+  Cache prepares from the future, to help avoid needing to repair the WAL near checkpoints when a
+  backup is a little behind primary.
+
+### Features
+
+- [#3174](https://github.com/tigerbeetle/tigerbeetle/pull/3174)
+
+  Don't unlink data file on formatting failure.
+
+- [#3173](https://github.com/tigerbeetle/tigerbeetle/pull/3173)
+
+  Use correct default statsd port (8125).
+
+- [#3154](https://github.com/tigerbeetle/tigerbeetle/pull/3154)
+
+  Remove translation logic from old checkpoint state to new. Note that this means that
+  `tigerbeetle inspect` will no longer decode superblocks from 0.16.25 or older, until
+  they are upgraded to at least 0.16.26.
+
+### Internals
+
+- [#3186](https://github.com/tigerbeetle/tigerbeetle/pull/3186)
+
+  Improvements to the balance bounds, rate limiting, and two phase transfers recipes. Thanks @snth!
+
+- [#3150](https://github.com/tigerbeetle/tigerbeetle/pull/3150)
+
+  Use true quine to generate unit tests.
+
+- [#3160](https://github.com/tigerbeetle/tigerbeetle/pull/3160)
+
+  Drop `SigIllHandler`. This was supposed to print a nice error message on unsupported
+  architectures, but we hit `SigIll` in Zig's `_start`, before we get to our `main`.
+
+- [#3148](https://github.com/tigerbeetle/tigerbeetle/pull/3148)
+
+  Add constants for KiB thru PiB.
+
+### TigerTracks 🎧
+
+- [Heavyweight](https://www.youtube.com/watch?v=9Axg_e8astI)
+
+## TigerBeetle 0.16.54
+
+Released: 2025-08-08
+
+### Safety And Performance
+
+- [#3123](https://github.com/tigerbeetle/tigerbeetle/pull/3123)
+
+  Speed up repair by removing a round-trip to fetch headers.
+
+- [#3134](https://github.com/tigerbeetle/tigerbeetle/pull/3134)
+
+  Check checksums when downloading Zig during the build.
+
+### Features
+
+- [#2993](https://github.com/tigerbeetle/tigerbeetle/pull/2993)
+
+  Add documentation for Rust client library.
+
+- [#2989](https://github.com/tigerbeetle/tigerbeetle/pull/2989)
+
+  Test that release artifacts are fully reproducible.
+
+### Internals
+
+- [#3136](https://github.com/tigerbeetle/tigerbeetle/pull/3136)
+
+  Add a test to test that tests include all the tests.
+
+- [#3143](https://github.com/tigerbeetle/tigerbeetle/pull/3143)
+
+  Remove local variable aliasing as per TigerStyle.
+
+- [#3124](https://github.com/tigerbeetle/tigerbeetle/pull/3124)
+
+  `@splat` all the things.
+
+- [#3135](https://github.com/tigerbeetle/tigerbeetle/pull/3135)
+
+  Use double-entry accounting for allocations.
+
+- [#3129](https://github.com/tigerbeetle/tigerbeetle/pull/3129)
+
+  Remove `git-review`.
+
+- [#3131](https://github.com/tigerbeetle/tigerbeetle/pull/3131),
+  [#3130](https://github.com/tigerbeetle/tigerbeetle/pull/3130)
+
+  Show total number of VOPR runs for release.
+
+### TigerTracks 🎧
+
+- [War Pigs](https://www.youtube.com/watch?v=IB6jbWoGtlA&list=RDIB6jbWoGtlA)
+
+## TigerBeetle 0.16.53
+
+Released: 2025-08-01
+
+### Safety And Performance
+
+- [#3090](https://github.com/tigerbeetle/tigerbeetle/pull/3090),
+  [#3116](https://github.com/tigerbeetle/tigerbeetle/pull/3116)
+
+  Allowing EWAH to decode bigger free set into smaller. This fixes the `--limit-storage` flag.
+
+- [#3089](https://github.com/tigerbeetle/tigerbeetle/pull/3089)
+
+  Fix Node.js v24 client.
+
+### Features
+
+- [#3119](https://github.com/tigerbeetle/tigerbeetle/pull/3119)
+
+  Add compaction/checkpoint/journal slot count to `tigerbeetle inspect`.
+
+### Internals
+
+- [#3121](https://github.com/tigerbeetle/tigerbeetle/pull/3121)
+
+  During tests, verify that grid read errors correspond to either storage faults or ongoing state
+  sync.
+
+- [#3122](https://github.com/tigerbeetle/tigerbeetle/pull/3122)
+
+  Teach snaptest how to decode/encode hex & zon.
+
+- [#3110](https://github.com/tigerbeetle/tigerbeetle/pull/3110)
+
+  Fix typo in `manifest_log_fuzz`.
+
+- [#3113](https://github.com/tigerbeetle/tigerbeetle/pull/3113)
+
+  Test `CreateTransfersResult.exists` in VOPR.
+
+- [#3117](https://github.com/tigerbeetle/tigerbeetle/pull/3117),
+  [#3120](https://github.com/tigerbeetle/tigerbeetle/pull/3120)
+
+  `stdx` refactoring.
+
+### TigerTracks 🎧
+
+- [Summer Eyes](https://www.youtube.com/watch?v=4Kc1Cks29-w)
+
+## TigerBeetle 0.16.52
+
+Released: 2025-07-25
+
+### Safety And Performance
+
+- [#3093](https://github.com/tigerbeetle/tigerbeetle/pull/3093)
+
+  Improve repair performance by tracking requested prepares so each is repaired exactly once per
+  timeout.
+
+### Internals
+
+- [#2956](https://github.com/tigerbeetle/tigerbeetle/pull/2956)
+
+  In VOPR, model events using nanosecond-resolution timestamps to uncover more interesting
+  interleaving.
+
+- [#3088](https://github.com/tigerbeetle/tigerbeetle/pull/3088)
+  [#3100](https://github.com/tigerbeetle/tigerbeetle/pull/3100)
+  [#3102](https://github.com/tigerbeetle/tigerbeetle/pull/3102)
+
+  Initialize `IO` and `Tracer` early. Avoid comptime type specialization.
+
+- [#3101](https://github.com/tigerbeetle/tigerbeetle/pull/3101)
+
+  Update TigerStyle with additional conventions for naming things and ordering struct fields.
+
+- [#3105](https://github.com/tigerbeetle/tigerbeetle/pull/3105)
+
+  Add `--requests-max` CLI flag to VOPR.
+
+- [#3107](https://github.com/tigerbeetle/tigerbeetle/pull/3107)
+
+  In DevHub, use `font-size-adjust` to better match sizes of sans and monospace text.
+
+- [#3108](https://github.com/tigerbeetle/tigerbeetle/pull/3108)
+
+  Introduce a fixtures module for fuzzing and testing to avoid code duplication.
+
+### TigerTracks 🎧
+
+- [Changes](https://open.spotify.com/track/2wNEcJHnFxoKZIrxjxF5jL)
+
 ## TigerBeetle 0.16.51
 
 Released: 2025-07-18
@@ -1071,7 +1510,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2747](https://github.com/tigerbeetle/tigerbeetle/pull/2747)
 
-  Don't use deprecated NodeJS APIs in the samples.
+  Don't use deprecated Node.js APIs in the samples.
 
 - [#2748](https://github.com/tigerbeetle/tigerbeetle/pull/2748),
   [#2744](https://github.com/tigerbeetle/tigerbeetle/pull/2744)
@@ -1122,7 +1561,7 @@ this crash loop, please reach out to us on the Community Slack so we can help yo
 
 - [#2717](https://github.com/tigerbeetle/tigerbeetle/pull/2717)
 
-  Fix a Node client crash when it was closed with outstanding requests.
+  Fix a Node.js client crash when it was closed with outstanding requests.
 
 - [#2720](https://github.com/tigerbeetle/tigerbeetle/pull/2720)
 
@@ -4124,7 +4563,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1482](https://github.com/tigerbeetle/tigerbeetle/pull/1482)
 
-  Bring back Windows tests for .Net client in CI.
+  Bring back Windows tests for .NET client in CI.
 
 - [#1540](https://github.com/tigerbeetle/tigerbeetle/pull/1540)
 
@@ -4314,7 +4753,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1480](https://github.com/tigerbeetle/tigerbeetle/pull/1480)
 
-  Deprecate support and testing for Node 16, which is EOL.
+  Deprecate support and testing for Node.js 16, which is EOL.
 
 - [#1477](https://github.com/tigerbeetle/tigerbeetle/pull/1477),
   [#1469](https://github.com/tigerbeetle/tigerbeetle/pull/1469),
@@ -4326,7 +4765,7 @@ A very special song from our friend [MEGAHIT](https://www.megahit.hu)!
 
 - [#1474](https://github.com/tigerbeetle/tigerbeetle/pull/1474)
 
-  Improve integration tests around Node and `pending_transfer_expired` - thanks to our friends at
+  Improve integration tests around Node.js and `pending_transfer_expired` - thanks to our friends at
   Rafiki for reporting!
 
 ### TigerTracks 🎧
@@ -4443,7 +4882,7 @@ Welcome to 2024!
 
 - [#1400](https://github.com/tigerbeetle/tigerbeetle/pull/1400)
 
-  Drop support for .Net Standard 2.1.
+  Drop support for .NET Standard 2.1.
 
 - [#1397](https://github.com/tigerbeetle/tigerbeetle/pull/1397)
 
@@ -4459,7 +4898,8 @@ Welcome to 2024!
 
 - [#1398](https://github.com/tigerbeetle/tigerbeetle/pull/1398)
 
-  Don't test NodeJS client on platforms for which there are no simple upstream installation scripts.
+  Don't test Node.js client on platforms for which there are no simple upstream installation
+  scripts.
 
 - [#1388](https://github.com/tigerbeetle/tigerbeetle/pull/1388)
 
@@ -4593,7 +5033,7 @@ Still, **the TigerBeetle team wishes everyone happy holidays!** 🎁
   [#1341](https://github.com/tigerbeetle/tigerbeetle/pull/1341),
   [#1340](https://github.com/tigerbeetle/tigerbeetle/pull/1340)
 
-  Gate the main branch on more checks: unit-tests for NodeJS and even more fuzzers.
+  Gate the main branch on more checks: unit-tests for Node.js and even more fuzzers.
 
 - [#1332](https://github.com/tigerbeetle/tigerbeetle/pull/1332),
   [#1348](https://github.com/tigerbeetle/tigerbeetle/pull/1348)

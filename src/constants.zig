@@ -6,7 +6,9 @@ const std = @import("std");
 const assert = std.debug.assert;
 const vsr = @import("vsr.zig");
 const Config = @import("config.zig").Config;
-const stdx = @import("stdx.zig");
+const stdx = @import("stdx");
+
+const MiB = stdx.MiB;
 
 pub const config = @import("config.zig").configs.current;
 
@@ -242,7 +244,7 @@ comptime {
     assert(message_size_max >= Config.Cluster.message_size_max_min(clients_max));
 
     // Ensure that DVC/SV messages can fit all necessary headers.
-    assert(message_body_size_max >= view_change_headers_max * @sizeOf(vsr.Header));
+    assert(message_body_size_max >= view_headers_max * @sizeOf(vsr.Header));
 
     assert(message_body_size_max >= @sizeOf(vsr.ReconfigurationRequest));
     assert(message_body_size_max >= @sizeOf(vsr.BlockRequest));
@@ -301,19 +303,19 @@ pub const view_change_headers_suffix_max = config.cluster.view_change_headers_su
 /// - We must include all uncommitted headers.
 /// - +1 We must include the highest cluster-committed header, so that the new primary still has a
 ///   head op if it truncates the entire pipeline.
-pub const view_change_headers_max = view_change_headers_suffix_max + 2;
+pub const view_headers_max = view_change_headers_suffix_max + 2;
 
 comptime {
     assert(view_change_headers_suffix_max >= pipeline_prepare_queue_max + 1);
 
-    assert(view_change_headers_max > 0);
-    assert(view_change_headers_max >= pipeline_prepare_queue_max + 3);
-    assert(view_change_headers_max <= journal_slot_count);
-    assert(view_change_headers_max <= @divFloor(
+    assert(view_headers_max > 0);
+    assert(view_headers_max >= pipeline_prepare_queue_max + 3);
+    assert(view_headers_max <= journal_slot_count);
+    assert(view_headers_max <= @divFloor(
         message_body_size_max - @sizeOf(vsr.CheckpointState),
         @sizeOf(vsr.Header),
     ));
-    assert(view_change_headers_max > view_change_headers_suffix_max);
+    assert(view_headers_max > view_change_headers_suffix_max);
 }
 
 /// The maximum number of headers to include with a response to a command=request_headers message.
@@ -445,8 +447,8 @@ pub const tcp_sndbuf_client = connection_send_queue_max_client * message_size_ma
 
 comptime {
     // Avoid latency issues from setting sndbuf too high:
-    assert(tcp_sndbuf_replica <= 16 * 1024 * 1024);
-    assert(tcp_sndbuf_client <= 16 * 1024 * 1024);
+    assert(tcp_sndbuf_replica <= 16 * MiB);
+    assert(tcp_sndbuf_client <= 16 * MiB);
 }
 
 /// Whether to enable TCP keepalive:
@@ -700,7 +702,7 @@ pub const lsm_manifest_memory_size_min = lsm_manifest_memory_size_multiplier;
 /// to 1MiB so it is a more obvious increment for users.
 pub const lsm_manifest_memory_size_multiplier = lsm_manifest_memory_multiplier: {
     const lsm_manifest_memory_multiplier = 64 * lsm_manifest_node_size;
-    assert(lsm_manifest_memory_multiplier == 1024 * 1024);
+    assert(lsm_manifest_memory_multiplier == MiB);
     break :lsm_manifest_memory_multiplier lsm_manifest_memory_multiplier;
 };
 

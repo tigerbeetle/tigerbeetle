@@ -18,13 +18,16 @@ const net = std.net;
 
 const vsr = @import("vsr");
 const stdx = vsr.stdx;
-const flags = vsr.flags;
 const constants = vsr.constants;
 const tigerbeetle = vsr.tigerbeetle;
 const data_file_size_min = vsr.superblock.data_file_size_min;
 const StateMachine = @import("./main.zig").StateMachine;
 const Grid = @import("./main.zig").Grid;
 const Ratio = stdx.PRNG.Ratio;
+const ByteSize = stdx.ByteSize;
+
+const KiB = stdx.KiB;
+const GiB = stdx.GiB;
 
 const CLIArgs = union(enum) {
     const Format = struct {
@@ -57,7 +60,7 @@ const CLIArgs = union(enum) {
     const Start = struct {
         // Stable CLI arguments.
         addresses: []const u8,
-        cache_grid: ?flags.ByteSize = null,
+        cache_grid: ?ByteSize = null,
         development: bool = false,
         positional: struct {
             path: []const u8,
@@ -69,14 +72,14 @@ const CLIArgs = union(enum) {
         // Experimental flags must default to null, except for bools which must be false.
         experimental: bool = false,
 
-        limit_storage: ?flags.ByteSize = null,
+        limit_storage: ?ByteSize = null,
         limit_pipeline_requests: ?u32 = null,
-        limit_request: ?flags.ByteSize = null,
-        cache_accounts: ?flags.ByteSize = null,
-        cache_transfers: ?flags.ByteSize = null,
-        cache_transfers_pending: ?flags.ByteSize = null,
-        memory_lsm_manifest: ?flags.ByteSize = null,
-        memory_lsm_compaction: ?flags.ByteSize = null,
+        limit_request: ?ByteSize = null,
+        cache_accounts: ?ByteSize = null,
+        cache_transfers: ?ByteSize = null,
+        cache_transfers_pending: ?ByteSize = null,
+        memory_lsm_manifest: ?ByteSize = null,
+        memory_lsm_compaction: ?ByteSize = null,
         trace: ?[]const u8 = null,
         log_debug: bool = false,
         timeout_prepare_ms: ?u64 = null,
@@ -84,7 +87,6 @@ const CLIArgs = union(enum) {
         commit_stall_probability: ?Ratio = null,
 
         // Highly experimental options that will be removed in a future release:
-        replicate_closed_loop: bool = false,
         replicate_star: bool = false,
 
         statsd: ?[]const u8 = null,
@@ -279,6 +281,7 @@ const CLIArgs = union(enum) {
         publish_routing_key: ?[]const u8 = null,
         event_count_max: ?u32 = null,
         idle_interval_ms: ?u32 = null,
+        requests_per_second_limit: ?u32 = null,
         timestamp_last: ?u64 = null,
         verbose: bool = false,
     };
@@ -408,19 +411,19 @@ const CLIArgs = union(enum) {
         .default_port = constants.port,
         .default_cache_grid_gb = @divExact(
             constants.grid_cache_size_default,
-            1024 * 1024 * 1024,
+            GiB,
         ),
     });
 };
 
 const StartDefaults = struct {
     limit_pipeline_requests: u32,
-    limit_request: flags.ByteSize,
-    cache_accounts: flags.ByteSize,
-    cache_transfers: flags.ByteSize,
-    cache_transfers_pending: flags.ByteSize,
-    cache_grid: flags.ByteSize,
-    memory_lsm_compaction: flags.ByteSize,
+    limit_request: ByteSize,
+    cache_accounts: ByteSize,
+    cache_transfers: ByteSize,
+    cache_transfers_pending: ByteSize,
+    cache_grid: ByteSize,
+    memory_lsm_compaction: ByteSize,
 };
 
 const start_defaults_production = StartDefaults{
@@ -439,7 +442,7 @@ const start_defaults_production = StartDefaults{
 
 const start_defaults_development = StartDefaults{
     .limit_pipeline_requests = 0,
-    .limit_request = .{ .value = 32 * 1024 }, // 32KiB
+    .limit_request = .{ .value = 32 * KiB },
     .cache_accounts = .{ .value = 0 },
     .cache_transfers = .{ .value = 0 },
     .cache_transfers_pending = .{ .value = 0 },
@@ -496,7 +499,6 @@ pub const Command = union(enum) {
         trace: ?[]const u8,
         development: bool,
         experimental: bool,
-        replicate_closed_loop: bool,
         replicate_star: bool,
         aof_file: ?Path,
         path: []const u8,
@@ -610,6 +612,7 @@ pub const Command = union(enum) {
         publish_routing_key: ?[]const u8,
         event_count_max: ?u32,
         idle_interval_ms: ?u32,
+        requests_per_second_limit: ?u32,
         timestamp_last: ?u64,
         log_debug: bool,
     };
@@ -628,7 +631,7 @@ pub const Command = union(enum) {
 /// Parse the command line arguments passed to the `tigerbeetle` binary.
 /// Exits the program with a non-zero exit code if an error is found.
 pub fn parse_args(args_iterator: *std.process.ArgIterator) Command {
-    const cli_args = flags.parse(args_iterator, CLIArgs);
+    const cli_args = stdx.flags(args_iterator, CLIArgs);
 
     return switch (cli_args) {
         .format => |format| .{ .format = parse_args_format(format) },
@@ -764,12 +767,16 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         } else false;
         if (stable_field) continue;
 
-        const flag_name = flags.flag_name(field);
+        const flag_name = comptime blk: {
+            var result: [2 + field.name.len]u8 = ("--" ++ field.name).*;
+            std.mem.replaceScalar(u8, &result, '_', '-');
+            break :blk result;
+        };
 
         // If you've added a flag and get a comptime error here, it's likely because
         // we require experimental flags to default to null.
         const required_default = if (field.type == bool) false else null;
-        assert(flags.default_value(field).? == required_default);
+        assert(field.defaultValue().? == required_default);
 
         if (@field(start, field.name) != required_default and !start.experimental) {
             vsr.fatal(
@@ -789,9 +796,9 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
     const defaults =
         if (start.development) start_defaults_development else start_defaults_production;
 
-    const start_limit_storage: flags.ByteSize = start.limit_storage orelse
+    const start_limit_storage: ByteSize = start.limit_storage orelse
         .{ .value = constants.storage_size_limit_default };
-    const start_memory_lsm_manifest: flags.ByteSize = start.memory_lsm_manifest orelse
+    const start_memory_lsm_manifest: ByteSize = start.memory_lsm_manifest orelse
         .{ .value = constants.lsm_manifest_memory_size_default };
 
     const storage_size_limit = start_limit_storage.bytes();
@@ -999,17 +1006,12 @@ fn parse_args_start(start: CLIArgs.Start) Command.Start {
         .development = start.development,
         .experimental = start.experimental,
         .trace = start.trace,
-        .replicate_closed_loop = start.replicate_closed_loop,
         .replicate_star = start.replicate_star,
         .aof_file = aof_file,
         .path = start.positional.path,
         .log_debug = start.log_debug,
         .statsd = if (start.statsd) |statsd_address|
-            parse_addresses(
-                statsd_address,
-                "--statsd",
-                stdx.BoundedArrayType(std.net.Address, 1),
-            ).get(0)
+            parse_address_and_port(statsd_address, "--statsd", 8125)
         else
             null,
     };
@@ -1169,6 +1171,16 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         );
     }
 
+    if (amqp.requests_per_second_limit) |requests_per_second_limit| {
+        if (requests_per_second_limit == 0) {
+            vsr.fatal(
+                .cli,
+                "--requests-per-second-limit must not be zero.",
+                .{},
+            );
+        }
+    }
+
     return .{
         .addresses = addresses,
         .cluster = amqp.cluster,
@@ -1180,6 +1192,7 @@ fn parse_args_amqp(amqp: CLIArgs.AMQP) Command.AMQP {
         .publish_routing_key = amqp.publish_routing_key,
         .event_count_max = amqp.event_count_max,
         .idle_interval_ms = amqp.idle_interval_ms,
+        .requests_per_second_limit = amqp.requests_per_second_limit,
         .timestamp_last = amqp.timestamp_last,
         .log_debug = amqp.verbose,
     };
@@ -1245,7 +1258,7 @@ fn parse_address_and_port(
 fn parse_cache_size_to_count(
     comptime T: type,
     comptime SetAssociativeCache: type,
-    size: flags.ByteSize,
+    size: ByteSize,
     cli_flag: []const u8,
 ) u32 {
     const value_count_max_multiple = SetAssociativeCache.value_count_max_multiple;

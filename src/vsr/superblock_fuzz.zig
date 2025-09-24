@@ -24,13 +24,14 @@ const SuperBlockHeader = @import("superblock.zig").SuperBlockHeader;
 const SuperBlockType = @import("superblock.zig").SuperBlockType;
 const Caller = @import("superblock.zig").Caller;
 const SuperBlock = SuperBlockType(Storage);
+const fixtures = @import("../testing/fixtures.zig");
 const fuzz = @import("../testing/fuzz.zig");
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const ratio = stdx.PRNG.ratio;
 
-const cluster = 0;
-const replica = 0;
-const replica_count = 6;
+const cluster = fixtures.cluster;
+const replica = fixtures.replica;
+const replica_count = fixtures.replica_count;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     // Total calls to checkpoint() + view_change().
@@ -52,8 +53,8 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     defer storage_fault_atlas.deinit(gpa);
 
     const storage_options: Storage.Options = .{
-        .replica_index = 0,
         .seed = prng.int(u64),
+        .size = superblock_zone_size,
         // SuperBlock's IO is all serial, so latencies never reorder reads/writes.
         .read_latency_min = .{ .ns = 0 },
         .read_latency_mean = .{ .ns = 0 },
@@ -73,23 +74,22 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
             prng.range_inclusive(u64, 50, 100),
             100,
         ),
+        .replica_index = fixtures.replica,
         .fault_atlas = &storage_fault_atlas,
     };
 
-    var storage = try Storage.init(gpa, superblock_zone_size, storage_options);
+    var storage = try fixtures.init_storage(gpa, storage_options);
     defer storage.deinit(gpa);
 
-    var storage_verify = try Storage.init(gpa, superblock_zone_size, storage_options);
+    var storage_verify = try fixtures.init_storage(gpa, storage_options);
     defer storage_verify.deinit(gpa);
 
-    var superblock = try SuperBlock.init(gpa, .{
-        .storage = &storage,
+    var superblock = try fixtures.init_superblock(gpa, &storage, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock.deinit(gpa);
 
-    var superblock_verify = try SuperBlock.init(gpa, .{
-        .storage = &storage_verify,
+    var superblock_verify = try fixtures.init_superblock(gpa, &storage_verify, .{
         .storage_size_limit = constants.storage_size_limit_default,
     });
     defer superblock_verify.deinit(gpa);
@@ -145,7 +145,6 @@ fn run_fuzz(gpa: std.mem.Allocator, seed: u64, transitions_count_total: usize) !
     while (env.pending.count() > 0) env.superblock.storage.run();
 
     env.open();
-    while (env.pending.count() > 0) env.superblock.storage.run();
 
     try env.verify();
     assert(env.pending.count() == 0);
@@ -185,7 +184,7 @@ const Environment = struct {
     /// Indexed by sequence.
     const SequenceStates = std.ArrayList(struct {
         vsr_state: VSRState,
-        vsr_headers: vsr.Headers.Array,
+        view_headers: vsr.Headers.Array,
     });
 
     sequence_states: SequenceStates,
@@ -295,8 +294,8 @@ const Environment = struct {
             .view = null,
         });
 
-        var vsr_headers = vsr.Headers.Array{};
-        vsr_headers.push(vsr.Header.Prepare.root(cluster));
+        var view_headers = vsr.Headers.Array{};
+        view_headers.push(vsr.Header.Prepare.root(cluster));
 
         assert(env.sequence_states.items.len == 0);
         try env.sequence_states.append(undefined); // skip sequence=0
@@ -309,7 +308,7 @@ const Environment = struct {
                 .replica_count = replica_count,
                 .view = 0,
             }),
-            .vsr_headers = vsr_headers,
+            .view_headers = view_headers,
         });
     }
 
@@ -321,15 +320,7 @@ const Environment = struct {
 
     fn open(env: *Environment) void {
         assert(env.pending.count() == 0);
-        env.pending.insert(.open);
-        env.superblock.open(open_callback, &env.context_open);
-    }
-
-    fn open_callback(context: *SuperBlock.Context) void {
-        const env: *Environment = @fieldParentPtr("context_open", context);
-        assert(env.pending.contains(.open));
-        env.pending.remove(.open);
-
+        fixtures.open_superblock(env.superblock);
         assert(env.superblock.working.sequence == 1);
         assert(env.superblock.working.vsr_state.replica_id == env.members[replica]);
         assert(env.superblock.working.vsr_state.replica_count == replica_count);
@@ -352,7 +343,7 @@ const Environment = struct {
             .replica_count = replica_count,
         };
 
-        var vsr_headers = vsr.Headers.Array{};
+        var view_headers = vsr.Headers.Array{};
         var vsr_head = std.mem.zeroInit(vsr.Header.Prepare, .{
             .client = 1,
             .request = 1,
@@ -364,12 +355,12 @@ const Environment = struct {
         });
         vsr_head.set_checksum_body(&.{});
         vsr_head.set_checksum();
-        vsr_headers.push(vsr_head);
+        view_headers.push(vsr_head);
 
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr_headers,
+            .view_headers = view_headers,
         });
 
         env.pending.insert(.view_change);
@@ -379,7 +370,7 @@ const Environment = struct {
             .view = vsr_state.view,
             .headers = &.{
                 .command = .do_view_change,
-                .array = vsr_headers,
+                .array = view_headers,
             },
             .sync_checkpoint = null,
         });
@@ -441,8 +432,8 @@ const Environment = struct {
         assert(env.sequence_states.items.len == env.superblock.staging.sequence + 1);
         try env.sequence_states.append(.{
             .vsr_state = vsr_state,
-            .vsr_headers = vsr.Headers.Array.from_slice(
-                env.superblock.staging.vsr_headers().slice,
+            .view_headers = vsr.Headers.Array.from_slice(
+                env.superblock.staging.view_headers().slice,
             ) catch unreachable,
         });
 

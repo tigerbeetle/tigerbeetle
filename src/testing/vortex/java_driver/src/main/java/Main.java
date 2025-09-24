@@ -54,7 +54,20 @@ public final class Main {
   }
 }
 
-record Driver(Client client, Reader reader, Writer writer) {
+class Driver {
+  private final Client client;
+  private final Reader reader;
+  private final Writer writer;
+
+  public Driver(Client client, Reader reader, Writer writer) {
+    this.client = client;
+    this.reader = reader;
+    this.writer = writer;
+  }
+
+  public Client client() { return client; }
+  public Reader reader() { return reader; }
+  public Writer writer() { return writer; }
   static ByteOrder BYTE_ORDER = ByteOrder.nativeOrder();
   static {
     // We require little-endian architectures everywhere for efficient network
@@ -152,9 +165,18 @@ record Driver(Client client, Reader reader, Writer writer) {
       throws IOException, InterruptedException, ExecutionException {
     reader.read(Driver.Operation.CREATE_ACCOUNTS.eventSize() * count);
 
-    record Request(CompletableFuture<CreateAccountResultBatch> future, int eventCount) {
+    class Request {
+      private final CompletableFuture<CreateAccountResultBatch> future;
+      private final int eventCount;
+
+      public Request(CompletableFuture<CreateAccountResultBatch> future, int eventCount) {
+        this.future = future;
+        this.eventCount = eventCount;
+      }
+
+      public CompletableFuture<CreateAccountResultBatch> future() { return future; }
+      public int eventCount() { return eventCount; }
     }
-    ;
     final var requests = new ArrayList<Request>(count);
     var batch = new AccountBatch(count);
     for (int index = 0; index < count; index++) {
@@ -184,9 +206,18 @@ record Driver(Client client, Reader reader, Writer writer) {
       requests.add(new Request(client.createAccountsAsync(batch), batch.getLength()));
     }
 
-    record Result(int index, CreateAccountResult result) {
+    class Result {
+      private final int index;
+      private final CreateAccountResult result;
+
+      public Result(int index, CreateAccountResult result) {
+        this.index = index;
+        this.result = result;
+      }
+
+      public int index() { return index; }
+      public CreateAccountResult result() { return result; }
     }
-    ;
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
@@ -241,9 +272,18 @@ record Driver(Client client, Reader reader, Writer writer) {
       throws IOException, InterruptedException, ExecutionException {
     reader.read(Driver.Operation.CREATE_TRANSFERS.eventSize() * count);
 
-    record Request(CompletableFuture<CreateTransferResultBatch> future, int eventCount) {
+    class Request {
+      private final CompletableFuture<CreateTransferResultBatch> future;
+      private final int eventCount;
+
+      public Request(CompletableFuture<CreateTransferResultBatch> future, int eventCount) {
+        this.future = future;
+        this.eventCount = eventCount;
+      }
+
+      public CompletableFuture<CreateTransferResultBatch> future() { return future; }
+      public int eventCount() { return eventCount; }
     }
-    ;
     final var requests = new ArrayList<Request>(count);
     var batch = new TransferBatch(count);
     for (int index = 0; index < count; index++) {
@@ -273,9 +313,18 @@ record Driver(Client client, Reader reader, Writer writer) {
       requests.add(new Request(client.createTransfersAsync(batch), batch.getLength()));
     }
 
-    record Result(int index, CreateTransferResult result) {
+    class Result {
+      private final int index;
+      private final CreateTransferResult result;
+
+      public Result(int index, CreateTransferResult result) {
+        this.index = index;
+        this.result = result;
+      }
+
+      public int index() { return index; }
+      public CreateTransferResult result() { return result; }
     }
-    ;
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
@@ -338,14 +387,51 @@ record Driver(Client client, Reader reader, Writer writer) {
       requests.add(client.lookupAccountsAsync(batch));
     }
 
-    record Result(
-        byte[] id,
-        BigInteger debitsPending, BigInteger debitsPosted,
-        BigInteger creditsPending, BigInteger creditsPosted,
-        byte[] userData128, long userData64, int userData32,
-        int ledger, int code, int flags, long timestamp) {
+    class Result {
+      private final byte[] id;
+      private final BigInteger debitsPending;
+      private final BigInteger debitsPosted;
+      private final BigInteger creditsPending;
+      private final BigInteger creditsPosted;
+      private final byte[] userData128;
+      private final long userData64;
+      private final int userData32;
+      private final int ledger;
+      private final int code;
+      private final int flags;
+      private final long timestamp;
+
+      public Result(byte[] id, BigInteger debitsPending, BigInteger debitsPosted,
+                   BigInteger creditsPending, BigInteger creditsPosted,
+                   byte[] userData128, long userData64, int userData32,
+                   int ledger, int code, int flags, long timestamp) {
+        this.id = id;
+        this.debitsPending = debitsPending;
+        this.debitsPosted = debitsPosted;
+        this.creditsPending = creditsPending;
+        this.creditsPosted = creditsPosted;
+        this.userData128 = userData128;
+        this.userData64 = userData64;
+        this.userData32 = userData32;
+        this.ledger = ledger;
+        this.code = code;
+        this.flags = flags;
+        this.timestamp = timestamp;
+      }
+
+      public byte[] id() { return id; }
+      public BigInteger debitsPending() { return debitsPending; }
+      public BigInteger debitsPosted() { return debitsPosted; }
+      public BigInteger creditsPending() { return creditsPending; }
+      public BigInteger creditsPosted() { return creditsPosted; }
+      public byte[] userData128() { return userData128; }
+      public long userData64() { return userData64; }
+      public int userData32() { return userData32; }
+      public int ledger() { return ledger; }
+      public int code() { return code; }
+      public int flags() { return flags; }
+      public long timestamp() { return timestamp; }
     }
-    ;
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
@@ -430,14 +516,54 @@ record Driver(Client client, Reader reader, Writer writer) {
       requests.add(client.lookupTransfersAsync(batch));
     }
 
-    record Result(
-        byte[] id,
-        byte[] debitAccountId, byte[] creditAccountId,
-        BigInteger amount, byte[] pendingId,
-        byte[] userData128, long userData64, int userData32,
-        int timeout, int ledger, int code, int flags, long timestamp) {
+    class Result {
+      private final byte[] id;
+      private final byte[] debitAccountId;
+      private final byte[] creditAccountId;
+      private final BigInteger amount;
+      private final byte[] pendingId;
+      private final byte[] userData128;
+      private final long userData64;
+      private final int userData32;
+      private final int timeout;
+      private final int ledger;
+      private final int code;
+      private final int flags;
+      private final long timestamp;
+
+      public Result(byte[] id, byte[] debitAccountId, byte[] creditAccountId,
+                   BigInteger amount, byte[] pendingId,
+                   byte[] userData128, long userData64, int userData32,
+                   int timeout, int ledger, int code, int flags, long timestamp) {
+        this.id = id;
+        this.debitAccountId = debitAccountId;
+        this.creditAccountId = creditAccountId;
+        this.amount = amount;
+        this.pendingId = pendingId;
+        this.userData128 = userData128;
+        this.userData64 = userData64;
+        this.userData32 = userData32;
+        this.timeout = timeout;
+        this.ledger = ledger;
+        this.code = code;
+        this.flags = flags;
+        this.timestamp = timestamp;
+      }
+
+      public byte[] id() { return id; }
+      public byte[] debitAccountId() { return debitAccountId; }
+      public byte[] creditAccountId() { return creditAccountId; }
+      public BigInteger amount() { return amount; }
+      public byte[] pendingId() { return pendingId; }
+      public byte[] userData128() { return userData128; }
+      public long userData64() { return userData64; }
+      public int userData32() { return userData32; }
+      public int timeout() { return timeout; }
+      public int ledger() { return ledger; }
+      public int code() { return code; }
+      public int flags() { return flags; }
+      public long timestamp() { return timestamp; }
     }
-    ;
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
@@ -569,8 +695,8 @@ record Driver(Client client, Reader reader, Writer writer) {
 
     void read(int count) throws IOException {
       if (this.buffer != null && this.buffer.hasRemaining()) {
-        throw new RuntimeException("existing read buffer has %d bytes remaining"
-            .formatted(this.buffer.remaining()));
+        throw new RuntimeException(String.format("existing read buffer has %d bytes remaining",
+            this.buffer.remaining()));
       }
       this.buffer = ByteBuffer.allocateDirect(count).order(BYTE_ORDER);
       int read = 0;
@@ -620,8 +746,8 @@ record Driver(Client client, Reader reader, Writer writer) {
 
     void allocate(int size) {
       if (this.buffer != null && this.buffer.hasRemaining()) {
-        throw new RuntimeException("existing buffer has %d bytes remaining"
-            .formatted(this.buffer.remaining()));
+        throw new RuntimeException(String.format("existing buffer has %d bytes remaining",
+            this.buffer.remaining()));
       }
       this.buffer = ByteBuffer.allocateDirect(size).order(BYTE_ORDER).position(0);
     }
@@ -631,8 +757,8 @@ record Driver(Client client, Reader reader, Writer writer) {
      */
     void flush() throws IOException {
       if (this.buffer != null && this.buffer.hasRemaining()) {
-        throw new RuntimeException("buffer has %d bytes remaining, refusing to write"
-            .formatted(this.buffer.remaining()));
+        throw new RuntimeException(String.format("buffer has %d bytes remaining, refusing to write",
+            this.buffer.remaining()));
       }
       buffer.rewind();
       while (buffer.hasRemaining()) {

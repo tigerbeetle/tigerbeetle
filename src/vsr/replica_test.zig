@@ -6,7 +6,7 @@ const expectEqual = std.testing.expectEqual;
 const expect = std.testing.expect;
 const allocator = std.testing.allocator;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
 const fuzz = @import("../testing/fuzz.zig");
@@ -35,7 +35,9 @@ const checkpoint_2_prepare_max = vsr.Checkpoint.prepare_max_for_checkpoint(check
 const checkpoint_1_prepare_ok_max = checkpoint_1_trigger + constants.pipeline_prepare_queue_max;
 const checkpoint_2_prepare_ok_max = checkpoint_2_trigger + constants.pipeline_prepare_queue_max;
 
-const log_level = std.log.Level.err;
+const MiB = stdx.MiB;
+
+const log_level: std.log.Level = .err;
 
 const releases = [_]Release{
     .{
@@ -482,9 +484,7 @@ test "Cluster: network: partition client-primary (symmetric)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .bidirectional);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
@@ -495,9 +495,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop requests)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .incoming);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
@@ -508,9 +506,7 @@ test "Cluster: network: partition client-primary (asymmetric, drop replies)" {
     var c = t.clients(.{});
 
     t.replica(.A0).drop_all(.C_, .outgoing);
-    // TODO: https://github.com/tigerbeetle/tigerbeetle/issues/444
-    // try c.request(1, 1);
-    try c.request(1, 0);
+    try c.request(1, 1);
 }
 
 test "Cluster: network: partition flexible quorum" {
@@ -1941,6 +1937,50 @@ test "Cluster: view_change: lagging replica repairs WAL using start_view from po
     try expectEqual(b1.commit(), checkpoint_3_trigger + 1);
 }
 
+test "Cluster: partitioned replica with higher view cannot lock out client" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{ .index = 0, .count = 1 });
+
+    try c.request(1, 1);
+
+    try expectEqual(t.replica(.R_).commit(), 1);
+    try expectEqual(t.replica(.R_).view(), 1);
+    try expectEqual(t.replica(.R_).log_view(), 1);
+
+    const a0 = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    // Partition primary, allow one of the backups to increment its view to 2 but the other to
+    // maintain its view at 1. Block exchange of DVC messages to avoid view change.
+    a0.drop_all(.R_, .bidirectional);
+    t.replica(.R_).drop(.R_, .bidirectional, .do_view_change);
+    b1.drop_all(.R_, .incoming);
+
+    t.run();
+    try expectEqual(b1.view(), 1);
+    try expectEqual(b1.log_view(), 1);
+    try expectEqual(b2.view(), 2);
+    try expectEqual(b2.log_view(), 1);
+
+    // Reconnect primary, partition the backup with view=2 so it doesn't influence a view change.
+    a0.pass_all(.R_, .bidirectional);
+    b2.drop_all(.R_, .bidirectional);
+
+    // Verify that the client is able to get its requests processed by the cluster even though
+    // there is a partitioned replica with a higher view number (view=2) than the cluster (view=1).
+    try c.request(2, 2);
+
+    try expectEqual(b2.view(), 2);
+    try expectEqual(b1.view(), 1);
+    try expectEqual(a0.view(), 1);
+
+    try expectEqual(b1.commit(), 2);
+    try expectEqual(a0.commit(), 2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
@@ -1983,6 +2023,7 @@ const TestContext = struct {
         const log_level_original = std.testing.log_level;
         std.testing.log_level = log_level;
         var prng = stdx.PRNG.from_seed(options.seed);
+        const storage_size_limit = vsr.sector_floor(128 * MiB);
 
         const cluster = try Cluster.init(allocator, .{
             .cluster = .{
@@ -1990,7 +2031,7 @@ const TestContext = struct {
                 .replica_count = options.replica_count,
                 .standby_count = options.standby_count,
                 .client_count = options.client_count,
-                .storage_size_limit = vsr.sector_floor(128 * 1024 * 1024),
+                .storage_size_limit = storage_size_limit,
                 .seed = prng.int(u64),
                 .releases = &releases,
                 .client_release = options.client_release,
@@ -2013,10 +2054,11 @@ const TestContext = struct {
                 .recorded_count_max = 16,
             },
             .storage = .{
-                .read_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
-                .read_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
-                .write_latency_min = .{ .ns = 10 * std.time.ns_per_ms },
-                .write_latency_mean = .{ .ns = 50 * std.time.ns_per_ms },
+                .size = storage_size_limit,
+                .read_latency_min = .ms(10),
+                .read_latency_mean = .ms(50),
+                .write_latency_min = .ms(10),
+                .write_latency_mean = .ms(50),
             },
             .storage_fault_atlas = .{
                 .faulty_superblock = false,
@@ -2216,10 +2258,7 @@ const TestReplicas = struct {
     pub fn open(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.replica_restart(
-                r,
-                t.cluster.replicas[r].releases_bundled,
-            ) catch |err| {
+            t.cluster.replica_restart(r) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -2231,7 +2270,7 @@ const TestReplicas = struct {
     }
 
     pub fn open_upgrade(t: *const TestReplicas, releases_bundled_patch: []const u8) !void {
-        var releases_bundled = vsr.ReleaseList{};
+        var releases_bundled: vsr.ReleaseList = .empty;
         for (releases_bundled_patch) |patch| {
             releases_bundled.push(vsr.Release.from(.{
                 .major = 0,
@@ -2239,10 +2278,12 @@ const TestReplicas = struct {
                 .patch = patch,
             }));
         }
+        releases_bundled.verify();
 
         for (t.replicas.const_slice()) |r| {
             log.info("{}: restart replica", .{r});
-            t.cluster.replica_restart(r, &releases_bundled) catch |err| {
+            t.cluster.replica_set_releases(r, &releases_bundled);
+            t.cluster.replica_restart(r) catch |err| {
                 assert(t.replicas.count() == 1);
                 return switch (err) {
                     error.WALCorrupt => return error.WALCorrupt,
@@ -2256,7 +2297,7 @@ const TestReplicas = struct {
     pub fn open_reformat(t: *const TestReplicas) !void {
         for (t.replicas.const_slice()) |r| {
             log.info("{}: recover replica", .{r});
-            try t.cluster.replica_reformat(r, t.cluster.replicas[r].releases_bundled);
+            try t.cluster.replica_reformat(r);
         }
     }
 
@@ -2287,8 +2328,8 @@ const TestReplicas = struct {
     fn get(
         t: *const TestReplicas,
         comptime field: std.meta.FieldEnum(Cluster.Replica),
-    ) std.meta.fieldInfo(Cluster.Replica, field).type {
-        var value_all: ?std.meta.fieldInfo(Cluster.Replica, field).type = null;
+    ) @FieldType(Cluster.Replica, @tagName(field)) {
+        var value_all: ?@FieldType(Cluster.Replica, @tagName(field)) = null;
         for (t.replicas.const_slice()) |r| {
             const replica = &t.cluster.replicas[r];
             const value = @field(replica, @tagName(field));

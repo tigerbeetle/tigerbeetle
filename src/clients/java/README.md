@@ -106,7 +106,7 @@ features of TigerBeetle.
 * [Basic](/src/clients/java/samples/basic/): Create two accounts and transfer an amount between them.
 * [Two-Phase Transfer](/src/clients/java/samples/two-phase/): Create two accounts and start a pending transfer between
 them, then post the transfer.
-* [Many Two-Phase Transfers](/src/clients/java/samples/two-phase-many/): Create two accounts and start a number of pending transfer
+* [Many Two-Phase Transfers](/src/clients/java/samples/two-phase-many/): Create two accounts and start a number of pending transfers
 between them, posting and voiding alternating transfers.
 ## Creating a Client
 
@@ -116,7 +116,8 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks.
+between multiple concurrent tasks. This allows events to be 
+[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
 one TigerBeetle cluster.
@@ -657,7 +658,7 @@ filter.setCode(1); // Filter by Code.
 filter.setLedger(0); // No filter by Ledger.
 filter.setTimestampMin(0); // No filter by Timestamp.
 filter.setTimestampMax(0); // No filter by Timestamp.
-filter.setLimit(10); // Limit to ten balances at most.
+filter.setLimit(10); // Limit to ten accounts at most.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
 AccountBatch accounts = client.queryAccounts(filter);
@@ -682,7 +683,7 @@ filter.setCode(1); // Filter by Code.
 filter.setLedger(0); // No filter by Ledger.
 filter.setTimestampMin(0); // No filter by Timestamp.
 filter.setTimestampMax(0); // No filter by Timestamp.
-filter.setLimit(10); // Limit to ten balances at most.
+filter.setLimit(10); // Limit to ten transfers at most.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
 TransferBatch transfers = client.queryTransfers(filter);

@@ -11,8 +11,7 @@
 //!   This is a special case of the following rule-of-thumb: length of `build.zig` should be O(1).
 const std = @import("std");
 
-const stdx = @import("stdx.zig");
-const flags = @import("flags.zig");
+const stdx = @import("stdx");
 const Shell = @import("shell.zig");
 
 const cfo = @import("./scripts/cfo.zig");
@@ -20,7 +19,6 @@ const ci = @import("./scripts/ci.zig");
 const release = @import("./scripts/release.zig");
 const devhub = @import("./scripts/devhub.zig");
 const changelog = @import("./scripts/changelog.zig");
-const antithesis = @import("./scripts/antithesis.zig");
 const amqp = @import("./scripts/amqp.zig");
 
 pub fn log_fn(
@@ -41,7 +39,6 @@ const CLIArgs = union(enum) {
     release: release.CLIArgs,
     devhub: devhub.CLIArgs,
     changelog: void,
-    antithesis: antithesis.CLIArgs,
     amqp: amqp.CLIArgs,
 
     pub const help =
@@ -58,7 +55,7 @@ const CLIArgs = union(enum) {
         \\
         \\  zig build scripts -- devhub --sha=<commit>
         \\
-        \\  zig build scripts -- release --run-number=<run> --sha=<commit>
+        \\  zig build scripts -- release --sha=<commit>
         \\
         \\Options:
         \\
@@ -95,7 +92,7 @@ pub fn main() !void {
     var args = try std.process.argsWithAllocator(gpa);
     defer args.deinit();
 
-    const cli_args = flags.parse(&args, CLIArgs);
+    const cli_args = stdx.flags(&args, CLIArgs);
 
     switch (cli_args) {
         .cfo => |args_cfo| try cfo.main(shell, gpa, args_cfo),
@@ -103,7 +100,6 @@ pub fn main() !void {
         .release => |args_release| try release.main(shell, gpa, args_release),
         .devhub => |args_devhub| try devhub.main(shell, gpa, args_devhub),
         .changelog => try changelog.main(shell, gpa),
-        .antithesis => |args_antithesis| try antithesis.main(shell, gpa, args_antithesis),
         .amqp => |args_amqp| try amqp.main(shell, gpa, args_amqp),
     }
 }

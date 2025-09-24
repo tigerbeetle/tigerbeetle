@@ -1,4 +1,4 @@
-const stdx = @import("./stdx.zig");
+const stdx = @import("stdx");
 const std = @import("std");
 const assert = std.debug.assert;
 const maybe = stdx.maybe;
@@ -31,10 +31,6 @@ pub const MessageBuffer = struct {
     advance_size: u32 = 0,
     /// The amount of bytes received from the kernel.
     receive_size: u32 = 0,
-
-    /// Which peer we are receiving from, inferred from the received messages. Set during parsing,
-    /// and used by the message bus to map connections to replicas and clients.
-    peer: vsr.Peer = .unknown,
 
     // An error occurred, and the MessageBus should terminate connection.
     // Can be set by replica to indicate semantic errors, such as wrong cluster.
@@ -139,15 +135,14 @@ pub const MessageBuffer = struct {
 
         // Check that command is valid without materializing invalid Zig enum value.
         comptime assert(@sizeOf(vsr.Command) == @sizeOf(u8) and
-            std.meta.FieldType(Header, .command) == vsr.Command);
+            @FieldType(Header, "command") == vsr.Command);
         const command_raw: u8 = header_bytes[@offsetOf(Header, "command")];
         _ = std.meta.intToEnum(vsr.Command, command_raw) catch {
             vsr.fatal(
                 .unknown_vsr_command,
                 "unknown VSR command, crashing for safety " ++
-                    "(peer={} command={d} protocol={d} replica={d} release={})",
+                    "(command={d} protocol={d} replica={d} release={})",
                 .{
-                    buffer.peer,
                     command_raw,
                     header.protocol,
                     header.replica,
@@ -163,20 +158,6 @@ pub const MessageBuffer = struct {
         assert(@sizeOf(Header) <= header.size and header.size <= constants.message_size_max);
 
         buffer.advance_size += @sizeOf(Header);
-
-        // To avoid dropping outgoing messages, set the peer as soon as we can,
-        // and not when we receive a full message.
-        const message_peer = header.peer_type();
-        if (message_peer != .unknown) {
-            if (buffer.peer == .unknown) {
-                buffer.peer = message_peer;
-            } else {
-                if (!std.meta.eql(buffer.peer, message_peer)) {
-                    buffer.invalidate(.misdirected);
-                    return;
-                }
-            }
-        }
     }
 
     fn advance_body(buffer: *MessageBuffer) void {
@@ -367,7 +348,7 @@ test "MessageBuffer fuzz" {
     // are received unless a fault is detected.
     const messages_max = 100;
 
-    var prng = stdx.PRNG.from_seed(92);
+    var prng = stdx.PRNG.from_seed_testing();
     const gpa = std.testing.allocator;
 
     var buffer: []u8 = try gpa.alloc(u8, 5 * constants.message_size_max);

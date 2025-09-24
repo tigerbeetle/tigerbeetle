@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 
 const Direction = @import("../direction.zig").Direction;
@@ -16,7 +16,7 @@ pub fn ZigZagMergeIteratorType(
     comptime Context: type,
     comptime Key: type,
     comptime Value: type,
-    comptime key_from_value: fn (*const Value) callconv(.Inline) Key,
+    comptime key_from_value: fn (*const Value) callconv(.@"inline") Key,
     comptime streams_max: u32,
     /// Peek the next key in the stream identified by `stream_index`.
     /// For example, `peek(stream_index=2)` returns `user_streams[2][0]`.
@@ -201,7 +201,12 @@ pub fn ZigZagMergeIteratorType(
                     // Probing the drained stream will update the key range for the next read.
                     stream_probe(it.context, @intCast(stream_index), probe_key);
                     // The stream must remain drained after probed.
-                    assert(stream_peek(it.context, @intCast(stream_index)) == error.Drained);
+                    if (stream_peek(it.context, @intCast(stream_index))) |_| {
+                        unreachable;
+                    } else |err| switch (err) {
+                        error.Drained => {},
+                        error.Empty => unreachable,
+                    }
                 } else {
                     // At this point, all the buffered streams must have produced a matching key.
                     assert(stream_peek(it.context, @intCast(stream_index)) catch {

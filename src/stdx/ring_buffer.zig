@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const math = std.math;
 const mem = std.mem;
 
-const stdx = @import("../stdx.zig");
+const stdx = @import("stdx.zig");
 
 /// A First In, First Out ring buffer.
 pub fn RingBufferType(
@@ -32,26 +32,34 @@ pub fn RingBufferType(
         /// The number of items in the buffer.
         count: usize = 0,
 
-        pub usingnamespace switch (buffer_type) {
-            .array => struct {
-                pub fn init() RingBuffer {
-                    return .{ .buffer = undefined };
-                }
-            },
-            .slice => struct {
-                pub fn init(allocator: mem.Allocator, capacity: usize) !RingBuffer {
-                    assert(capacity > 0);
-
-                    const buffer = try allocator.alloc(T, capacity);
-                    errdefer allocator.free(buffer);
-                    return RingBuffer{ .buffer = buffer };
-                }
-
-                pub fn deinit(self: *RingBuffer, allocator: mem.Allocator) void {
-                    allocator.free(self.buffer);
-                }
-            },
+        pub const init = switch (buffer_type) {
+            .array => init_array,
+            .slice => init_slice,
         };
+
+        fn init_array() RingBuffer {
+            comptime assert(buffer_type == .array);
+            return .{ .buffer = undefined };
+        }
+
+        fn init_slice(allocator: mem.Allocator, capacity: usize) !RingBuffer {
+            comptime assert(buffer_type == .slice);
+            assert(capacity > 0);
+
+            const buffer = try allocator.alloc(T, capacity);
+            errdefer allocator.free(buffer);
+            return RingBuffer{ .buffer = buffer };
+        }
+
+        pub const deinit = switch (buffer_type) {
+            .array => {},
+            .slice => deinit_slice,
+        };
+
+        fn deinit_slice(self: *RingBuffer, allocator: mem.Allocator) void {
+            comptime assert(buffer_type == .slice);
+            allocator.free(self.buffer);
+        }
 
         pub inline fn clear(self: *RingBuffer) void {
             self.index = 0;
