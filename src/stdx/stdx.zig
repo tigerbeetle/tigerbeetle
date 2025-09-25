@@ -12,6 +12,7 @@ pub const BitSetType = @import("bit_set.zig").BitSetType;
 pub const BoundedArrayType = @import("bounded_array.zig").BoundedArrayType;
 pub const CountingAllocator = @import("counting_allocator.zig");
 pub const PRNG = @import("prng.zig");
+pub const QueueType = @import("queue.zig").QueueType;
 pub const StaticAllocator = @import("static_allocator.zig");
 pub const RingBufferType = @import("ring_buffer.zig").RingBufferType;
 pub const Snap = @import("testing/snaptest.zig").Snap;
@@ -1270,6 +1271,7 @@ comptime {
     _ = @import("bounded_array.zig");
     _ = @import("flags.zig");
     _ = @import("prng.zig");
+    _ = @import("queue.zig");
     _ = @import("ring_buffer.zig");
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");

@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const buffer_limit = @import("../io.zig").buffer_limit;
 const Ratio = stdx.PRNG.Ratio;
 

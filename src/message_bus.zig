@@ -13,7 +13,7 @@ const RingBufferType = stdx.RingBufferType;
 const MessagePool = @import("message_pool.zig").MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
-const QueueType = @import("./queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 
 pub const MessageBusReplica = MessageBusType(@import("io.zig").IO, .replica);
 pub const MessageBusClient = MessageBusType(@import("io.zig").IO, .client);

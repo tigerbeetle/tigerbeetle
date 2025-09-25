@@ -32,7 +32,7 @@ const Ratio = stdx.PRNG.Ratio;
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
