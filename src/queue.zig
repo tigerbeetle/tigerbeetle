@@ -1,8 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const constants = @import("./constants.zig");
-
 const QueueLink = extern struct {
     next: ?*QueueLink = null,
 };
@@ -93,12 +91,11 @@ const QueueAny = struct {
     // This should only be null if you're sure we'll never want to monitor `count`.
     name: ?[]const u8,
 
-    // If the number of elements is large, the constants.verify check in push() can be too
-    // expensive. Allow the user to gate it. Could also be a comptime param?
+    // Used by tests.
     verify_push: bool = true,
 
     pub fn push(self: *QueueAny, link: *QueueLink) void {
-        if (constants.verify and self.verify_push) assert(!self.contains(link));
+        if (self.verify_push) assert(!self.contains(link));
 
         assert(link.next == null);
         if (self.in) |in| {
