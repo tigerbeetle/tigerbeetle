@@ -786,8 +786,6 @@ test "tidy extensions" {
         .{".github/ci/test_aof.sh"},
         .{"src/clients/python/pyproject.toml"},
         .{"src/clients/python/src/tigerbeetle/py.typed"},
-        .{"src/clients/rust/samples/two-phase/Cargo.lock"},
-        .{"src/clients/rust/samples/two-phase-many/Cargo.lock"},
         .{"src/testing/vortex/rust_driver/Cargo.lock"},
     });
 
