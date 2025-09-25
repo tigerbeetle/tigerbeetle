@@ -21,6 +21,7 @@ pub const ZipfianShuffled = @import("zipfian.zig").ZipfianShuffled;
 pub const aegis = @import("aegis.zig");
 pub const dbg = @import("debug.zig").dbg;
 pub const flags = @import("flags.zig").parse;
+pub const fuzz = @import("testing/fuzz.zig");
 pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
@@ -1272,6 +1273,7 @@ comptime {
     _ = @import("ring_buffer.zig");
     _ = @import("sort_test.zig");
     _ = @import("stdx.zig");
+    _ = @import("testing/fuzz.zig");
     _ = @import("testing/snaptest.zig");
     _ = @import("zipfian.zig");
     _ = @import("unshare.zig");

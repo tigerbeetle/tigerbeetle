@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const stdx = @import("stdx");
 const constants = @import("./constants.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const log = std.log.scoped(.fuzz);
 

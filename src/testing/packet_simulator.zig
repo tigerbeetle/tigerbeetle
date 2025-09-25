@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.packet_simulator);
 const vsr = @import("../vsr.zig");
-const fuzz = @import("./fuzz.zig");
+const fuzz = stdx.fuzz;
 const stdx = @import("stdx");
 const constants = @import("../constants.zig");
 const Ratio = stdx.PRNG.Ratio;

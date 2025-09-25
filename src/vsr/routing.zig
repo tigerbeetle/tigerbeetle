@@ -801,7 +801,7 @@ test "Routing fuzz" {
     // This fuzzer doesn't try to be realistic, and just hammers the API
     // with a random sequence of calls, to make sure nothing breaks.
     const Environment = struct {
-        const fuzz = @import("../testing/fuzz.zig");
+        const fuzz = stdx.fuzz;
 
         steps: u32 = 10_000,
         prng: stdx.PRNG,

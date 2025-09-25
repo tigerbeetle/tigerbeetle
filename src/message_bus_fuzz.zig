@@ -22,7 +22,7 @@ const MessageBusClient = vsr.message_bus.MessageBusType(IO, .client);
 const MessagePool = vsr.message_pool.MessagePool;
 const Message = MessagePool.Message;
 const MessageBuffer = @import("./message_buffer.zig").MessageBuffer;
-const fuzz = @import("testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
 

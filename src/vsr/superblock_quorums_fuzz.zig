@@ -9,7 +9,7 @@ const superblock = @import("./superblock.zig");
 const SuperBlockHeader = superblock.SuperBlockHeader;
 const SuperBlockVersion = superblock.SuperBlockVersion;
 
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const superblock_quorums = @import("superblock_quorums.zig");
 const QuorumsType = superblock_quorums.QuorumsType;
 

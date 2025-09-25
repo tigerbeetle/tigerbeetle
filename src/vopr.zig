@@ -6,12 +6,12 @@ const maybe = stdx.maybe;
 const mem = std.mem;
 const ratio = stdx.PRNG.ratio;
 const Ratio = stdx.PRNG.Ratio;
-const range_inclusive_ms = @import("./testing/fuzz.zig").range_inclusive_ms;
+const range_inclusive_ms = stdx.fuzz.range_inclusive_ms;
 
 const constants = @import("constants.zig");
 const schema = @import("lsm/schema.zig");
 const vsr = @import("vsr.zig");
-const fuzz = @import("./testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const Header = vsr.Header;
 
 const vsr_vopr_options = @import("vsr_vopr_options");

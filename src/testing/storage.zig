@@ -41,7 +41,7 @@ const FreeSet = @import("../vsr/free_set.zig").FreeSet;
 const schema = @import("../lsm/schema.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
-const fuzz = @import("./fuzz.zig");
+const fuzz = stdx.fuzz;
 const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
