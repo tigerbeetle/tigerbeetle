@@ -25,7 +25,6 @@ futures-channel = "0.3.31"
 
 [build-dependencies]
 anyhow = "1.0.93"
-walkdir = "2.5.0"
 
 [dev-dependencies]
 anyhow = "1.0.93"

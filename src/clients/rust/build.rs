@@ -1,14 +1,4 @@
 use std::{env, fs, path::Path};
-use walkdir::{DirEntry, WalkDir};
-
-/// Returns true if the directory entry is hidden (starts with a dot).
-fn is_hidden(entry: &DirEntry) -> bool {
-    entry
-        .file_name()
-        .to_str()
-        .map(|s| s.starts_with('.'))
-        .unwrap_or(false)
-}
 
 fn main() -> anyhow::Result<()> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
@@ -130,15 +120,21 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
 
 fn emit_tigerbeetle_rerun_if_changed(manifest_dir: &str) -> anyhow::Result<()> {
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
-    for entry in WalkDir::new(&tigerbeetle_root)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .filter_map(|e| e.ok())
-    {
-        if let Some(ext) = entry.path().extension() {
-            if ext == "zig" {
-                println!("cargo:rerun-if-changed={}", entry.path().display());
-            }
+
+    let output = std::process::Command::new("git")
+        .args(["ls-files", "-z"])
+        .current_dir(&tigerbeetle_root)
+        .output()?;
+
+    if !output.status.success() {
+        return Err(anyhow::anyhow!("git ls-files failed"));
+    }
+
+    let stdout = String::from_utf8(output.stdout)?;
+    for file_path in stdout.split('\0') {
+        if !file_path.is_empty() && file_path.ends_with(".zig") {
+            let full_path = format!("{tigerbeetle_root}/{file_path}");
+            println!("cargo:rerun-if-changed={}", full_path);
         }
     }
 
