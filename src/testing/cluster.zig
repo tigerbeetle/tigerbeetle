@@ -330,7 +330,10 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                         .id = client_id_permutation.encode(i + client_id_permutation_shift),
                         .cluster = options.cluster.cluster_id,
                         .replica_count = options.cluster.replica_count,
-                        .message_bus_options = .{ .network = network },
+                        .message_bus_options = .{
+                            .network = network,
+                            .process_count = options.cluster.replica_count,
+                        },
                         .eviction_callback = client_on_eviction,
                     },
                 );
@@ -740,7 +743,13 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
                     .storage_size_limit = cluster.options.storage_size_limit,
                     .nonce = options.nonce,
                     .state_machine_options = cluster.options.state_machine,
-                    .message_bus_options = .{ .network = cluster.network },
+                    .message_bus_options = .{
+                        .network = cluster.network,
+                        .process_count = cluster.options.replica_count +
+                            cluster.options.standby_count +
+                            cluster.options.client_count +
+                            cluster.options.reformats_max,
+                    },
                     .release = options.release,
                     .release_client_min = release_client_min,
                     .multiversion = replica_multiversion(replica),

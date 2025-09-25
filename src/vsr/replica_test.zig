@@ -2744,7 +2744,10 @@ const TestClientBus = struct {
                 .{ .client = client_id },
                 message_pool,
                 on_messages,
-                .{ .network = context.cluster.network },
+                .{
+                    .network = context.cluster.network,
+                    .process_count = context.cluster.replica_count,
+                },
             ),
         };
         errdefer client_bus.message_bus.deinit(allocator);
@@ -2766,7 +2769,7 @@ const TestClientBus = struct {
         allocator.destroy(t);
     }
 
-    fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer) void {
+    fn on_messages(message_bus: *Cluster.MessageBus, buffer: *MessageBuffer, _: vsr.Peer) void {
         const t: *TestClientBus = @fieldParentPtr("message_bus", message_bus);
         while (buffer.next_header()) |header| {
             const message = buffer.consume_message(t.message_pool, &header);

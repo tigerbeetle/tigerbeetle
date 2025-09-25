@@ -67,7 +67,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
         id: u128,
 
         /// The callback to be called when a message is received.
-        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+        on_messages_callback: *const fn (
+            message_bus: *MessageBus,
+            buffer: *MessageBuffer,
+            from: vsr.Peer,
+        ) void,
 
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
@@ -101,7 +105,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
             allocator: mem.Allocator,
             process_id: ProcessID,
             message_pool: *MessagePool,
-            on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+            on_messages_callback: *const fn (
+                message_bus: *MessageBus,
+                buffer: *MessageBuffer,
+                from: vsr.Peer,
+            ) void,
             options: Options,
         ) !MessageBus {
             assert(@as(vsr.ProcessType, process_id) == process_type);
@@ -900,7 +908,11 @@ fn MessageBusType(comptime process_type: vsr.ProcessType) type {
 
             fn call_on_messages(connection: *Connection, bus: *MessageBus) void {
                 if (connection.recv_buffer.?.has_message()) {
-                    bus.on_messages_callback(bus, &connection.recv_buffer.?);
+                    bus.on_messages_callback(
+                        bus,
+                        &connection.recv_buffer.?,
+                        connection.peer,
+                    );
                 }
 
                 if (connection.recv_buffer.?.invalid) |reason| {
