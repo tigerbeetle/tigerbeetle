@@ -4,6 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-tokio.version = "1.38.1"
+tokio.version = "=1.38.1"
 tokio.features = ["macros", "rt-multi-thread"]
 tigerbeetle.path = "../.."
