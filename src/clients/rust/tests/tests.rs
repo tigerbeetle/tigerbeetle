@@ -1,9 +1,11 @@
+use std::cell::UnsafeCell;
 use std::env;
 use std::env::consts::EXE_SUFFIX;
 use std::io::{BufRead as _, BufReader};
 use std::mem;
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Barrier, LazyLock};
+use std::sync::{Arc, Barrier, Once};
 
 use futures::executor::block_on;
 use futures::pin_mut;
@@ -12,8 +14,30 @@ use futures::{Stream, StreamExt};
 use tigerbeetle as tb;
 
 // Singleton test database.
-static TEST_DB: LazyLock<TestDb> =
-    LazyLock::new(|| TestDb::new().expect("couldn't start test database"));
+// This can be a OnceLock in Rust 1.70+, and LazyLock in 1.80.
+fn get_test_db() -> &'static TestDb {
+    struct OnceLock {
+        once: Once,
+        value: UnsafeCell<Option<TestDb>>,
+    }
+
+    unsafe impl Sync for OnceLock {}
+
+    static TEST_DB: OnceLock = OnceLock {
+        once: Once::new(),
+        value: UnsafeCell::new(None),
+    };
+
+    let error_msg = "couldn't start test database";
+
+    unsafe {
+        TEST_DB.once.call_once(|| {
+            *(&mut *TEST_DB.value.get()) = Some(TestDb::new().expect(error_msg));
+        });
+
+        (&*TEST_DB.value.get()).as_ref().expect(error_msg)
+    }
+}
 
 struct TestDb {
     port: u16,
@@ -34,7 +58,7 @@ impl TestDb {
         let work_dir = env!("CARGO_TARGET_TMPDIR");
         let database_name = "0_0.testdb.tigerbeetle";
 
-        if !std::fs::exists(&format!("{work_dir}/{database_name}"))? {
+        if !Path::new(&format!("{work_dir}/{database_name}")).try_exists()? {
             let mut cmd = Command::new(&tigerbeetle_bin);
             cmd.current_dir(&work_dir);
             cmd.args([
@@ -75,7 +99,7 @@ impl TestDb {
 }
 
 fn test_client() -> anyhow::Result<tb::Client> {
-    let address = &format!("127.0.0.1:{}", TEST_DB.port);
+    let address = &format!("127.0.0.1:{}", get_test_db().port);
     let client = tb::Client::new(0, address)?;
 
     Ok(client)
@@ -548,7 +572,7 @@ fn multithread() -> anyhow::Result<()> {
     }
 
     block_on(async {
-        let client = Arc::into_inner(client).expect("arc");
+        let client = Arc::try_unwrap(client).expect("arc");
 
         client.close().await;
 
@@ -646,10 +670,10 @@ fn client_drop_loses_pending_transactions() -> anyhow::Result<()> {
 //
 // NB: This is a runnable version of an example in the crate docs.
 // Try to keep them in sync.
-fn get_account_transfers_paged<'s>(
-    client: &'s tb::Client,
+fn get_account_transfers_paged(
+    client: &tb::Client,
     event: tb::AccountFilter,
-) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + use<'s> {
+) -> impl Stream<Item = Result<Vec<tb::Transfer>, tb::PacketStatus>> + '_ {
     assert!(
         event.limit > 1,
         "paged queries should use an explicit limit"
@@ -867,7 +891,7 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
     fn merge_create_accounts_results(
         accounts: &[tb::Account],
         results: Vec<tb::CreateAccountsResult>,
-    ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + use<'_> {
+    ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + '_ {
         let mut results = results.into_iter().peekable();
         accounts
             .iter()
@@ -987,7 +1011,7 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
     fn merge_create_transfers_results(
         transfers: &[tb::Transfer],
         results: Vec<tb::CreateTransfersResult>,
-    ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + use<'_> {
+    ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + '_ {
         let mut results = results.into_iter().peekable();
         transfers
             .iter()
@@ -1119,7 +1143,7 @@ fn example_lookup_accounts() -> Result<(), Box<dyn std::error::Error>> {
     fn merge_lookup_accounts_results(
         accounts: &[u128],
         results: Vec<tb::Account>,
-    ) -> impl Iterator<Item = (u128, Option<tb::Account>)> + use<'_> {
+    ) -> impl Iterator<Item = (u128, Option<tb::Account>)> + '_ {
         let mut results = results.into_iter().peekable();
         accounts.iter().map(move |&id| match results.peek() {
             Some(acc) if acc.id == id => (id, results.next()),
@@ -1230,7 +1254,7 @@ fn example_lookup_transfers() -> Result<(), Box<dyn std::error::Error>> {
     fn merge_lookup_transfers_results(
         transfers: &[u128],
         results: Vec<tb::Transfer>,
-    ) -> impl Iterator<Item = (u128, Option<tb::Transfer>)> + use<'_> {
+    ) -> impl Iterator<Item = (u128, Option<tb::Transfer>)> + '_ {
         let mut results = results.into_iter().peekable();
         transfers.iter().map(move |&id| match results.peek() {
             Some(transfer) if transfer.id == id => (id, results.next()),
