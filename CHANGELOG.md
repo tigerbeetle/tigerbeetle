@@ -3,6 +3,49 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.60
+
+Released: 2025-09-26
+
+### Safety And Performance
+
+- [#3270](https://github.com/tigerbeetle/tigerbeetle/pull/3270)
+
+  Remove a copy from the StateMachine.
+
+### Features
+
+- [#3277](https://github.com/tigerbeetle/tigerbeetle/pull/3277)
+
+  Improve metrics to use a reduce the worst case packet count (and benefit from a small memory
+  saving while we're at it).
+
+### Internals
+- [#3273](https://github.com/tigerbeetle/tigerbeetle/pull/3273)
+
+  Update the k-way-merge to use the new `from_seed_testing()`.
+
+- [#3275](https://github.com/tigerbeetle/tigerbeetle/pull/3275)
+
+  Refactor references to old time types to use the Instant and Duration types.
+
+- [#3278](https://github.com/tigerbeetle/tigerbeetle/pull/3278)
+
+  Clarified documentation on closing accounts and two-phase transfers.
+  Thanks @raui100!
+
+- [#3279](https://github.com/tigerbeetle/tigerbeetle/pull/3279)
+
+  Fix mislabelled transfers/accounts/balances in all client snippets.
+
+- [#3274](https://github.com/tigerbeetle/tigerbeetle/pull/3274)
+
+  Added documentation for our CI entrypoint: `zig build ci`.
+
+### TigerTracks 🎧
+
+- [Undefeated](https://open.spotify.com/track/5fwKEMTyS0FqLk7KVdGQwl?si=9d23f68ec7a542fe)
+
 ## TigerBeetle 0.16.59
 
 Released: 2025-09-19
