@@ -49,7 +49,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         );
         try shell.env.put("TIGERBEETLE_BINARY", tigerbeetle_path);
 
-        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("python3 -m pytest tests/", .{});
     }
 
@@ -65,7 +65,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
-        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("python3 main.py", .{});
     }
 
@@ -111,7 +111,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     defer tmp_beetle.deinit(gpa);
     errdefer tmp_beetle.log_stderr();
 
-    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     try Shell.copy_path(
         shell.project_root,

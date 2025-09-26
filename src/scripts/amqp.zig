@@ -409,7 +409,7 @@ fn run_cdc_test(
             "--idle-interval-ms={idle_interval_ms}",
         .{
             .tigerbeetle = tmp_beetle.tigerbeetle_exe,
-            .addresses = tmp_beetle.port_str.slice(),
+            .addresses = tmp_beetle.port_str,
             .port = options.host.getPort(),
             .queue = queue,
             .idle_interval_ms = 1,
@@ -427,7 +427,7 @@ fn run_cdc_test(
             "--transfer-pending",
         .{
             .tigerbeetle = tmp_beetle.tigerbeetle_exe,
-            .addresses = tmp_beetle.port_str.slice(),
+            .addresses = tmp_beetle.port_str,
             .transfer_count = options.transfer_count,
         },
     );
