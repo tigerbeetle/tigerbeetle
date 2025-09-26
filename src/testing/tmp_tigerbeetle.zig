@@ -19,7 +19,7 @@ tigerbeetle_exe: []const u8,
 /// Port the TigerBeetle instance is listening on.
 port: u16,
 /// For convenience, the same port pre-converted to string.
-port_str: stdx.BoundedArrayType(u8, 8),
+port_str: []const u8,
 
 tmp_dir: std.testing.TmpDir,
 
@@ -125,8 +125,8 @@ pub fn init(
         break :port try std.fmt.parseInt(u16, port_buf[0 .. port_buf_len - 1], 10);
     };
 
-    var port_str: stdx.BoundedArrayType(u8, 8) = .{};
-    std.fmt.formatInt(port, 10, .lower, .{}, port_str.writer()) catch unreachable;
+    const port_str = try std.fmt.allocPrint(gpa, "{d}", .{port});
+    errdefer gpa.free(port_str);
 
     return TmpTigerBeetle{
         .tigerbeetle_exe = tigerbeetle_exe,
@@ -145,6 +145,7 @@ pub fn deinit(tb: *TmpTigerBeetle, gpa: std.mem.Allocator) void {
     assert(tb.process.term == null);
     tb.stderr_reader.stop(gpa, &tb.process);
     assert(tb.process.term != null);
+    gpa.free(tb.port_str);
     tb.tmp_dir.cleanup();
     gpa.free(tb.tigerbeetle_exe);
 }

@@ -32,7 +32,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
-        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec(
             \\mvn --batch-mode --file pom.xml --quiet
             \\  package exec:java
@@ -51,7 +51,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     defer tmp_beetle.deinit(gpa);
     errdefer tmp_beetle.log_stderr();
 
-    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     try shell.cwd.writeFile(.{ .sub_path = "pom.xml", .data = try shell.fmt(
         \\<project>

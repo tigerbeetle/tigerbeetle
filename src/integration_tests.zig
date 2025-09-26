@@ -59,7 +59,7 @@ test "repl integration" {
                 \\{tigerbeetle} repl --cluster=0 --addresses={addresses} --command={command}
             , .{
                 .tigerbeetle = context.tigerbeetle_exe,
-                .addresses = context.tmp_beetle.port_str.slice(),
+                .addresses = context.tmp_beetle.port_str,
                 .command = command,
             });
         }
