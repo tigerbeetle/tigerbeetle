@@ -13,30 +13,27 @@ Released: 2025-09-26
 
   Remove a copy from the StateMachine.
 
-### Features
+- [#3273](https://github.com/tigerbeetle/tigerbeetle/pull/3273)
+
+  Update the k-way-merge to use the new `from_seed_testing()`.
 
 - [#3277](https://github.com/tigerbeetle/tigerbeetle/pull/3277)
 
   Improve metrics to use a reduce the worst case packet count (and benefit from a small memory
   saving while we're at it).
 
-### Internals
-- [#3273](https://github.com/tigerbeetle/tigerbeetle/pull/3273)
-
-  Update the k-way-merge to use the new `from_seed_testing()`.
-
-- [#3275](https://github.com/tigerbeetle/tigerbeetle/pull/3275)
-
-  Refactor references to old time types to use the Instant and Duration types.
+### Features
 
 - [#3278](https://github.com/tigerbeetle/tigerbeetle/pull/3278)
 
   Clarified documentation on closing accounts and two-phase transfers.
   Thanks @raui100!
 
-- [#3279](https://github.com/tigerbeetle/tigerbeetle/pull/3279)
+### Internals
 
-  Fix mislabelled transfers/accounts/balances in all client snippets.
+- [#3275](https://github.com/tigerbeetle/tigerbeetle/pull/3275)
+
+  Refactor references to old time types to use the Instant and Duration types.
 
 - [#3274](https://github.com/tigerbeetle/tigerbeetle/pull/3274)
 
