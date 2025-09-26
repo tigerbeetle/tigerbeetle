@@ -1981,6 +1981,54 @@ test "Cluster: partitioned replica with higher view cannot lock out client" {
     try expectEqual(a0.commit(), 2);
 }
 
+test "Cluster: broken hash chain within the same view does not stall commit via repair" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    // Forcefully stall commit pipeline. We let the cluster run for a while to circumvent assertions
+    // related to `commit_stage` on replica startup.
+    t.run();
+    const b2 = t.replica(.B2);
+    const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
+    b2_replica.commit_stage = .compact;
+
+    // Disallow receiving a specific prepare, and repairing headers via repair and start_view, to
+    // force a hash chain break.
+    b2.drop_fn(.R_, .incoming, struct {
+        fn drop_message(message: *const Message) bool {
+            const header = message.header.into(.prepare) orelse return false;
+            return header.op == constants.pipeline_prepare_queue_max + 1;
+        }
+    }.drop_message);
+    b2.drop(.R_, .outgoing, .request_headers);
+    b2.drop(.R_, .incoming, .start_view);
+
+    var c = t.clients(.{});
+    try c.request(
+        constants.pipeline_prepare_queue_max - 1,
+        constants.pipeline_prepare_queue_max - 1,
+    );
+
+    try expectEqual(t.replica(.R_).op_head(), constants.pipeline_prepare_queue_max - 1);
+    try expectEqual(t.replica(.R_).commit_max(), constants.pipeline_prepare_queue_max - 1);
+    try expectEqual(b2.commit(), 0);
+
+    try c.request(
+        2 * constants.pipeline_prepare_queue_max,
+        2 * constants.pipeline_prepare_queue_max,
+    );
+
+    // Disallow commit pipeline initiation via commit. Dropping incoming commit messages, and the
+    // fact that no more prepares are exchanged, ensures commit can only be initiated via repair.
+    b2_replica.commit_stage = .idle;
+    b2.drop(.R_, .incoming, .commit);
+    t.run();
+
+    try expectEqual(b2.op_head(), constants.pipeline_prepare_queue_max * 2);
+    try expectEqual(b2.commit_max(), constants.pipeline_prepare_queue_max * 2);
+    try expectEqual(b2.commit(), constants.pipeline_prepare_queue_max);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
