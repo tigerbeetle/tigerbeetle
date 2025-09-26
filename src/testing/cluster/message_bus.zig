@@ -20,36 +20,63 @@ pub const MessageBus = struct {
 
     process: Process,
 
-    buffer: ?MessageBuffer,
-    suspended: bool = false,
-    resume_scheduled: bool = false,
+    buffers: []MessageBuffer,
+    buffers_suspended: []bool,
+
     /// The callback to be called when a message is received.
-    on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+    on_messages_callback: *const fn (
+        message_bus: *MessageBus,
+        buffer: *MessageBuffer,
+        peer: vsr.Peer,
+    ) void,
 
     pub const Options = struct {
         network: *Network,
+        process_count: u8,
     };
 
     pub fn init(
-        _: std.mem.Allocator,
+        allocator: std.mem.Allocator,
         process: Process,
         message_pool: *MessagePool,
-        on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
+        on_messages_callback: *const fn (
+            message_bus: *MessageBus,
+            buffer: *MessageBuffer,
+            peer: vsr.Peer,
+        ) void,
         options: Options,
     ) !MessageBus {
+        const buffers = try allocator.alloc(MessageBuffer, options.process_count);
+        errdefer allocator.free(buffers);
+
+        for (buffers, 0..) |*buffer, index| {
+            errdefer for (buffer[0..index]) |*b| b.deinit(allocator);
+            buffer.* = MessageBuffer.init(message_pool);
+
+            errdefer buffer.deinit(allocator);
+        }
+
+        const buffers_suspended = try allocator.alloc(bool, options.process_count);
+        errdefer allocator.free(buffers_suspended);
+        @memset(buffers_suspended, false);
+
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
             .process = process,
-            .buffer = MessageBuffer.init(message_pool),
+            .buffers = buffers,
+            .buffers_suspended = buffers_suspended,
             .on_messages_callback = on_messages_callback,
         };
     }
 
-    pub fn deinit(bus: *MessageBus, _: std.mem.Allocator) void {
-        bus.buffer.?.deinit(bus.pool);
-        bus.buffer = null;
-        bus.resume_scheduled = false;
+    pub fn deinit(bus: *MessageBus, allocator: std.mem.Allocator) void {
+        for (bus.buffers) |*buffer| {
+            buffer.*.deinit(bus.pool);
+        }
+        allocator.free(bus.buffers);
+        allocator.free(bus.buffers_suspended);
+
         // NB: Network keeps a reference to a message bus even when a replica is de-initialized,
         // so we don't assign bus.* to undefined here.
     }
@@ -71,12 +98,23 @@ pub const MessageBus = struct {
     }
 
     pub fn resume_needed(bus: *MessageBus) bool {
-        return bus.suspended;
+        for (bus.buffers_suspended) |suspended| {
+            if (suspended) return true;
+        } else return false;
     }
 
     pub fn resume_receive(bus: *MessageBus) void {
-        bus.suspended = false;
-        bus.resume_scheduled = true;
+        for (bus.buffers_suspended, 0..) |*suspended, index| {
+            if (suspended.*) {
+                const process = Network.raw_process_to_process(bus.network.processes.items[index]);
+                bus.on_messages_callback(
+                    bus,
+                    &bus.buffers[index],
+                    bus.network.process_to_peer(process),
+                );
+                if (!bus.buffers[index].has_message()) suspended.* = false;
+            }
+        }
     }
 
     pub fn send_message_to_replica(bus: *MessageBus, replica: u8, message: *Message) void {

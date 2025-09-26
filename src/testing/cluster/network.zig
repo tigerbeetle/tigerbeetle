@@ -111,18 +111,7 @@ pub const Network = struct {
     }
 
     pub fn step(network: *Network) bool {
-        var advanced = false;
-        for (network.buses.items) |bus| {
-            if (bus.resume_scheduled) {
-                bus.resume_scheduled = false;
-                bus.on_messages_callback(bus, &bus.buffer.?);
-                if (bus.buffer.?.has_message()) {
-                    bus.suspended = true;
-                }
-                advanced = true;
-            }
-        }
-        return network.packet_simulator.step() or advanced;
+        return network.packet_simulator.step();
     }
 
     pub fn tick(network: *Network) void {
@@ -261,20 +250,6 @@ pub const Network = struct {
         );
     }
 
-    fn process_to_address(network: *const Network, process: Process) u8 {
-        for (network.processes.items, 0..) |p, i| {
-            if (std.meta.eql(raw_process_to_process(p), process)) {
-                switch (process) {
-                    .replica => assert(i < network.options.node_count),
-                    .client => assert(i >= network.options.node_count),
-                }
-                return @intCast(i);
-            }
-        }
-        log.err("no such process: {} (have {any})", .{ process, network.processes.items });
-        unreachable;
-    }
-
     pub fn get_message_bus(network: *Network, process: Process) *MessageBus {
         return network.buses.items[network.process_to_address(process)];
     }
@@ -319,9 +294,10 @@ pub const Network = struct {
         });
 
         const target_bus = network.buses.items[path.target];
-        assert(target_bus.buffer != null);
 
-        if (target_bus.buffer.?.receive_size + message.header.size > constants.message_size_max) {
+        const source_address = network.process_to_address(process_path.source);
+        const message_buffer = &target_bus.buffers[source_address];
+        if (message_buffer.receive_size + message.header.size > constants.message_size_max) {
             log.debug("deliver_message: {} > {}: {} (dropped; buffer is full)", .{
                 process_path.source,
                 process_path.target,
@@ -333,21 +309,62 @@ pub const Network = struct {
         stdx.copy_disjoint(
             .inexact,
             u8,
-            target_bus.buffer.?.recv_slice(),
+            message_buffer.recv_slice(),
             message.buffer[0..message.header.size],
         );
-        target_bus.buffer.?.recv_advance(message.header.size);
-        target_bus.on_messages_callback(target_bus, &target_bus.buffer.?);
-        assert(target_bus.buffer != null);
-        assert(target_bus.buffer.?.invalid == null);
-        maybe(target_bus.buffer.?.receive_size > 0);
-        maybe(target_bus.buffer.?.process_size > 0);
-        if (target_bus.buffer.?.has_message()) {
-            target_bus.suspended = true;
+        message_buffer.recv_advance(message.header.size);
+        target_bus.on_messages_callback(
+            target_bus,
+            message_buffer,
+            network.process_to_peer(process_path.source),
+        );
+        assert(message_buffer.invalid == null);
+        maybe(message_buffer.receive_size > 0);
+        maybe(message_buffer.process_size > 0);
+        if (message_buffer.has_message()) {
+            target_bus.buffers_suspended[source_address] = true;
         }
     }
 
-    fn raw_process_to_process(raw: u128) Process {
+    pub fn process_to_address(network: *const Network, process: Process) u8 {
+        for (network.processes.items, 0..) |p, i| {
+            if (std.meta.eql(raw_process_to_process(p), process)) {
+                switch (process) {
+                    .replica => assert(i < network.options.node_count),
+                    .client => assert(i >= network.options.node_count),
+                }
+                return @intCast(i);
+            }
+        }
+        log.err("no such process: {} (have {any})", .{ process, network.processes.items });
+        unreachable;
+    }
+
+    pub fn process_to_peer(network: *const Network, process: Process) vsr.Peer {
+        for (network.processes.items, 0..) |p, i| {
+            if (std.meta.eql(raw_process_to_process(p), process)) {
+                switch (process) {
+                    .replica => assert(i < network.options.node_count),
+                    .client => assert(i >= network.options.node_count),
+                }
+                return raw_process_to_peer(p);
+            }
+        }
+        log.err("no such process: {} (have {any})", .{ process, network.processes.items });
+        unreachable;
+    }
+
+    fn raw_process_to_peer(raw: u128) vsr.Peer {
+        switch (raw) {
+            0...(constants.members_max - 1) => return .{ .replica = @intCast(raw) },
+            else => {
+                assert(raw >= constants.members_max);
+                return .{ .client = raw };
+            },
+        }
+    }
+
+    pub fn raw_process_to_process(raw: u128) Process {
         switch (raw) {
             0...(constants.members_max - 1) => return .{ .replica = @intCast(raw) },
             else => {

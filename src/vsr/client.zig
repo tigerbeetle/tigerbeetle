@@ -187,7 +187,7 @@ pub fn ClientType(
             self.message_bus.deinit(allocator);
         }
 
-        pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
+        pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer, _: vsr.Peer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
