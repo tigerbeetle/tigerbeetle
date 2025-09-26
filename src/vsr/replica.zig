@@ -7432,18 +7432,6 @@ pub fn ReplicaType(
             // Request and repair any missing, dirty, or faulty prepares.
             self.repair_prepares();
 
-            if (header_break != null and header_break.?.op_max > self.op_checkpoint()) {
-                return;
-            }
-
-            // The hash chain is anchored at both ends: `self.op` and `self.op_checkpoint`.
-            // It is safe to start committing.
-            // The replica might still be repairing headers and prepares before the checkpoint.
-            assert(self.valid_hash_chain_between(
-                @min(self.op_checkpoint() + 1, self.op),
-                self.op,
-            ));
-
             if (self.commit_min < self.commit_max) {
                 // Try to the commit prepares we already have, even if we don't have all of them.
                 // This helps when a replica is recovering from a crash and has a mostly intact
