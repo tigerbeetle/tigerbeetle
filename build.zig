@@ -1,9 +1,9 @@
 const std = @import("std");
-const assert = std.debug.assert;
 const builtin = @import("builtin");
-const Query = std.Target.Query;
+// NB: Don't import anything from `./src` to keep compile times low.
 
-const config = @import("./src/config.zig");
+const assert = std.debug.assert;
+const Query = std.Target.Query;
 
 const VoprStateMachine = enum { testing, accounting };
 const VoprLog = enum { short, full };
@@ -128,11 +128,6 @@ pub fn build(b: *std.Build) !void {
             "git-commit",
             "The git commit revision of the source code.",
         ) orelse std.mem.trimRight(u8, b.run(&.{ "git", "rev-parse", "--verify", "HEAD" }), "\n"),
-        .hash_log_mode = b.option(
-            config.HashLogMode,
-            "hash-log-mode",
-            "Log hashes (used for debugging non-deterministic executions).",
-        ) orelse .none,
         .vopr_state_machine = b.option(
             VoprStateMachine,
             "vopr-state-machine",
@@ -167,7 +162,6 @@ pub fn build(b: *std.Build) !void {
         .config_release = build_options.config_release,
         .config_release_client_min = build_options.config_release_client_min,
         .config_aof_recovery = build_options.config_aof_recovery,
-        .hash_log_mode = build_options.hash_log_mode,
     });
 
     const tb_client_header = blk: {
@@ -360,7 +354,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
     config_release: ?[]const u8,
     config_release_client_min: ?[]const u8,
     config_aof_recovery: bool,
-    hash_log_mode: config.HashLogMode,
 }) struct { *std.Build.Step.Options, *std.Build.Module } {
     // Ideally, we would return _just_ the module here, and keep options an implementation detail.
     // However, currently Zig makes it awkward to provide multiple entry points for a module:
@@ -378,7 +371,6 @@ fn build_vsr_module(b: *std.Build, options: struct {
         options.config_release_client_min,
     );
     vsr_options.addOption(bool, "config_aof_recovery", options.config_aof_recovery);
-    vsr_options.addOption(config.HashLogMode, "hash_log_mode", options.hash_log_mode);
 
     const vsr_module = b.createModule(.{
         .root_source_file = b.path("src/vsr.zig"),
@@ -936,7 +928,6 @@ fn build_test_integration(
         .config_release = "0.16.99",
         .config_release_client_min = "0.16.4",
         .config_aof_recovery = false,
-        .hash_log_mode = .none,
     });
     const tigerbeetle_previous = download_release(b, "latest", options.target, options.mode);
     const tigerbeetle = build_tigerbeetle_executable_multiversion(b, .{

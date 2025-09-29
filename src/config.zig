@@ -20,7 +20,6 @@ const TiB = stdx.TiB;
 
 const BuildOptions = struct {
     config_verify: bool,
-    hash_log_mode: HashLogMode,
     git_commit: ?[40]u8,
     release: ?[]const u8,
     release_client_min: ?[]const u8,
@@ -91,7 +90,6 @@ pub const Config = struct {
 // TODO: Some of these could be runtime parameters (e.g. grid_scrubber_cycle_ms).
 const ConfigProcess = struct {
     log_level: std.log.Level = .info,
-    hash_log_mode: HashLogMode = .none,
     verify: bool,
     release: vsr.Release = vsr.Release.minimum,
     release_client_min: vsr.Release = vsr.Release.minimum,
@@ -219,12 +217,6 @@ pub const ConfigBase = enum {
     default,
 };
 
-pub const HashLogMode = enum {
-    none,
-    create,
-    check,
-};
-
 pub const configs = struct {
     /// A good default config for production.
     pub const default_production = Config{
@@ -308,8 +300,6 @@ pub const configs = struct {
         else
             vsr.Release.minimum;
 
-        // TODO Use additional build options to overwrite other fields.
-        base.process.hash_log_mode = build_options.hash_log_mode;
         base.process.release = release;
         base.process.release_client_min = release_client_min;
         base.process.git_commit = build_options.git_commit;
