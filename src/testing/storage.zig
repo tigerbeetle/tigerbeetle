@@ -42,7 +42,6 @@ const schema = @import("../lsm/schema.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
 const fuzz = @import("./fuzz.zig");
-const hash_log = @import("./hash_log.zig");
 const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);
@@ -415,7 +414,6 @@ pub const Storage = struct {
     ) void {
         zone.verify_iop(buffer, offset_in_zone);
         assert(zone != .grid_padding);
-        hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
 
         switch (zone) {
             .superblock,
@@ -447,8 +445,6 @@ pub const Storage = struct {
     }
 
     fn read_sectors_finish(storage: *Storage, read: *Storage.Read) void {
-        hash_log.emit_autohash(.{ read.buffer, read.zone, read.offset }, .DeepRecursive);
-
         const offset_in_storage = read.zone.offset(read.offset);
         stdx.copy_disjoint(
             .exact,
@@ -571,7 +567,6 @@ pub const Storage = struct {
     ) void {
         zone.verify_iop(buffer, offset_in_zone);
         maybe(zone == .grid_padding); // Padding is zeroed during format.
-        hash_log.emit_autohash(.{ buffer, zone, offset_in_zone }, .DeepRecursive);
 
         // Verify that there are no concurrent overlapping writes.
         for (storage.writes.items) |other| {
@@ -595,8 +590,6 @@ pub const Storage = struct {
 
     fn write_sectors_finish(storage: *Storage, write: *Storage.Write) void {
         assert(storage.overlays.total() >= 2);
-
-        hash_log.emit_autohash(.{ write.buffer, write.zone, write.offset }, .DeepRecursive);
 
         // Clean up old misdirects if they are overwritten.
         var overlays_iterator = storage.overlays.iterate();
