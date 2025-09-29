@@ -389,7 +389,10 @@ pub fn emit_metrics(tracer: *Tracer) void {
     tracer.start(.metrics_emit);
     defer tracer.stop(.metrics_emit);
 
-    tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| switch (err) {
+    const metrics_statsd_packets = tracer.statsd.emit(
+        tracer.events_metric,
+        tracer.events_timing,
+    ) catch |err| switch (err) {
         error.Busy, error.UnknownProcess => return,
     };
 
@@ -397,6 +400,8 @@ pub fn emit_metrics(tracer: *Tracer) void {
     // Prometheus, this would have to be removed.
     @memset(tracer.events_metric, null);
     @memset(tracer.events_timing, null);
+
+    tracer.gauge(.metrics_statsd_packets, metrics_statsd_packets);
 }
 
 // Timing works by storing the min, max, sum and count of each value provided. The avg is calculated

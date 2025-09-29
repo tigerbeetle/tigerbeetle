@@ -471,6 +471,8 @@ pub const EventMetric = union(enum) {
     grid_cache_misses,
     lsm_nodes_free,
     lsm_manifest_block_count,
+    metrics_statsd_packets,
+    release,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
         .table_count_visible = enum_count(TreeEnum),
@@ -496,6 +498,8 @@ pub const EventMetric = union(enum) {
         .grid_cache_misses = 1,
         .lsm_nodes_free = 1,
         .lsm_manifest_block_count = 1,
+        .metrics_statsd_packets = 1,
+        .release = 1,
     });
 
     pub const slot_bases = array: {
