@@ -1074,3 +1074,32 @@ pub fn zip_executable(
     };
     try zip_file_writer.writer().writeStructEndian(end_record, .little);
 }
+
+pub fn sha256sum(shell: *Shell, file_path: []const u8) !u256 {
+    const buffer = try shell.gpa.alloc(u8, 512 * stdx.KiB);
+    defer shell.gpa.free(buffer);
+
+    var hasher = std.crypto.hash.sha2.Sha256.init(.{});
+
+    const file = try shell.cwd.openFile(file_path, .{});
+    defer file.close();
+
+    const stat = try file.stat();
+    var bytes_read_total: u64 = 0;
+    while (bytes_read_total < stat.size) {
+        const bytes_read = try file.readAll(buffer);
+        if (bytes_read == 0) {
+            break;
+        }
+
+        bytes_read_total += bytes_read;
+        hasher.update(buffer[0..bytes_read]);
+    }
+
+    assert(stat.size == bytes_read_total);
+
+    var output: u256 = undefined;
+    hasher.final(std.mem.asBytes(&output));
+
+    return output;
+}

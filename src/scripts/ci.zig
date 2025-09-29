@@ -138,26 +138,22 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         // Zig only guarantees release builds to be deterministic.
         if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
-        const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
-            .artifact = artifact,
-        });
+        const checksum_downloaded = try shell.sha256sum(artifact);
 
         shell.popd();
-        const checksum_built = try shell.exec_stdout(
-            "sha256sum zig-out/dist/tigerbeetle/{artifact}",
+        const checksum_built = try shell.sha256sum(try shell.fmt(
+            "zig-out/dist/tigerbeetle/{s}",
             .{
-                .artifact = artifact,
+                artifact,
             },
-        );
+        ));
         try shell.pushd_dir(tmp_dir.dir);
 
-        // Slice the output to suppress the names.
-        if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
-            // Still run the code, but suppress failing until a release cycle has taken place.
-            std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+        if (checksum_downloaded != checksum_built) {
+            std.debug.panic("checksum mismatch - {s}: downloaded {x}, built {x}", .{
                 artifact,
-                checksum_downloaded[0..64],
-                checksum_built[0..64],
+                checksum_downloaded,
+                checksum_built,
             });
         }
     }
