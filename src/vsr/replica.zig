@@ -3790,6 +3790,7 @@ pub fn ReplicaType(
             self.trace.gauge(.grid_cache_hits, self.grid.cache.metrics.hits);
             self.trace.gauge(.grid_cache_misses, self.grid.cache.metrics.misses);
             self.trace.gauge(.lsm_nodes_free, self.state_machine.forest.node_pool.free.count());
+            self.trace.gauge(.release, self.release.value);
 
             self.trace.gauge(
                 .grid_blocks_acquired,
