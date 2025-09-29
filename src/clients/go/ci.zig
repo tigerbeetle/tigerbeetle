@@ -95,3 +95,14 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     try shell.env.put("CC", zig_cc);
     try shell.exec("go run main.go", .{});
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    // Returns a list of all versions. Slice on ' v' and offset by 2 to get the raw version number.
+    const output = try shell.exec_stdout(
+        "go list -m -versions github.com/tigerbeetle/tigerbeetle-go",
+        .{},
+    );
+    const last_version = std.mem.lastIndexOf(u8, output, " v").?;
+
+    return output[last_version + 2 ..];
+}

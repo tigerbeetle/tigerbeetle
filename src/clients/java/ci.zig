@@ -1,6 +1,7 @@
 const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
+const stdx = @import("stdx");
 
 const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
@@ -156,4 +157,52 @@ fn mvn_update(shell: *Shell) !union(enum) { ok, retry: anyerror } {
 
         return err;
     }
+}
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    const url = "https://central.sonatype.com/api/internal/browse/component/versions?sortField" ++
+        "=normalizedVersion&sortDirection=desc&page=0&size=1&" ++
+        "filter=namespace%3Acom.tigerbeetle%2Cname%3Atigerbeetle-java";
+
+    var client = std.http.Client{ .allocator = shell.gpa };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(url);
+    var header_buffer: [4 * stdx.KiB]u8 = undefined;
+    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
+    defer request.deinit();
+
+    try request.send();
+    try request.finish();
+    try request.wait();
+
+    if (request.response.status != std.http.Status.ok) {
+        return error.WrongStatusResponse;
+    }
+
+    const response_body_size_max = 32 * stdx.KiB;
+    var response_body_buffer: [response_body_size_max]u8 = undefined;
+    const response_body_len = try request.readAll(&response_body_buffer);
+    const response_body = response_body_buffer[0..response_body_len];
+
+    const MavenSearch = struct {
+        const Component = struct {
+            namespace: []const u8,
+            name: []const u8,
+            version: []const u8,
+        };
+        components: []Component,
+    };
+
+    const maven_search_results = try std.json.parseFromSliceLeaky(
+        MavenSearch,
+        shell.arena.allocator(),
+        response_body,
+        .{ .ignore_unknown_fields = true },
+    );
+
+    assert(std.mem.eql(u8, maven_search_results.components[0].namespace, "com.tigerbeetle"));
+    assert(std.mem.eql(u8, maven_search_results.components[0].name, "tigerbeetle-java"));
+
+    return maven_search_results.components[0].version;
 }

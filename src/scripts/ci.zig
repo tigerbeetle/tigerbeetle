@@ -177,6 +177,24 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
+    // Check all the client releases to ensure the latest published release is what it should be.
+    inline for (comptime std.enums.values(Language)) |language| {
+        if ((language == language_requested or language_requested == null) and
+            language != .rust) // Rust isn't published yet.
+        {
+            const ci = @field(LanguageCI, @tagName(language));
+            const release_published_latest = try ci.release_published_latest(shell);
+
+            if (!std.mem.eql(u8, release_published_latest, tag)) {
+                std.debug.panic("version mismatch - {s}: latest published {s}, expected {s}", .{
+                    @tagName(language),
+                    release_published_latest,
+                    tag,
+                });
+            }
+        }
+    }
+
     const docker_version = try shell.exec_stdout(
         \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
     , .{ .version = tag });
