@@ -932,6 +932,36 @@ pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: Http
     }
 }
 
+/// Issues an HTTP GET request to the given `url`, and returns the response.
+///
+/// The returned body is owned by the shell arena and doesn't need to be freed.
+/// If the response is not 200 OK, the response body is logged and an error is returned.
+pub fn http_get(shell: *Shell, url: []const u8) ![]const u8 {
+    var client = std.http.Client{ .allocator = shell.gpa };
+    defer client.deinit();
+
+    const uri = try std.Uri.parse(url);
+    var header_buffer: [4 * stdx.KiB]u8 = undefined;
+    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
+    defer request.deinit();
+
+    try request.send();
+    try request.finish();
+    try request.wait();
+
+    const response_body_size_max = 32 * stdx.KiB;
+    var response_body_buffer = try shell.arena.allocator().alloc(u8, response_body_size_max);
+    const response_body_len = try request.readAll(response_body_buffer);
+    const response_body = response_body_buffer[0..response_body_len];
+
+    if (request.response.status != std.http.Status.ok) {
+        log.err("response: {s}", .{response_body});
+        return error.WrongStatusResponse;
+    }
+
+    return response_body;
+}
+
 /// Converts an ISO8601 timestamp into seconds from the epoch by shelling out to the `date` util.
 pub fn iso8601_to_timestamp_seconds(shell: *Shell, datetime_iso8601: []const u8) !u64 {
     return try std.fmt.parseInt(u64, try shell.exec_stdout(

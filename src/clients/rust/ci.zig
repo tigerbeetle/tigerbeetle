@@ -20,6 +20,6 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
-    _ = shell; // autofix
+    _ = shell;
     return "unimplemented";
 }

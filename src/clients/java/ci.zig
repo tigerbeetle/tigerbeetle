@@ -1,7 +1,6 @@
 const std = @import("std");
 const log = std.log;
 const assert = std.debug.assert;
-const stdx = @import("stdx");
 
 const Shell = @import("../../shell.zig");
 const TmpTigerBeetle = @import("../../testing/tmp_tigerbeetle.zig");
@@ -164,26 +163,7 @@ pub fn release_published_latest(shell: *Shell) ![]const u8 {
         "=normalizedVersion&sortDirection=desc&page=0&size=1&" ++
         "filter=namespace%3Acom.tigerbeetle%2Cname%3Atigerbeetle-java";
 
-    var client = std.http.Client{ .allocator = shell.gpa };
-    defer client.deinit();
-
-    const uri = try std.Uri.parse(url);
-    var header_buffer: [4 * stdx.KiB]u8 = undefined;
-    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
-    defer request.deinit();
-
-    try request.send();
-    try request.finish();
-    try request.wait();
-
-    if (request.response.status != std.http.Status.ok) {
-        return error.WrongStatusResponse;
-    }
-
-    const response_body_size_max = 32 * stdx.KiB;
-    var response_body_buffer: [response_body_size_max]u8 = undefined;
-    const response_body_len = try request.readAll(&response_body_buffer);
-    const response_body = response_body_buffer[0..response_body_len];
+    const response_body = try shell.http_get(url);
 
     const MavenSearch = struct {
         const Component = struct {
