@@ -390,7 +390,7 @@ const IO = struct {
     connections_closing: u32 = 0,
     events: EventQueue,
     ticks: u64 = 0,
-    fd: socket_t = 1,
+    fd_next: socket_t = 1,
 
     const posix = std.posix;
     // We can't specify io/linux.zig since it won't compile on windows, which means that we are
@@ -531,8 +531,8 @@ const IO = struct {
                 const server = io.servers.getPtr(operation.socket).?;
                 if (server.backlog.items.len == 0) return .retry;
 
-                const local_fd = io.fd;
-                io.fd += 1;
+                const local_fd = io.fd_next;
+                io.fd_next += 1;
 
                 const remote_completion =
                     server.backlog.swapRemove(io.prng.index(server.backlog.items));
@@ -710,8 +710,8 @@ const IO = struct {
     }
 
     pub fn open_socket_tcp(io: *IO, _: u32, _: RealIO.TCPOptions) !socket_t {
-        const socket = io.fd;
-        io.fd += 1;
+        const socket = io.fd_next;
+        io.fd_next += 1;
         return @intCast(socket);
     }
 
@@ -878,7 +878,7 @@ const IO = struct {
         io.events.add(.{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = (nanoseconds -| jitter_mean) + jitter }),
-        }) catch unreachable;
+        }) catch @panic("OOM");
     }
 
     fn tick_instant(io: *const IO) stdx.Instant {
@@ -891,7 +891,7 @@ const IO = struct {
         io.events.add(.{
             .completion = completion,
             .ready_at = io.tick_instant().add(.{ .ns = delay_ns }),
-        }) catch unreachable;
+        }) catch @panic("OOM");
     }
 
     fn erase_types(
