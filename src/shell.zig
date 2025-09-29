@@ -905,7 +905,7 @@ pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: Http
     defer client.deinit();
 
     const uri = try std.Uri.parse(url);
-    var header_buffer: [4 << 10]u8 = undefined;
+    var header_buffer: [4 * stdx.KiB]u8 = undefined;
     var request = try client.open(.POST, uri, .{ .server_header_buffer = &header_buffer });
     defer request.deinit();
 
@@ -923,7 +923,7 @@ pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: Http
     try request.wait();
 
     if (request.response.status != std.http.Status.ok) {
-        const response_body_size_max = 512 << 10;
+        const response_body_size_max = 512 * stdx.KiB;
         var response_body_buffer: [response_body_size_max]u8 = undefined;
         const response_body_len = try request.readAll(&response_body_buffer);
         const response_body = response_body_buffer[0..response_body_len];
