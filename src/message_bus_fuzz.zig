@@ -629,9 +629,8 @@ const IO = struct {
                         try sender.sending.append(gpa, io.prng.int(u8));
                     } else {
                         const corrupt_byte = io.prng.index(send_buffer);
-                        const corrupt_bit = io.prng.int_inclusive(u3, @bitSizeOf(u8) - 1);
                         sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
-                            @as(u8, 1) << corrupt_bit;
+                            @as(u8, 1) << io.prng.bit(u8);
                     }
                 }
 

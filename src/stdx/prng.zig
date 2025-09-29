@@ -375,6 +375,23 @@ test boolean {
     ).diff_fmt("heads = {} tails = {}", .{ heads, tails });
 }
 
+/// Returns the index of a randomly-chosen bit within a Word.
+pub fn bit(prng: *PRNG, comptime Word: type) std.math.Log2Int(Word) {
+    comptime assert(@typeInfo(Word) == .int);
+    return prng.int_inclusive(std.math.Log2Int(Word), @bitSizeOf(Word) - 1);
+}
+
+test bit {
+    var prng = PRNG.from_seed(92);
+    var hits: [8]u32 = @splat(0);
+    for (0..1000) |_| {
+        hits[prng.bit(u8)] += 1;
+    }
+    try snap(@src(),
+        \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
+    ).diff_fmt("{any}", .{hits});
+}
+
 /// Returns true with the given rational probability.
 pub fn chance(prng: *PRNG, probability: Ratio) bool {
     assert(probability.denominator > 0);
