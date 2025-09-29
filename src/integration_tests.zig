@@ -23,6 +23,10 @@ const vortex_exe: []const u8 = @import("test_options").vortex_exe;
 const tigerbeetle: []const u8 = @import("test_options").tigerbeetle_exe;
 const tigerbeetle_past: []const u8 = @import("test_options").tigerbeetle_exe_past;
 
+comptime {
+    _ = @import("clients/c/tb_client_header_test.zig");
+}
+
 test "repl integration" {
     const Context = struct {
         const Context = @This();

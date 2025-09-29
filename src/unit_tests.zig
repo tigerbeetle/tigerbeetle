@@ -6,7 +6,6 @@ comptime {
     _ = @import("clients/c/tb_client.zig");
     _ = @import("clients/c/tb_client/context.zig");
     _ = @import("clients/c/tb_client/signal.zig");
-    _ = @import("clients/c/tb_client_header_test.zig");
     _ = @import("clients/c/test.zig");
     _ = @import("copyhound.zig");
     _ = @import("ewah.zig");
@@ -161,6 +160,7 @@ const quine =
     \\        if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "clients/") and
     \\            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
+    \\        if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
     \\
     \\        const contents = try src_dir.readFileAlloc(arena, entry_path, 1 * MiB);
@@ -284,6 +284,7 @@ fn unit_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []con
         if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
         if (std.mem.startsWith(u8, entry_path, "clients/") and
             !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
+        if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
         if (std.mem.eql(u8, entry_path, "tigerbeetle/libtb_client.zig")) continue;
 
         const contents = try src_dir.readFileAlloc(arena, entry_path, 1 * MiB);
