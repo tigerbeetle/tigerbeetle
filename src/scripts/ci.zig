@@ -195,9 +195,33 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
+    // Check that the docker tag for latest is the same as the docker tag for the release. Docker's
+    // APIs make it much harder to do a release_published_latest() style check as above.
+    const docker_digest_latest = try docker_digest(shell, "latest");
+    const docker_digest_tagged = try docker_digest(shell, tag);
+
+    if (!std.mem.eql(u8, docker_digest_latest, docker_digest_tagged)) {
+        std.debug.panic("version mismatch - docker: latest published {s}, expected {s}", .{
+            docker_digest_latest,
+            docker_digest_tagged,
+        });
+    }
+
     const docker_version = try shell.exec_stdout(
         \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
     , .{ .version = tag });
     assert(std.mem.indexOf(u8, docker_version, tag) != null);
     assert(std.mem.indexOf(u8, docker_version, "ReleaseSafe") != null);
+}
+
+fn docker_digest(shell: *Shell, version: []const u8) ![]const u8 {
+    try shell.exec(
+        \\docker pull ghcr.io/tigerbeetle/tigerbeetle:{version}
+    , .{ .version = version });
+
+    return try shell.exec_stdout("docker inspect --format={format} " ++
+        "ghcr.io/tigerbeetle/tigerbeetle:{version}", .{
+        .format = "{{index .RepoDigests 0}}",
+        .version = version,
+    });
 }
