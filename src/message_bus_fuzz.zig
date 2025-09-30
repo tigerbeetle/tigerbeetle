@@ -90,10 +90,12 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         .seed = prng.int(u64),
         .recv_partial_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .recv_error_probability = ratio(prng.int_inclusive(u64, 1), 10),
+        .recv_after_shutdown_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .send_partial_probability = ratio(prng.int_inclusive(u64, 5), 10),
         .send_corrupt_probability = ratio(prng.int_inclusive(u64, 10), 100),
         .send_error_probability = ratio(prng.int_inclusive(u64, 1), 10),
         .send_now_probability = ratio(prng.int_inclusive(u64, 10), 10),
+        .send_after_shutdown_probability = ratio(prng.int_inclusive(u64, 10), 10),
         .close_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
         .shutdown_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
         .accept_error_probability = ratio(prng.int_inclusive(u64, 2), 10),
@@ -384,13 +386,13 @@ const IO = struct {
 
     servers: std.AutoArrayHashMapUnmanaged(socket_t, SocketServer) = .{},
     connections: std.AutoArrayHashMapUnmanaged(socket_t, SocketConnection) = .{},
-    /// Current number of events with event.completion.operation == .close
-    /// (We cache this separately since it is used in deinit(), so the Completion references are
-    /// invalid.)
-    connections_closing: u32 = 0,
     events: EventQueue,
     ticks: u64 = 0,
     fd_next: socket_t = 1,
+    /// Count the number of fds/sockets which have been created but not closed.
+    /// Unlike `connection.closed`, this is tracking whether sockets were explicitly closed by the
+    /// message bus.
+    fds_open: u32 = 0,
 
     const posix = std.posix;
     // We can't specify io/linux.zig since it won't compile on windows, which means that we are
@@ -412,10 +414,12 @@ const IO = struct {
         seed: u64 = 0,
         recv_partial_probability: Ratio,
         recv_error_probability: Ratio,
+        recv_after_shutdown_probability: Ratio,
         send_partial_probability: Ratio,
         send_corrupt_probability: Ratio,
         send_error_probability: Ratio,
         send_now_probability: Ratio,
+        send_after_shutdown_probability: Ratio,
         close_error_probability: Ratio,
         shutdown_error_probability: Ratio,
         accept_error_probability: Ratio,
@@ -484,15 +488,12 @@ const IO = struct {
     pub fn deinit(io: *IO) void {
         // Servers were already cleaned up by io.close_socket().
         assert(io.servers.count() == 0);
+        assert(io.fds_open == 0);
 
-        var connections_open: u32 = 0;
         for (io.connections.values()) |*connection| {
-            connections_open += @intFromBool(!connection.closed);
+            assert(connection.closed);
             connection.sending.deinit(io.gpa);
         }
-        // "<=" instead of "==" since MessageBus may try to close() a connection which never
-        // successfully connected due to a connect() error.
-        assert(connections_open <= io.connections_closing);
 
         io.events.deinit();
         io.connections.deinit(io.gpa);
@@ -533,6 +534,7 @@ const IO = struct {
 
                 const local_fd = io.fd_next;
                 io.fd_next += 1;
+                io.fds_open += 1;
 
                 const remote_completion =
                     server.backlog.swapRemove(io.prng.index(server.backlog.items));
@@ -556,8 +558,6 @@ const IO = struct {
                 );
             },
             .close => |operation| {
-                io.connections_closing -= 1;
-
                 const local = io.connections.getPtr(operation.fd) orelse {
                     // close() was called but we didn't ever connect.
                     // (This happens when we injected an error into connect()).
@@ -565,8 +565,8 @@ const IO = struct {
                     completion.callback(completion.context, completion, &result);
                     return .done;
                 };
+                assert(local.closed);
 
-                local.closed = true;
                 if (io.prng.chance(io.options.close_error_probability)) {
                     const result: CloseError!void = io.prng.error_uniform(CloseError);
                     completion.callback(completion.context, completion, &result);
@@ -611,9 +611,13 @@ const IO = struct {
                 }
 
                 if (sender.shutdown_send) {
-                    const result: SendError!usize = error.BrokenPipe;
-                    completion.callback(completion.context, completion, &result);
-                    return .done;
+                    if (io.prng.chance(io.options.send_after_shutdown_probability)) {
+                        // Sometimes allow the send() to complete even after shutdown().
+                    } else {
+                        const result: SendError!usize = error.BrokenPipe;
+                        completion.callback(completion.context, completion, &result);
+                        return .done;
+                    }
                 }
 
                 const send_size = if (io.prng.chance(io.options.send_partial_probability))
@@ -650,9 +654,13 @@ const IO = struct {
                 }
 
                 if (receiver.shutdown_recv) {
-                    const result: RecvError!usize = 0;
-                    completion.callback(completion.context, completion, &result);
-                    return .done;
+                    if (io.prng.chance(io.options.recv_after_shutdown_probability)) {
+                        // Sometimes allow the recv() to complete even after shutdown().
+                    } else {
+                        const result: RecvError!usize = 0;
+                        completion.callback(completion.context, completion, &result);
+                        return .done;
+                    }
                 }
 
                 const sender_fd = receiver.remote orelse return .retry;
@@ -712,6 +720,7 @@ const IO = struct {
     pub fn open_socket_tcp(io: *IO, _: u32, _: RealIO.TCPOptions) !socket_t {
         const socket = io.fd_next;
         io.fd_next += 1;
+        io.fds_open += 1;
         return @intCast(socket);
     }
 
@@ -721,11 +730,13 @@ const IO = struct {
         address: std.net.Address,
         _: RealIO.ListenOptions,
     ) !std.net.Address {
-        io.servers.putNoClobber(io.gpa, fd, .{ .address = address }) catch unreachable;
+        io.servers.putNoClobber(io.gpa, fd, .{ .address = address }) catch @panic("OOM");
         return address;
     }
 
     pub fn close_socket(io: *IO, socket: socket_t) void {
+        io.fds_open -= 1;
+
         if (io.servers.getPtr(socket)) |server| {
             assert(!io.connections.contains(socket));
             server.backlog.deinit(io.gpa);
@@ -772,13 +783,29 @@ const IO = struct {
         completion: *Completion,
         fd: fd_t,
     ) void {
+        // There are no pending operations on this socket.
+        var events = io.events.iterator();
+        while (events.next()) |event| {
+            switch (event.completion.operation) {
+                inline .accept, .connect, .recv, .send => |data| assert(data.socket != fd),
+                .close => |data| assert(data.fd != fd),
+                .timeout => {},
+            }
+        }
+
+        io.fds_open -= 1;
+        if (io.connections.getPtr(fd)) |connection| {
+            connection.closed = true;
+        } else {
+            // We might be closing a socket which didn't ever connect().
+        }
+
         completion.* = .{
             .context = context,
             .callback = erase_types(Context, CloseError!void, callback),
             .operation = .{ .close = .{ .fd = fd } },
         };
         io.enqueue(completion);
-        io.connections_closing += 1;
     }
 
     pub fn connect(
@@ -855,7 +882,7 @@ const IO = struct {
         else
             buffer.len;
 
-        sender.sending.appendSlice(io.gpa, buffer[0..send_size]) catch unreachable;
+        sender.sending.appendSlice(io.gpa, buffer[0..send_size]) catch @panic("OOM");
         return send_size;
     }
 
