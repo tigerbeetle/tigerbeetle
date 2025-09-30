@@ -384,7 +384,7 @@ test route_decode {
         var code: u64 = @bitCast(code_bytes);
 
         if (prng.chance(ratio(1, 20))) {
-            code ^= @as(u64, 1) << prng.int_inclusive(u6, @bitSizeOf(u64) - 1);
+            code ^= prng.bit(u64);
         }
 
         var routing = Routing.init(.{
