@@ -630,7 +630,7 @@ const IO = struct {
                     } else {
                         const corrupt_byte = io.prng.index(send_buffer);
                         sender.sending.items[sender.sending.items.len - corrupt_byte - 1] ^=
-                            @as(u8, 1) << io.prng.bit(u8);
+                            io.prng.bit(u8);
                     }
                 }
 

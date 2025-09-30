@@ -375,17 +375,20 @@ test boolean {
     ).diff_fmt("heads = {} tails = {}", .{ heads, tails });
 }
 
-/// Returns the index of a randomly-chosen bit within a Word.
-pub fn bit(prng: *PRNG, comptime Word: type) std.math.Log2Int(Word) {
+/// Returns a Word with a single randomly-chosen bit set.
+pub fn bit(prng: *PRNG, comptime Word: type) Word {
     comptime assert(@typeInfo(Word) == .int);
-    return prng.int_inclusive(std.math.Log2Int(Word), @bitSizeOf(Word) - 1);
+    comptime assert(@typeInfo(Word).int.signedness == .unsigned);
+    return @as(Word, 1) << prng.int_inclusive(std.math.Log2Int(Word), @bitSizeOf(Word) - 1);
 }
 
 test bit {
     var prng = PRNG.from_seed(92);
     var hits: [8]u32 = @splat(0);
     for (0..1000) |_| {
-        hits[prng.bit(u8)] += 1;
+        const word = prng.bit(u8);
+        assert(@popCount(word) == 1);
+        hits[@ctz(word)] += 1;
     }
     try snap(@src(),
         \\{ 134, 134, 117, 121, 117, 128, 131, 118 }

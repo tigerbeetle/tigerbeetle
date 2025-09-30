@@ -481,7 +481,7 @@ pub const Storage = struct {
                 const corrupt_seed: u64 = @bitCast(sector_bytes[0..@sizeOf(u64)].*);
                 var corrupt_prng = stdx.PRNG.from_seed(corrupt_seed);
                 const corrupt_byte = corrupt_prng.index(sector_bytes);
-                sector_bytes[corrupt_byte] ^= @as(u8, 1) << corrupt_prng.bit(u8);
+                sector_bytes[corrupt_byte] ^= corrupt_prng.bit(u8);
             }
 
             if (sector_uninitialized) {
