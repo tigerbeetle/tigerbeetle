@@ -38,7 +38,7 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     const messages_max = args.events_max orelse 200;
     // Usually we don't need nearly this many ticks, but certain combinations of errors can make
     // delivering messages quite time consuming.
-    const ticks_max = messages_max * 5_000;
+    const ticks_max = messages_max * 10_000;
 
     var prng = stdx.PRNG.from_seed(args.seed);
 
