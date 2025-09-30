@@ -429,6 +429,22 @@ pub fn exec_stdout(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !
     return captured_stdout;
 }
 
+pub fn exec_stdout_stderr(shell: *Shell, comptime cmd: []const u8, cmd_args: anytype) !struct {
+    []const u8,
+    []const u8,
+} {
+    var argv = try Argv.expand(shell.gpa, cmd, cmd_args);
+    defer argv.deinit();
+
+    var captured_stdout: []const u8 = &.{};
+    var captured_stderr: []const u8 = &.{};
+    try exec_inner(shell, argv.slice(), .{
+        .capture_stdout = &captured_stdout,
+        .capture_stderr = &captured_stderr,
+    });
+    return .{ captured_stdout, captured_stderr };
+}
+
 pub fn exec_stdout_options(
     shell: *Shell,
     options: struct {
@@ -477,7 +493,11 @@ fn exec_inner(
     argv: []const []const u8,
     options: struct {
         stdin_slice: ?[]const u8 = null,
-        capture_stdout: ?*[]const u8 = null, // Optional out parameter.
+
+        // Optional out parameters:
+        capture_stdout: ?*[]const u8 = null,
+        capture_stderr: ?*[]const u8 = null,
+
         output_limit_bytes: usize = 128 * MiB,
         timeout: stdx.Duration = .minutes(10),
     },
@@ -550,14 +570,19 @@ fn exec_inner(
         else => return error.ExecFailed,
     }
 
-    if (options.capture_stdout) |destination| {
-        const stdout = poller.?.fifo(.stdout).readableSlice(0);
-        const trailing_newline = if (std.mem.indexOfScalar(u8, stdout, '\n')) |first_newline|
-            first_newline == stdout.len - 1
-        else
-            false;
-        const len_without_newline = stdout.len - @intFromBool(trailing_newline);
-        destination.* = try shell.arena.allocator().dupe(u8, stdout[0..len_without_newline]);
+    inline for (
+        .{ options.capture_stdout, options.capture_stderr },
+        .{ .stdout, .stderr },
+    ) |capture_destination, capture_stream| {
+        if (capture_destination) |destination| {
+            const stream = poller.?.fifo(capture_stream).readableSlice(0);
+            const trailing_newline = if (std.mem.indexOfScalar(u8, stream, '\n')) |first_newline|
+                first_newline == stream.len - 1
+            else
+                false;
+            const len_without_newline = stream.len - @intFromBool(trailing_newline);
+            destination.* = try shell.arena.allocator().dupe(u8, stream[0..len_without_newline]);
+        }
     }
 }
 

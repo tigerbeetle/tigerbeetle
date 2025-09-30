@@ -129,6 +129,8 @@ events_timing: []?EventTimingAggregate,
 
 time_start: stdx.Instant,
 
+log_trace: bool,
+
 pub const ProcessID = union(enum) {
     unknown,
     replica: struct {
@@ -168,6 +170,7 @@ pub const Options = struct {
             address: std.net.Address,
         },
     } = .log,
+    log_trace: bool = true,
 };
 
 pub fn init(
@@ -215,6 +218,8 @@ pub fn init(
         .events_timing = events_timing,
 
         .time_start = time.monotonic(),
+
+        .log_trace = options.log_trace,
     };
 }
 
@@ -269,10 +274,12 @@ pub fn start(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
 
-    log.debug(
-        "{}: {s}({}): start: {}",
-        .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
-    );
+    if (tracer.log_trace) {
+        log.debug(
+            "{}: {s}({}): start: {}",
+            .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
+        );
+    }
 
     const writer = tracer.options.writer orelse return;
     const time_elapsed = time_now.duration_since(tracer.time_start);
@@ -327,18 +334,20 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
-    // Double leading space to align with 'start: '.
-    log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
-        tracer.process_id,
-        @tagName(event),
-        event_tracing,
-        event_timing,
-        if (event_duration.ns < us_log_threshold_ns)
-            event_duration.to_us()
-        else
-            event_duration.to_ms(),
-        if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
-    });
+    if (tracer.log_trace) {
+        // Double leading space to align with 'start: '.
+        log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
+            tracer.process_id,
+            @tagName(event),
+            event_tracing,
+            event_timing,
+            if (event_duration.ns < us_log_threshold_ns)
+                event_duration.to_us()
+            else
+                event_duration.to_ms(),
+            if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
+        });
+    }
 
     tracer.timing(event_timing, event_duration);
 
@@ -351,7 +360,9 @@ pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     const event_end = tracer.time.monotonic();
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
-            log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
+            if (tracer.log_trace) {
+                log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
+            }
 
             const event_duration = event_end.duration_since(tracer.time_start);
 
