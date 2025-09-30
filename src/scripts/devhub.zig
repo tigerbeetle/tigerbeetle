@@ -143,10 +143,13 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
         "tigerbeetle",
     );
 
-    const benchmark_result = try shell.exec_stdout(
-        "./tigerbeetle benchmark --validate --checksum-performance --log-debug",
+    // `--log-debug-replica` is explicitly enabled, to measure the performance hit from debug
+    // logging and count the log lines.
+    const benchmark_result, const benchmark_stderr = try shell.exec_stdout_stderr(
+        "./tigerbeetle benchmark --validate --checksum-performance --log-debug-replica",
         .{},
     );
+    const replica_log_lines = std.mem.count(u8, benchmark_stderr, "\n");
     const tps = try get_measurement(benchmark_result, "load accepted", "tx/s");
     const batch_p100_ms = try get_measurement(benchmark_result, "batch latency p100", "ms");
     const query_p100_ms = try get_measurement(benchmark_result, "query latency p100", "ms");
@@ -303,6 +306,7 @@ fn devhub_metrics(shell: *Shell, cli_args: CLIArgs) !void {
             .{ .name = "RSS", .value = rss_bytes, .unit = "bytes" },
             .{ .name = "datafile", .value = datafile_bytes, .unit = "bytes" },
             .{ .name = "datafile empty", .value = datafile_empty_bytes, .unit = "bytes" },
+            .{ .name = "replica log lines", .value = replica_log_lines, .unit = "lines" },
             .{
                 .name = "checksum(message_size_max)",
                 .value = checksum_message_size_max_us,

@@ -334,8 +334,8 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
-    // Double leading space to align with 'start: '.
     if (tracer.log_trace) {
+        // Double leading space to align with 'start: '.
         log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
             tracer.process_id,
             @tagName(event),
