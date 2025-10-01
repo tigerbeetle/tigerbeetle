@@ -123,7 +123,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
-    const output = try shell.exec_stdout("python3 -m pip index versions --pre tigerbeetle", .{});
+    const output = try shell.exec_stdout("python3 -m pip index versions tigerbeetle", .{});
     const version_start = std.mem.indexOf(u8, output, "(").? + 1;
     const version_end = std.mem.indexOf(u8, output, ")").?;
 

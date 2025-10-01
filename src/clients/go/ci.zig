@@ -97,7 +97,8 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
 }
 
 pub fn release_published_latest(shell: *Shell) ![]const u8 {
-    // Returns a list of all versions. Slice on ' v' and offset by 2 to get the raw version number.
+    // Example output:
+    //  github.com/tigerbeetle/tigerbeetle-go v0.9.149 v0.13.56 v0.13.57
     const output = try shell.exec_stdout(
         "go list -m -versions github.com/tigerbeetle/tigerbeetle-go",
         .{},

@@ -891,72 +891,97 @@ pub const HttpOptions = struct {
         }
     };
 
-    content_type: ?ContentType,
-    authorization: ?[]const u8,
+    content_type: ?ContentType = null,
+    authorization: ?[]const u8 = null,
+
+    response_body_size_max: u32 = 512 * stdx.KiB,
 };
 
-/// Issues an HTTP POST request with the given `body` to the given `url`.
+pub fn http_get(shell: *Shell, url: []const u8, options: HttpOptions) ![]const u8 {
+    return shell.http_request(.get, url, options);
+}
+
+pub fn http_post(
+    shell: *Shell,
+    url: []const u8,
+    body: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    return shell.http_request(.{ .post = body }, url, options);
+}
+
+/// Issues an HTTP request to the given `url` and returns the response.
 ///
+/// The returned body is owned by the shell arena and doesn't need to be freed.
 /// If the response is not 200 OK, the response body is logged and an error is returned.
-pub fn http_post(shell: *Shell, url: []const u8, body: []const u8, options: HttpOptions) !void {
-    errdefer |err| log.err("failed to HTTP post to \"{s}\": {s}", .{ url, @errorName(err) });
+fn http_request(
+    shell: *Shell,
+    method: union(enum) { get, post: []const u8 },
+    url: []const u8,
+    options: HttpOptions,
+) ![]const u8 {
+    errdefer |err| log.err("failed to HTTP {s} to \"{s}\": {s}", .{
+        @tagName(method),
+        url,
+        @errorName(err),
+    });
 
     var client = std.http.Client{ .allocator = shell.gpa };
     defer client.deinit();
 
     const uri = try std.Uri.parse(url);
     var header_buffer: [4 * stdx.KiB]u8 = undefined;
-    var request = try client.open(.POST, uri, .{ .server_header_buffer = &header_buffer });
+    var request = try client.open(
+        switch (method) {
+            .post => .POST,
+            .get => .GET,
+        },
+        uri,
+        .{ .server_header_buffer = &header_buffer },
+    );
     defer request.deinit();
 
     if (options.content_type) |content_type| {
         request.headers.content_type = .{ .override = content_type.string() };
     }
+
     if (options.authorization) |authorization| {
         request.headers.authorization = .{ .override = authorization };
     }
-    request.transfer_encoding = .{ .content_length = body.len };
 
-    try request.send();
-    try request.writeAll(body);
-    try request.finish();
-    try request.wait();
-
-    if (request.response.status != std.http.Status.ok) {
-        const response_body_size_max = 512 * stdx.KiB;
-        var response_body_buffer: [response_body_size_max]u8 = undefined;
-        const response_body_len = try request.readAll(&response_body_buffer);
-        const response_body = response_body_buffer[0..response_body_len];
-        log.err("response: {s}", .{response_body});
-        return error.WrongStatusResponse;
+    if (method == .post) {
+        request.transfer_encoding = .{ .content_length = method.post.len };
     }
-}
-
-/// Issues an HTTP GET request to the given `url`, and returns the response.
-///
-/// The returned body is owned by the shell arena and doesn't need to be freed.
-/// If the response is not 200 OK, the response body is logged and an error is returned.
-pub fn http_get(shell: *Shell, url: []const u8) ![]const u8 {
-    var client = std.http.Client{ .allocator = shell.gpa };
-    defer client.deinit();
-
-    const uri = try std.Uri.parse(url);
-    var header_buffer: [4 * stdx.KiB]u8 = undefined;
-    var request = try client.open(.GET, uri, .{ .server_header_buffer = &header_buffer });
-    defer request.deinit();
 
     try request.send();
+    if (method == .post) {
+        try request.writeAll(method.post);
+    }
     try request.finish();
     try request.wait();
 
-    const response_body_size_max = 32 * stdx.KiB;
-    var response_body_buffer = try shell.arena.allocator().alloc(u8, response_body_size_max);
-    const response_body_len = try request.readAll(response_body_buffer);
-    const response_body = response_body_buffer[0..response_body_len];
+    const response_body_buffer_size = request.response.content_length orelse
+        options.response_body_size_max;
+
+    if (response_body_buffer_size > options.response_body_size_max) {
+        return error.ResponseTooLarge;
+    }
+
+    const response_body_buffer = try shell.arena.allocator().alloc(
+        u8,
+        response_body_buffer_size,
+    );
+    const response_body_size = try request.readAll(response_body_buffer);
+    assert(response_body_size <= options.response_body_size_max);
+    const response_body = response_body_buffer[0..response_body_size];
+
+    if (request.response.content_length) |response_content_length| {
+        assert(response_content_length == response_body_size);
+    }
 
     if (request.response.status != std.http.Status.ok) {
         log.err("response: {s}", .{response_body});
-        return error.WrongStatusResponse;
+        return error.ResponseWrongStatus;
     }
 
     return response_body;

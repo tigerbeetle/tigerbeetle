@@ -194,6 +194,9 @@ pub fn release_published_latest(shell: *Shell) ![]const u8 {
         .{ .ignore_unknown_fields = true },
     );
 
+    assert(dotnet_search_results.searchResult.len == 1);
+    assert(dotnet_search_results.searchResult[0].packages.len == 1);
+
     assert(std.mem.eql(u8, dotnet_search_results.searchResult[0].packages[0].id, "tigerbeetle"));
 
     return dotnet_search_results.searchResult[0].packages[0].latestVersion;
