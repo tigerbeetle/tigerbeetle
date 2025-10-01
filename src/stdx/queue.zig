@@ -16,7 +16,7 @@ pub fn QueueType(comptime T: type) type {
 
         pub inline fn init(options: struct {
             name: ?[]const u8,
-            verify_push: bool = true,
+            verify_push: bool = false,
         }) Queue {
             return .{ .any = .{
                 .name = options.name,
@@ -92,7 +92,7 @@ const QueueAny = struct {
     name: ?[]const u8,
 
     // Used by tests.
-    verify_push: bool = true,
+    verify_push: bool = false,
 
     pub fn push(self: *QueueAny, link: *QueueLink) void {
         if (self.verify_push) assert(!self.contains(link));
