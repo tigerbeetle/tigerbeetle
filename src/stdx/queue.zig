@@ -271,6 +271,7 @@ test "Queue: fuzz" {
 
         var queue = Queue.init(.{
             .name = "fuzz",
+            .verify_push = true,
         });
         var model = try Model.init(gpa, N);
         defer model.deinit(gpa);
