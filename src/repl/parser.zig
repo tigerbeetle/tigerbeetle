@@ -480,7 +480,6 @@ const null_terminal = Terminal{
     .stdin = undefined,
     .stderr = null,
     .stdout = null,
-    .buffer_in = undefined,
 };
 
 test "parser.zig: Parser single transfer successfully" {
