@@ -774,7 +774,7 @@ Released: 2025-06-06
 Released: 2025-05-30
 
 This release includes the `tigerbeetle recover` subcommand, which can be used to _safely_ recover a
-replica that is permanantly lost.
+replica that is permanently lost.
 
 Additionally, it includes Change Data Capture (CDC) support to stream TigerBeetle state to Advanced
 Message Queuing Protocol (AMQP) targets, such as RabbitMQ and other compatible brokers.
@@ -787,10 +787,10 @@ CDC and `tigerbeetle recover`!
 
 - [#2996](https://github.com/tigerbeetle/tigerbeetle/pull/2996)
 
-  Add the `tigerbeetle recover` subcommand, to safely recover a replica that is permanantly lost
+  Add the `tigerbeetle recover` subcommand, to safely recover a replica that is permanently lost
   (e.g. if the SSD fails).
 
-  Earlier, the only way to recover a permanantly lost replica was using the `tigerbeetle format`
+  Earlier, the only way to recover a permanently lost replica was using the `tigerbeetle format`
   command. Howerver, this was unsafe, as a newly-formatted replica may nack prepares which its
   previous incarnation acked -- a correctness bug.
 
