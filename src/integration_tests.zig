@@ -332,10 +332,8 @@ test "in-place upgrade" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -392,10 +390,8 @@ test "recover smoke" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -453,9 +449,7 @@ const TmpCluster = struct {
     workload_thread: ?std.Thread = null,
     workload_exit_ok: bool = false,
 
-    fn init(options: struct {
-        seed: u64,
-    }) !TmpCluster {
+    fn init() !TmpCluster {
         const shell = try Shell.create(std.testing.allocator);
         errdefer shell.destroy();
 
@@ -478,7 +472,7 @@ const TmpCluster = struct {
             });
         }
 
-        const prng = stdx.PRNG.from_seed(options.seed);
+        const prng = stdx.PRNG.from_seed_testing();
         return .{
             .shell = shell,
             .tmp = tmp,
