@@ -857,7 +857,7 @@ pub fn exponential_backoff_with_jitter(
 }
 
 test "exponential_backoff_with_jitter" {
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const attempts = 1000;
     const max: u64 = std.math.maxInt(u64);
@@ -1080,9 +1080,7 @@ test "parse_addresses: fuzz" {
     const len_max = 32;
     const alphabet = " \t\n,:[]0123456789abcdefgABCDEFGXx";
 
-    const seed = std.crypto.random.int(u64);
-
-    var prng = stdx.PRNG.from_seed(seed);
+    var prng = stdx.PRNG.from_seed_testing();
 
     var input_max: [len_max]u8 = @splat(0);
     var buffer: [3]std.net.Address = undefined;

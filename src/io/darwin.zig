@@ -14,6 +14,7 @@ const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
+    pub const ListenOptions = common.ListenOptions;
 
     kq: fd_t,
     event_id: Event = 0,
@@ -163,7 +164,7 @@ pub const IO = struct {
         while (timeouts_iterator.next()) |completion| {
 
             // NOTE: We could cache `now` above the loop but monotonic() should be cheap to call.
-            const now = self.time_os.time().monotonic();
+            const now = self.time_os.time().monotonic().ns;
             const expires = completion.operation.timeout.expires;
 
             // NOTE: remove() could be O(1) here with a doubly-linked-list
@@ -662,7 +663,7 @@ pub const IO = struct {
             completion,
             .timeout,
             .{
-                .expires = self.time_os.time().monotonic() + nanoseconds,
+                .expires = self.time_os.time().monotonic().ns + nanoseconds,
             },
             struct {
                 fn do_operation(_: anytype) TimeoutError!void {
@@ -840,7 +841,7 @@ pub const IO = struct {
         _: *IO,
         fd: socket_t,
         address: std.net.Address,
-        options: common.ListenOptions,
+        options: ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
     }

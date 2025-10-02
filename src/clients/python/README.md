@@ -586,7 +586,7 @@ filter = tb.AccountFilter(
     code=0, # No filter by Code.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten transfers at most.
     flags=tb.AccountFilterFlags.DEBITS | # Include transfer from the debit side.
     tb.AccountFilterFlags.CREDITS | # Include transfer from the credit side.
     tb.AccountFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
@@ -647,7 +647,7 @@ query_filter = tb.QueryFilter(
     ledger=0, # No filter by Ledger.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten accounts at most.
     flags=tb.QueryFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
 )
 
@@ -673,7 +673,7 @@ query_filter = tb.QueryFilter(
     ledger=0, # No filter by Ledger.
     timestamp_min=0, # No filter by Timestamp.
     timestamp_max=0, # No filter by Timestamp.
-    limit=10, # Limit to ten balances at most.
+    limit=10, # Limit to ten transfers at most.
     flags=tb.QueryFilterFlags.REVERSED, # Sort by timestamp in reverse-chronological order.
 )
 

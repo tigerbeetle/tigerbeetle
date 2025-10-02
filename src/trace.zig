@@ -129,6 +129,8 @@ events_timing: []?EventTimingAggregate,
 
 time_start: stdx.Instant,
 
+log_trace: bool,
+
 pub const ProcessID = union(enum) {
     unknown,
     replica: struct {
@@ -168,6 +170,7 @@ pub const Options = struct {
             address: std.net.Address,
         },
     } = .log,
+    log_trace: bool = true,
 };
 
 pub fn init(
@@ -214,7 +217,9 @@ pub fn init(
         .events_metric = events_metric,
         .events_timing = events_timing,
 
-        .time_start = time.monotonic_instant(),
+        .time_start = time.monotonic(),
+
+        .log_trace = options.log_trace,
     };
 }
 
@@ -264,15 +269,17 @@ pub fn start(tracer: *Tracer, event: Event) void {
     const event_timing = event.as(EventTiming);
     const stack = event_tracing.stack();
 
-    const time_now = tracer.time.monotonic_instant();
+    const time_now = tracer.time.monotonic();
 
     assert(tracer.events_started[stack] == null);
     tracer.events_started[stack] = time_now;
 
-    log.debug(
-        "{}: {s}({}): start: {}",
-        .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
-    );
+    if (tracer.log_trace) {
+        log.debug(
+            "{}: {s}({}): start: {}",
+            .{ tracer.process_id, @tagName(event), event_tracing, event_timing },
+        );
+    }
 
     const writer = tracer.options.writer orelse return;
     const time_elapsed = time_now.duration_since(tracer.time_start);
@@ -321,24 +328,26 @@ pub fn stop(tracer: *Tracer, event: Event) void {
     const stack = event_tracing.stack();
 
     const event_start = tracer.events_started[stack].?;
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     const event_duration = event_end.duration_since(event_start);
 
     assert(tracer.events_started[stack] != null);
     tracer.events_started[stack] = null;
 
-    // Double leading space to align with 'start: '.
-    log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
-        tracer.process_id,
-        @tagName(event),
-        event_tracing,
-        event_timing,
-        if (event_duration.ns < us_log_threshold_ns)
-            event_duration.to_us()
-        else
-            event_duration.to_ms(),
-        if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
-    });
+    if (tracer.log_trace) {
+        // Double leading space to align with 'start: '.
+        log.debug("{}: {s}({}): stop:  {} (duration={}{s})", .{
+            tracer.process_id,
+            @tagName(event),
+            event_tracing,
+            event_timing,
+            if (event_duration.ns < us_log_threshold_ns)
+                event_duration.to_us()
+            else
+                event_duration.to_ms(),
+            if (event_duration.ns < us_log_threshold_ns) "us" else "ms",
+        });
+    }
 
     tracer.timing(event_timing, event_duration);
 
@@ -348,10 +357,12 @@ pub fn stop(tracer: *Tracer, event: Event) void {
 pub fn cancel(tracer: *Tracer, event_tag: Event.Tag) void {
     const stack_base = EventTracing.stack_bases.get(event_tag);
     const cardinality = EventTracing.stack_limits.get(event_tag);
-    const event_end = tracer.time.monotonic_instant();
+    const event_end = tracer.time.monotonic();
     for (stack_base..stack_base + cardinality) |stack| {
         if (tracer.events_started[stack]) |_| {
-            log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
+            if (tracer.log_trace) {
+                log.debug("{}: {s}: cancel", .{ tracer.process_id, @tagName(event_tag) });
+            }
 
             const event_duration = event_end.duration_since(tracer.time_start);
 
@@ -389,7 +400,10 @@ pub fn emit_metrics(tracer: *Tracer) void {
     tracer.start(.metrics_emit);
     defer tracer.stop(.metrics_emit);
 
-    tracer.statsd.emit(tracer.events_metric, tracer.events_timing) catch |err| switch (err) {
+    const metrics_statsd_packets = tracer.statsd.emit(
+        tracer.events_metric,
+        tracer.events_timing,
+    ) catch |err| switch (err) {
         error.Busy, error.UnknownProcess => return,
     };
 
@@ -397,6 +411,8 @@ pub fn emit_metrics(tracer: *Tracer) void {
     // Prometheus, this would have to be removed.
     @memset(tracer.events_metric, null);
     @memset(tracer.events_timing, null);
+
+    tracer.gauge(.metrics_statsd_packets, metrics_statsd_packets);
 }
 
 // Timing works by storing the min, max, sum and count of each value provided. The avg is calculated

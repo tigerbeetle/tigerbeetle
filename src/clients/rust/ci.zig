@@ -21,7 +21,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
         defer tmp_beetle.deinit(gpa);
         errdefer tmp_beetle.log_stderr();
 
-        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+        try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
         try shell.exec("cargo run", .{});
     }
 }
@@ -43,7 +43,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     defer tmp_beetle.deinit(gpa);
     errdefer tmp_beetle.log_stderr();
 
-    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str.slice());
+    try shell.env.put("TB_ADDRESS", tmp_beetle.port_str);
 
     // Create a new Rust project to test the published crate
     try shell.exec("cargo init --name test_tigerbeetle", .{});

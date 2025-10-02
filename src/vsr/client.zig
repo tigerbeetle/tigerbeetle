@@ -475,7 +475,7 @@ pub fn ClientType(
             }
 
             const ping_timestamp_monotonic = pong.header.ping_timestamp_monotonic;
-            const pong_timestamp_monotonic = self.time.monotonic();
+            const pong_timestamp_monotonic = self.time.monotonic().ns;
             if (ping_timestamp_monotonic <= pong_timestamp_monotonic) {
                 self.replica_round_trip_times_ns[pong.header.replica] =
                     pong_timestamp_monotonic - ping_timestamp_monotonic;
@@ -637,7 +637,7 @@ pub fn ClientType(
                 .cluster = self.cluster,
                 .release = self.release,
                 .client = self.id,
-                .ping_timestamp_monotonic = self.time.monotonic(),
+                .ping_timestamp_monotonic = self.time.monotonic().ns,
             };
 
             self.send_header_to_replicas(ping.frame_const());

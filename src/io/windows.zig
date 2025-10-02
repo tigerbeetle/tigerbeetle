@@ -14,6 +14,7 @@ const DirectIO = @import("../io.zig").DirectIO;
 
 pub const IO = struct {
     pub const TCPOptions = common.TCPOptions;
+    pub const ListenOptions = common.ListenOptions;
 
     iocp: os.windows.HANDLE,
     time_os: TimeOS = .{},
@@ -151,7 +152,7 @@ pub const IO = struct {
         var timeouts_iterator = self.timeouts.iterate();
         while (timeouts_iterator.next()) |completion| {
             // Lazily get the current time.
-            const now = current_time orelse self.time_os.time().monotonic();
+            const now = current_time orelse self.time_os.time().monotonic().ns;
             current_time = now;
 
             // Move the completion to completed if it expired.
@@ -1019,7 +1020,7 @@ pub const IO = struct {
             callback,
             completion,
             .timeout,
-            .{ .deadline = self.time_os.time().monotonic() + nanoseconds },
+            .{ .deadline = self.time_os.time().monotonic().ns + nanoseconds },
             struct {
                 fn do_operation(ctx: Completion.Context, op: anytype) TimeoutError!void {
                     _ = ctx;
@@ -1156,7 +1157,7 @@ pub const IO = struct {
         _: *IO,
         fd: socket_t,
         address: std.net.Address,
-        options: common.ListenOptions,
+        options: ListenOptions,
     ) !std.net.Address {
         return common.listen(fd, address, options);
     }

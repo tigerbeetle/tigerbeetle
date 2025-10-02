@@ -74,7 +74,7 @@ pub const IdPermutation = union(enum) {
 };
 
 test "IdPermutation" {
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     for ([_]IdPermutation{
         .{ .identity = {} },

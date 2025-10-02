@@ -243,7 +243,7 @@ pub fn KWayMergeIteratorType(
         }
 
         fn next_contender(self: *KWayMergeIterator, stream_id: u32) error{Drained}!Node {
-            assert(stream_id < options.streams_max);
+            assert(stream_id < self.streams_count);
             const next_key = stream_peek(self.context, stream_id) catch |err| switch (err) {
                 error.Drained => return error.Drained,
                 error.Empty => {
@@ -692,9 +692,6 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
 }
 
 test "k_way_merge: fuzz" {
-    const seed = std.crypto.random.int(u64);
-    errdefer std.debug.print("\nTEST FAILED: seed = {}\n", .{seed});
-
-    var prng = stdx.PRNG.from_seed(seed);
+    var prng = stdx.PRNG.from_seed_testing();
     try FuzzTestContextType(32).fuzz(&prng, 1024);
 }

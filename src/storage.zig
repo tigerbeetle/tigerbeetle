@@ -231,7 +231,7 @@ pub fn StorageType(comptime IO: type) type {
                 .offset = offset_in_storage,
                 .target_max = buffer.len,
                 .zone = zone,
-                .start = self.tracer.time.monotonic_instant(),
+                .start = self.tracer.time.monotonic(),
             };
 
             self.start_read(read, null);
@@ -257,7 +257,7 @@ pub fn StorageType(comptime IO: type) type {
 
                 self.tracer.timing(
                     .{ .storage_read = .{ .zone = read.zone } },
-                    self.tracer.time.monotonic_instant().duration_since(read.start.?),
+                    self.tracer.time.monotonic().duration_since(read.start.?),
                 );
 
                 read.callback(read);
@@ -401,7 +401,7 @@ pub fn StorageType(comptime IO: type) type {
                 .buffer = buffer,
                 .offset = offset_in_storage,
                 .zone = zone,
-                .start = self.tracer.time.monotonic_instant(),
+                .start = self.tracer.time.monotonic(),
             };
 
             self.start_write(write);
@@ -466,7 +466,7 @@ pub fn StorageType(comptime IO: type) type {
             if (write.buffer.len == 0) {
                 self.tracer.timing(
                     .{ .storage_write = .{ .zone = write.zone } },
-                    self.tracer.time.monotonic_instant().duration_since(write.start.?),
+                    self.tracer.time.monotonic().duration_since(write.start.?),
                 );
 
                 write.callback(write);

@@ -98,6 +98,7 @@ pub fn main() !void {
     defer if (trace_file) |file| file.close();
 
     var statsd_address: ?std.net.Address = null;
+    var log_trace = true;
 
     switch (command) {
         .start => |*args| {
@@ -108,6 +109,7 @@ pub fn main() !void {
                 };
             }
             if (args.statsd) |address| statsd_address = address;
+            log_trace = args.log_trace;
         },
         .benchmark => {}, // Forwards trace and statsd argument to child tigerbeetle.
         inline else => |args| comptime {
@@ -118,10 +120,13 @@ pub fn main() !void {
 
     var tracer = try Tracer.init(gpa, time, .unknown, .{
         .writer = if (trace_file) |file| file.writer().any() else null,
-        .statsd_options = if (statsd_address) |address| .{ .udp = .{
-            .io = &io,
-            .address = address,
-        } } else .log,
+        .statsd_options = if (statsd_address) |address| .{
+            .udp = .{
+                .io = &io,
+                .address = address,
+            },
+        } else .log,
+        .log_trace = log_trace,
     });
     defer tracer.deinit(gpa);
 
@@ -362,6 +367,7 @@ fn command_start(
                 .cache_entries_accounts = args.cache_accounts,
                 .cache_entries_transfers = args.cache_transfers,
                 .cache_entries_transfers_pending = args.cache_transfers_pending,
+                .log_trace = args.log_trace,
             },
             .message_bus_options = .{
                 .configuration = args.addresses.const_slice(),

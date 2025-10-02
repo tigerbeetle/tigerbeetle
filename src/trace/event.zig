@@ -32,8 +32,8 @@ const TreeEnum = tree_enum: {
     } });
 };
 
-/// Returns the minimum length of an array which can be indexed by the values of every enum variant.
-fn enum_max(EnumOrUnion: type) u8 {
+/// Returns the count of an exhaustive enum.
+fn enum_count(EnumOrUnion: type) u8 {
     const type_info = @typeInfo(EnumOrUnion);
     assert(type_info == .@"enum" or type_info == .@"union");
 
@@ -43,11 +43,26 @@ fn enum_max(EnumOrUnion: type) u8 {
         @typeInfo(type_info.Union.tag_type.?).@"enum";
     assert(Enum.is_exhaustive);
 
-    var max: u8 = Enum.fields[0].value;
-    for (Enum.fields[1..]) |field| {
-        max = @max(max, field.value);
-    }
-    return max + 1;
+    return Enum.fields.len;
+}
+
+/// Maps an exhaustive enum value from an enum type that might potentially start with a non-zero
+/// value or be sparse to a continuous index that fits within enum_count().
+fn index_from_enum(enum_tag: anytype) u8 {
+    const type_info = @typeInfo(@TypeOf(enum_tag));
+    assert(type_info == .@"enum" or type_info == .@"union");
+
+    const Enum = if (type_info == .@"enum")
+        type_info.@"enum"
+    else
+        @typeInfo(type_info.Union.tag_type.?).@"enum";
+    assert(Enum.is_exhaustive);
+
+    inline for (Enum.fields, 0..) |enum_field, i| {
+        if (enum_field.value == @intFromEnum(enum_tag)) {
+            return i;
+        }
+    } else unreachable;
 }
 
 // TODO: It should be possible to get rid of all unbounded cardinality (eg, level_b being a u8) and
@@ -173,28 +188,28 @@ pub const EventTiming = union(Event.Tag) {
     client_request_round_trip: struct { operation: Operation },
 
     pub const slot_limits = std.enums.EnumArray(Event.Tag, u32).init(.{
-        .replica_commit = enum_max(CommitStage.Tag),
+        .replica_commit = enum_count(CommitStage.Tag),
         .replica_aof_write = 1,
         .replica_aof_checkpoint = 1,
         .replica_sync_table = 1,
-        .replica_request = enum_max(Operation),
-        .replica_request_execute = enum_max(Operation),
-        .replica_request_local = enum_max(Operation),
-        .compact_beat = enum_max(TreeEnum),
-        .compact_beat_merge = enum_max(TreeEnum),
+        .replica_request = enum_count(Operation),
+        .replica_request_execute = enum_count(Operation),
+        .replica_request_local = enum_count(Operation),
+        .compact_beat = enum_count(TreeEnum),
+        .compact_beat_merge = enum_count(TreeEnum),
         .compact_manifest = 1,
-        .compact_mutable = enum_max(TreeEnum),
-        .compact_mutable_suffix = enum_max(TreeEnum),
-        .lookup = enum_max(TreeEnum),
-        .lookup_worker = enum_max(TreeEnum),
-        .scan_tree = enum_max(TreeEnum),
-        .scan_tree_level = enum_max(TreeEnum),
+        .compact_mutable = enum_count(TreeEnum),
+        .compact_mutable_suffix = enum_count(TreeEnum),
+        .lookup = enum_count(TreeEnum),
+        .lookup_worker = enum_count(TreeEnum),
+        .scan_tree = enum_count(TreeEnum),
+        .scan_tree_level = enum_count(TreeEnum),
         .grid_read = 1,
         .grid_write = 1,
         .metrics_emit = 1,
-        .storage_read = enum_max(Zone),
-        .storage_write = enum_max(Zone),
-        .client_request_round_trip = enum_max(Operation),
+        .storage_read = enum_count(Zone),
+        .storage_write = enum_count(Zone),
+        .client_request_round_trip = enum_count(Operation),
     });
 
     pub const slot_bases = array: {
@@ -220,14 +235,11 @@ pub const EventTiming = union(Event.Tag) {
     //
     // TODO: This could be computed automatically, at least in the cases where all, or all except
     // one of the values are enums.
-    //
-    // TODO: The enum logic is a bit wasteful. It considers the max value, so for enums that don't
-    // start at 0 (eg, the trees) it's not optimal.
     pub fn slot(event: *const EventTiming) u32 {
         switch (event.*) {
             // Single payload: CommitStage.Tag
             inline .replica_commit => |data| {
-                const stage: u32 = @intFromEnum(data.stage);
+                const stage = index_from_enum(data.stage);
                 assert(stage < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + stage;
@@ -238,7 +250,7 @@ pub const EventTiming = union(Event.Tag) {
             .replica_request_local,
             .client_request_round_trip,
             => |data| {
-                const operation: u32 = @intFromEnum(data.operation);
+                const operation = index_from_enum(data.operation);
                 assert(operation < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + operation;
@@ -250,27 +262,27 @@ pub const EventTiming = union(Event.Tag) {
             .lookup_worker,
             .scan_tree,
             => |data| {
-                const tree_id: u32 = @intFromEnum(data.tree);
+                const tree_id = index_from_enum(data.tree);
                 assert(tree_id < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + tree_id;
             },
             inline .compact_beat, .compact_beat_merge => |data| {
-                const tree_id: u32 = @intFromEnum(data.tree);
+                const tree_id = index_from_enum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + offset;
             },
             inline .scan_tree_level => |data| {
-                const tree_id: u32 = @intFromEnum(data.tree);
+                const tree_id = index_from_enum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + offset;
             },
             inline .storage_read, .storage_write => |data| {
-                const zone: u32 = @intFromEnum(data.zone);
+                const zone = index_from_enum(data.zone);
                 const offset = zone;
                 assert(offset < slot_limits.get(event.*));
 
@@ -459,10 +471,12 @@ pub const EventMetric = union(enum) {
     grid_cache_misses,
     lsm_nodes_free,
     lsm_manifest_block_count,
+    metrics_statsd_packets,
+    release,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
-        .table_count_visible = enum_max(TreeEnum),
-        .table_count_visible_max = enum_max(TreeEnum),
+        .table_count_visible = enum_count(TreeEnum),
+        .table_count_visible_max = enum_count(TreeEnum),
         .replica_status = 1,
         .replica_view = 1,
         .replica_log_view = 1,
@@ -474,8 +488,8 @@ pub const EventMetric = union(enum) {
         .replica_sync_stage = 1,
         .replica_sync_op_min = 1,
         .replica_sync_op_max = 1,
-        .replica_messages_in = enum_max(Command),
-        .replica_messages_out = enum_max(Command),
+        .replica_messages_in = enum_count(Command),
+        .replica_messages_out = enum_count(Command),
         .journal_dirty = 1,
         .journal_faulty = 1,
         .grid_blocks_acquired = 1,
@@ -484,6 +498,8 @@ pub const EventMetric = union(enum) {
         .grid_cache_misses = 1,
         .lsm_nodes_free = 1,
         .lsm_manifest_block_count = 1,
+        .metrics_statsd_packets = 1,
+        .release = 1,
     });
 
     pub const slot_bases = array: {
@@ -507,14 +523,14 @@ pub const EventMetric = union(enum) {
     pub fn slot(event: *const EventMetric) u32 {
         switch (event.*) {
             inline .table_count_visible, .table_count_visible_max => |data| {
-                const tree_id: u32 = @intFromEnum(data.tree);
+                const tree_id = index_from_enum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + offset;
             },
             inline .replica_messages_in, .replica_messages_out => |data| {
-                const command: u32 = @intFromEnum(data.command);
+                const command = index_from_enum(data.command);
                 const offset = command;
                 assert(offset < slot_limits.get(event.*));
 

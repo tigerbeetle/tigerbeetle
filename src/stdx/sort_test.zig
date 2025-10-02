@@ -28,7 +28,7 @@ test "sort_stable" {
 
     const allocator = std.testing.allocator;
 
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const values_max = 1 << 15;
     const values_all = try allocator.alloc(Value, values_max);

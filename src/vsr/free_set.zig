@@ -1277,7 +1277,7 @@ fn find_bit(
 }
 
 test "find_bit" {
-    var prng = stdx.PRNG.from_seed(123);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const gpa = std.testing.allocator;
     for (1..(@bitSizeOf(std.DynamicBitSetUnmanaged.MaskInt) * 4) + 1) |bit_length| {

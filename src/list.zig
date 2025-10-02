@@ -164,7 +164,7 @@ test "DoublyLinkedList fuzz" {
 
     const allocator = std.testing.allocator;
 
-    var prng = stdx.PRNG.from_seed(0);
+    var prng = stdx.PRNG.from_seed_testing();
 
     const Node = struct { id: u32, back: ?*@This() = null, next: ?*@This() = null };
     const List = DoublyLinkedListType(Node, .back, .next);

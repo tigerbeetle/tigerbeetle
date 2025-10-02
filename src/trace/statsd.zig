@@ -104,7 +104,7 @@ const packet_count_max = stdx.div_ceil(
 comptime {
     // Sanity-check:
     assert(packet_count_max > 0);
-    assert(packet_count_max < 2048);
+    assert(packet_count_max < 256);
 }
 
 pub const StatsD = struct {
@@ -181,7 +181,7 @@ pub const StatsD = struct {
         self: *StatsD,
         events_metric: []const ?EventMetricAggregate,
         events_timing: []const ?EventTimingAggregate,
-    ) error{ Busy, UnknownProcess }!void {
+    ) error{ Busy, UnknownProcess }!u32 {
         const cluster, const replica = switch (self.process_id) {
             .unknown => {
                 log.err("{}: process id unknown; skipping emit", .{self.process_id});
@@ -278,13 +278,15 @@ pub const StatsD = struct {
             if (self.send_in_flight_count >= self.send_completions.len) {
                 // This shouldn't ever happen, but don't allow metrics to kill the system.
                 log.err("{}: insufficient packets to emit any metrics", .{self.process_id});
-                return;
+                return 0;
             }
             const completion = &self.send_completions[self.send_in_flight_count];
             self.send_in_flight_count += 1;
             self.emit_buffer(completion, self.send_buffer[send_offset..][0..send_size]);
             send_offset += send_size;
         }
+
+        return @intCast(send_sizes.count());
     }
 
     fn emit_buffer(self: *StatsD, send_completion: *IO.Completion, send_buffer: []const u8) void {

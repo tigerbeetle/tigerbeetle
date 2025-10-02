@@ -266,7 +266,7 @@ test "Queue: fuzz" {
     const Model = stdx.RingBufferType(u64, .slice);
 
     const gpa = std.testing.allocator;
-    var prng = stdx.PRNG.from_seed(92);
+    var prng = stdx.PRNG.from_seed_testing();
 
     for (0..100) |_| {
         const N = 1000;

@@ -1,4 +1,8 @@
 //! Extensions to the standard library -- things which could have been in std, but aren't.
+//!
+//! Unlike std, the namespacing is relatively flat: `stdx.PRNG` rather than `stdx.random.PRNG`.
+//! We don't care about backwards compatibility and prefer directness to scalability. Hierarchy can
+//! always be introduced later, when/if stdx grows too large.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -19,6 +23,7 @@ pub const memory_lock_allocated = @import("mlock.zig").memory_lock_allocated;
 pub const timeit = @import("debug.zig").timeit;
 pub const unshare = @import("unshare.zig");
 pub const windows = @import("windows.zig");
+pub const radix_sort = @import("radix.zig").sort;
 
 // Import these as `const GiB = stdx.GiB;`
 pub const KiB = 1 << 10;
@@ -336,8 +341,6 @@ pub fn log_with_timestamp(
     var buffered_writer = std.io.bufferedWriter(stderr);
     const writer = buffered_writer.writer();
 
-    std.debug.lockStdErr();
-    defer std.debug.unlockStdErr();
     nosuspend {
         date_time.format("", .{}, writer) catch return;
         writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
@@ -1270,4 +1273,5 @@ comptime {
     _ = @import("testing/snaptest.zig");
     _ = @import("zipfian.zig");
     _ = @import("unshare.zig");
+    _ = @import("radix.zig");
 }

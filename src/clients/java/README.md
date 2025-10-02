@@ -658,7 +658,7 @@ filter.setCode(1); // Filter by Code.
 filter.setLedger(0); // No filter by Ledger.
 filter.setTimestampMin(0); // No filter by Timestamp.
 filter.setTimestampMax(0); // No filter by Timestamp.
-filter.setLimit(10); // Limit to ten balances at most.
+filter.setLimit(10); // Limit to ten accounts at most.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
 AccountBatch accounts = client.queryAccounts(filter);
@@ -683,7 +683,7 @@ filter.setCode(1); // Filter by Code.
 filter.setLedger(0); // No filter by Ledger.
 filter.setTimestampMin(0); // No filter by Timestamp.
 filter.setTimestampMax(0); // No filter by Timestamp.
-filter.setLimit(10); // Limit to ten balances at most.
+filter.setLimit(10); // Limit to ten transfers at most.
 filter.setReversed(true); // Sort by timestamp in reverse-chronological order.
 
 TransferBatch transfers = client.queryTransfers(filter);

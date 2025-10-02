@@ -112,6 +112,11 @@ pub fn from_seed(seed: u64) PRNG {
     } };
 }
 
+pub fn from_seed_testing() PRNG {
+    comptime assert(@import("builtin").is_test);
+    return .from_seed(std.testing.random_seed);
+}
+
 fn split_mix_64(s: *u64) u64 {
     s.* +%= 0x9e3779b97f4a7c15;
 
@@ -370,6 +375,26 @@ test boolean {
     ).diff_fmt("heads = {} tails = {}", .{ heads, tails });
 }
 
+/// Returns a Word with a single randomly-chosen bit set.
+pub fn bit(prng: *PRNG, comptime Word: type) Word {
+    comptime assert(@typeInfo(Word) == .int);
+    comptime assert(@typeInfo(Word).int.signedness == .unsigned);
+    return @as(Word, 1) << prng.int_inclusive(std.math.Log2Int(Word), @bitSizeOf(Word) - 1);
+}
+
+test bit {
+    var prng = PRNG.from_seed(92);
+    var hits: [8]u32 = @splat(0);
+    for (0..1000) |_| {
+        const word = prng.bit(u8);
+        assert(@popCount(word) == 1);
+        hits[@ctz(word)] += 1;
+    }
+    try snap(@src(),
+        \\{ 134, 134, 117, 121, 117, 128, 131, 118 }
+    ).diff_fmt("{any}", .{hits});
+}
+
 /// Returns true with the given rational probability.
 pub fn chance(prng: *PRNG, probability: Ratio) bool {
     assert(probability.denominator > 0);
@@ -406,6 +431,14 @@ test chances {
     try snap(@src(),
         \\a=166 b=475 c=359
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
+}
+
+pub fn error_uniform(prng: *PRNG, Error: type) Error {
+    const errors = @typeInfo(Error).error_set.?;
+    return switch (prng.index(errors)) {
+        inline 0...(errors.len - 1) => |i| @field(Error, errors[i].name),
+        else => unreachable,
+    };
 }
 
 /// Returns a random value of an enum.
