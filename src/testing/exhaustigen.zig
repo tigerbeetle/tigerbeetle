@@ -89,6 +89,21 @@ pub fn int_inclusive(g: *Gen, Int: type, bound: Int) Int {
     return @intCast(g.gen(@intCast(bound)));
 }
 
+pub fn range_inclusive(g: *Gen, Int: type, min: Int, max: Int) Int {
+    comptime assert(@typeInfo(Int).int.signedness == .unsigned);
+    assert(min <= max);
+    return min + g.int_inclusive(Int, max - min);
+}
+
+pub fn shuffle(g: *Gen, T: type, slice: []T) void {
+    if (slice.len <= 1) return;
+
+    for (0..slice.len - 1) |i| {
+        const j = g.range_inclusive(u64, i, slice.len - 1);
+        std.mem.swap(T, &slice[i], &slice[j]);
+    }
+}
+
 pub fn index(g: *Gen, slice: anytype) usize {
     assert(slice.len > 0);
     return g.int_inclusive(usize, slice.len - 1);

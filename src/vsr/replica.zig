@@ -1776,7 +1776,7 @@ pub fn ReplicaType(
             if (self.status == .normal and self.backup()) {
                 if (message.header.view == self.view and message.header.route != 0) {
                     const route = self.routing.route_decode(message.header.route).?;
-                    if (!std.mem.eql(u8, route.const_slice(), self.routing.a.const_slice())) {
+                    if (!self.routing.a.equal(&route)) {
                         self.routing.route_activate(route);
                     }
                 }
@@ -8318,9 +8318,10 @@ pub fn ReplicaType(
                 return;
             }
 
-            const next_hop = self.routing.op_next_hop(message.header.op);
-            assert(next_hop.count() <= 2);
-            for (next_hop.const_slice()) |replica_target| {
+            var next_hop_buffer: [2]u8 = undefined;
+            const next_hop = self.routing.op_next_hop(message.header.op, &next_hop_buffer);
+            assert(next_hop.len <= 2);
+            for (next_hop) |replica_target| {
                 assert(replica_target != self.replica);
                 assert(replica_target != self.view % self.replica_count);
                 assert(replica_target < self.replica_count + self.standby_count);
