@@ -1074,8 +1074,8 @@ pub const IO = struct {
         assert(event != INVALID_EVENT);
         os.windows.PostQueuedCompletionStatus(
             self.iocp,
-            undefined,
-            undefined,
+            0,
+            0,
             &completion.operation.event.raw,
         ) catch unreachable;
     }
