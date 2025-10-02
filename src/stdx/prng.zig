@@ -504,6 +504,33 @@ test enum_weighted {
     ).diff_fmt("a={} b={} c={}", .{ count.a, count.b, count.c });
 }
 
+/// Return a distribution for use with `random_enum`.
+///
+/// This is swarm testing: some variants are disabled completely,
+/// and the rest have wildly different probabilities.
+pub fn enum_weights(
+    prng: *PRNG,
+    comptime Enum: type,
+) EnumWeightsType(Enum) {
+    const fields = comptime std.meta.fieldNames(Enum);
+
+    var combination = PRNG.Combination.init(.{
+        .total = fields.len,
+        .sample = prng.range_inclusive(u32, 1, fields.len),
+    });
+    defer assert(combination.done());
+
+    var weights: PRNG.EnumWeightsType(Enum) = undefined;
+    inline for (fields) |field| {
+        @field(weights, field) = if (combination.take(prng))
+            prng.range_inclusive(u64, 1, 100)
+        else
+            0;
+    }
+
+    return weights;
+}
+
 /// An iterator-style API for selecting a random combination of elements.
 pub const Combination = struct {
     total: u32,
