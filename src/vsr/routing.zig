@@ -72,7 +72,7 @@ experiment_chance: Ratio = ratio(1, 20),
 
 history: [history_max]OpHistory,
 
-// A permutation of replicas, where the middle replica is the primary.
+/// A permutation of replicas, where the middle replica is the primary.
 pub const Route = struct {
     replicas: [constants.replicas_max]u8,
     count: u8,
@@ -152,7 +152,7 @@ pub const Route = struct {
         return true;
     }
 
-    // Encode a root as a u64
+    // Encode a root as a u64.
     // Routes are communicated in pings, which have u64 space in the message header.
     pub fn encode(route: Route) u64 {
         comptime assert(constants.replicas_max <= @sizeOf(u64));
@@ -206,7 +206,12 @@ pub const Route = struct {
         assert(replica < route.count);
         assert(route.valid(view, route.count));
 
-        // We need to return at most two "neightbours" in replication topology.
+        // We need to return at most two "neighbours" in replication topology.
+        // Assume that the route is as follows, with view=7:
+        //
+        //     0 2 1 3 5 4
+        //         ^ primary
+        //
         // Assume that the route is as follows, with view=7
         //
         //     0 2 1 3 5 4
