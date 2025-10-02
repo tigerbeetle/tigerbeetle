@@ -116,7 +116,6 @@ const Scrub = @This();
 
 io: *IO,
 storage: Storage,
-data_file: std.fs.File,
 
 superblock: SuperBlock,
 client_sessions_checkpoint: CheckpointTrailer,
@@ -148,10 +147,7 @@ fn init(
     });
     errdefer scrub.storage.deinit();
 
-    // Borrows a handle from storage - don't close this!
-    scrub.data_file = std.fs.File{ .handle = scrub.storage.fd };
-
-    const data_file_stat = try scrub.data_file.stat();
+    const data_file_stat = try (std.fs.File{ .handle = scrub.storage.fd }).stat();
 
     scrub.superblock = try SuperBlock.init(
         gpa,
@@ -303,7 +299,7 @@ fn deinit(scrub: *Scrub, gpa: std.mem.Allocator) void {
 fn scrub_wal(scrub: *Scrub) !u64 {
     var scrubbed_bytes: u64 = 0;
 
-    const headers_bytes_read = try scrub.data_file.preadAll(
+    const headers_bytes_read = try scrub.sync_read_all(
         scrub.buffer_headers,
         vsr.Zone.wal_headers.start(),
     );
@@ -316,7 +312,7 @@ fn scrub_wal(scrub: *Scrub) !u64 {
     for (wal_headers, 0..) |*wal_header, slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try scrub.data_file.preadAll(
+        const bytes_read = try scrub.sync_read_all(
             scrub.buffer_prepare,
             vsr.Zone.wal_prepares.start() + offset,
         );
@@ -352,7 +348,7 @@ fn scrub_client_replies(scrub: *Scrub) !u64 {
     for (0..constants.clients_max) |slot| {
         const offset = slot * constants.message_size_max;
 
-        const bytes_read = try scrub.data_file.preadAll(
+        const bytes_read = try scrub.sync_read_all(
             scrub.buffer_prepare,
             vsr.Zone.client_replies.start() + offset,
         );
@@ -470,4 +466,45 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
     });
 
     return scrubbed_bytes;
+}
+
+/// Windows doesn't support using sync IO functions like preadAll on the handles IO opens.
+fn sync_read_all(scrub: *Scrub, buffer: []u8, offset: u64) !u64 {
+    var completion: IO.Completion = undefined;
+
+    const Context = struct {
+        bytes_read: ?u64 = null,
+
+        fn read_callback(
+            context: *@This(),
+            _: *IO.Completion,
+            result: IO.ReadError!usize,
+        ) void {
+            context.bytes_read = result catch unreachable;
+        }
+    };
+    var context: Context = .{};
+    var bytes_read: u64 = 0;
+
+    while (bytes_read < buffer.len) {
+        scrub.io.read(
+            *Context,
+            &context,
+            Context.read_callback,
+            &completion,
+            scrub.storage.fd,
+            buffer[bytes_read..],
+            offset,
+        );
+
+        while (context.bytes_read == null) {
+            try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
+        }
+
+        if (context.bytes_read.? == 0) break;
+        bytes_read += context.bytes_read.?;
+    }
+
+    assert(bytes_read == buffer.len);
+    return bytes_read;
 }
