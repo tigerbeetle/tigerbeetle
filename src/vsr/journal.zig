@@ -166,17 +166,13 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         };
 
         pub const Write = struct {
-            pub const Trigger = enum { append, fix, repair, pipeline };
-
             journal: *Journal,
             callback: *const fn (
                 replica: *Replica,
                 wrote: ?*Message.Prepare,
-                trigger: Trigger,
             ) void,
 
             message: *Message.Prepare,
-            trigger: Trigger,
 
             /// This is reset to undefined and reused for each Storage.write_sectors() call.
             range: Range,
@@ -1626,7 +1622,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .journal = journal,
                 .callback = undefined,
                 .message = undefined,
-                .trigger = .fix,
                 .range = undefined,
             };
 
@@ -1641,7 +1636,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         fn recover_fix_callback(write: *Journal.Write) void {
             const journal = write.journal;
             assert(journal.status == .recovering);
-            assert(write.trigger == .fix);
 
             journal.writes.release(write);
             journal.recover_fix();
@@ -1773,13 +1767,8 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         /// `write_prepare` uses `write_sectors` to prevent concurrent disk writes.
         pub fn write_prepare(
             journal: *Journal,
-            callback: *const fn (
-                journal: *Replica,
-                wrote: ?*Message.Prepare,
-                trigger: Write.Trigger,
-            ) void,
+            callback: *const fn (journal: *Replica, wrote: ?*Message.Prepare) void,
             message: *Message.Prepare,
-            trigger: Journal.Write.Trigger,
         ) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
 
@@ -1805,7 +1794,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(journal.prepare_checksums[slot.index] == message.header.checksum);
                 assert(journal.headers_redundant[slot.index].checksum == message.header.checksum);
                 journal.write_prepare_debug(message.header, "skipping (clean)");
-                callback(replica, message, trigger);
+                callback(replica, message);
                 return;
             }
 
@@ -1815,7 +1804,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 assert(!replica.solo());
 
                 journal.write_prepare_warn(message.header, "waiting for IOP");
-                callback(replica, null, trigger);
+                callback(replica, null);
                 return;
             };
 
@@ -1825,7 +1814,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 .journal = journal,
                 .callback = callback,
                 .message = message.ref(),
-                .trigger = trigger,
                 .range = undefined,
             };
 
@@ -1954,7 +1942,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ) void {
             const replica: *Replica = @alignCast(@fieldParentPtr("journal", journal));
             const write_callback = write.callback;
-            const write_trigger = write.trigger;
             const write_message = write.message;
 
             // Release the write prior to returning control to the caller.
@@ -1963,7 +1950,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             journal.writes.release(write);
             assert(journal.writing(write_message.header) == .none);
 
-            write_callback(replica, wrote, write_trigger);
+            write_callback(replica, wrote);
             replica.message_bus.unref(write_message);
         }
 
