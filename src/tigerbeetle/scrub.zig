@@ -157,7 +157,11 @@ fn init(
         gpa,
         &scrub.storage,
         .{
-            .storage_size_limit = data_file_stat.size,
+            .storage_size_limit = std.mem.alignForward(
+                u64,
+                data_file_stat.size,
+                constants.block_size,
+            ),
         },
     );
     errdefer scrub.superblock.deinit(gpa);

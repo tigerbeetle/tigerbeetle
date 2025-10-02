@@ -237,7 +237,7 @@ test "repl integration" {
     ));
 }
 
-test "benchmark/inspect smoke" {
+test "benchmark/scrub/inspect smoke" {
     const data_file = data_file: {
         var random_bytes: [4]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
@@ -266,6 +266,11 @@ test "benchmark/inspect smoke" {
             .data_file = data_file,
         },
     );
+
+    try shell.exec("{tigerbeetle} scrub {data_file}", .{
+        .tigerbeetle = tigerbeetle,
+        .data_file = data_file,
+    });
 
     inline for (.{
         "{tigerbeetle} inspect constants",
