@@ -432,7 +432,7 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
 
         try scrub.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms);
     }
-    const scrub_duration_ms = @divFloor(timer.read(), std.time.ns_per_ms);
+    const scrub_duration_ms = stdx.div_ceil(timer.read(), std.time.ns_per_ms);
 
     assert(scrub.grid_scrubber.tour == .done and scrub.grid_scrubber.reads.executing() == 0);
 
@@ -460,7 +460,7 @@ fn scrub_grid(scrub: *Scrub, seed: u64) !u64 {
 
     const throughput = @divFloor(@divFloor(
         blocks_expected_count * constants.block_size,
-        @divFloor(scrub_duration_ms, std.time.ms_per_s),
+        stdx.div_ceil(scrub_duration_ms, std.time.ms_per_s),
     ), 1024 * 1024);
 
     log.info("successfully scrubbed {} grid blocks in {}ms. ({}MiB/s)", .{
