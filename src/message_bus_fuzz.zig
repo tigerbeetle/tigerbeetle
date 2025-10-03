@@ -29,7 +29,6 @@ const Ratio = stdx.PRNG.Ratio;
 const NodeReplica = NodeType(MessageBusReplica);
 const NodeClient = NodeType(MessageBusClient);
 
-/// TODO Test suspend/resume.
 /// TODO If we remove type-level distinction between MessageBusReplica and MessageBusClient, then we
 /// can simplify erase_types()/Context handling in the fuzzers IO implementation to avoid some
 /// `*any opaque`s. We can also remove Node's helper methods in favor of accessing the message_bus
@@ -114,6 +113,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         errdefer for (nodes[0..i]) |*n| n.deinit(gpa);
 
         node.* = .{ .replica = .{
+            .prng = &prng,
+            .options = .swarm(&prng),
             .messages_pending = &messages_pending,
             .message_bus = try MessageBusReplica.init(
                 gpa,
@@ -131,6 +132,8 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
         errdefer for (nodes[replica_count..][0..i]) |*n| n.deinit(gpa);
 
         node.* = .{ .client = .{
+            .prng = &prng,
+            .options = .swarm(&prng),
             .messages_pending = &messages_pending,
             .message_bus = try MessageBusClient.init(
                 gpa,
@@ -257,6 +260,9 @@ pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
             if (prng.chance(message_bus_tick_probability)) {
                 node.tick();
             }
+            if (prng.chance(node.options().message_resume_probability)) {
+                node.resume_receive();
+            }
         }
         try io.run();
     } else {
@@ -304,9 +310,21 @@ const NodeAny = union(enum) {
         }
     }
 
+    fn options(node: *const NodeAny) NodeOptions {
+        return switch (node.*) {
+            inline else => |*node_any| node_any.options,
+        };
+    }
+
     fn send_message(node: *NodeAny, target: u8, message: *Message) void {
         switch (node.*) {
             inline else => |*node_any| node_any.send_message(target, message),
+        }
+    }
+
+    fn resume_receive(node: *NodeAny) void {
+        switch (node.*) {
+            inline else => |*node_any| node_any.message_bus.resume_receive(),
         }
     }
 
@@ -317,10 +335,31 @@ const NodeAny = union(enum) {
     }
 };
 
+const NodeOptions = struct {
+    message_suspend_probability: Ratio,
+    message_resume_probability: Ratio,
+
+    pub fn swarm(prng: *stdx.PRNG) NodeOptions {
+        var result: NodeOptions = .{
+            .message_suspend_probability = ratio(prng.int_inclusive(u64, 5), 10),
+            .message_resume_probability = ratio(prng.range_inclusive(u64, 0, 10), 10),
+        };
+
+        if (result.message_suspend_probability.numerator > 0) {
+            result.message_resume_probability = ratio(prng.range_inclusive(u64, 2, 10), 10);
+            assert(result.message_resume_probability.numerator > 0);
+        }
+
+        return result;
+    }
+};
+
 fn NodeType(comptime MessageBus: type) type {
     return struct {
         const Node = @This();
 
+        prng: *stdx.PRNG,
+        options: NodeOptions,
         messages_pending: *std.AutoArrayHashMapUnmanaged(u128, MessagePending),
         message_bus: MessageBus,
         id: u8,
@@ -340,10 +379,17 @@ fn NodeType(comptime MessageBus: type) type {
         fn on_messages_callback(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const node: *Node = @fieldParentPtr("message_bus", message_bus);
             while (buffer.next_header()) |header| {
+                assert(header.valid_checksum());
+
+                if (node.prng.chance(node.options.message_suspend_probability)) {
+                    buffer.suspend_message(&header);
+                    continue;
+                }
+
                 const message = buffer.consume_message(message_bus.pool, &header);
                 defer message_bus.unref(message);
 
-                assert(message.header.valid_checksum());
+                assert(stdx.equal_bytes(vsr.Header, &header, message.header));
                 assert(message.header.valid_checksum_body(message.body_used()));
 
                 if (node.messages_pending.get(message.header.checksum)) |message_pending| {
