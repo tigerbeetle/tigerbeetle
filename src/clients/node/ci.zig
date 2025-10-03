@@ -98,3 +98,7 @@ pub fn validate_release(shell: *Shell, gpa: std.mem.Allocator, options: struct {
     );
     try shell.exec("node main.js", .{});
 }
+
+pub fn release_published_latest(shell: *Shell) ![]const u8 {
+    return try shell.exec_stdout("npm view tigerbeetle-node version", .{});
+}

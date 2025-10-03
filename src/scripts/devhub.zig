@@ -417,7 +417,7 @@ fn upload_nyrkio(shell: *Shell, batch: *const MetricBatch) !void {
         [_]*const MetricBatch{batch}, // Nyrkiö needs an _array_ of batches.
         .{},
     );
-    try shell.http_post(url, payload, .{
+    _ = try shell.http_post(url, payload, .{
         .content_type = .json,
         .authorization = try shell.fmt("Bearer {s}", .{token}),
     });

@@ -138,26 +138,22 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         // Zig only guarantees release builds to be deterministic.
         if (std.mem.indexOf(u8, artifact, "-debug.zip") != null) continue;
 
-        const checksum_downloaded = try shell.exec_stdout("sha256sum {artifact}", .{
-            .artifact = artifact,
-        });
+        const checksum_downloaded = try shell.sha256sum(artifact);
 
         shell.popd();
-        const checksum_built = try shell.exec_stdout(
-            "sha256sum zig-out/dist/tigerbeetle/{artifact}",
+        const checksum_built = try shell.sha256sum(try shell.fmt(
+            "zig-out/dist/tigerbeetle/{s}",
             .{
-                .artifact = artifact,
+                artifact,
             },
-        );
+        ));
         try shell.pushd_dir(tmp_dir.dir);
 
-        // Slice the output to suppress the names.
-        if (!std.mem.eql(u8, checksum_downloaded[0..64], checksum_built[0..64])) {
-            // Still run the code, but suppress failing until a release cycle has taken place.
-            std.debug.panic("checksum mismatch - {s}: downloaded {s}, built {s}", .{
+        if (checksum_downloaded != checksum_built) {
+            std.debug.panic("checksum mismatch - {s}: downloaded {x}, built {x}", .{
                 artifact,
-                checksum_downloaded[0..64],
-                checksum_built[0..64],
+                checksum_downloaded,
+                checksum_built,
             });
         }
     }
@@ -181,9 +177,51 @@ fn validate_release(shell: *Shell, gpa: std.mem.Allocator, language_requested: ?
         }
     }
 
+    // Check all the client releases to ensure the latest published release is what it should be.
+    inline for (comptime std.enums.values(Language)) |language| {
+        if ((language == language_requested or language_requested == null) and
+            language != .rust) // Rust isn't published yet.
+        {
+            const ci = @field(LanguageCI, @tagName(language));
+            const release_published_latest = try ci.release_published_latest(shell);
+
+            if (!std.mem.eql(u8, release_published_latest, tag)) {
+                std.debug.panic("version mismatch - {s}: latest published {s}, expected {s}", .{
+                    @tagName(language),
+                    release_published_latest,
+                    tag,
+                });
+            }
+        }
+    }
+
+    // Check that the docker tag for latest is the same as the docker tag for the release. Docker's
+    // APIs make it much harder to do a release_published_latest() style check as above.
+    const docker_digest_latest = try docker_digest(shell, "latest");
+    const docker_digest_tagged = try docker_digest(shell, tag);
+
+    if (!std.mem.eql(u8, docker_digest_latest, docker_digest_tagged)) {
+        std.debug.panic("version mismatch - docker: latest published {s}, expected {s}", .{
+            docker_digest_latest,
+            docker_digest_tagged,
+        });
+    }
+
     const docker_version = try shell.exec_stdout(
         \\docker run ghcr.io/tigerbeetle/tigerbeetle:{version} version --verbose
     , .{ .version = tag });
     assert(std.mem.indexOf(u8, docker_version, tag) != null);
     assert(std.mem.indexOf(u8, docker_version, "ReleaseSafe") != null);
+}
+
+fn docker_digest(shell: *Shell, version: []const u8) ![]const u8 {
+    try shell.exec(
+        \\docker pull ghcr.io/tigerbeetle/tigerbeetle:{version}
+    , .{ .version = version });
+
+    return try shell.exec_stdout("docker inspect --format={format} " ++
+        "ghcr.io/tigerbeetle/tigerbeetle:{version}", .{
+        .format = "{{index .RepoDigests 0}}",
+        .version = version,
+    });
 }
