@@ -8,7 +8,7 @@ const stdx = @import("stdx");
 
 const FreeSet = @import("./free_set.zig").FreeSet;
 const Reservation = @import("./free_set.zig").Reservation;
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);

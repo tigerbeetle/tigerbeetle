@@ -32,7 +32,7 @@ const Ratio = stdx.PRNG.Ratio;
 const Duration = stdx.Duration;
 const Instant = stdx.Instant;
 
-const QueueType = @import("../queue.zig").QueueType;
+const QueueType = stdx.QueueType;
 const IOPSType = @import("../iops.zig").IOPSType;
 const constants = @import("../constants.zig");
 const vsr = @import("../vsr.zig");
@@ -41,7 +41,7 @@ const FreeSet = @import("../vsr/free_set.zig").FreeSet;
 const schema = @import("../lsm/schema.zig");
 const stdx = @import("stdx");
 const maybe = stdx.maybe;
-const fuzz = @import("./fuzz.zig");
+const fuzz = stdx.fuzz;
 const GridChecker = @import("./cluster/grid_checker.zig").GridChecker;
 
 const log = std.log.scoped(.storage);

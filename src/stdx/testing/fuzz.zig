@@ -2,18 +2,17 @@
 
 const builtin = @import("builtin");
 const std = @import("std");
-const stdx = @import("stdx");
 const assert = std.debug.assert;
-const PRNG = stdx.PRNG;
-const Duration = stdx.Duration;
+const PRNG = @import("../prng.zig");
+const Duration = @import("../stdx.zig").Duration;
 
-const GiB = stdx.GiB;
+const GiB = @import("../stdx.zig").GiB;
 
 const log = std.log.scoped(.fuzz);
 
 /// Returns an integer of type `T` with an exponential distribution of rate `avg`.
 /// Note: If you specify a very high rate then `std.math.maxInt(T)` may be over-represented.
-pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
+pub fn random_int_exponential(prng: *PRNG, comptime T: type, avg: T) T {
     comptime {
         const info = @typeInfo(T);
         assert(info == .int);
@@ -22,7 +21,7 @@ pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
     // Note: we use floats and rely on std implementation. Ideally, we should do neither, but I
     // wasn't able to find a quick way to generate geometrically distributed integers using only
     // integer arithmetic.
-    const random = std.Random.init(prng, stdx.PRNG.fill);
+    const random = std.Random.init(prng, PRNG.fill);
     const exp = random.floatExp(f64) * @as(f64, @floatFromInt(avg));
     return std.math.lossyCast(T, exp);
 }
@@ -32,12 +31,12 @@ pub fn random_int_exponential(prng: *stdx.PRNG, comptime T: type, avg: T) T {
 /// This is swarm testing: some variants are disabled completely,
 /// and the rest have wildly different probabilities.
 pub fn random_enum_weights(
-    prng: *stdx.PRNG,
+    prng: *PRNG,
     comptime Enum: type,
-) stdx.PRNG.EnumWeightsType(Enum) {
+) PRNG.EnumWeightsType(Enum) {
     const fields = comptime std.meta.fieldNames(Enum);
 
-    var combination = stdx.PRNG.Combination.init(.{
+    var combination = PRNG.Combination.init(.{
         .total = fields.len,
         .sample = prng.range_inclusive(u32, 1, fields.len),
     });
@@ -59,7 +58,7 @@ pub fn random_enum_weights(
 /// 2. We want to generate enough ids that various caches can't hold them all.
 ///
 /// So, flip a coin and pick an an ID either from a small, or from a large set.
-pub fn random_id(prng: *stdx.PRNG, comptime Int: type, options: struct {
+pub fn random_id(prng: *PRNG, comptime Int: type, options: struct {
     average_hot: Int,
     average_cold: Int,
 }) Int {
@@ -68,7 +67,7 @@ pub fn random_id(prng: *stdx.PRNG, comptime Int: type, options: struct {
     return random_int_exponential(prng, Int, average);
 }
 
-pub fn range_inclusive_ms(prng: *stdx.PRNG, min: anytype, max: anytype) Duration {
+pub fn range_inclusive_ms(prng: *PRNG, min: anytype, max: anytype) Duration {
     const min_ns = switch (@TypeOf(min)) {
         comptime_int, u64 => min * std.time.ns_per_ms,
         Duration => min.ns,
