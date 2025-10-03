@@ -95,6 +95,8 @@ jobs:
           - { os: 'ubuntu-latest-arm64',  language: 'python',  language_version: '3.13'  }
 
     runs-on: ${{ matrix.os }}
+    env:
+      RUST_BACKTRACE: 1
     steps:
       - run: git config --global core.autocrlf false
       - if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-latest-arm64'
