@@ -23,6 +23,7 @@ biodigital
 bitcast
 bitemporality
 bitfield
+bitflags
 bitrot
 bitset
 block_pool
