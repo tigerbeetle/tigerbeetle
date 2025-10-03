@@ -1,14 +1,9 @@
 const std = @import("std");
-const stdx = @import("stdx");
 const assert = std.debug.assert;
 const posix = std.posix;
 const windows = std.os.windows;
 
 const builtin = @import("builtin");
-
-/// The terminal needs to read control codes, but the exact input capacity
-/// is unknown; this should be more than enough.
-const buffer_in_capacity = 256;
 
 pub const Terminal = struct {
     const ModeStart = switch (builtin.os.tag) {
@@ -22,8 +17,6 @@ pub const Terminal = struct {
     // These are made optional so that printing on failure can be disabled in tests expecting them.
     stdout: ?std.fs.File.Writer,
     stderr: ?std.fs.File.Writer,
-
-    buffer_in: stdx.BoundedArrayType(u8, buffer_in_capacity),
 
     pub fn init(
         self: *Terminal,
@@ -63,7 +56,6 @@ pub const Terminal = struct {
             .stdin = std.io.bufferedReader(stdin.reader()),
             .stdout = stdout.writer(),
             .stderr = std.io.getStdErr().writer(),
-            .buffer_in = .{},
         };
     }
 
@@ -233,13 +225,17 @@ pub const Terminal = struct {
         // retrying until successful.
         const stdin = self.stdin.reader();
         while (true) {
+            // The terminal needs to read control codes, but the exact input capacity
+            // is unknown; this should be more than enough.
+            var buffer: [256]u8 = undefined;
+            var buffer_in = std.io.fixedBufferStream(&buffer);
             // The response is of the form `<ESC>[{row};{col}R`.
             try self.print("\x1b[6n", .{});
-            self.buffer_in.clear();
+            buffer_in.reset();
             stdin.streamUntilDelimiter(
-                self.buffer_in.writer(),
+                buffer_in.writer(),
                 '[',
-                buffer_in_capacity,
+                buffer.len,
             ) catch |err| {
                 switch (err) {
                     anyerror.StreamTooLong => continue,
@@ -247,31 +243,31 @@ pub const Terminal = struct {
                 }
             };
 
-            self.buffer_in.clear();
+            buffer_in.reset();
             stdin.streamUntilDelimiter(
-                self.buffer_in.writer(),
+                buffer_in.writer(),
                 ';',
-                buffer_in_capacity,
+                buffer.len,
             ) catch |err| {
                 switch (err) {
                     anyerror.StreamTooLong => continue,
                     else => return err,
                 }
             };
-            const row = std.fmt.parseInt(usize, self.buffer_in.const_slice(), 10) catch continue;
+            const row = std.fmt.parseInt(usize, buffer_in.getWritten(), 10) catch continue;
 
-            self.buffer_in.clear();
+            buffer_in.reset();
             stdin.streamUntilDelimiter(
-                self.buffer_in.writer(),
+                buffer_in.writer(),
                 'R',
-                buffer_in_capacity,
+                buffer.len,
             ) catch |err| {
                 switch (err) {
                     anyerror.StreamTooLong => continue,
                     else => return err,
                 }
             };
-            const column = std.fmt.parseInt(usize, self.buffer_in.const_slice(), 10) catch continue;
+            const column = std.fmt.parseInt(usize, buffer_in.getWritten(), 10) catch continue;
 
             return .{
                 .row = row,
