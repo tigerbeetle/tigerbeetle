@@ -778,7 +778,7 @@ pub fn ReplicaType(
                 for (self.journal.headers) |*header| {
                     assert(header.command == .prepare);
                     if (header.operation != .reserved) {
-                        assert(header.op <= self.op_prepare_max());
+                        assert(header.op <= self.op_prepare_max_for_current_checkpoint());
                         assert(header.view <= self.log_view);
 
                         if (op_head == null or op_head.? < header.op) op_head = header.op;
@@ -811,7 +811,7 @@ pub fn ReplicaType(
             // 6. Checkpoint X is truncated.
             for (view_headers.slice) |*vsr_header| {
                 if (vsr.Headers.dvc_header_type(vsr_header) == .valid and
-                    vsr_header.op <= self.op_prepare_max() and
+                    vsr_header.op <= self.op_prepare_max_for_current_checkpoint() and
                     (op_head == null or op_head.? <= vsr_header.op))
                 {
                     op_head = vsr_header.op;
@@ -843,7 +843,7 @@ pub fn ReplicaType(
             // Guaranteed since our durable view_headers always contain an op from the current
             // checkpoint (see `commit_checkpoint_superblock`).
             assert(op_head.? >= self.op_checkpoint());
-            assert(op_head.? <= self.op_prepare_max());
+            assert(op_head.? <= self.op_prepare_max_for_current_checkpoint());
 
             self.op = op_head.?;
             self.commit_max = @max(
@@ -1940,7 +1940,7 @@ pub fn ReplicaType(
             defer {
                 if (self.status == .normal and self.syncing == .idle and
                     message.header.view == self.view and
-                    message.header.op > self.op_checkpoint() and
+                    message.header.op >= self.op_repair_min() and
                     message.header.op <= self.op_checkpoint_next_trigger())
                 {
                     assert(self.journal.has_header(message.header));
@@ -2079,26 +2079,29 @@ pub fn ReplicaType(
                 return;
             }
 
-            if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
-                message.header.checkpoint_id !=
-                    self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
-            {
-                // Panic on encountering a prepare which does not match an expected checkpoint id.
-                //
-                // If this branch is hit, there is a storage determinism problem. At this point in
-                // the code it is not possible to distinguish whether the problem is with this
-                // replica, the prepare's replica, or both independently.
-                log.err("{}: on_prepare: checkpoint diverged " ++
-                    "(op={} expect={x:0>32} received={x:0>32} from={})", .{
-                    self.log_prefix(),
-                    message.header.op,
-                    self.superblock.working.checkpoint_id(),
-                    message.header.checkpoint_id,
-                    message.header.replica,
-                });
+            if (message.header.op <= self.op_prepare_max_for_current_checkpoint()) {
+                if (message.header.checkpoint_id != self.superblock.working.checkpoint_id() and
+                    message.header.checkpoint_id !=
+                        self.superblock.working.vsr_state.checkpoint.parent_checkpoint_id)
+                {
+                    // Panic on encountering a prepare which does not match the expected checkpoint
+                    // id.
+                    //
+                    // If this branch is hit, there is a storage determinism problem. At this point
+                    // in the code it is not possible to distinguish whether the problem is with
+                    // this replica, the prepare's replica, or both independently.
+                    log.err("{}: on_prepare: checkpoint diverged " ++
+                        "(op={} expect={x:0>32} received={x:0>32} from={})", .{
+                        self.log_prefix(),
+                        message.header.op,
+                        self.superblock.working.checkpoint_id(),
+                        message.header.checkpoint_id,
+                        message.header.replica,
+                    });
 
-                assert(self.backup());
-                @panic("checkpoint diverged");
+                    assert(self.backup());
+                    @panic("checkpoint diverged");
+                }
             }
 
             if (message.header.op > self.op + 1) {
@@ -2136,7 +2139,8 @@ pub fn ReplicaType(
             });
             assert(message.header.op == self.op + 1);
             assert(message.header.op <= self.op_prepare_max());
-            assert(message.header.op - self.op_repair_min() < constants.journal_slot_count);
+            assert(message.header.op - self.op_repair_min() <= constants.journal_slot_count);
+
             self.op = message.header.op;
             self.journal.set_header_as_dirty(message.header);
 
@@ -2824,6 +2828,21 @@ pub fn ReplicaType(
                 // messages might be beyond its prepare_max.
                 maybe(view_headers[0].op > self.op_prepare_max_sync());
 
+                // It is crucial to truncate ops past the prepare_max for this checkpoint, to uphold
+                // the invariant that a backup is able to apply at least one header from the SV
+                // headers. This is safe, since we are guaranteed to have not prepare_ok'd these ops
+                // (we do so when we transition to the next checkpoint, see `op_prepare_ok_max`).
+                if (self.op > self.op_prepare_max_for_current_checkpoint()) {
+                    self.op = self.op_prepare_max_for_current_checkpoint();
+                    self.journal.remove_entries_from(self.op + 1);
+                }
+
+                // Advance commit_max to ensure op_prepare_max_sync correctly reflects the
+                // durability of the next checkpoint. Otherwise, we may update our head to a
+                // smaller op than we can safely accomodate based on the commit_max in the SV.
+                self.advance_commit_max(message.header.commit_max, @src());
+                assert(self.commit_max >= message.header.commit_max);
+
                 // Find the first message that fits, make it our new head.
                 for (view_headers) |*header| {
                     assert(header.commit <= message.header.commit_max);
@@ -2850,7 +2869,6 @@ pub fn ReplicaType(
                     }
                 }
             }
-
             if (self.syncing == .updating_checkpoint) {
                 // State sync can "truncate" the first batch of committed ops!
                 maybe(self.commit_min >
@@ -5242,8 +5260,12 @@ pub fn ReplicaType(
                 assert(prepare.header.parent ==
                     self.superblock.working.vsr_state.checkpoint.header.checksum);
             } else {
-                assert(prepare.header.parent ==
-                    self.journal.header_with_op(self.commit_min).?.checksum);
+                // self.commit_min may have been replaced by an op from the next log wrap.
+                if (self.journal.header_with_op(self.commit_min)) |header| {
+                    assert(prepare.header.parent == header.checksum);
+                } else if (self.journal.header_for_op(self.commit_min)) |header| {
+                    assert(header.op == self.commit_min + constants.journal_slot_count);
+                }
             }
 
             log.debug("{}: execute_op: executing view={} primary={} op={} checksum={} ({s})", .{
@@ -5727,49 +5749,33 @@ pub fn ReplicaType(
 
             self.view_headers.array.clear();
 
-            // All replicas are guaranteed to have no gaps in their headers between op_checkpoint
-            // and commit_min. Between commit_min and self.op:
-            // * The primary is guaranteed to have no gaps.
-            // * Backups are not guaranteed to have no gaps, they may have not received some
-            //   prepares yet.
-            const op_head_no_gaps = if (self.primary_index(self.view) == self.replica)
-                self.op
-            else
-                self.commit_min;
-
-            var op = op_head_no_gaps + 1;
+            var op = self.op + 1;
             while (op > 0 and
                 self.view_headers.array.count() < constants.view_change_headers_suffix_max)
             {
                 op -= 1;
-                self.view_headers.append(self.journal.header_with_op(op).?);
+                const header_maybe = self.journal.header_with_op(op);
+                if (self.status == .normal and self.primary()) {
+                    // The primary is guaranteed to have no gaps in its hash chain.
+                    assert(header_maybe != null);
+                } else {
+                    // Backups or potential primaries may have gaps in their hash chain.
+                }
+                if (header_maybe) |header| {
+                    self.view_headers.append(header);
+                } else {
+                    self.view_headers.append_blank(op);
+                }
             }
             assert(self.view_headers.array.count() + 2 <= constants.view_headers_max);
 
             // Determine the consecutive extent of the log that we can help recover.
             // This may precede op_repair_min if we haven't had a view-change recently.
-            const range_min = (op_head_no_gaps + 1) -| constants.journal_slot_count;
-            const range = self.journal.find_latest_headers_break_between(
-                range_min,
-                op_head_no_gaps,
-            );
+            const range_min = (self.op + 1) -| constants.journal_slot_count;
+            const range = self.journal.find_latest_headers_break_between(range_min, self.op);
             const op_min = if (range) |r| r.op_max + 1 else range_min;
-            assert(op_min <= op);
 
-            if (self.op_checkpoint() == 0 and range != null) {
-                // We get here only if we are a backup with a missing/corrupt root op, advancing our
-                // checkpoint mid-repair. Primaries can never have a corrupt root op as repair
-                // ensures a primary's journal is clean before it transitions to .normal status.
-                assert(self.status == .normal);
-                assert(self.backup());
-                assert(self.commit_min == self.op_checkpoint_next_trigger());
-                assert(op_min == 1);
-                assert(range.?.op_max == 0);
-                assert(range.?.op_min == 0);
-                assert(self.journal.faulty.bit(.{ .index = 0 }));
-            } else {
-                assert(op_min <= self.op_repair_min());
-            }
+            if (self.status == .normal and self.primary()) assert(op_min <= op);
 
             // The SV includes headers corresponding to the op_prepare_max for preceding
             // checkpoints (as many as we have and can help repair, which is at most 2).
@@ -6823,12 +6829,14 @@ pub fn ReplicaType(
         fn op_head_certain(self: *const Replica) bool {
             assert(self.status == .recovering);
             assert(self.op >= self.op_checkpoint());
-            assert(self.op <= self.op_prepare_max());
+            assert(self.op <= self.op_prepare_max_for_current_checkpoint());
 
             // Head is guaranteed to be certain; replica couldn't have prepared past prepare_max.
-            if (self.op == self.op_prepare_max()) return true;
+            if (self.op == self.op_prepare_max_for_current_checkpoint()) return true;
 
-            const slot_prepare_max = self.journal.slot_for_op(self.op_prepare_max());
+            const slot_prepare_max = self.journal.slot_for_op(
+                self.op_prepare_max_for_current_checkpoint(),
+            );
             const slot_op_head = self.journal.slot_with_op(self.op).?;
 
             // For the op-head to be faulty, this must be a header that was restored from the
@@ -6855,7 +6863,7 @@ pub fn ReplicaType(
 
             const slot_known_range = vsr.SlotRange{
                 .head = self.journal.slot_for_op(self.op + 1),
-                .tail = self.journal.slot_for_op(self.op_prepare_max()),
+                .tail = self.journal.slot_for_op(self.op_prepare_max_for_current_checkpoint()),
             };
             // Checked separately as SlotRange.contains doesn't handle empty ranges.
             const range_empty = slot_known_range.head.index ==
@@ -6902,13 +6910,30 @@ pub fn ReplicaType(
             return vsr.Checkpoint.trigger_for_checkpoint(self.op_checkpoint_next()).?;
         }
 
+        pub fn op_prepare_max_for_current_checkpoint(self: *const Replica) u64 {
+            return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
+        }
+
         /// Returns the highest op that this replica can safely prepare to its WAL.
         ///
         /// Receiving and storing an op higher than `op_prepare_max()` is forbidden;
         /// doing so would overwrite a message (or the slot of a message) that has not yet been
         /// committed and checkpointed.
         pub fn op_prepare_max(self: *const Replica) u64 {
-            return vsr.Checkpoint.prepare_max_for_checkpoint(self.op_checkpoint_next()).?;
+            const prepare_max =
+                if (vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max))
+                    @min(
+                        self.commit_min + constants.journal_slot_count,
+                        // Don't allow replacing op_checkpoint_next to op_checkpoint_next_trigger,
+                        // as we need these for upgrade (see `release_for_next_checkpoint`) and
+                        // checkpoint (see `commit_checkpoint_superblock`).
+                        self.op_checkpoint_next() + constants.journal_slot_count - 1,
+                    )
+                else
+                    self.op_prepare_max_for_current_checkpoint();
+            assert(prepare_max >= self.op_prepare_max_for_current_checkpoint());
+
+            return prepare_max;
         }
 
         /// Like prepare_max, but takes into account yet the in-memory checkpoint during sync.
@@ -6926,7 +6951,7 @@ pub fn ReplicaType(
         ///
         /// Sending prepare_ok for a particular op signifies that a replica has a sufficiently fresh
         /// checkpoint. Specifically, if a replica is at checkpoint Cₙ, it withholds prepare_oks for
-        /// ops larger than Cₙ + checkpoint_ops + compaction_interval + pipeline_prepare_queue_max.
+        /// ops larger than Cₙ₊₁ + compaction_interval + pipeline_prepare_queue_max.
         /// Committing past this op would allow a primary at checkpoint Cₙ₊₁ to overwrite ops from
         /// the previous wrap, which is safe to do only if a commit quorum of replicas are on Cₙ₊₁.
         ///
@@ -7015,10 +7040,6 @@ pub fn ReplicaType(
             assert(self.commit_max >= self.op -| constants.pipeline_prepare_queue_max);
 
             const repair_min = repair_min: {
-                if (self.op_checkpoint() == 0) {
-                    break :repair_min 0;
-                }
-
                 if (vsr.Checkpoint.durable(self.op_checkpoint(), self.commit_max)) {
                     if (self.op == self.op_checkpoint()) {
                         // Don't allow "op_repair_min > op_head".
@@ -7026,7 +7047,21 @@ pub fn ReplicaType(
                         // this is required.
                         break :repair_min self.op_checkpoint();
                     }
-                    break :repair_min self.op_checkpoint() + 1;
+
+                    // While writing the target checkpoint to our superblock during state sync, our
+                    // head op is from the target checkpoint. Special case updating_checkpoint to
+                    // avoid spuriously returning an op_repair_min based on that head op.
+                    if (self.syncing != .updating_checkpoint and
+                        self.op > self.op_prepare_max_for_current_checkpoint())
+                    {
+                        assert(vsr.Checkpoint.durable(self.op_checkpoint_next(), self.commit_max));
+                        break :repair_min (self.op + 1) -| constants.journal_slot_count;
+                    }
+
+                    break :repair_min if (self.op_checkpoint() == 0)
+                        0
+                    else
+                        self.op_checkpoint() + 1;
                 } else {
                     break :repair_min (self.op_checkpoint() + 1) -|
                         constants.vsr_checkpoint_ops;
@@ -7035,7 +7070,6 @@ pub fn ReplicaType(
 
             assert(repair_min <= self.op);
             assert(repair_min <= self.commit_min + 1);
-            assert(repair_min <= self.op_checkpoint() + 1);
             assert(self.syncing == .updating_checkpoint or
                 self.op - repair_min < constants.journal_slot_count);
             assert(self.checkpoint_id_for_op(repair_min) != null);
@@ -7658,13 +7692,11 @@ pub fn ReplicaType(
                 });
                 return false;
             }
-            assert(header.checkpoint_id == self.checkpoint_id_for_op(header.op).?);
-            assert(header.op + constants.journal_slot_count > self.op);
 
-            // If we already committed this op, the repair must be the identical message.
-            if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.journal.has_header(header));
+            if (header.op <= self.op_prepare_max_for_current_checkpoint()) {
+                assert(header.checkpoint_id == self.checkpoint_id_for_op(header.op).?);
             }
+            assert(header.op + constants.journal_slot_count > self.op);
 
             self.journal.set_header_as_dirty(header);
             return true;
@@ -8006,7 +8038,6 @@ pub fn ReplicaType(
             maybe(self.journal.dirty.count > 0);
             assert(self.op >= self.commit_min);
             assert(self.op - self.commit_min <= constants.journal_slot_count);
-            assert(self.op - self.op_checkpoint() <= constants.journal_slot_count);
 
             if (self.op < constants.journal_slot_count) {
                 // The op is known, and this is the first WAL cycle.
@@ -8278,11 +8309,6 @@ pub fn ReplicaType(
             assert(header.view <= self.view);
             assert(header.op <= self.op); // Never advance the op.
             assert(header.op <= self.op_prepare_max_sync());
-
-            // If we already committed this op, the repair must be the identical message.
-            if (self.op_checkpoint() < header.op and header.op <= self.commit_min) {
-                assert(self.syncing == .updating_checkpoint or self.journal.has_header(header));
-            }
 
             if (header.op == self.op_checkpoint() + 1) {
                 assert(

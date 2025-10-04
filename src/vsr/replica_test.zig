@@ -1328,7 +1328,7 @@ test "Cluster: sync: using SV from durable checkpoint" {
     try expectEqual(b1.op_checkpoint(), checkpoint_2);
 
     try expectEqual(b2.op_head(), checkpoint_2_prepare_ok_max + 1);
-    try expectEqual(b2.commit(), checkpoint_2);
+    try expectEqual(b2.commit(), checkpoint_2 + 1);
     try expectEqual(b2.op_checkpoint(), checkpoint_2);
 }
 

@@ -203,7 +203,17 @@ pub fn StateCheckerType(comptime Client: type, comptime Replica: type) type {
             const commit_b = replica.commit_min;
 
             const header_b = replica.journal.header_with_op(replica.commit_min);
-            if (header_b == null) assert(replica.commit_min == replica.op_checkpoint());
+
+            if (header_b == null and replica.commit_min != replica.op_checkpoint()) {
+                // The slot with commit_min may have been replaced by an op from the next wrap.
+                // It is also possible that it got replaced by an op in the next wrap, which then
+                // got truncated as part of a view change.
+                if (replica.journal.header_for_op(replica.commit_min)) |header| {
+                    assert(header.op == replica.commit_min + constants.journal_slot_count);
+                }
+                return;
+            }
+
             if (header_b != null) assert(header_b.?.op == commit_b);
 
             const checksum_a = state_checker.commits.items[commit_a].header.checksum;
