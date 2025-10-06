@@ -1082,50 +1082,47 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
 
                 assert(connection.state == .terminating);
 
-                // Reset the connection to its initial state.
-                defer {
-                    assert(connection.recv_buffer == null);
-                    assert(connection.send_queue.empty());
-
-                    switch (connection.peer) {
-                        .unknown => {},
-                        .client, .client_likely => |client_id| switch (process_type) {
-                            .replica => {
-                                // A newer client connection may have replaced this one:
-                                if (bus.process.clients.get(client_id)) |existing_connection| {
-                                    if (existing_connection == connection) {
-                                        assert(bus.process.clients.remove(client_id));
-                                    }
-                                } else {
-                                    // A newer client connection may even leapfrog this connection
-                                    // and then be terminated and set to null before we can get
-                                    // here.
-                                }
-                            },
-                            .client => unreachable,
-                        },
-                        .replica => |replica| {
-                            // A newer replica connection may have replaced this one:
-                            if (bus.replicas[replica] == connection) {
-                                bus.replicas[replica] = null;
-                            } else {
-                                // A newer replica connection may even leapfrog this connection and
-                                // then be terminated and set to null before we can get here:
-                                stdx.maybe(bus.replicas[replica] == null);
-                            }
-                        },
-                    }
-                    bus.connections_used -= 1;
-                    connection.* = .{
-                        .send_queue = .{
-                            .buffer = connection.send_queue.buffer,
-                        },
-                    };
-                }
-
                 result catch |err| {
                     log.warn("{}: on_closing: to={} {}", .{ bus.id, connection.peer, err });
-                    return;
+                };
+
+                // Reset the connection to its initial state.
+                assert(connection.recv_buffer == null);
+                assert(connection.send_queue.empty());
+
+                switch (connection.peer) {
+                    .unknown => {},
+                    .client, .client_likely => |client_id| switch (process_type) {
+                        .replica => {
+                            // A newer client connection may have replaced this one:
+                            if (bus.process.clients.get(client_id)) |existing_connection| {
+                                if (existing_connection == connection) {
+                                    assert(bus.process.clients.remove(client_id));
+                                }
+                            } else {
+                                // A newer client connection may even leapfrog this connection
+                                // and then be terminated and set to null before we can get
+                                // here.
+                            }
+                        },
+                        .client => unreachable,
+                    },
+                    .replica => |replica| {
+                        // A newer replica connection may have replaced this one:
+                        if (bus.replicas[replica] == connection) {
+                            bus.replicas[replica] = null;
+                        } else {
+                            // A newer replica connection may even leapfrog this connection and
+                            // then be terminated and set to null before we can get here:
+                            stdx.maybe(bus.replicas[replica] == null);
+                        }
+                    },
+                }
+                bus.connections_used -= 1;
+                connection.* = .{
+                    .send_queue = .{
+                        .buffer = connection.send_queue.buffer,
+                    },
                 };
             }
         };
