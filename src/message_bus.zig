@@ -19,13 +19,13 @@ pub const MessageBusReplica = MessageBusType(@import("io.zig").IO, .replica);
 pub const MessageBusClient = MessageBusType(@import("io.zig").IO, .client);
 
 pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType) type {
-    const SendQueue = RingBufferType(*Message, .{
-        .array = switch (process_type) {
-            .replica => constants.connection_send_queue_max_replica,
-            // A client has at most 1 in-flight request, plus pings.
-            .client => constants.connection_send_queue_max_client,
-        },
-    });
+    // Slice points to a subslice of send_queue_buffer.
+    const SendQueue = RingBufferType(*Message, .slice);
+    const send_queue_max = switch (process_type) {
+        .replica => constants.connection_send_queue_max_replica,
+        // A client has at most 1 in-flight request, plus pings.
+        .client => constants.connection_send_queue_max_client,
+    };
 
     const ProcessID = union(vsr.ProcessType) {
         replica: u8,
@@ -68,6 +68,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
         /// The callback to be called when a message is received.
         on_messages_callback: *const fn (message_bus: *MessageBus, buffer: *MessageBuffer) void,
 
+        /// SendQueue storage shared by all connections.
+        send_queue_buffer: []*Message,
         /// This slice is allocated with a fixed size in the init function and never reallocated.
         connections: []Connection,
         /// Number of connections currently in use (i.e. connection.state != .free).
@@ -117,9 +119,22 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 .client => @intCast(options.configuration.len),
             };
 
+            const send_queue_buffer = try allocator.alloc(
+                *Message,
+                connections_max * send_queue_max,
+            );
+            @memset(send_queue_buffer, undefined);
+            errdefer allocator.free(send_queue_buffer);
+
             const connections = try allocator.alloc(Connection, connections_max);
             errdefer allocator.free(connections);
-            @memset(connections, .{});
+            for (connections, 0..) |*connection, index| {
+                connection.* = .{
+                    .send_queue = .{
+                        .buffer = send_queue_buffer[index * send_queue_max ..][0..send_queue_max],
+                    },
+                };
+            }
 
             const replicas = try allocator.alloc(?*Connection, options.configuration.len);
             errdefer allocator.free(replicas);
@@ -163,6 +178,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                     .client => |id| id,
                 },
                 .on_messages_callback = on_messages_callback,
+                .send_queue_buffer = send_queue_buffer,
                 .connections = connections,
                 .replicas = replicas,
                 .replicas_connect_attempts = replicas_connect_attempts,
@@ -183,6 +199,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 bus.io.close_socket(bus.process.accept_fd);
             }
 
+            var send_queue_buffer_previous: ?[]*Message = null;
             for (bus.connections) |*connection| {
                 if (connection.fd != IO.INVALID_SOCKET) {
                     bus.io.close_socket(connection.fd);
@@ -191,10 +208,22 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 if (connection.recv_buffer) |*buffer| buffer.deinit(bus.pool);
                 connection.recv_buffer = null;
                 while (connection.send_queue.pop()) |message| bus.unref(message);
+
+                assert(connection.send_queue.buffer.len == send_queue_max);
+                if (send_queue_buffer_previous) |previous| {
+                    assert(connection.send_queue.buffer.ptr == previous.ptr + previous.len);
+                } else {
+                    assert(connection.send_queue.buffer.ptr == bus.send_queue_buffer.ptr);
+                }
+                send_queue_buffer_previous = connection.send_queue.buffer;
             }
-            allocator.free(bus.connections);
-            allocator.free(bus.replicas);
+            assert(bus.send_queue_buffer.ptr + bus.send_queue_buffer.len ==
+                send_queue_buffer_previous.?.ptr + send_queue_buffer_previous.?.len);
+
             allocator.free(bus.replicas_connect_attempts);
+            allocator.free(bus.replicas);
+            allocator.free(bus.connections);
+            allocator.free(bus.send_queue_buffer);
         }
 
         fn init_tcp(io: *IO, family: u32) !IO.socket_t {
@@ -464,7 +493,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
             /// Number of bytes of the current message that have already been sent.
             send_progress: usize = 0,
             /// The queue of messages to send to the client or replica peer.
-            send_queue: SendQueue = SendQueue.init(),
+            send_queue: SendQueue,
             /// For connections_suspended.
             link: QueueType(Connection).Link = .{},
 
@@ -951,8 +980,8 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.fd != IO.INVALID_SOCKET);
                 assert(!connection.send_submitted);
 
-                for (0..SendQueue.count_max) |_| {
-                    const message = connection.send_queue.head() orelse return;
+                for (0..connection.send_queue.count) |_| {
+                    const message = connection.send_queue.head().?;
                     assert(connection.send_progress < message.header.size);
                     const write_size = bus.io.send_now(
                         connection.fd,
@@ -1087,7 +1116,11 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                         },
                     }
                     bus.connections_used -= 1;
-                    connection.* = .{};
+                    connection.* = .{
+                        .send_queue = .{
+                            .buffer = connection.send_queue.buffer,
+                        },
+                    };
                 }
 
                 result catch |err| {
