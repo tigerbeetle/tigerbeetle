@@ -154,8 +154,11 @@ From the perspective of our example bank:
 - You withdrawing cash debits (decreases) their bank account balance liabilities and credits
   (decreases) their cash assets.
 
-Note that accounting conventions also always write the debits first, to represent the funds flowing
-_from_ the debited account _to_ the credited account.
+Note that accounting conventions also always write the debits first, to represent that something
+is received (debit) before it is given up (credit). 
+This is also consistent with the visual representation of
+[T-Accounts](https://en.wikipedia.org/wiki/Debits_and_credits#T-accounts), with a "debit" column
+on the left and a "credit" column on the right.
 
 If this seems arbitrary and confusing, we understand! It's a convention, just like how most
 programmers need to learn zero-based array indexing and then at some point it becomes second nature.
