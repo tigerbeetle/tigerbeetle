@@ -80,10 +80,6 @@ pub fn BoundedArrayType(comptime T: type, comptime buffer_capacity: usize) type 
             array.inner.appendSliceAssumeCapacity(items);
         }
 
-        pub inline fn writer(self: *BoundedArray) Inner.Writer {
-            return self.inner.writer();
-        }
-
         pub inline fn swap_remove(array: *BoundedArray, index: usize) T {
             return array.inner.swapRemove(index);
         }
