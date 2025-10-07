@@ -1,5 +1,6 @@
 const std = @import("std");
-const fuzz = @import("../testing/fuzz.zig");
+const stdx = @import("stdx");
+const fuzz = stdx.fuzz;
 const segmented_array = @import("segmented_array.zig");
 
 pub fn main(gpa: std.mem.Allocator, fuzz_args: fuzz.FuzzArgs) !void {

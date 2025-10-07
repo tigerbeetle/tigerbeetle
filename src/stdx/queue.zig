@@ -1,8 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const constants = @import("./constants.zig");
-
 const QueueLink = extern struct {
     next: ?*QueueLink = null,
 };
@@ -18,7 +16,7 @@ pub fn QueueType(comptime T: type) type {
 
         pub inline fn init(options: struct {
             name: ?[]const u8,
-            verify_push: bool = true,
+            verify_push: bool = false,
         }) Queue {
             return .{ .any = .{
                 .name = options.name,
@@ -93,12 +91,11 @@ const QueueAny = struct {
     // This should only be null if you're sure we'll never want to monitor `count`.
     name: ?[]const u8,
 
-    // If the number of elements is large, the constants.verify check in push() can be too
-    // expensive. Allow the user to gate it. Could also be a comptime param?
-    verify_push: bool = true,
+    // Used by tests.
+    verify_push: bool = false,
 
     pub fn push(self: *QueueAny, link: *QueueLink) void {
-        if (constants.verify and self.verify_push) assert(!self.contains(link));
+        if (self.verify_push) assert(!self.contains(link));
 
         assert(link.next == null);
         if (self.in) |in| {
@@ -255,24 +252,26 @@ test "Queue: push/pop/peek/remove/empty" {
 }
 
 test "Queue: fuzz" {
-    const stdx = @import("stdx");
-    const fuzz = @import("./testing/fuzz.zig");
+    const fuzz = @import("testing/fuzz.zig");
+    const RingBufferType = @import("ring_buffer.zig").RingBufferType;
+    const PRNG = @import("prng.zig");
 
     const Item = struct {
         value: u64,
         link: QueueType(@This()).Link,
     };
     const Queue = QueueType(Item);
-    const Model = stdx.RingBufferType(u64, .slice);
+    const Model = RingBufferType(u64, .slice);
 
     const gpa = std.testing.allocator;
-    var prng = stdx.PRNG.from_seed_testing();
+    var prng = PRNG.from_seed_testing();
 
     for (0..100) |_| {
         const N = 1000;
 
         var queue = Queue.init(.{
             .name = "fuzz",
+            .verify_push = true,
         });
         var model = try Model.init(gpa, N);
         defer model.deinit(gpa);

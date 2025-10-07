@@ -352,7 +352,7 @@ pub inline fn binary_search_keys_range(
 }
 
 const test_binary_search = struct {
-    const fuzz = @import("../testing/fuzz.zig");
+    const fuzz = stdx.fuzz;
 
     const log = false;
 

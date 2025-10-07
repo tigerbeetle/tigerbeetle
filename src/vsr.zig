@@ -10,7 +10,7 @@ const log = std.log.scoped(.vsr);
 pub const cdc = @import("cdc/runner.zig");
 pub const constants = @import("constants.zig");
 pub const io = @import("io.zig");
-pub const queue = @import("queue.zig");
+pub const queue = stdx;
 pub const stack = @import("stack.zig");
 pub const message_bus = @import("message_bus.zig");
 pub const message_pool = @import("message_pool.zig");
@@ -35,9 +35,9 @@ pub const lsm = .{
 };
 pub const testing = .{
     .cluster = @import("testing/cluster.zig"),
-    .random_int_exponential = @import("testing/fuzz.zig").random_int_exponential,
+    .random_int_exponential = stdx.fuzz.random_int_exponential,
     .IdPermutation = @import("testing/id.zig").IdPermutation,
-    .parse_seed = @import("testing/fuzz.zig").parse_seed,
+    .parse_seed = stdx.fuzz.parse_seed,
 };
 pub const ewah = @import("ewah.zig").ewah;
 pub const checkpoint_trailer = @import("vsr/checkpoint_trailer.zig");
@@ -70,7 +70,7 @@ pub const FreeSet = @import("vsr/free_set.zig").FreeSet;
 pub const CheckpointTrailerType = @import("vsr/checkpoint_trailer.zig").CheckpointTrailerType;
 pub const GridScrubberType = @import("vsr/grid_scrubber.zig").GridScrubberType;
 pub const Routing = @import("vsr/routing.zig");
-pub const CountingAllocator = @import("counting_allocator.zig");
+pub const CountingAllocator = stdx.CountingAllocator;
 
 /// The version of our Viewstamped Replication protocol in use, including customizations.
 /// For backwards compatibility through breaking changes (e.g. upgrading checksums/ciphers).

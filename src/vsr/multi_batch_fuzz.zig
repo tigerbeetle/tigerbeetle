@@ -7,7 +7,7 @@ const MultiBatchDecoder = vsr.multi_batch.MultiBatchDecoder;
 const MultiBatchEncoder = vsr.multi_batch.MultiBatchEncoder;
 const stdx = @import("stdx");
 const MiB = stdx.MiB;
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {
     var prng = stdx.PRNG.from_seed(args.seed);

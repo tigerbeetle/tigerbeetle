@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const Signal = @import("./signal.zig").Signal;
 const IO = @import("../../../io.zig").IO;
 const stdx = @import("stdx");
-const fuzz = @import("../../../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 
 const threads_limit = 8;
 const Threads = stdx.BoundedArrayType(std.Thread, threads_limit);

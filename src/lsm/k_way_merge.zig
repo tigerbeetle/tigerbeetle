@@ -524,7 +524,7 @@ fn FuzzTestContextType(comptime streams_max: u32) type {
             expect: []const Value,
             prng: *stdx.PRNG,
         ) !void {
-            const fuzz_helper = @import("../testing/fuzz.zig");
+            const fuzz_helper = stdx.fuzz;
             const KWay = KWayMergeIteratorType(
                 FuzzTestContext,
                 u32,
