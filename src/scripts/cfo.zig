@@ -1290,28 +1290,36 @@ const LogTail = struct {
 };
 
 test "cfo: LogTail" {
-    var log_tail = try LogTail.init(std.testing.allocator, 4);
+    var prng = stdx.PRNG.from_seed_testing();
+
+    const log_tail_size = 8;
+    var log_tail = try LogTail.init(std.testing.allocator, log_tail_size);
     defer log_tail.deinit(std.testing.allocator);
 
-    log_tail.append("a");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[0], "a");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[1], "");
+    var log_tail_model = std.ArrayList(u8).init(std.testing.allocator);
+    defer log_tail_model.deinit();
 
-    log_tail.append("bc");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[0], "abc");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[1], "");
+    var buffer = try std.testing.allocator.alloc(u8, log_tail_size);
+    defer std.testing.allocator.free(buffer);
 
-    log_tail.append("def");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[0], "cd");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[1], "ef");
+    for (0..1024) |_| {
+        const append_size = prng.int_inclusive(u32, log_tail_size);
+        const append = buffer[0..append_size];
+        prng.fill(append);
 
-    log_tail.append("ghi");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[0], "fgh");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[1], "i");
+        try log_tail_model.appendSlice(append);
+        log_tail.append(append);
 
-    log_tail.append("jklm");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[0], "jkl");
-    try std.testing.expectEqualSlices(u8, log_tail.suffix()[1], "m");
+        const suffix = buffer[0..log_tail.size()];
+        assert(suffix.len <= log_tail_size);
+        log_tail.write_to(suffix);
+
+        try std.testing.expectEqualSlices(
+            u8,
+            suffix,
+            log_tail_model.items[log_tail_model.items.len -| log_tail_size..],
+        );
+    }
 }
 
 const Snap = stdx.Snap;
