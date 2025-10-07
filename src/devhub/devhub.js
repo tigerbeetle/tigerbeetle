@@ -57,6 +57,8 @@ async function main_seeds() {
     "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/fuzzing/data.json";
   const issues_url =
     "https://api.github.com/repos/tigerbeetle/tigerbeetle/issues?per_page=200";
+  const logs_base =
+    "https://raw.githubusercontent.com/tigerbeetle/devhubdb/main/";
 
   const [records, issues] = await Promise.all([
     fetch_json(data_url),
@@ -163,6 +165,7 @@ async function main_seeds() {
     } else if (is_release(record)) {
       commit_extra = "(release)";
     }
+    const log_link = record.log ? ` <a href="${logs_base + record.log}">(log)</a>` : '';
     row_dom.innerHTML = `
           <td>
             <a href="https://github.com/tigerbeetle/tigerbeetle/commit/${record.commit_sha}"><code>${
@@ -173,7 +176,7 @@ async function main_seeds() {
           <td>${pull ? pull.user.login : ""}</td>
           <td><a href="?fuzzer=${record.fuzzer}&commit=${record.commit_sha}">${record.fuzzer}</a></td>
           <td><code onclick="copy_to_clipboard(this)">${record.command}</code></td>
-          <td><time>${format_duration(seed_duration_ms)}</time></td>
+          <td><time>${format_duration(seed_duration_ms)}</time>${log_link}</td>
           <td>
             <time>${format_duration(seed_freshness_ms)} ago</time>
             ${staleness_warning}
