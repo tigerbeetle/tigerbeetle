@@ -233,7 +233,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///    Because prepare 6 is not yet written, header 6 is written as reserved.
         /// 4. If at this point the replica crashes & restarts, slot 6 is in case `@I`
         ///    (decision=nil) which can be locally repaired.
-        ///    In contrast, if op 6's prepare header was written in step 3, it would be case `@H`,
+        ///    In contrast, if op 6's prepare header was written in step 3, it would be case `@I`,
         ///    which requires remote repair.
         ///
         /// During recovery, store the redundant (unvalidated) headers.
@@ -1207,16 +1207,17 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
         ///
         /// Recovery decision table:
         ///
-        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M
-        ///   header valid             0   1   1   0   0   0   1   1   1   1   1   1   1
-        ///   header reserved          _   1   0   _   _   _   1   0   1   0   0   0   0
-        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1
-        ///   prepare reserved         _   _   _   1   0   0   0   1   1   0   0   0   0
-        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _
-        ///   match checksum           _   _   _   _   _   _   _   _  !1   0   0   0   1
-        ///   match op                 _   _   _   _   _   _   _   _  !1   <   >   1  !1
-        ///   match view               _   _   _   _   _   _   _   _  !1   _   _  !0  !1
-        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr nil fix vsr vsr eql
+        ///   label                   @A  @B  @C  @D  @E  @F  @G  @H  @I  @J  @K  @L  @M  @N
+        ///   header valid             0   1   1   0   0   0   1   _   1   1   1   1   1   1
+        ///   header reserved          _   1   0   _   _   _   1   _   0   1   0   0   0   0
+        ///   prepare valid            0   0   0   1   1   1   1   1   1   1   1   1   1   1
+        ///   prepare reserved         _   _   _   1   0   0   0   0   1   1   0   0   0   0
+        ///   prepare.op is maximum    _   _   _   _   0   1   _   _   _   _   _   _   _   _
+        ///   op > op_prepare_max     !0  !0  !0   _   0   0   0   1   _   _   0   0   0   0
+        ///   match checksum           _   _   _   _   _   _   _   _   _  !1   0   0   0   1
+        ///   match op                 _   _   _   _   _   _   _   _   _  !1   <   >   1  !1
+        ///   match view               _   _   _   _   _   _   _   _   _  !1   _   _  !0  !1
+        ///   decision (replicas>1)  vsr vsr vsr vsr vsr fix fix vsr vsr nil fix vsr vsr eql
         ///   decision (replicas=1)              fix fix
         ///
         /// Legend:
@@ -1250,11 +1251,6 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             assert(journal.dirty.count == slot_count);
             assert(journal.faulty.count == slot_count);
 
-            const prepare_op_max = @max(
-                replica.op_checkpoint(),
-                op_maximum_headers_untrusted(replica.cluster, journal.headers),
-            );
-
             var cases: [slot_count]*const Case = undefined;
 
             for (journal.headers, 0..) |_, index| {
@@ -1263,7 +1259,11 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 const prepare = header_ok(replica.cluster, slot, &journal.headers[index]);
 
                 cases[index] = recovery_case(header, prepare, .{
-                    .prepare_op_max = prepare_op_max,
+                    .op_max_checkpoint = replica.op_prepare_max(),
+                    .op_max_journal = @max(
+                        op_maximum_headers_untrusted(replica.cluster, journal.headers_redundant),
+                        op_maximum_headers_untrusted(replica.cluster, journal.headers),
+                    ),
                     .op_checkpoint = replica.op_checkpoint(),
                 });
 
@@ -1306,7 +1306,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
             //
             // It is essential that this is performed:
             // - after prepare_op_max is computed,
-            // - after the case decisions are made (to avoid @H:vsr arising from an
+            // - after the case decisions are made (to avoid @I:vsr arising from an
             //   artificially reserved prepare),
             // - after torn_prepares(), which computes its own max ops.
             // - before we repair the 'fix' cases.
@@ -1374,14 +1374,15 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                 op_maximum_headers_untrusted(replica.cluster, journal.headers),
             );
 
-            // Nothing to truncate - head op is not certain as it must be >= op_checkpoint.
-            if (op_max < replica.op_checkpoint()) return .{};
-
-            // Nothing to truncate - replica could not have prepared anything beyond prepare_max.
-            if (op_max == replica.op_prepare_max()) return .{};
-
             const op_checkpoint = replica.op_checkpoint();
             const op_prepare_max = replica.op_prepare_max();
+
+            // Nothing to truncate - head op is not certain as it must be >= op_checkpoint.
+            if (op_max < op_checkpoint) return .{};
+
+            // Nothing to truncate - replica could not have prepared anything beyond prepare_max.
+            if (op_max >= op_prepare_max) return .{};
+
             const op_prepare_max_slot = journal.slot_for_op(op_prepare_max);
             const op_checkpoint_slot = journal.slot_for_op(op_checkpoint);
 
@@ -1551,6 +1552,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                     journal.dirty.clear(slot);
                     journal.faulty.clear(slot);
                 },
+                .cut => {
+                    maybe(header == null);
+                    assert(prepare != null);
+                    assert(prepare.?.operation != .reserved);
+                    assert(journal.prepare_inhabited[slot.index]);
+                    assert(journal.prepare_checksums[slot.index] == prepare.?.checksum);
+                    journal.headers[slot.index] = Header.Prepare.reserve(cluster, slot.index);
+                    journal.dirty.clear(slot);
+                    journal.faulty.clear(slot);
+                },
             }
 
             journal.headers_redundant[slot.index] = journal.headers[slot.index];
@@ -1573,7 +1584,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
                         journal.headers[slot.index].view,
                     });
                 },
-                .fix, .vsr, .cut_torn => {
+                .fix, .vsr, .cut, .cut_torn => {
                     log.warn("{}: recover_slot: recovered " ++
                         "slot={:0>4} label={s} decision={s} operation={} op={} view={}", .{
                         journal.replica,
@@ -1695,7 +1706,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 
             for (journal.headers, 0..) |*header, index| {
                 // We must remove the header regardless of whether it is a prepare or reserved,
-                // since a reserved header may have been marked faulty for case @H, and
+                // since a reserved header may have been marked faulty for case @I, and
                 // since the caller expects the WAL to be truncated, with clean slots.
                 if (header.op >= op_min) {
                     // TODO Explore scenarios where the data on disk may resurface after a crash.
@@ -2231,17 +2242,23 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///
 /// There is a risk of data loss in the case of 2 lost writes.
 ///
-///
 /// @H:
+/// The prepare is valid and is past the prepare_max for the replica's checkpoint. We allow replicas
+/// to write to slots past prepare_max when the *next* checkpoint is already durable on a
+/// commit quorum of replicas, and the replica has already committed the prepares in those slots.
+///
+/// On startup, we must truncate all these prepares so we can replay all prepares in the checkpoint.
+///
+/// @I:
 /// The redundant header is present & valid, but the corresponding prepare was a lost or misdirected
 /// read or write.
 ///
 ///
-/// @I:
+/// @J:
 /// This slot is legitimately reserved — this may be the first fill of the log.
 ///
 ///
-/// @J and @K:
+/// @K and @L:
 /// When the redundant header & prepare header are both valid but distinct ops, always pick the
 /// higher op.
 ///
@@ -2253,16 +2270,16 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 /// The length of the prepare pipeline is the upper bound on how many ops can be reordered during a
 /// view change.
 ///
-/// @J:
+/// @K:
 /// When the higher op belongs to the prepare, repair locally.
 /// The most likely cause for this case is that the log wrapped, but the redundant header write was
 /// lost.
 ///
-/// @K:
+/// @L:
 /// When the higher op belongs to the header, mark faulty.
 ///
 ///
-/// @L:
+/// @M:
 /// Either:
 /// - The message was rewritten due to a view change.
 /// - The prepare write was lost, but the previous prepare had the same op (but a different view).
@@ -2281,7 +2298,7 @@ pub fn JournalType(comptime Replica: type, comptime Storage: type) type {
 ///   (This last case is the most likely.)
 ///
 ///
-/// @M:
+/// @N:
 /// The redundant header matches the message's header.
 /// This is the usual case: both the prepare and header are correct and equivalent.
 const recovery_cases = table: {
@@ -2301,25 +2318,27 @@ const recovery_cases = table: {
         //    nil  operation == reserved
         //     ✓∑  header.checksum == prepare.checksum
         //    op⌈  prepare.op is maximum of all prepare.ops
+        //    op>  prepare.op > op_prepare_max
         //    op=  header.op == prepare.op
         //    op<  header.op  < prepare.op
         //   view  header.view == prepare.view
         //
         //        Label  Decision      Header  Prepare Compare
-        //               R>1   R=1     ok  nil ok  nil op⌈ ✓∑  op= op< view
-        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, __, __, __, __ }),
-        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, __, __, __, __ }),
-        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, __, __, __, __ }),
-        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __ }),
-        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, __, __, __, __ }),
-        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, __, __, __, __ }),
-        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, __, __, __, __ }),
-        Case.init("@H", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __ }),
-        Case.init("@I", .nil, .nil, .{ _1, _1, _1, _1, __, a1, a1, a0, a1 }), // normal path: reserved
-        Case.init("@J", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _1, __ }), // header.op < prepare.op
-        Case.init("@K", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, __ }), // header.op > prepare.op
-        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _1, a0, a0 }),
-        Case.init("@M", .eql, .eql, .{ _1, _0, _1, _0, __, _1, a1, a0, a1 }), // normal path: prepare
+        //               R>1   R=1     ok  nil ok  nil op⌈ op> ✓∑ op= op< view
+        Case.init("@A", .vsr, .vsr, .{ _0, __, _0, __, __, a0, __, __, __, __ }),
+        Case.init("@B", .vsr, .vsr, .{ _1, _1, _0, __, __, a0, __, __, __, __ }),
+        Case.init("@C", .vsr, .vsr, .{ _1, _0, _0, __, __, a0, __, __, __, __ }),
+        Case.init("@D", .vsr, .fix, .{ _0, __, _1, _1, __, __, __, __, __, __ }),
+        Case.init("@E", .vsr, .fix, .{ _0, __, _1, _0, _0, _0, __, __, __, __ }),
+        Case.init("@F", .fix, .fix, .{ _0, __, _1, _0, _1, _0, __, __, __, __ }),
+        Case.init("@G", .fix, .fix, .{ _1, _1, _1, _0, __, _0, __, __, __, __ }),
+        Case.init("@H", .cut, .eql, .{ __, __, _1, _0, __, _1, __, __, __, __ }), // prepare.op > op_prepare_max
+        Case.init("@I", .vsr, .vsr, .{ _1, _0, _1, _1, __, __, __, __, __, __ }),
+        Case.init("@J", .nil, .nil, .{ _1, _1, _1, _1, __, __, a1, a1, a0, a1 }), // normal path: reserved
+        Case.init("@K", .fix, .fix, .{ _1, _0, _1, _0, __, _0, _0, _0, _1, __ }), // header.op < prepare.op
+        Case.init("@L", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _0, _0, __ }), // header.op > prepare.op
+        Case.init("@M", .vsr, .vsr, .{ _1, _0, _1, _0, __, _0, _0, _1, a0, a0 }),
+        Case.init("@N", .eql, .eql, .{ _1, _0, _1, _0, __, _0, _1, a1, a0, a1 }), // normal path: prepare
     };
 };
 
@@ -2341,6 +2360,8 @@ const RecoveryDecision = enum {
     /// If replica_count=1 and !standby: Fail; cannot recover safely.
     vsr,
     /// Truncate the op, setting it to reserved. Dirty/faulty are clear.
+    cut,
+    /// Truncate the op, setting it to reserved. Dirty/faulty are clear.
     cut_torn,
 };
 
@@ -2357,13 +2378,14 @@ const Case = struct {
     /// 2: header_ok(prepare) ∧ valid_checksum_body
     /// 3: prepare.operation == reserved
     /// 4: prepare.op is maximum of all prepare.ops
-    /// 5: header.checksum == prepare.checksum
-    /// 6: header.op == prepare.op
-    /// 7: header.op < prepare.op
-    /// 8: header.view == prepare.view
+    /// 5: prepare.op > op_prepare_max
+    /// 6: header.checksum == prepare.checksum
+    /// 7: header.op == prepare.op
+    /// 8: header.op < prepare.op
+    /// 9: header.view == prepare.view
     pattern: [pattern_size]Matcher,
 
-    const pattern_size = 9;
+    const pattern_size = 10;
 
     fn init(
         label: []const u8,
@@ -2405,7 +2427,8 @@ fn recovery_case(
     header: ?Header.Prepare,
     prepare: ?Header.Prepare,
     data: struct {
-        prepare_op_max: u64,
+        op_max_journal: u64,
+        op_max_checkpoint: u64,
         op_checkpoint: u64,
     },
 ) *const Case {
@@ -2420,7 +2443,8 @@ fn recovery_case(
         if (h_ok) header.?.operation == .reserved else false,
         p_ok,
         if (p_ok) prepare.?.operation == .reserved else false,
-        if (p_ok) prepare.?.op == data.prepare_op_max else false,
+        if (p_ok) prepare.?.op == data.op_max_journal else false,
+        if (p_ok) prepare.?.op > data.op_max_checkpoint else false,
         if (h_ok and p_ok) header.?.checksum == prepare.?.checksum else false,
         if (h_ok and p_ok) header.?.op == prepare.?.op else false,
         if (h_ok and p_ok) header.?.op < prepare.?.op else false,

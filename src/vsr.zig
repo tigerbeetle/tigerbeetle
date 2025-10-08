@@ -1516,7 +1516,6 @@ const ViewChangeHeadersArray = struct {
     }
 
     pub fn append_blank(headers: *ViewChangeHeadersArray, op: u64) void {
-        assert(headers.command == .do_view_change);
         assert(headers.array.count() > 0);
         headers.array.push(Headers.dvc_blank(op));
     }
