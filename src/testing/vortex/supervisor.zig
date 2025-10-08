@@ -12,7 +12,7 @@
 //! If the workload exits successfully, or is actively terminated, the whole vortex exits
 //! successfully.
 //!
-//! To launch a one-minute smoke test, run this command from the repository root:
+//! To launch a one-second smoke test, run this command from the repository root:
 //!
 //!     $ zig build test:integration -- "vortex smoke"
 //!
@@ -284,7 +284,7 @@ const Supervisor = struct {
     fn run(supervisor: *Supervisor) !void {
         var running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
         var terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
-        var stopped_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var paused_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
 
         var sleep_deadline: u64 = 0;
         // This represents the start timestamp of a period where we have an acceptable number of
@@ -304,10 +304,10 @@ const Supervisor = struct {
                 replicas_in_state(supervisor.replicas, &running_replicas_buffer, .running);
             const terminated_replicas =
                 replicas_in_state(supervisor.replicas, &terminated_replicas_buffer, .terminated);
-            const stopped_replicas =
-                replicas_in_state(supervisor.replicas, &stopped_replicas_buffer, .stopped);
+            const paused_replicas =
+                replicas_in_state(supervisor.replicas, &paused_replicas_buffer, .paused);
 
-            const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
+            const faulty_replica_count = terminated_replicas.len + paused_replicas.len;
 
             if (acceptable_faults_start_ns) |start_ns| {
                 const deadline = start_ns + constants.vortex.liveness_requirement_seconds *
@@ -359,7 +359,7 @@ const Supervisor = struct {
                     sleep,
                     replica_terminate,
                     replica_restart,
-                    replica_stop,
+                    replica_pause,
                     replica_resume,
                     network_delay,
                     network_lose,
@@ -372,8 +372,8 @@ const Supervisor = struct {
                     .sleep = 10,
                     .replica_terminate = if (running_replicas.len > 0) 4 else 0,
                     .replica_restart = if (terminated_replicas.len > 0) 3 else 0,
-                    .replica_stop = if (running_replicas.len > 0) 3 else 0,
-                    .replica_resume = if (stopped_replicas.len > 0) 10 else 0,
+                    .replica_pause = if (running_replicas.len > 0) 3 else 0,
+                    .replica_resume = if (paused_replicas.len > 0) 10 else 0,
                     .network_delay = if (supervisor.network.faults.delay == null) 3 else 0,
                     .network_lose = if (supervisor.network.faults.lose == null) 3 else 0,
                     .network_corrupt = if (supervisor.network.faults.corrupt == null) 3 else 0,
@@ -397,15 +397,15 @@ const Supervisor = struct {
                             terminated_replicas[supervisor.prng.index(terminated_replicas)];
                         try pick.replica.start();
                     },
-                    .replica_stop => {
+                    .replica_pause => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        try pick.replica.stop();
+                        try pick.replica.pause();
                     },
                     .replica_resume => {
                         const pick =
-                            stopped_replicas[supervisor.prng.index(stopped_replicas)];
-                        try pick.replica.cont();
+                            paused_replicas[supervisor.prng.index(paused_replicas)];
+                        try pick.replica.unpause();
                     },
                     .network_delay => {
                         const time_ms = supervisor.prng.range_inclusive(u32, 10, 500);
@@ -440,7 +440,7 @@ const Supervisor = struct {
                         sleep_deadline = now + duration;
 
                         supervisor.network.faults.heal();
-                        for (stopped_replicas) |stopped| try stopped.replica.cont();
+                        for (paused_replicas) |paused| try paused.replica.unpause();
                         for (terminated_replicas) |terminated| try terminated.replica.start();
 
                         log.info("going into {} quiescence (no faults)", .{
@@ -552,7 +552,7 @@ test comma_separate_ports {
 }
 
 const Replica = struct {
-    pub const State = enum(u8) { initial, running, stopped, terminated };
+    pub const State = enum(u8) { initial, running, paused, terminated };
 
     allocator: std.mem.Allocator,
     executable_path: []const u8,
@@ -598,7 +598,7 @@ const Replica = struct {
         if (self.process) |process| {
             switch (process.state()) {
                 .running => return .running,
-                .stopped => return .stopped,
+                .paused => return .paused,
                 .terminated => return .terminated,
             }
         } else return .initial;
@@ -636,34 +636,28 @@ const Replica = struct {
         self.process = try LoggedProcess.spawn(self.allocator, argv.const_slice(), .{});
     }
 
-    pub fn terminate(
-        self: *Replica,
-    ) !std.process.Child.Term {
-        assert(self.state() == .running or self.state() == .stopped);
+    pub fn terminate(self: *Replica) !std.process.Child.Term {
+        assert(self.state() == .running or self.state() == .paused);
         defer assert(self.state() == .terminated);
 
         log.info("{}: terminating replica", .{self.replica_index});
         return try self.process.?.terminate();
     }
 
-    pub fn stop(
-        self: *Replica,
-    ) !void {
+    pub fn pause(self: *Replica) !void {
         assert(self.state() == .running);
-        defer assert(self.state() == .stopped);
+        defer assert(self.state() == .paused);
 
-        log.info("{}: stopping replica", .{self.replica_index});
-        try self.process.?.stop();
+        log.info("{}: pausing replica", .{self.replica_index});
+        try self.process.?.pause();
     }
 
-    pub fn cont(
-        self: *Replica,
-    ) !void {
-        assert(self.state() == .stopped);
+    pub fn unpause(self: *Replica) !void {
+        assert(self.state() == .paused);
         defer assert(self.state() == .running);
 
-        log.info("{}: resuming replica", .{self.replica_index});
-        try self.process.?.cont();
+        log.info("{}: unpausing replica", .{self.replica_index});
+        try self.process.?.unpause();
     }
 };
 
