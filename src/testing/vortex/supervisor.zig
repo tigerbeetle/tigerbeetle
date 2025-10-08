@@ -145,6 +145,10 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
+    // By default, the shell uses project root as cwd, but we want to the actual process cwd.
+    try shell.pushd_dir(std.fs.cwd());
+    defer shell.popd();
+
     var io = try IO.init(128, 0);
 
     const output_directory = args.output_directory orelse try shell.create_tmp_dir();
@@ -202,43 +206,22 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             .{ output_directory, constants.vortex.cluster_id, replica_index },
         );
 
-        const arg_cluster = try std.fmt.allocPrint(
-            allocator,
-            "--cluster={d}",
-            .{constants.vortex.cluster_id},
-        );
-        defer allocator.free(arg_cluster);
-        const arg_replica = try std.fmt.allocPrint(
-            allocator,
-            "--replica={d}",
-            .{replica_index},
-        );
-        defer allocator.free(arg_replica);
-        const arg_replica_count = try std.fmt.allocPrint(
-            allocator,
-            "--replica-count={d}",
-            .{args.replica_count},
-        );
-        defer allocator.free(arg_replica_count);
-
-        // Format each replica's datafile.
-        const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &.{
-            args.tigerbeetle_executable,
-            "format",
-            arg_cluster,
-            arg_replica,
-            arg_replica_count,
-            datafile,
-        } });
-        defer {
-            allocator.free(result.stderr);
-            allocator.free(result.stdout);
-        }
-
-        if (!std.meta.eql(result.term, .{ .Exited = 0 })) {
-            log.err("failed formatting datafile: {s}", .{result.stderr});
+        shell.exec(
+            \\{tigerbeetle_executable} format
+            \\    --cluster={cluster}
+            \\    --replica={replica_index}
+            \\    --replica-count={replica_count}
+            \\    {datafile}
+        , .{
+            .tigerbeetle_executable = args.tigerbeetle_executable,
+            .cluster = constants.vortex.cluster_id,
+            .replica_index = replica_index,
+            .replica_count = args.replica_count,
+            .datafile = datafile,
+        }) catch |err| {
+            log.err("failed formatting datafile: {}", .{err});
             std.process.exit(1);
-        }
+        };
 
         // Start replica.
         var replica = try Replica.create(
