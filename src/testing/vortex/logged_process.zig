@@ -197,12 +197,16 @@ pub const main =
     if (@import("root") != @This()) {} else struct {
         fn main() !void {
             while (true) {
-                _ = try std.io.getStdErr().write("yep\n");
+                try std.io.getStdOut().writeAll("yep\n");
             }
         }
     }.main;
 
 test "LoggedProcess: starts and stops" {
+    if (builtin.os.tag != .linux) {
+        return error.SkipZigTest;
+    }
+
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer assert(gpa.deinit() == .ok);
@@ -256,7 +260,7 @@ test "LoggedProcess: starts and stops" {
 
     const argv: []const []const u8 = &.{test_exe};
 
-    var process = try LoggedProcess.spawn(allocator, argv);
+    var process = try LoggedProcess.spawn(allocator, argv, .{});
     defer process.destroy(allocator);
 
     std.time.sleep(10 * std.time.ns_per_ms);

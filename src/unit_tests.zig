@@ -46,6 +46,8 @@ comptime {
     _ = @import("testing/id.zig");
     _ = @import("testing/marks.zig");
     _ = @import("testing/table.zig");
+    _ = @import("testing/vortex/logged_process.zig");
+    _ = @import("testing/vortex/supervisor.zig");
     _ = @import("tidy.zig");
     _ = @import("time.zig");
     _ = @import("trace.zig");
@@ -157,7 +159,6 @@ const quine =
     \\        if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
     \\        if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
-    \\        if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
     \\        if (std.mem.startsWith(u8, entry_path, "clients/") and
     \\            !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
     \\        if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
@@ -281,7 +282,6 @@ fn unit_test_files(arena: std.mem.Allocator, src_dir: std.fs.Dir) ![]const []con
         if (std.mem.eql(u8, entry_path, "unit_tests.zig")) continue;
         if (std.mem.eql(u8, entry_path, "integration_tests.zig")) continue;
         if (std.mem.startsWith(u8, entry_path, "stdx/")) continue;
-        if (std.mem.startsWith(u8, entry_path, "testing/vortex/")) continue;
         if (std.mem.startsWith(u8, entry_path, "clients/") and
             !std.mem.startsWith(u8, entry_path, "clients/c")) continue;
         if (std.mem.eql(u8, entry_path, "clients/c/tb_client_header_test.zig")) continue;
