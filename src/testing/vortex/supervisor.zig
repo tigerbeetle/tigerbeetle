@@ -254,10 +254,6 @@ const Supervisor = struct {
     test_deadline: i128,
     disable_faults: bool,
 
-    running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
-    terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
-    stopped_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined,
-
     fn create(allocator: std.mem.Allocator, options: struct {
         io: *IO,
         network: *faulty_network.Network,
@@ -286,6 +282,10 @@ const Supervisor = struct {
     }
 
     fn run(supervisor: *Supervisor) !void {
+        var running_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var terminated_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+        var stopped_replicas_buffer: [constants.vsr.replicas_max]ReplicaWithIndex = undefined;
+
         var sleep_deadline: u64 = 0;
         // This represents the start timestamp of a period where we have an acceptable number of
         // process faults, such that we require liveness (that requests are finished within a
@@ -300,21 +300,12 @@ const Supervisor = struct {
             try supervisor.io.run_for_ns(constants.vsr.tick_ms * std.time.ns_per_ms);
             const now: u64 = @intCast(std.time.nanoTimestamp());
 
-            const running_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.running_replicas_buffer,
-                .running,
-            );
-            const terminated_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.terminated_replicas_buffer,
-                .terminated,
-            );
-            const stopped_replicas = replicas_in_state(
-                supervisor.replicas,
-                &supervisor.stopped_replicas_buffer,
-                .stopped,
-            );
+            const running_replicas =
+                replicas_in_state(supervisor.replicas, &running_replicas_buffer, .running);
+            const terminated_replicas =
+                replicas_in_state(supervisor.replicas, &terminated_replicas_buffer, .terminated);
+            const stopped_replicas =
+                replicas_in_state(supervisor.replicas, &stopped_replicas_buffer, .stopped);
 
             const faulty_replica_count = terminated_replicas.len + stopped_replicas.len;
 
@@ -425,17 +416,13 @@ const Supervisor = struct {
                         log.info("injecting network delays: {any}", .{supervisor.network.faults});
                     },
                     .network_lose => {
-                        supervisor.network.faults.lose = ratio(
-                            supervisor.prng.range_inclusive(u8, 1, 10),
-                            100,
-                        );
+                        supervisor.network.faults.lose =
+                            ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
                         log.info("injecting network loss: {any}", .{supervisor.network.faults});
                     },
                     .network_corrupt => {
-                        supervisor.network.faults.corrupt = ratio(
-                            supervisor.prng.range_inclusive(u8, 1, 10),
-                            100,
-                        );
+                        supervisor.network.faults.corrupt =
+                            ratio(supervisor.prng.range_inclusive(u8, 1, 10), 100);
                         log.info("injecting network corruption: {any}", .{
                             supervisor.network.faults,
                         });
