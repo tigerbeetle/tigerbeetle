@@ -170,17 +170,13 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
     }
 
-    if (args.test_duration_seconds % std.time.s_per_min == 0) {
-        log.info(
-            "starting test with target runtime of {d}m",
-            .{@divExact(args.test_duration_seconds, std.time.s_per_min)},
-        );
-    } else {
-        log.info(
-            "starting test with target runtime of {d}s",
-            .{args.test_duration_seconds},
-        );
-    }
+    log.info(
+        "starting test with target runtime of {d}m{d}s",
+        .{
+            @divFloor(args.test_duration_seconds, std.time.s_per_min),
+            args.test_duration_seconds % std.time.s_per_min,
+        },
+    );
 
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
