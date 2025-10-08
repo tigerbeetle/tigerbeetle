@@ -266,28 +266,3 @@ test "LoggedProcess: starts and stops" {
     std.time.sleep(10 * std.time.ns_per_ms);
     _ = try process.terminate();
 }
-
-/// Formats the ports as comma-separated. Caller owns slice after successful return.
-pub fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
-    assert(ports.len > 0);
-
-    var out = std.ArrayList(u8).init(allocator);
-    errdefer out.deinit();
-
-    const writer = out.writer();
-
-    try std.fmt.format(writer, "{d}", .{ports[0]});
-    for (ports[1..]) |port| {
-        try writer.writeByte(',');
-        try std.fmt.format(writer, "{d}", .{port});
-    }
-
-    return out.toOwnedSlice();
-}
-
-test comma_separate_ports {
-    const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
-    defer std.testing.allocator.free(formatted);
-
-    try std.testing.expectEqualStrings("3000,3001,3002", formatted);
-}

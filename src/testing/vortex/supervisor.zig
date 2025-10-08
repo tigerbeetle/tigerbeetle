@@ -83,7 +83,7 @@ fn replica_addresses_for_replica(
     allocator: std.mem.Allocator,
     replica_count: u8,
     replica_index: u8,
-) !std.ArrayListUnmanaged(u8) {
+) ![]const u8 {
     return try comma_separate_ports(
         allocator,
         replica_ports_for_replicas[replica_index][0..replica_count],
@@ -93,7 +93,7 @@ fn replica_addresses_for_replica(
 fn replica_addresses_for_clients(
     allocator: std.mem.Allocator,
     replica_count: u8,
-) !std.ArrayListUnmanaged(u8) {
+) ![]const u8 {
     return try comma_separate_ports(allocator, replica_ports_proxied[0..replica_count]);
 }
 
@@ -714,28 +714,24 @@ fn replicas_in_state(
     return buffer[0..count];
 }
 
-pub fn comma_separate_ports(
-    allocator: std.mem.Allocator,
-    ports: []const u16,
-) !std.ArrayListUnmanaged(u8) {
+fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
     assert(ports.len > 0);
 
-    var out: std.ArrayListUnmanaged(u8) = .{};
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
 
-    const first = try std.fmt.allocPrint(allocator, "{d}", .{ports[0]});
-    defer allocator.free(first);
-    try out.appendSlice(allocator, first);
+    const writer = out.writer();
+    try writer.print("{d}", .{ports[0]});
+    for (ports[1..]) |port| try writer.print(",{d}", .{port});
 
-    for (ports[1..]) |port| {
-        const next = try std.fmt.allocPrint(allocator, ",{d}", .{port});
-        defer allocator.free(next);
-        try out.appendSlice(allocator, next);
-    }
+    return out.toOwnedSlice();
+}
 
-    out.shrinkAndFree(allocator, out.items.len);
+test comma_separate_ports {
+    const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
+    defer std.testing.allocator.free(formatted);
 
-    assert(std.mem.count(u8, out.items, ",") == ports.len - 1);
-    return out;
+    try std.testing.expectEqualStrings("3000,3001,3002", formatted);
 }
 
 const Replica = struct {
@@ -800,16 +796,16 @@ const Replica = struct {
         }
 
         var addresses_buffer: [128]u8 = undefined;
-        var replica_addresses = try replica_addresses_for_replica(
+        const replica_addresses = try replica_addresses_for_replica(
             self.allocator,
             self.replica_count,
             self.replica_index,
         );
-        defer replica_addresses.deinit(self.allocator);
+        defer self.allocator.free(replica_addresses);
         const addresses_arg = try std.fmt.bufPrint(
             addresses_buffer[0..],
             "--addresses={s}",
-            .{replica_addresses.items},
+            .{replica_addresses},
         );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
@@ -899,12 +895,12 @@ const Workload = struct {
             .{driver_command_selected},
         );
 
-        var replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
-        defer replica_addresses.deinit(allocator);
+        const replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
+        defer allocator.free(replica_addresses);
         const arg_addresses = try std.fmt.allocPrint(
             allocator,
             "--addresses={s}",
-            .{replica_addresses.items},
+            .{replica_addresses},
         );
         defer allocator.free(arg_addresses);
 
