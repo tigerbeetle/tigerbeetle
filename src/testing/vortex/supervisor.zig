@@ -485,7 +485,7 @@ const Supervisor = struct {
                     .replica_terminate => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("terminating replica {d}", .{pick.index});
+                        log.info("{}: terminating replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
                             .process_id = pick.index,
@@ -496,7 +496,7 @@ const Supervisor = struct {
                     .replica_restart => {
                         const pick =
                             terminated_replicas[supervisor.prng.index(terminated_replicas)];
-                        log.info("restarting replica {d}", .{pick.index});
+                        log.info("{}: restarting replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
                             .process_id = pick.index,
@@ -507,7 +507,7 @@ const Supervisor = struct {
                     .replica_stop => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("stopping replica {d}", .{pick.index});
+                        log.info("{}: stopping replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
                             .process_id = pick.index,
@@ -518,7 +518,7 @@ const Supervisor = struct {
                     .replica_resume => {
                         const pick =
                             stopped_replicas[supervisor.prng.index(stopped_replicas)];
-                        log.info("resuming replica {d}", .{pick.index});
+                        log.info("{}: resuming replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
                             .process_id = pick.index,
@@ -644,7 +644,7 @@ const Supervisor = struct {
                                 std.posix.SIG.KILL => {},
                                 else => {
                                     log.err(
-                                        "replica {d} terminated unexpectedly with signal {d}",
+                                        "{}: replica terminated unexpectedly with signal {d}",
                                         .{ index, signal },
                                     );
                                     std.process.exit(1);
@@ -652,7 +652,10 @@ const Supervisor = struct {
                             }
                         },
                         else => {
-                            log.err("unexpected replica result: {any}", .{replica_result});
+                            log.err(
+                                "{} unexpected replica result: {any}",
+                                .{ index, replica_result },
+                            );
                             return error.TestFailed;
                         },
                     }
@@ -678,15 +681,9 @@ const Supervisor = struct {
         switch (workload_result) {
             .Signal => |signal| {
                 switch (signal) {
-                    std.posix.SIG.KILL => log.info(
-                        "workload terminated as requested",
-                        .{},
-                    ),
+                    std.posix.SIG.KILL => log.info("workload terminated as requested", .{}),
                     else => {
-                        log.err(
-                            "workload exited unexpectedly with signal {d}",
-                            .{signal},
-                        );
+                        log.err("workload exited unexpectedly with signal {d}", .{signal});
                         std.process.exit(1);
                     },
                 }
