@@ -51,6 +51,7 @@ const faulty_network = @import("./faulty_network.zig");
 const constants = @import("constants.zig");
 const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
+const Shell = @import("../../shell.zig");
 
 const log = std.log.scoped(.supervisor);
 
@@ -141,11 +142,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("vortex may spawn runaway processes when run on a non-Linux OS", .{});
     }
 
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
     var io = try IO.init(128, 0);
 
-    var output_directory_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const output_directory = args.output_directory orelse
-        try create_tmp_dir(&output_directory_buffer);
+    const output_directory = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
             std.fs.cwd().deleteTree(output_directory) catch |err| {
@@ -758,20 +760,6 @@ pub fn comma_separate_ports(
 
     assert(std.mem.count(u8, out.items, ",") == ports.len - 1);
     return out;
-}
-
-// Create a new Vortex-specific temporary directory.
-fn create_tmp_dir(absolute_path_buffer: []u8) ![]const u8 {
-    const working_directory = std.fs.cwd();
-
-    var relative_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&relative_path_buffer, ".zig-cache/vortex-{d}", .{
-        std.crypto.random.int(u64),
-    });
-
-    try working_directory.makePath(path);
-
-    return working_directory.realpath(path, absolute_path_buffer);
 }
 
 const Replica = struct {
