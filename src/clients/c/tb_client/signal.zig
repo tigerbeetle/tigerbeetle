@@ -43,6 +43,7 @@ pub const Signal = struct {
     }
 
     pub fn deinit(self: *Signal) void {
+        self.io.assert_any_thread();
         assert(self.event != IO.INVALID_EVENT);
         assert(self.status() == .stopped);
 
@@ -59,6 +60,7 @@ pub const Signal = struct {
     /// The caller must continue processing `IO.run()` until `state() == .stopped`.
     /// Safe to call from multiple threads.
     pub fn stop(self: *Signal) void {
+        self.io.assert_any_thread();
         self.mutex_deinit.lock();
         defer self.mutex_deinit.unlock();
         const listening = self.listening.swap(false, .release);
@@ -95,6 +97,7 @@ pub const Signal = struct {
     /// Calling `notify()` when `state() != .running` has no effect.
     /// Safe to call from multiple threads.
     pub fn notify(self: *Signal) void {
+        self.io.assert_any_thread();
         // Try to transition from `waiting` to `notified`.
         // If it fails, analyze the current state to determine if a notification is needed.
         var state: @TypeOf(self.event_state.raw) = .waiting;
@@ -117,6 +120,8 @@ pub const Signal = struct {
     }
 
     fn wait(self: *Signal) void {
+        // Note: wait() is called both during init (from main thread) and from on_event callback
+        // (from IO thread), so we cannot assert thread ownership here.
         // It is not guaranteed to be `running` here, as another caller might have requested
         // a stop during the callback.
         assert(self.status() != .stopped);
@@ -138,6 +143,7 @@ pub const Signal = struct {
 
     fn on_event(completion: *IO.Completion) void {
         const self: *Signal = @fieldParentPtr("completion", completion);
+        self.io.assert_io_thread();
         const listening: bool = self.listening.load(.acquire);
         const state = self.event_state.cmpxchgStrong(
             .notified,
@@ -179,6 +185,7 @@ test "signal" {
                 .main_thread_id = std.Thread.getCurrentId(),
                 .signal = undefined,
             };
+            self.io.set_io_thread();
             defer self.io.deinit();
 
             try Signal.init(&self.signal, &self.io, on_signal);

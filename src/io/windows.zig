@@ -17,6 +17,7 @@ pub const IO = struct {
     pub const ListenOptions = common.ListenOptions;
 
     iocp: os.windows.HANDLE,
+    thread_id: std.Thread.Id,
     time_os: TimeOS = .{},
     io_pending: usize = 0,
     timeouts: QueueType(Completion) = QueueType(Completion).init(.{ .name = "io_timeouts" }),
@@ -35,10 +36,14 @@ pub const IO = struct {
             0,
             0,
         );
-        return IO{ .iocp = iocp };
+        return IO{
+            .iocp = iocp,
+            .thread_id = undefined,
+        };
     }
 
     pub fn deinit(self: *IO) void {
+        self.assert_io_thread();
         assert(self.iocp != os.windows.INVALID_HANDLE_VALUE);
         os.windows.CloseHandle(self.iocp);
         self.iocp = os.windows.INVALID_HANDLE_VALUE;
@@ -47,10 +52,12 @@ pub const IO = struct {
     }
 
     pub fn run(self: *IO) !void {
+        self.assert_io_thread();
         return self.flush(.non_blocking);
     }
 
     pub fn run_for_ns(self: *IO, nanoseconds: u63) !void {
+        self.assert_io_thread();
         const Callback = struct {
             fn on_timeout(
                 timed_out: *bool,
@@ -78,6 +85,7 @@ pub const IO = struct {
     };
 
     fn flush(self: *IO, mode: FlushMode) !void {
+        self.assert_io_thread();
         if (self.completed.empty()) {
             // Compute how long to poll by flushing timeout completions.
             // NOTE: this may push to completed queue.
@@ -145,6 +153,7 @@ pub const IO = struct {
     }
 
     fn flush_timeouts(self: *IO) ?u64 {
+        self.assert_io_thread();
         var min_expires: ?u64 = null;
         var current_time: ?u64 = null;
 
@@ -251,6 +260,7 @@ pub const IO = struct {
         op_data: std.meta.TagPayload(Completion.Operation, op_tag),
         comptime OperationImpl: type,
     ) void {
+        self.assert_io_thread();
         const Callback = struct {
             fn onComplete(ctx: Completion.Context) void {
                 // Perform the operation and get the result.
@@ -295,7 +305,8 @@ pub const IO = struct {
         }
     }
 
-    pub fn cancel_all(_: *IO) void {
+    pub fn cancel_all(self: *IO) void {
+        self.assert_io_thread();
         // TODO Cancel in-flight async IO and wait for all completions.
     }
 
@@ -313,6 +324,7 @@ pub const IO = struct {
         completion: *Completion,
         socket: socket_t,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -438,6 +450,7 @@ pub const IO = struct {
         socket: socket_t,
         address: std.net.Address,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -588,6 +601,7 @@ pub const IO = struct {
         completion: *Completion,
         fd: fd_t,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -620,6 +634,7 @@ pub const IO = struct {
         socket: socket_t,
         buffer: []const u8,
     ) void {
+        self.assert_io_thread();
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
@@ -727,6 +742,7 @@ pub const IO = struct {
         socket: socket_t,
         buffer: []u8,
     ) void {
+        self.assert_io_thread();
         const transfer = Completion.Transfer{
             .socket = socket,
             .buf = os.windows.ws2_32.WSABUF{
@@ -891,6 +907,7 @@ pub const IO = struct {
         buffer: []u8,
         offset: u64,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -928,6 +945,7 @@ pub const IO = struct {
         buffer: []const u8,
         offset: u64,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -961,6 +979,7 @@ pub const IO = struct {
         completion: *Completion,
         fd: fd_t,
     ) void {
+        self.assert_io_thread();
         self.submit(
             context,
             callback,
@@ -997,6 +1016,7 @@ pub const IO = struct {
         completion: *Completion,
         nanoseconds: u63,
     ) void {
+        self.assert_io_thread();
         // Special case a zero timeout as a yield.
         if (nanoseconds == 0) {
             completion.* = .{
@@ -1049,6 +1069,7 @@ pub const IO = struct {
         completion: *Completion,
         comptime on_event: fn (*Completion) void,
     ) void {
+        self.assert_io_thread();
         assert(event != INVALID_EVENT);
         completion.* = .{
             .link = .{},
@@ -1071,6 +1092,7 @@ pub const IO = struct {
     }
 
     pub fn event_trigger(self: *IO, event: Event, completion: *Completion) void {
+        self.assert_any_thread();
         assert(event != INVALID_EVENT);
         os.windows.PostQueuedCompletionStatus(
             self.iocp,
@@ -1081,7 +1103,7 @@ pub const IO = struct {
     }
 
     pub fn close_event(self: *IO, event: Event) void {
-        _ = self;
+        self.assert_io_thread();
         // Nothing to close as events are just intrusive OVERLAPPED structs.
         assert(event != INVALID_EVENT);
     }
@@ -1091,6 +1113,7 @@ pub const IO = struct {
 
     /// Creates a TCP socket that can be used for async operations with the IO instance.
     pub fn open_socket_tcp(self: *IO, family: u32, options: TCPOptions) !socket_t {
+        self.assert_io_thread();
         const socket = try self.open_socket(
             @bitCast(family),
             posix.SOCK.STREAM,
@@ -1104,6 +1127,7 @@ pub const IO = struct {
 
     /// Creates a UDP socket that can be used for async operations with the IO instance.
     pub fn open_socket_udp(self: *IO, family: u32) !socket_t {
+        self.assert_io_thread();
         return try self.open_socket(
             @bitCast(family),
             posix.SOCK.DGRAM,
@@ -1112,6 +1136,7 @@ pub const IO = struct {
     }
 
     fn open_socket(self: *IO, family: u32, sock_type: i32, protocol: i32) !socket_t {
+        self.assert_io_thread();
         // Equivalent to SOCK_NONBLOCK | SOCK_CLOEXEC.
         const socket_flags: os.windows.DWORD =
             os.windows.ws2_32.WSA_FLAG_OVERLAPPED |
@@ -1133,6 +1158,7 @@ pub const IO = struct {
 
     /// Register the IO handle for overlapped operations.
     fn register_handle(self: *IO, handle: os.windows.HANDLE) !void {
+        self.assert_io_thread();
         const iocp_handle = try os.windows.CreateIoCompletionPort(handle, self.iocp, 0, 0);
         assert(iocp_handle == self.iocp);
 
@@ -1146,7 +1172,7 @@ pub const IO = struct {
 
     /// Closes a socket opened by the IO instance.
     pub fn close_socket(self: *IO, socket: socket_t) void {
-        _ = self;
+        self.assert_io_thread();
         posix.close(socket);
     }
 
@@ -1154,15 +1180,17 @@ pub const IO = struct {
     /// Returns socket resolved address, which might be more specific
     /// than the input address (e.g., listening on port 0).
     pub fn listen(
-        _: *IO,
+        self: *IO,
         fd: socket_t,
         address: std.net.Address,
         options: ListenOptions,
     ) !std.net.Address {
+        self.assert_io_thread();
         return common.listen(fd, address, options);
     }
 
-    pub fn shutdown(_: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
+    pub fn shutdown(self: *IO, socket: socket_t, how: posix.ShutdownHow) posix.ShutdownError!void {
+        self.assert_io_thread();
         return posix.shutdown(socket, how);
     }
 
@@ -1181,6 +1209,7 @@ pub const IO = struct {
         relative_path: []const u8,
         purpose: enum { format, open, inspect },
     ) !fd_t {
+        self.assert_io_thread();
         const path_w = try os.windows.sliceToPrefixedFileW(dir_handle, relative_path);
 
         // FILE_CREATE = O_CREAT | O_EXCL
@@ -1269,6 +1298,7 @@ pub const IO = struct {
         purpose: OpenDataFilePurpose,
         direct_io: DirectIO,
     ) !fd_t {
+        self.assert_io_thread();
         assert(relative_path.len > 0);
         assert(size % constants.sector_size == 0);
         // On windows, assume that Direct IO is always available.
@@ -1413,6 +1443,18 @@ pub const IO = struct {
 
     pub fn aof_blocking_close(_: *IO, fd: fd_t) void {
         return common.aof_blocking_close(fd);
+    }
+
+    pub fn set_io_thread(self: *IO) void {
+        self.thread_id = std.Thread.getCurrentId();
+    }
+
+    pub fn assert_io_thread(self: *const IO) void {
+        assert(std.Thread.getCurrentId() == self.thread_id);
+    }
+
+    pub fn assert_any_thread(self: *const IO) void {
+        _ = self;
     }
 };
 

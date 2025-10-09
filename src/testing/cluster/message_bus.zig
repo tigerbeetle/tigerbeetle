@@ -14,9 +14,16 @@ pub const Process = union(ProcessType) {
     client: u128,
 };
 
+const MockIO = struct {
+    pub fn assert_io_thread(_: *const MockIO) void {}
+    pub fn assert_any_thread(_: *const MockIO) void {}
+    pub fn set_io_thread(_: *MockIO) void {}
+};
+
 pub const MessageBus = struct {
     network: *Network,
     pool: *MessagePool,
+    io: MockIO,
 
     process: Process,
 
@@ -40,6 +47,7 @@ pub const MessageBus = struct {
         return MessageBus{
             .network = options.network,
             .pool = message_pool,
+            .io = .{},
             .process = process,
             .buffer = MessageBuffer.init(message_pool),
             .on_messages_callback = on_messages_callback,
