@@ -21,8 +21,6 @@ pub const Signal = struct {
     }),
 
     listening: Atomic(bool),
-    mutex_deinit: std.Thread.Mutex,
-
     on_signal_fn: *const fn (*Signal) void,
 
     pub fn init(self: *Signal, io: *IO, on_signal_fn: *const fn (*Signal) void) !void {
@@ -35,7 +33,6 @@ pub const Signal = struct {
             .event = event,
             .event_state = @TypeOf(self.event_state).init(.running),
             .listening = Atomic(bool).init(true),
-            .mutex_deinit = .{},
             .on_signal_fn = on_signal_fn,
         };
 
@@ -47,12 +44,7 @@ pub const Signal = struct {
         assert(self.event != IO.INVALID_EVENT);
         assert(self.status() == .stopped);
 
-        {
-            self.mutex_deinit.lock();
-            defer self.mutex_deinit.unlock();
-            self.io.close_event(self.event);
-        }
-
+        self.io.close_event(self.event);
         self.* = undefined;
     }
 
@@ -61,8 +53,6 @@ pub const Signal = struct {
     /// Safe to call from multiple threads.
     pub fn stop(self: *Signal) void {
         self.io.assert_any_thread();
-        self.mutex_deinit.lock();
-        defer self.mutex_deinit.unlock();
         const listening = self.listening.swap(false, .release);
         if (listening) {
             self.notify();
