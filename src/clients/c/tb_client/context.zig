@@ -201,6 +201,8 @@ pub fn ContextType(
         completion_context: usize,
 
         interface: *ClientInterface,
+        // The submission queue. This is accessed from multiple threads and must always
+        // be protected by taking `interface.locker`.
         submitted: Packet.Queue,
         pending: Packet.Queue,
 
@@ -366,12 +368,15 @@ pub fn ContextType(
         }
 
         fn tick(self: *Context) void {
+            self.io.assert_io_thread();
             if (self.eviction_reason == null) {
                 self.client.tick();
             }
         }
 
         fn io_thread(self: *Context) void {
+            self.io.set_io_thread();
+            self.io.assert_io_thread();
             while (self.signal.status() != .stopped) {
                 self.tick();
                 self.io.run_for_ns(constants.tick_ms * std.time.ns_per_ms) catch |err| {
@@ -390,9 +395,11 @@ pub fn ContextType(
                 self.packet_cancel(packet);
             }
 
-            // The submitted queue is no longer accessible to user threads,
-            // so synchronization is not required here.
-            while (self.submitted.pop()) |packet| {
+            while (brk: {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
+                break :brk self.submitted.pop();
+            }) |packet| {
                 packet.assert_phase(.submitted);
                 self.packet_cancel(packet);
             }
@@ -407,6 +414,7 @@ pub fn ContextType(
         /// Cancel the current inflight request (and the entire batched linked list of packets),
         /// as it won't be replied anymore.
         fn cancel_request_inflight(self: *Context) void {
+            self.io.assert_io_thread();
             if (self.client.request_inflight) |*inflight| {
                 if (inflight.message.header.operation != .register) {
                     const packet: *Packet = @as(UserData, @bitCast(inflight.user_data)).packet;
@@ -419,6 +427,7 @@ pub fn ContextType(
         /// Calls the user callback when a packet (the entire batched linked list of packets)
         /// is canceled due to the client being either evicted or shutdown.
         fn packet_cancel(self: *Context, packet_list: *Packet) void {
+            self.io.assert_io_thread();
             assert(packet_list.link.next == null);
             assert(packet_list.phase != .complete);
             packet_list.assert_phase(packet_list.phase);
@@ -442,6 +451,7 @@ pub fn ContextType(
         }
 
         fn packet_enqueue(self: *Context, packet: *Packet) void {
+            self.io.assert_io_thread();
             assert(self.batch_size_limit != null);
             packet.assert_phase(.submitted);
 
@@ -583,6 +593,7 @@ pub fn ContextType(
         /// Sends the packet (the entire batched linked list of packets) through the vsr client.
         /// Always called by the io thread.
         fn packet_send(self: *Context, packet_list: *Packet) void {
+            self.io.assert_io_thread();
             assert(self.batch_size_limit != null);
             assert(self.client.request_inflight == null);
             packet_list.assert_phase(.pending);
@@ -692,6 +703,7 @@ pub fn ContextType(
 
         fn signal_notify_callback(signal: *Signal) void {
             const self: *Context = @alignCast(@fieldParentPtr("signal", signal));
+            self.io.assert_io_thread();
             assert(self.signal.status() != .stopped);
 
             // Don't send any requests until registration completes.
@@ -735,6 +747,7 @@ pub fn ContextType(
 
         fn client_register_callback(user_data: u128, result: *const vsr.RegisterResult) void {
             const self: *Context = @ptrFromInt(@as(usize, @intCast(user_data)));
+            self.io.assert_io_thread();
             assert(self.client.request_inflight == null);
             assert(self.batch_size_limit == null);
             assert(result.batch_size_limit > 0);
@@ -749,6 +762,7 @@ pub fn ContextType(
 
         fn client_eviction_callback(client: *Client, eviction: *const Message.Eviction) void {
             const self: *Context = @fieldParentPtr("client", client);
+            self.io.assert_io_thread();
             assert(self.eviction_reason == null);
 
             log.debug("{}: client_eviction_callback: reason={?s} reason_int={}", .{
@@ -772,6 +786,7 @@ pub fn ContextType(
         ) void {
             const user_data: UserData = @bitCast(raw_user_data);
             const self: *Context = user_data.self;
+            self.io.assert_io_thread();
             const packet_list: *Packet = user_data.packet;
             const operation = operation_vsr.cast(Client.StateMachine);
             assert(packet_list.operation == @intFromEnum(operation));
@@ -843,6 +858,7 @@ pub fn ContextType(
                 reply: []const u8,
             },
         ) void {
+            self.io.assert_io_thread();
             const result = completion catch |err| {
                 packet.status = switch (err) {
                     error.TooMuchData => .too_much_data,
@@ -883,6 +899,7 @@ pub fn ContextType(
 
         fn vtable_submit_fn(context: *anyopaque, packet_extern: *Packet.Extern) void {
             const self: *Context = @ptrCast(@alignCast(context));
+            self.io.assert_any_thread();
 
             // Packet is caller-allocated to enable elastic intrusive-link-list-based
             // memory management. However, some of Packet's fields are essentially private.
@@ -919,16 +936,22 @@ pub fn ContextType(
 
         fn vtable_completion_context_fn(context: *anyopaque) usize {
             const self: *Context = @ptrCast(@alignCast(context));
+            self.io.assert_any_thread();
             return self.completion_context;
         }
 
         fn vtable_deinit_fn(context: *anyopaque) void {
             const self: *Context = @ptrCast(@alignCast(context));
+            self.io.assert_any_thread();
 
             self.signal.stop();
             self.thread.join();
 
-            assert(self.submitted.pop() == null);
+            {
+                self.interface.locker.lock();
+                defer self.interface.locker.unlock();
+                assert(self.submitted.pop() == null);
+            }
             assert(self.pending.pop() == null);
 
             self.gpa.allocator().free(self.addresses_copy);
@@ -941,6 +964,7 @@ pub fn ContextType(
 
         fn vtable_init_parameters_fn(context: *anyopaque, out_parameters: *InitParameters) void {
             const self: *Context = @ptrCast(@alignCast(context));
+            self.io.assert_any_thread();
             assert(self.signal.status() == .running);
 
             out_parameters.cluster_id = self.cluster_id;
