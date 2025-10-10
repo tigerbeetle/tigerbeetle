@@ -1,5 +1,5 @@
 use ignore::Walk;
-use std::{env, fs, path::Path};
+use std::{env, fs, path::Path, process::Command};
 
 fn main() -> anyhow::Result<()> {
     let cargo_manifest_dir = env::var("CARGO_MANIFEST_DIR")?;
@@ -81,7 +81,22 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
 
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
     let zig_compiler = if cfg!(unix) {
-        format!("{tigerbeetle_root}/zig/zig")
+        let zig_path = format!("{tigerbeetle_root}/zig/zig");
+        if !fs::exists(&zig_path)? {
+            // Fallback to the system zig if installed
+            match Command::new("which").arg("zig").output() {
+                Ok(output) => {
+                    if output.status.success() {
+                        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                        if !path.is_empty() {
+                            zig_path = path;
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+        }
+        zig_path
     } else if cfg!(windows) {
         format!("{tigerbeetle_root}/zig/zig.exe")
     } else {
