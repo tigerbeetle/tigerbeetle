@@ -81,7 +81,7 @@ fn build_tigerbeetle(manifest_dir: &str) -> anyhow::Result<()> {
 
     let tigerbeetle_root = format!("{manifest_dir}/../../..");
     let zig_compiler = if cfg!(unix) {
-        let zig_path = format!("{tigerbeetle_root}/zig/zig");
+        let mut zig_path = format!("{tigerbeetle_root}/zig/zig");
         if !fs::exists(&zig_path)? {
             // Fallback to the system zig if installed
             match Command::new("which").arg("zig").output() {
