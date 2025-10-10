@@ -3,6 +3,30 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle (unreleased)
+
+Released: 2025-10-10
+
+### Features
+
+- [#3299](https://github.com/tigerbeetle/tigerbeetle/pull/3299)
+
+  Rephrase the "debits first" explanation in documentation.
+
+### Internals
+
+- [#3296](https://github.com/tigerbeetle/tigerbeetle/pull/3296)
+
+  Implement `BoundedArray` from scratch.
+
+- [#3292](https://github.com/tigerbeetle/tigerbeetle/pull/3292)
+
+  Remove needless use of bounded array from REPL.
+
+### TigerTracks 🎧
+
+- [voyager](https://www.youtube.com/watch?v=BLVI-RS9srI)
+
 ## TigerBeetle 0.16.61
 
 Released: 2025-10-03
