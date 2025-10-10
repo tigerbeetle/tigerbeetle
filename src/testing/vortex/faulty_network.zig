@@ -50,11 +50,6 @@ const Faults = struct {
     }
 };
 
-pub const Mapping = struct {
-    remote: std.net.Address,
-    origin: std.net.Address,
-};
-
 const Pipe = struct {
     io: *IO,
     connection: *Connection,
@@ -453,7 +448,8 @@ const Connection = struct {
 const Proxy = struct {
     io: *IO,
     accept_fd: std.posix.socket_t,
-    mapping: Mapping,
+    origin_address: std.net.Address, // The proxy's address.
+    remote_address: std.net.Address, // The replica's address.
     connections: [constants.vortex.connections_count_max]Connection,
 
     fn deinit(proxy: *Proxy) void {
@@ -478,14 +474,14 @@ pub const Network = struct {
 
     pub fn listen(
         allocator: std.mem.Allocator,
-        io: *IO,
-        address_mappings: []Mapping,
         prng: *stdx.PRNG,
+        io: *IO,
+        replica_ports: []const u16,
     ) !*Network {
         const network = try allocator.create(Network);
         errdefer allocator.destroy(network);
 
-        const proxies = try allocator.alloc(Proxy, address_mappings.len);
+        const proxies = try allocator.alloc(Proxy, replica_ports.len);
         errdefer allocator.free(proxies);
 
         network.* = .{
@@ -496,19 +492,18 @@ pub const Network = struct {
         };
 
         var proxies_initialized: usize = 0;
-        errdefer for (proxies[0..proxies_initialized]) |*proxy| {
-            proxy.deinit();
-        };
+        errdefer for (proxies[0..proxies_initialized]) |*proxy| proxy.deinit();
 
-        for (address_mappings, proxies, 0..) |mapping, *proxy, replica_index| {
-            const listen_fd = try io.open_socket_tcp(mapping.origin.any.family, tcp_options);
+        // Proxies get an unused port from the ephemeral port range (usually 32768-60999; see
+        // /proc/sys/net/ipv4/ip_local_port_range) by listening on port=0.
+        // We assume that replicas' ports are from outside of that range and cannot conflict.
+        for (proxies, replica_ports, 0..) |*proxy, replica_port, replica_index| {
+            const Address = std.net.Address;
+            const replica_address = Address.parseIp("127.0.0.1", replica_port) catch unreachable;
+            const listen_address = Address.parseIp("127.0.0.1", 0) catch unreachable;
+            const listen_fd = try io.open_socket_tcp(std.posix.AF.INET, tcp_options);
             errdefer io.close_socket(listen_fd);
 
-            proxy.io = io;
-            proxy.accept_fd = listen_fd;
-            proxy.mapping = mapping;
-
-            // Initialize all proxies, connections, and pipes.
             for (&proxy.connections, 0..) |*connection, connection_index| {
                 connection.* = .{
                     .io = io,
@@ -516,29 +511,22 @@ pub const Network = struct {
                     .state = .free,
                     .replica_index = replica_index,
                     .connection_index = connection_index,
-                    .origin_to_remote_pipe = .{
-                        .io = io,
-                        .connection = connection,
-                    },
-                    .remote_to_origin_pipe = .{
-                        .io = io,
-                        .connection = connection,
-                    },
+                    .origin_to_remote_pipe = .{ .io = io, .connection = connection },
+                    .remote_to_origin_pipe = .{ .io = io, .connection = connection },
                 };
             }
 
-            std.posix.bind(
-                listen_fd,
-                &mapping.origin.any,
-                mapping.origin.getOsSockLen(),
-            ) catch |err| {
-                log.err("failed to bind {any}", .{mapping.origin});
-                return err;
+            const origin_address = try io.listen(listen_fd, listen_address, .{ .backlog = 64 });
+            proxy.* = .{
+                .io = io,
+                .accept_fd = listen_fd,
+                .origin_address = origin_address,
+                .remote_address = replica_address,
+                .connections = proxy.connections,
             };
-            try std.posix.listen(listen_fd, constants.vsr.tcp_backlog);
-
-            log.info("proxying {any} -> {any}", .{ mapping.origin, mapping.remote });
             proxies_initialized += 1;
+
+            log.debug("proxying {any} -> {any}", .{ origin_address, replica_address });
         }
 
         return network;
@@ -564,7 +552,7 @@ pub const Network = struct {
                     });
 
                     connection.state = .accepting;
-                    connection.remote_address = proxy.mapping.remote;
+                    connection.remote_address = proxy.remote_address;
                     connection.origin_fd = IO.INVALID_SOCKET;
                     connection.remote_fd = IO.INVALID_SOCKET;
 

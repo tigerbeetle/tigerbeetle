@@ -56,46 +56,6 @@ const log = std.log.scoped(.supervisor);
 
 const assert = std.debug.assert;
 
-const replica_ports_actual = constants.vortex.replica_ports_actual;
-const replica_ports_proxied = constants.vortex.replica_ports_proxied;
-
-// Calculate replica ports for each replica. Because
-// we want replicas to communicate over the proxies, we use those ports
-// for their peers, but we must use the replica's actual port for itself
-// (because that's the port it listens to).
-const replica_ports_for_replicas = blk: {
-    var result: [constants.vsr.replicas_max][constants.vsr.replicas_max]u16 = undefined;
-    for (0..constants.vsr.replicas_max) |replica_self| {
-        var ports: [constants.vsr.replicas_max]u16 = undefined;
-        for (0..constants.vsr.replicas_max) |replica_other| {
-            ports[replica_other] = if (replica_self == replica_other)
-                replica_ports_actual[replica_other]
-            else
-                replica_ports_proxied[replica_other];
-        }
-        result[replica_self] = ports;
-    }
-    break :blk result;
-};
-
-fn replica_addresses_for_replica(
-    allocator: std.mem.Allocator,
-    replica_count: u8,
-    replica_index: u8,
-) ![]const u8 {
-    return try comma_separate_ports(
-        allocator,
-        replica_ports_for_replicas[replica_index][0..replica_count],
-    );
-}
-
-fn replica_addresses_for_clients(
-    allocator: std.mem.Allocator,
-    replica_count: u8,
-) ![]const u8 {
-    return try comma_separate_ports(allocator, replica_ports_proxied[0..replica_count]);
-}
-
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
     test_duration: stdx.Duration = .minutes(1),
@@ -145,6 +105,14 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
 
+    var network = try faulty_network.Network.listen(
+        allocator,
+        &prng,
+        &io,
+        constants.vortex.replica_ports_actual[0..args.replica_count],
+    );
+    defer network.destroy(allocator);
+
     var replicas: [constants.vsr.replicas_max]*Replica = undefined;
     var replicas_initialized: usize = 0;
     defer {
@@ -183,12 +151,21 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             std.process.exit(1);
         };
 
-        // Start replica.
+        var replica_ports: [constants.vsr.replicas_max]u16 = undefined;
+        for (replica_ports[0..args.replica_count], 0..) |*replica_port, i| {
+            if (replica_index == i) {
+                replica_port.* = network.proxies[i].remote_address.getPort();
+            } else {
+                replica_port.* = network.proxies[i].origin_address.getPort();
+            }
+        }
+
         var replica = try Replica.create(
             allocator,
             args.tigerbeetle_executable,
             args.replica_count,
             @intCast(replica_index),
+            replica_ports,
             datafile,
             args.log_debug,
         );
@@ -199,31 +176,12 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         try replica.start();
     }
 
-    // Construct mappings between proxy and underlying replicas.
-    var mappings: [constants.vsr.replicas_max]faulty_network.Mapping = undefined;
-    for (0..args.replica_count) |replica_index| {
-        mappings[replica_index] = .{
-            .origin = .{ .in = std.net.Ip4Address.init(
-                .{ 0, 0, 0, 0 },
-                replica_ports_proxied[replica_index],
-            ) },
-            .remote = .{ .in = std.net.Ip4Address.init(
-                .{ 0, 0, 0, 0 },
-                replica_ports_actual[replica_index],
-            ) },
-        };
+    var proxy_ports: [constants.vsr.replicas_max]u16 = undefined;
+    for (proxy_ports[0..args.replica_count], 0..) |*port, i| {
+        port.* = network.proxies[i].origin_address.getPort();
     }
 
-    // Start fault-injecting network (a set of proxies).
-    var network = try faulty_network.Network.listen(
-        allocator,
-        &io,
-        mappings[0..args.replica_count],
-        &prng,
-    );
-    defer network.destroy(allocator);
-
-    const workload = try Workload.spawn(allocator, args, &io);
+    const workload = try Workload.spawn(allocator, &io, proxy_ports[0..args.replica_count], args);
     defer {
         if (workload.process.state() == .running) {
             _ = workload.process.terminate() catch {};
@@ -558,6 +516,7 @@ const Replica = struct {
     executable_path: []const u8,
     replica_count: u8,
     replica_index: u8,
+    replica_ports: [constants.vsr.replicas_max]u16,
     datafile: []const u8,
     log_debug: bool,
     process: ?*LoggedProcess,
@@ -567,9 +526,12 @@ const Replica = struct {
         executable_path: []const u8,
         replica_count: u8,
         replica_index: u8,
+        replica_ports: [constants.vsr.replicas_max]u16,
         datafile: []const u8,
         log_debug: bool,
     ) !*Replica {
+        assert(replica_index < replica_count);
+
         const self = try allocator.create(Replica);
         errdefer allocator.destroy(self);
 
@@ -578,6 +540,7 @@ const Replica = struct {
             .executable_path = executable_path,
             .replica_count = replica_count,
             .replica_index = replica_index,
+            .replica_ports = replica_ports,
             .datafile = datafile,
             .log_debug = log_debug,
             .process = null,
@@ -612,13 +575,11 @@ const Replica = struct {
             process.destroy(self.allocator);
         }
 
-        var addresses_buffer: [128]u8 = undefined;
-        const replica_addresses = try replica_addresses_for_replica(
-            self.allocator,
-            self.replica_count,
-            self.replica_index,
-        );
+        const replica_addresses =
+            try comma_separate_ports(self.allocator, self.replica_ports[0..self.replica_count]);
         defer self.allocator.free(replica_addresses);
+
+        var addresses_buffer: [128]u8 = undefined;
         const addresses_arg = try std.fmt.bufPrint(
             addresses_buffer[0..],
             "--addresses={s}",
@@ -680,7 +641,12 @@ const Workload = struct {
 
     requests_finished: Requests = Requests.init(),
 
-    pub fn spawn(allocator: std.mem.Allocator, args: CLIArgs, io: *IO) !*Workload {
+    pub fn spawn(
+        allocator: std.mem.Allocator,
+        io: *IO,
+        proxy_ports: []u16,
+        args: CLIArgs,
+    ) !*Workload {
         var vortex_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
         const vortex_path = try std.fs.selfExePath(&vortex_path_buffer);
 
@@ -701,13 +667,11 @@ const Workload = struct {
             .{driver_command_selected},
         );
 
-        const replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
-        defer allocator.free(replica_addresses);
-        const arg_addresses = try std.fmt.allocPrint(
-            allocator,
-            "--addresses={s}",
-            .{replica_addresses},
-        );
+        const proxy_addresses = try comma_separate_ports(allocator, proxy_ports);
+        defer allocator.free(proxy_addresses);
+
+        const arg_addresses =
+            try std.fmt.allocPrint(allocator, "--addresses={s}", .{proxy_addresses});
         defer allocator.free(arg_addresses);
 
         const argv = &.{
