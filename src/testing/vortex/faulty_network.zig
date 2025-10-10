@@ -458,7 +458,7 @@ const Proxy = struct {
     }
 };
 
-pub const tcp_options: IO.TCPOptions = .{
+const tcp_options: IO.TCPOptions = .{
     .rcvbuf = 0,
     .sndbuf = 0,
     .keepalive = null,
@@ -504,6 +504,15 @@ pub const Network = struct {
             const listen_fd = try io.open_socket_tcp(std.posix.AF.INET, tcp_options);
             errdefer io.close_socket(listen_fd);
 
+            const origin_address = try io.listen(listen_fd, listen_address, .{ .backlog = 64 });
+            proxy.* = .{
+                .io = io,
+                .accept_fd = listen_fd,
+                .origin_address = origin_address,
+                .remote_address = replica_address,
+                .connections = undefined,
+            };
+
             for (&proxy.connections, 0..) |*connection, connection_index| {
                 connection.* = .{
                     .io = io,
@@ -515,21 +524,18 @@ pub const Network = struct {
                     .remote_to_origin_pipe = .{ .io = io, .connection = connection },
                 };
             }
-
-            const origin_address = try io.listen(listen_fd, listen_address, .{ .backlog = 64 });
-            proxy.* = .{
-                .io = io,
-                .accept_fd = listen_fd,
-                .origin_address = origin_address,
-                .remote_address = replica_address,
-                .connections = proxy.connections,
-            };
             proxies_initialized += 1;
 
             log.debug("proxying {any} -> {any}", .{ origin_address, replica_address });
         }
 
         return network;
+    }
+
+    pub fn destroy(network: *Network, allocator: std.mem.Allocator) void {
+        for (network.proxies) |*proxy| proxy.deinit();
+        allocator.free(network.proxies);
+        allocator.destroy(network);
     }
 
     pub fn tick(network: *Network) void {
@@ -566,13 +572,5 @@ pub const Network = struct {
                 }
             }
         }
-    }
-
-    pub fn destroy(network: *Network, allocator: std.mem.Allocator) void {
-        for (network.proxies) |*proxy| {
-            proxy.deinit();
-        }
-        allocator.free(network.proxies);
-        allocator.destroy(network);
     }
 };
