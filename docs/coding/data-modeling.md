@@ -197,16 +197,18 @@ advantage of LSM optimizations, which leads to higher database throughput.
 
 TigerBeetle clients include an `id()` function to generate IDs using the recommended scheme.
 
-TigerBeetle IDs consist of:
+TigerBeetle ID is a 128-bit number where:
 
-- 48 bits of (millisecond) timestamp (high-order bits)
-- 80 bits of randomness (low-order bits)
+- the high 48 bits are a millisecond timestamp
+- the low 80 bits are random
+
+```
+id = (timestamp << 80) | random
+```
 
 When creating multiple objects during the same millisecond, we increment the random bytes rather
-than generating new random bytes. Furthermore, it is important that IDs are stored in little-endian
-with the random bytes as the lower-order bits and the timestamp as the higher-order bits. These
-details ensure that a sequence of objects have strictly increasing IDs according to the server,
-which improves database optimization.
+than generating new random bytes. These details ensure that a sequence of objects have strictly
+increasing IDs according to the server, which improves database optimization.
 
 Similar to ULIDs and UUIDv7s, these IDs have the following benefits:
 
