@@ -253,6 +253,7 @@ fn command_start(
     var message_pool = try MessagePool.init(gpa, .{ .replica = .{
         .members_count = args.addresses.count_as(u8),
         .pipeline_requests_limit = args.pipeline_requests_limit,
+        .message_bus = .tcp,
     } });
     defer message_pool.deinit(gpa);
 
