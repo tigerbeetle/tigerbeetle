@@ -70,26 +70,26 @@ pub const TestContext = struct {
         /// including deprecated ones used by old clients.
         const Versions: []const Operations = &.{
             .{
-                .create_accounts = StateMachine.Operation.create_accounts,
-                .create_transfers = StateMachine.Operation.create_transfers,
-                .lookup_accounts = StateMachine.Operation.lookup_accounts,
-                .lookup_transfers = StateMachine.Operation.lookup_transfers,
-                .get_account_transfers = StateMachine.Operation.get_account_transfers,
-                .get_account_balances = StateMachine.Operation.get_account_balances,
-                .query_accounts = StateMachine.Operation.query_accounts,
-                .query_transfers = StateMachine.Operation.query_transfers,
-                .get_change_events = StateMachine.Operation.get_change_events,
+                .create_accounts = .create_accounts,
+                .create_transfers = .create_transfers,
+                .lookup_accounts = .lookup_accounts,
+                .lookup_transfers = .lookup_transfers,
+                .get_account_transfers = .get_account_transfers,
+                .get_account_balances = .get_account_balances,
+                .query_accounts = .query_accounts,
+                .query_transfers = .query_transfers,
+                .get_change_events = .get_change_events,
             },
             .{
-                .create_accounts = StateMachine.Operation.deprecated_create_accounts,
-                .create_transfers = StateMachine.Operation.deprecated_create_transfers,
-                .lookup_accounts = StateMachine.Operation.deprecated_lookup_accounts,
-                .lookup_transfers = StateMachine.Operation.deprecated_lookup_transfers,
-                .get_account_transfers = StateMachine.Operation.deprecated_get_account_transfers,
-                .get_account_balances = StateMachine.Operation.deprecated_get_account_balances,
-                .query_accounts = StateMachine.Operation.deprecated_query_accounts,
-                .query_transfers = StateMachine.Operation.deprecated_query_transfers,
-                .get_change_events = StateMachine.Operation.get_change_events,
+                .create_accounts = .deprecated_create_accounts_unbatched,
+                .create_transfers = .deprecated_create_transfers_unbatched,
+                .lookup_accounts = .deprecated_lookup_accounts_unbatched,
+                .lookup_transfers = .deprecated_lookup_transfers_unbatched,
+                .get_account_transfers = .deprecated_get_account_transfers_unbatched,
+                .get_account_balances = .deprecated_get_account_balances_unbatched,
+                .query_accounts = .deprecated_query_accounts_unbatched,
+                .query_transfers = .deprecated_query_transfers_unbatched,
+                .get_change_events = .get_change_events,
             },
         };
 
@@ -2852,19 +2852,19 @@ test "StateMachine: batch_elements_max" {
 
     // No multi-batch encode.
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_accounts,
+        .deprecated_create_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_accounts,
+        .deprecated_lookup_accounts_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_create_transfers,
+        .deprecated_create_transfers_unbatched,
         message_body_size_max,
     ));
     try testing.expectEqual(@as(u32, 8190), StateMachine.operation_event_max(
-        .deprecated_lookup_transfers,
+        .deprecated_lookup_transfers_unbatched,
         message_body_size_max,
     ));
 

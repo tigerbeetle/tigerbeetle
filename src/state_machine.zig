@@ -111,19 +111,31 @@ pub fn StateMachineType(
             pub const batch_max = struct {
                 pub const create_accounts: u32 = @max(
                     operation_event_max(.create_accounts, message_body_size_max),
-                    operation_event_max(.deprecated_create_accounts, message_body_size_max),
+                    operation_event_max(
+                        .deprecated_create_accounts_unbatched,
+                        message_body_size_max,
+                    ),
                 );
                 pub const create_transfers: u32 = @max(
                     operation_event_max(.create_transfers, message_body_size_max),
-                    operation_event_max(.deprecated_create_transfers, message_body_size_max),
+                    operation_event_max(
+                        .deprecated_create_transfers_unbatched,
+                        message_body_size_max,
+                    ),
                 );
                 pub const lookup_accounts: u32 = @max(
                     operation_event_max(.lookup_accounts, message_body_size_max),
-                    operation_event_max(.deprecated_lookup_accounts, message_body_size_max),
+                    operation_event_max(
+                        .deprecated_lookup_accounts_unbatched,
+                        message_body_size_max,
+                    ),
                 );
                 pub const lookup_transfers: u32 = @max(
                     operation_event_max(.lookup_transfers, message_body_size_max),
-                    operation_event_max(.deprecated_lookup_transfers, message_body_size_max),
+                    operation_event_max(
+                        .deprecated_lookup_transfers_unbatched,
+                        message_body_size_max,
+                    ),
                 );
 
                 comptime {
@@ -528,14 +540,14 @@ pub fn StateMachineType(
                 .query_transfers => QueryFilter,
                 .get_change_events => ChangeEventsFilter,
 
-                .deprecated_create_accounts => Account,
-                .deprecated_create_transfers => Transfer,
-                .deprecated_lookup_accounts => u128,
-                .deprecated_lookup_transfers => u128,
-                .deprecated_get_account_transfers => AccountFilter,
-                .deprecated_get_account_balances => AccountFilter,
-                .deprecated_query_accounts => QueryFilter,
-                .deprecated_query_transfers => QueryFilter,
+                .deprecated_create_accounts_unbatched => Account,
+                .deprecated_create_transfers_unbatched => Transfer,
+                .deprecated_lookup_accounts_unbatched => u128,
+                .deprecated_lookup_transfers_unbatched => u128,
+                .deprecated_get_account_transfers_unbatched => AccountFilter,
+                .deprecated_get_account_balances_unbatched => AccountFilter,
+                .deprecated_query_accounts_unbatched => QueryFilter,
+                .deprecated_query_transfers_unbatched => QueryFilter,
             };
         }
 
@@ -552,14 +564,14 @@ pub fn StateMachineType(
                 .query_transfers => Transfer,
                 .get_change_events => ChangeEvent,
 
-                .deprecated_create_accounts => CreateAccountsResult,
-                .deprecated_create_transfers => CreateTransfersResult,
-                .deprecated_lookup_accounts => Account,
-                .deprecated_lookup_transfers => Transfer,
-                .deprecated_get_account_transfers => Transfer,
-                .deprecated_get_account_balances => AccountBalance,
-                .deprecated_query_accounts => Account,
-                .deprecated_query_transfers => Transfer,
+                .deprecated_create_accounts_unbatched => CreateAccountsResult,
+                .deprecated_create_transfers_unbatched => CreateTransfersResult,
+                .deprecated_lookup_accounts_unbatched => Account,
+                .deprecated_lookup_transfers_unbatched => Transfer,
+                .deprecated_get_account_transfers_unbatched => Transfer,
+                .deprecated_get_account_balances_unbatched => AccountBalance,
+                .deprecated_query_accounts_unbatched => Account,
+                .deprecated_query_transfers_unbatched => Transfer,
             };
         }
 
@@ -595,14 +607,14 @@ pub fn StateMachineType(
                 .query_transfers => false,
                 .get_change_events => false,
 
-                .deprecated_create_accounts => true,
-                .deprecated_create_transfers => true,
-                .deprecated_lookup_accounts => true,
-                .deprecated_lookup_transfers => true,
-                .deprecated_get_account_transfers => false,
-                .deprecated_get_account_balances => false,
-                .deprecated_query_accounts => false,
-                .deprecated_query_transfers => false,
+                .deprecated_create_accounts_unbatched => true,
+                .deprecated_create_transfers_unbatched => true,
+                .deprecated_lookup_accounts_unbatched => true,
+                .deprecated_lookup_transfers_unbatched => true,
+                .deprecated_get_account_transfers_unbatched => false,
+                .deprecated_get_account_balances_unbatched => false,
+                .deprecated_query_accounts_unbatched => false,
+                .deprecated_query_transfers_unbatched => false,
             };
         }
 
@@ -624,14 +636,14 @@ pub fn StateMachineType(
 
                 .get_change_events => false,
 
-                .deprecated_create_accounts,
-                .deprecated_create_transfers,
-                .deprecated_lookup_accounts,
-                .deprecated_lookup_transfers,
-                .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                .deprecated_create_accounts_unbatched,
+                .deprecated_create_transfers_unbatched,
+                .deprecated_lookup_accounts_unbatched,
+                .deprecated_lookup_transfers_unbatched,
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 => false,
             };
         }
@@ -734,10 +746,10 @@ pub fn StateMachineType(
                 .create_transfers,
                 .lookup_accounts,
                 .lookup_transfers,
-                .deprecated_create_accounts,
-                .deprecated_create_transfers,
-                .deprecated_lookup_accounts,
-                .deprecated_lookup_transfers,
+                .deprecated_create_accounts_unbatched,
+                .deprecated_create_transfers_unbatched,
+                .deprecated_lookup_accounts_unbatched,
+                .deprecated_lookup_transfers_unbatched,
                 => |operation_comptime| count: {
                     // For these types of operations, each event produces at most one result.
                     comptime assert(StateMachine.operation_is_batchable(operation_comptime));
@@ -756,10 +768,10 @@ pub fn StateMachineType(
                 .get_account_balances,
                 .query_accounts,
                 .query_transfers,
-                .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 .get_change_events,
                 => |operation_comptime| count: {
                     // For queries, each event produces up to `limit` events.
@@ -944,35 +956,35 @@ pub fn StateMachineType(
             fn from_operation(comptime operation: Operation) MetricEnum {
                 return switch (operation) {
                     .create_accounts,
-                    .deprecated_create_accounts,
+                    .deprecated_create_accounts_unbatched,
                     => .create_accounts,
 
                     .create_transfers,
-                    .deprecated_create_transfers,
+                    .deprecated_create_transfers_unbatched,
                     => .create_transfers,
 
                     .lookup_accounts,
-                    .deprecated_lookup_accounts,
+                    .deprecated_lookup_accounts_unbatched,
                     => .lookup_accounts,
 
                     .lookup_transfers,
-                    .deprecated_lookup_transfers,
+                    .deprecated_lookup_transfers_unbatched,
                     => .lookup_transfers,
 
                     .get_account_transfers,
-                    .deprecated_get_account_transfers,
+                    .deprecated_get_account_transfers_unbatched,
                     => .get_account_transfers,
 
                     .get_account_balances,
-                    .deprecated_get_account_balances,
+                    .deprecated_get_account_balances_unbatched,
                     => .get_account_balances,
 
                     .query_accounts,
-                    .deprecated_query_accounts,
+                    .deprecated_query_accounts_unbatched,
                     => .query_accounts,
 
                     .query_transfers,
-                    .deprecated_query_transfers,
+                    .deprecated_query_transfers_unbatched,
                     => .query_transfers,
 
                     .get_change_events,
@@ -1061,10 +1073,10 @@ pub fn StateMachineType(
                         .query_transfers,
                         .get_change_events,
 
-                        .deprecated_get_account_transfers,
-                        .deprecated_get_account_balances,
-                        .deprecated_query_accounts,
-                        .deprecated_query_transfers,
+                        .deprecated_get_account_transfers_unbatched,
+                        .deprecated_get_account_balances_unbatched,
+                        .deprecated_query_accounts_unbatched,
+                        .deprecated_query_transfers_unbatched,
                     };
                     var batch_count_max: u16 = 0;
                     var buffer_size_max: usize = 0;
@@ -1073,16 +1085,16 @@ pub fn StateMachineType(
                         // the same as `ResultType(operation)`.
                         const object_size: usize = switch (operation) {
                             .get_account_transfers,
-                            .deprecated_get_account_transfers,
+                            .deprecated_get_account_transfers_unbatched,
                             => @sizeOf(Transfer),
                             .get_account_balances,
-                            .deprecated_get_account_balances,
+                            .deprecated_get_account_balances_unbatched,
                             => @sizeOf(AccountEvent),
                             .query_accounts,
-                            .deprecated_query_accounts,
+                            .deprecated_query_accounts_unbatched,
                             => @sizeOf(Account),
                             .query_transfers,
-                            .deprecated_query_transfers,
+                            .deprecated_query_transfers_unbatched,
                             => @sizeOf(Transfer),
                             .get_change_events => @sizeOf(AccountEvent),
                             else => comptime unreachable,
@@ -1305,14 +1317,14 @@ pub fn StateMachineType(
                 .query_transfers => 0,
                 .get_change_events => 0,
 
-                .deprecated_create_accounts => @divExact(batch.len, @sizeOf(Account)),
-                .deprecated_create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
-                .deprecated_lookup_accounts => 0,
-                .deprecated_lookup_transfers => 0,
-                .deprecated_get_account_transfers => 0,
-                .deprecated_get_account_balances => 0,
-                .deprecated_query_accounts => 0,
-                .deprecated_query_transfers => 0,
+                .deprecated_create_accounts_unbatched => @divExact(batch.len, @sizeOf(Account)),
+                .deprecated_create_transfers_unbatched => @divExact(batch.len, @sizeOf(Transfer)),
+                .deprecated_lookup_accounts_unbatched => 0,
+                .deprecated_lookup_transfers_unbatched => 0,
+                .deprecated_get_account_transfers_unbatched => 0,
+                .deprecated_get_account_balances_unbatched => 0,
+                .deprecated_query_accounts_unbatched => 0,
+                .deprecated_query_transfers_unbatched => 0,
             };
         }
 
@@ -1385,14 +1397,30 @@ pub fn StateMachineType(
                 .query_transfers => self.prefetch_query_transfers(),
                 .get_change_events => self.prefetch_get_change_events(),
 
-                .deprecated_create_accounts => self.prefetch_create_accounts(),
-                .deprecated_create_transfers => self.prefetch_create_transfers(),
-                .deprecated_lookup_accounts => self.prefetch_lookup_accounts(),
-                .deprecated_lookup_transfers => self.prefetch_lookup_transfers(),
-                .deprecated_get_account_transfers => self.prefetch_get_account_transfers(),
-                .deprecated_get_account_balances => self.prefetch_get_account_balances(),
-                .deprecated_query_accounts => self.prefetch_query_accounts(),
-                .deprecated_query_transfers => self.prefetch_query_transfers(),
+                .deprecated_create_accounts_unbatched => {
+                    self.prefetch_create_accounts();
+                },
+                .deprecated_create_transfers_unbatched => {
+                    self.prefetch_create_transfers();
+                },
+                .deprecated_lookup_accounts_unbatched => {
+                    self.prefetch_lookup_accounts();
+                },
+                .deprecated_lookup_transfers_unbatched => {
+                    self.prefetch_lookup_transfers();
+                },
+                .deprecated_get_account_transfers_unbatched => {
+                    self.prefetch_get_account_transfers();
+                },
+                .deprecated_get_account_balances_unbatched => {
+                    self.prefetch_get_account_balances();
+                },
+                .deprecated_query_accounts_unbatched => {
+                    self.prefetch_query_accounts();
+                },
+                .deprecated_query_transfers_unbatched => {
+                    self.prefetch_query_transfers();
+                },
             }
         }
 
@@ -1413,7 +1441,7 @@ pub fn StateMachineType(
         fn prefetch_create_accounts(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_accounts or
-                self.prefetch_operation == .deprecated_create_accounts);
+                self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             const accounts = stdx.bytes_as_slice(
                 .exact,
@@ -1436,7 +1464,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_accounts or
-                self.prefetch_operation == .deprecated_create_accounts);
+                self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
             const accounts = stdx.bytes_as_slice(
@@ -1467,7 +1495,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_accounts or
-                self.prefetch_operation == .deprecated_create_accounts);
+                self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -1476,7 +1504,7 @@ pub fn StateMachineType(
         fn prefetch_create_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
-                self.prefetch_operation == .deprecated_create_transfers);
+                self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             const transfers = stdx.bytes_as_slice(
                 .exact,
@@ -1503,7 +1531,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
-                self.prefetch_operation == .deprecated_create_transfers);
+                self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
             const transfers = stdx.bytes_as_slice(
@@ -1550,7 +1578,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
-                self.prefetch_operation == .deprecated_create_transfers);
+                self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
             self.forest.grooves.transfers_pending.prefetch(
@@ -1565,7 +1593,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .create_transfers or
-                self.prefetch_operation == .deprecated_create_transfers);
+                self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -1574,7 +1602,7 @@ pub fn StateMachineType(
         fn prefetch_lookup_accounts(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .lookup_accounts or
-                self.prefetch_operation == .deprecated_lookup_accounts);
+                self.prefetch_operation == .deprecated_lookup_accounts_unbatched);
 
             const ids = stdx.bytes_as_slice(
                 .exact,
@@ -1595,7 +1623,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .lookup_accounts or
-                self.prefetch_operation == .deprecated_lookup_accounts);
+                self.prefetch_operation == .deprecated_lookup_accounts_unbatched);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -1604,7 +1632,7 @@ pub fn StateMachineType(
         fn prefetch_lookup_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .lookup_transfers or
-                self.prefetch_operation == .deprecated_lookup_transfers);
+                self.prefetch_operation == .deprecated_lookup_transfers_unbatched);
 
             const ids = stdx.bytes_as_slice(
                 .exact,
@@ -1625,7 +1653,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation == .lookup_transfers or
-                self.prefetch_operation == .deprecated_lookup_transfers);
+                self.prefetch_operation == .deprecated_lookup_transfers_unbatched);
 
             self.prefetch_context = .null;
             self.prefetch_finish();
@@ -1634,7 +1662,7 @@ pub fn StateMachineType(
         fn prefetch_get_account_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_transfers or
-                self.prefetch_operation.? == .deprecated_get_account_transfers);
+                self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
@@ -1649,7 +1677,7 @@ pub fn StateMachineType(
         ) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_transfers or
-                self.prefetch_operation.? == .deprecated_get_account_transfers);
+                self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -1706,7 +1734,7 @@ pub fn StateMachineType(
             const self: *StateMachine = ScanLookup.parent(.transfers, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_transfers or
-                self.prefetch_operation.? == .deprecated_get_account_transfers);
+                self.prefetch_operation.? == .deprecated_get_account_transfers_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -1723,7 +1751,7 @@ pub fn StateMachineType(
         fn prefetch_get_account_balances(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
-                self.prefetch_operation.? == .deprecated_get_account_balances);
+                self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
@@ -1750,7 +1778,7 @@ pub fn StateMachineType(
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
-                self.prefetch_operation.? == .deprecated_get_account_balances);
+                self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
@@ -1766,7 +1794,7 @@ pub fn StateMachineType(
         ) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
-                self.prefetch_operation.? == .deprecated_get_account_balances);
+                self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -1839,7 +1867,7 @@ pub fn StateMachineType(
             const self: *StateMachine = ScanLookup.parent(.account_balances, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .get_account_balances or
-                self.prefetch_operation.? == .deprecated_get_account_balances);
+                self.prefetch_operation.? == .deprecated_get_account_balances_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -1877,7 +1905,9 @@ pub fn StateMachineType(
                     if (filter_index == filters.len) return null;
                     return &filters[filter_index];
                 },
-                .deprecated_get_account_transfers, .deprecated_get_account_balances => {
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                => {
                     // Operations not encoded as multi-batch must have only a single filter.
                     assert(self.scan_lookup_results.items.len == 0);
                     const filter: *const AccountFilter = @alignCast(std.mem.bytesAsValue(
@@ -1999,7 +2029,7 @@ pub fn StateMachineType(
         fn prefetch_query_accounts(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_accounts or
-                self.prefetch_operation.? == .deprecated_query_accounts);
+                self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
@@ -2011,7 +2041,7 @@ pub fn StateMachineType(
         fn prefetch_query_accounts_scan(self: *StateMachine, filter: *const QueryFilter) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_accounts or
-                self.prefetch_operation.? == .deprecated_query_accounts);
+                self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -2073,7 +2103,7 @@ pub fn StateMachineType(
             const self: *StateMachine = ScanLookup.parent(.accounts, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_accounts or
-                self.prefetch_operation.? == .deprecated_query_accounts);
+                self.prefetch_operation.? == .deprecated_query_accounts_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -2090,7 +2120,7 @@ pub fn StateMachineType(
         fn prefetch_query_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_transfers or
-                self.prefetch_operation.? == .deprecated_query_transfers);
+                self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
             assert(self.scan_lookup == .null);
             assert(self.scan_lookup_buffer_index == 0);
             assert(self.scan_lookup_results.items.len == 0);
@@ -2102,7 +2132,7 @@ pub fn StateMachineType(
         fn prefetch_query_transfers_scan(self: *StateMachine, filter: *const QueryFilter) void {
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_transfers or
-                self.prefetch_operation.? == .deprecated_query_transfers);
+                self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -2163,7 +2193,7 @@ pub fn StateMachineType(
             const self: *StateMachine = ScanLookup.parent(.transfers, scan_lookup);
             assert(self.prefetch_input != null);
             assert(self.prefetch_operation.? == .query_transfers or
-                self.prefetch_operation.? == .deprecated_query_transfers);
+                self.prefetch_operation.? == .deprecated_query_transfers_unbatched);
             assert(self.scan_lookup_buffer_index < self.scan_lookup_buffer.len);
             maybe(self.scan_lookup_results.items.len > 0);
 
@@ -2201,7 +2231,7 @@ pub fn StateMachineType(
                     if (filter_index == filters.len) return null;
                     return &filters[filter_index];
                 },
-                .deprecated_query_accounts, .deprecated_query_transfers => {
+                .deprecated_query_accounts_unbatched, .deprecated_query_transfers_unbatched => {
                     // Operations not encoded as multi-batch must have only a single filter.
                     assert(self.scan_lookup_results.items.len == 0);
                     const filter: *const QueryFilter = @alignCast(std.mem.bytesAsValue(
@@ -2331,10 +2361,10 @@ pub fn StateMachineType(
                 },
                 .get_change_events => {},
 
-                .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 => {},
 
                 else => unreachable, // Not query operations.
@@ -2398,11 +2428,17 @@ pub fn StateMachineType(
                     // Also constrained by the maximum number of available prefetches.
                     const prefetch_transfers = @max(
                         operation_event_max(.lookup_transfers, self.batch_size_limit),
-                        operation_event_max(.deprecated_lookup_transfers, self.batch_size_limit),
+                        operation_event_max(
+                            .deprecated_lookup_transfers_unbatched,
+                            self.batch_size_limit,
+                        ),
                     );
                     const prefetch_accounts = @max(
                         operation_event_max(.lookup_accounts, self.batch_size_limit),
-                        operation_event_max(.deprecated_lookup_accounts, self.batch_size_limit),
+                        operation_event_max(
+                            .deprecated_lookup_accounts_unbatched,
+                            self.batch_size_limit,
+                        ),
                     );
 
                     break :limit_max @min(
@@ -2581,7 +2617,7 @@ pub fn StateMachineType(
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
+                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
             ) * @sizeOf(Transfer);
 
             const scan_lookup_buffer = stdx.bytes_as_slice(
@@ -2643,7 +2679,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
+                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
             );
             assert(result_count <= result_max);
             assert(self.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
@@ -2746,20 +2782,20 @@ pub fn StateMachineType(
                     output_buffer,
                 ),
 
-                inline .deprecated_create_accounts,
-                .deprecated_create_transfers,
-                .deprecated_lookup_accounts,
-                .deprecated_lookup_transfers,
+                inline .deprecated_create_accounts_unbatched,
+                .deprecated_create_transfers_unbatched,
+                .deprecated_lookup_accounts_unbatched,
+                .deprecated_lookup_transfers_unbatched,
                 => |operation_comptime| self.execute(
                     timestamp,
                     operation_comptime,
                     message_body_used,
                     output_buffer,
                 ),
-                inline .deprecated_get_account_transfers,
-                .deprecated_get_account_balances,
-                .deprecated_query_accounts,
-                .deprecated_query_transfers,
+                inline .deprecated_get_account_transfers_unbatched,
+                .deprecated_get_account_balances_unbatched,
+                .deprecated_query_accounts_unbatched,
+                .deprecated_query_transfers_unbatched,
                 => |operation_comptime| self.execute_query(
                     operation_comptime,
                     message_body_used,
@@ -2812,19 +2848,19 @@ pub fn StateMachineType(
             comptime assert(operation_is_batchable(operation));
 
             switch (operation) {
-                .deprecated_create_accounts,
-                .deprecated_create_transfers,
+                .deprecated_create_accounts_unbatched,
+                .deprecated_create_transfers_unbatched,
                 => return self.execute_create(
                     operation,
                     timestamp,
                     message_body_used,
                     output_buffer,
                 ),
-                .deprecated_lookup_accounts => return self.execute_lookup_accounts(
+                .deprecated_lookup_accounts_unbatched => return self.execute_lookup_accounts(
                     message_body_used,
                     output_buffer,
                 ),
-                .deprecated_lookup_transfers => return self.execute_lookup_transfers(
+                .deprecated_lookup_transfers_unbatched => return self.execute_lookup_transfers(
                     message_body_used,
                     output_buffer,
                 ),
@@ -2926,22 +2962,22 @@ pub fn StateMachineType(
                     output_buffer,
                 ),
 
-                .deprecated_get_account_transfers => self.execute_get_account_transfers(
+                .deprecated_get_account_transfers_unbatched => self.execute_get_account_transfers(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
                 ),
-                .deprecated_get_account_balances => self.execute_get_account_balances(
+                .deprecated_get_account_balances_unbatched => self.execute_get_account_balances(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
                 ),
-                .deprecated_query_transfers => self.execute_query_transfers(
+                .deprecated_query_transfers_unbatched => self.execute_query_transfers(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
                 ),
-                .deprecated_query_accounts => self.execute_query_accounts(
+                .deprecated_query_accounts_unbatched => self.execute_query_accounts(
                     message_body_used,
                     self.scan_lookup_buffer[0..result_size],
                     output_buffer,
@@ -3088,12 +3124,12 @@ pub fn StateMachineType(
         fn scope_open(self: *StateMachine, operation: Operation) void {
             switch (operation) {
                 .create_accounts,
-                .deprecated_create_accounts,
+                .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_open();
                 },
                 .create_transfers,
-                .deprecated_create_transfers,
+                .deprecated_create_transfers_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_open();
                     self.forest.grooves.transfers.scope_open();
@@ -3107,12 +3143,12 @@ pub fn StateMachineType(
         fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
             switch (operation) {
                 .create_accounts,
-                .deprecated_create_accounts,
+                .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
                 },
                 .create_transfers,
-                .deprecated_create_transfers,
+                .deprecated_create_transfers_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
                     self.forest.grooves.transfers.scope_close(mode);
@@ -3132,8 +3168,8 @@ pub fn StateMachineType(
         ) usize {
             comptime assert(operation == .create_accounts or
                 operation == .create_transfers or
-                operation == .deprecated_create_accounts or
-                operation == .deprecated_create_transfers);
+                operation == .deprecated_create_accounts_unbatched or
+                operation == .deprecated_create_transfers_unbatched);
 
             const Event = EventType(operation);
             const Result = ResultType(operation);
@@ -3186,10 +3222,10 @@ pub fn StateMachineType(
                     assert(TimestampRange.valid(timestamp_event));
 
                     break :result switch (operation) {
-                        .deprecated_create_accounts,
+                        .deprecated_create_accounts_unbatched,
                         .create_accounts,
                         => self.create_account(timestamp_event, event),
-                        .deprecated_create_transfers,
+                        .deprecated_create_transfers_unbatched,
                         .create_transfers,
                         => self.create_transfer(timestamp_event, event),
                         else => comptime unreachable,
@@ -3258,14 +3294,14 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .create_accounts,
-                .deprecated_create_accounts,
+                .deprecated_create_accounts_unbatched,
                 => {
                     comptime assert(@TypeOf(result) == CreateAccountResult);
                     // The `create_accounts` error codes do not depend on transient system status.
                     return;
                 },
                 .create_transfers,
-                .deprecated_create_transfers,
+                .deprecated_create_transfers_unbatched,
                 => {
                     comptime assert(@TypeOf(result) == CreateTransferResult);
 
@@ -4478,7 +4514,7 @@ pub fn StateMachineType(
 
             const result_max: u32 = @max(
                 operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers, self.batch_size_limit),
+                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
             );
             assert(result_count <= result_max);
 
@@ -4581,14 +4617,20 @@ pub fn StateMachineType(
         pub fn forest_options(options: Options) Forest.GroovesOptions {
             const prefetch_create_accounts_limit: u32 = @max(
                 operation_event_max(.create_accounts, options.batch_size_limit),
-                operation_event_max(.deprecated_create_accounts, options.batch_size_limit),
+                operation_event_max(
+                    .deprecated_create_accounts_unbatched,
+                    options.batch_size_limit,
+                ),
             );
             assert(prefetch_create_accounts_limit > 0);
             assert(prefetch_create_accounts_limit <= machine_constants.batch_max.create_accounts);
 
             const prefetch_lookup_accounts_limit: u32 = @max(
                 operation_event_max(.lookup_accounts, options.batch_size_limit),
-                operation_event_max(.deprecated_lookup_accounts, options.batch_size_limit),
+                operation_event_max(
+                    .deprecated_lookup_accounts_unbatched,
+                    options.batch_size_limit,
+                ),
             );
             assert(prefetch_lookup_accounts_limit > 0);
             assert(prefetch_lookup_accounts_limit <= machine_constants.batch_max.lookup_accounts);
@@ -4596,14 +4638,20 @@ pub fn StateMachineType(
 
             const prefetch_create_transfers_limit: u32 = @max(
                 operation_event_max(.create_transfers, options.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers, options.batch_size_limit),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    options.batch_size_limit,
+                ),
             );
             assert(prefetch_create_transfers_limit > 0);
             assert(prefetch_create_transfers_limit <= machine_constants.batch_max.create_transfers);
 
             const prefetch_lookup_transfers_limit: u32 = @max(
                 operation_event_max(.lookup_transfers, options.batch_size_limit),
-                operation_event_max(.deprecated_lookup_transfers, options.batch_size_limit),
+                operation_event_max(
+                    .deprecated_lookup_transfers_unbatched,
+                    options.batch_size_limit,
+                ),
             );
             assert(prefetch_lookup_transfers_limit > 0);
             assert(prefetch_lookup_transfers_limit <= machine_constants.batch_max.lookup_transfers);
@@ -4755,14 +4803,14 @@ pub fn StateMachineType(
 
             const batch_create_accounts: u32 = @max(
                 operation_event_max(.create_accounts, batch_size_limit),
-                operation_event_max(.deprecated_create_accounts, batch_size_limit),
+                operation_event_max(.deprecated_create_accounts_unbatched, batch_size_limit),
             );
             assert(batch_create_accounts > 0);
             assert(batch_create_accounts <= machine_constants.batch_max.create_accounts);
 
             const batch_create_transfers: u32 = @max(
                 operation_event_max(.create_transfers, batch_size_limit),
-                operation_event_max(.deprecated_create_transfers, batch_size_limit),
+                operation_event_max(.deprecated_create_transfers_unbatched, batch_size_limit),
             );
             assert(batch_create_transfers > 0);
             assert(batch_create_transfers <= machine_constants.batch_max.create_transfers);

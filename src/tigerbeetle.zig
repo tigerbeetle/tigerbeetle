@@ -639,14 +639,14 @@ pub const Operation = enum(u8) {
     pulse = constants.vsr_operations_reserved + 0,
 
     // Deprecated operations not encoded as multi-batch:
-    deprecated_create_accounts = constants.vsr_operations_reserved + 1,
-    deprecated_create_transfers = constants.vsr_operations_reserved + 2,
-    deprecated_lookup_accounts = constants.vsr_operations_reserved + 3,
-    deprecated_lookup_transfers = constants.vsr_operations_reserved + 4,
-    deprecated_get_account_transfers = constants.vsr_operations_reserved + 5,
-    deprecated_get_account_balances = constants.vsr_operations_reserved + 6,
-    deprecated_query_accounts = constants.vsr_operations_reserved + 7,
-    deprecated_query_transfers = constants.vsr_operations_reserved + 8,
+    deprecated_create_accounts_unbatched = constants.vsr_operations_reserved + 1,
+    deprecated_create_transfers_unbatched = constants.vsr_operations_reserved + 2,
+    deprecated_lookup_accounts_unbatched = constants.vsr_operations_reserved + 3,
+    deprecated_lookup_transfers_unbatched = constants.vsr_operations_reserved + 4,
+    deprecated_get_account_transfers_unbatched = constants.vsr_operations_reserved + 5,
+    deprecated_get_account_balances_unbatched = constants.vsr_operations_reserved + 6,
+    deprecated_query_accounts_unbatched = constants.vsr_operations_reserved + 7,
+    deprecated_query_transfers_unbatched = constants.vsr_operations_reserved + 8,
 
     get_change_events = constants.vsr_operations_reserved + 9,
 
