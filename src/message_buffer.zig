@@ -412,6 +412,7 @@ test "MessageBuffer fuzz" {
         var pool = try MessagePool.init(gpa, .{ .replica = .{
             .members_count = 6,
             .pipeline_requests_limit = 1,
+            .message_bus = .testing,
         } });
         defer pool.deinit(gpa);
 
