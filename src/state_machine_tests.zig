@@ -53,23 +53,22 @@ pub const TestContext = struct {
 
     pub const message_body_size_max = 64 * @max(@sizeOf(Account), @sizeOf(Transfer));
 
-    pub const Operations = struct {
-        create_accounts: StateMachine.Operation,
-        create_transfers: StateMachine.Operation,
-        lookup_accounts: StateMachine.Operation,
-        lookup_transfers: StateMachine.Operation,
-        get_account_transfers: StateMachine.Operation,
-        get_account_balances: StateMachine.Operation,
-        query_accounts: StateMachine.Operation,
-        query_transfers: StateMachine.Operation,
-        get_change_events: StateMachine.Operation,
+    pub const Operation = enum {
+        create_accounts,
+        create_transfers,
+        lookup_accounts,
+        lookup_transfers,
+        get_account_transfers,
+        get_account_balances,
+        query_accounts,
+        query_transfers,
+        get_change_events,
 
-        const Tag = std.meta.FieldEnum(Operations);
-
+        const VersionMap = std.EnumArray(Operation, StateMachine.Operation);
         /// Variations of operations supported by the state machine,
         /// including deprecated ones used by old clients.
-        const versions: []const Operations = &.{
-            .{
+        const versions: []const VersionMap = &.{
+            .init(.{
                 .create_accounts = .create_accounts,
                 .create_transfers = .create_transfers,
                 .lookup_accounts = .lookup_accounts,
@@ -79,8 +78,8 @@ pub const TestContext = struct {
                 .query_accounts = .query_accounts,
                 .query_transfers = .query_transfers,
                 .get_change_events = .get_change_events,
-            },
-            .{
+            }),
+            .init(.{
                 .create_accounts = .deprecated_create_accounts_unbatched,
                 .create_transfers = .deprecated_create_transfers_unbatched,
                 .lookup_accounts = .deprecated_lookup_accounts_unbatched,
@@ -90,14 +89,8 @@ pub const TestContext = struct {
                 .query_accounts = .deprecated_query_accounts_unbatched,
                 .query_transfers = .deprecated_query_transfers_unbatched,
                 .get_change_events = .get_change_events,
-            },
+            }),
         };
-
-        fn to_state_machine(self: Operations, operation: Operations.Tag) StateMachine.Operation {
-            return switch (operation) {
-                inline else => |operation_comptime| @field(self, @tagName(operation_comptime)),
-            };
-        }
     };
 
     storage: Storage,
@@ -312,7 +305,7 @@ const TestAction = union(enum) {
         unit: enum { nanoseconds, seconds },
     },
 
-    commit: TestContext.Operations.Tag,
+    commit: TestContext.Operation,
     account: TestCreateAccount,
     transfer: TestCreateTransfer,
 
@@ -615,17 +608,17 @@ fn check(test_table: []const u8) !void {
 
     // Runs the same test for each variation of supported operations,
     // simulating different client versions.
-    for (TestContext.Operations.versions) |operations_version| {
+    for (TestContext.Operation.versions) |*version_map| {
         try check_version(
             test_actions.const_slice(),
-            operations_version,
+            version_map,
         );
     }
 }
 
 fn check_version(
     test_actions: []const TestAction,
-    operations_version: TestContext.Operations,
+    version_map: *const TestContext.Operation.VersionMap,
 ) !void {
     const allocator = std.testing.allocator;
 
@@ -646,7 +639,7 @@ fn check_version(
     var reply = std.ArrayListAligned(u8, 16).init(allocator);
     defer reply.deinit();
 
-    var operation: ?TestContext.Operations.Tag = null;
+    var operation: ?TestContext.Operation = null;
     for (test_actions) |test_action| {
         switch (test_action) {
             .setup => |b| {
@@ -967,7 +960,7 @@ fn check_version(
                 const payload_size: u32 = @intCast(request.items.len);
                 request.expandToCapacity();
 
-                const operation_actual = operations_version.to_state_machine(commit_operation);
+                const operation_actual = version_map.get(commit_operation);
                 const reply_actual = context.submit(
                     operation_actual,
                     request.items,
