@@ -68,7 +68,7 @@ pub const TestContext = struct {
 
         /// Variations of operations supported by the state machine,
         /// including deprecated ones used by old clients.
-        const Versions: []const Operations = &.{
+        const versions: []const Operations = &.{
             .{
                 .create_accounts = .create_accounts,
                 .create_transfers = .create_transfers,
@@ -615,13 +615,16 @@ fn check(test_table: []const u8) !void {
 
     // Runs the same test for each variation of supported operations,
     // simulating different client versions.
-    for (TestContext.Operations.Versions) |operations_version| {
-        try check_version(test_actions, operations_version);
+    for (TestContext.Operations.versions) |operations_version| {
+        try check_version(
+            test_actions.const_slice(),
+            operations_version,
+        );
     }
 }
 
 fn check_version(
-    test_actions: stdx.BoundedArrayType(TestAction, 128),
+    test_actions: []const TestAction,
     operations_version: TestContext.Operations,
 ) !void {
     const allocator = std.testing.allocator;
@@ -644,7 +647,7 @@ fn check_version(
     defer reply.deinit();
 
     var operation: ?TestContext.Operations.Tag = null;
-    for (test_actions.const_slice()) |test_action| {
+    for (test_actions) |test_action| {
         switch (test_action) {
             .setup => |b| {
                 assert(operation == null);
