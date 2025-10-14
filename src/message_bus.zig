@@ -1083,7 +1083,7 @@ pub fn MessageBusType(comptime IO: type, comptime process_type: vsr.ProcessType)
                 assert(connection.state == .terminating);
 
                 result catch |err| {
-                    log.warn("{}: on_closing: to={} {}", .{ bus.id, connection.peer, err });
+                    log.warn("{}: on_close: to={} {}", .{ bus.id, connection.peer, err });
                 };
 
                 // Reset the connection to its initial state.
