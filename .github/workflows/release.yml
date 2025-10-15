@@ -11,6 +11,9 @@ jobs:
     permissions:
       packages: write
       contents: write
+      # Required for OIDC.
+      # See: https://docs.npmjs.com/trusted-publishers
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +43,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18.x'
+          node-version: '24.x'
           registry-url: 'https://registry.npmjs.org'
 
       - uses: actions/setup-python@v4
