@@ -26,8 +26,7 @@
 //!
 //! Other options:
 //!
-//! * Control the test duration by adding the `--test-duration-seconds=N` option (it's 1 minute
-//!   by default).
+//! * Set the test duration by adding the `--test-duration=XmYs` option (it's 1 minute by default).
 //! * Enable replica debug logging with `--log-debug`.
 //!
 //! If you have permissions troubles with unshare and Ubuntu, see:
@@ -51,6 +50,7 @@ const faulty_network = @import("./faulty_network.zig");
 const constants = @import("constants.zig");
 const Progress = @import("./workload.zig").Progress;
 const ratio = stdx.PRNG.ratio;
+const Shell = @import("../../shell.zig");
 
 const log = std.log.scoped(.supervisor);
 
@@ -82,7 +82,7 @@ fn replica_addresses_for_replica(
     allocator: std.mem.Allocator,
     replica_count: u8,
     replica_index: u8,
-) !std.ArrayListUnmanaged(u8) {
+) ![]const u8 {
     return try comma_separate_ports(
         allocator,
         replica_ports_for_replicas[replica_index][0..replica_count],
@@ -92,7 +92,7 @@ fn replica_addresses_for_replica(
 fn replica_addresses_for_clients(
     allocator: std.mem.Allocator,
     replica_count: u8,
-) !std.ArrayListUnmanaged(u8) {
+) ![]const u8 {
     return try comma_separate_ports(allocator, replica_ports_proxied[0..replica_count]);
 }
 
@@ -117,7 +117,7 @@ comptime {
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
-    test_duration_seconds: u32 = 60,
+    test_duration: stdx.Duration = .minutes(1),
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
     disable_faults: bool = false,
@@ -141,14 +141,19 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         log.warn("vortex may spawn runaway processes when run on a non-Linux OS", .{});
     }
 
+    const shell = try Shell.create(allocator);
+    defer shell.destroy();
+
+    // By default, the shell uses project root as cwd, but we want to use the actual process cwd.
+    try shell.pushd_dir(std.fs.cwd());
+    defer shell.popd();
+
     var io = try IO.init(128, 0);
 
-    var output_directory_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const output_directory = args.output_directory orelse
-        try create_tmp_dir(&output_directory_buffer);
+    const output_directory = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
-            std.fs.cwd().deleteTree(output_directory) catch |err| {
+            shell.cwd.deleteTree(output_directory) catch |err| {
                 log.err("error deleting tree: {}", .{err});
             };
         }
@@ -167,18 +172,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
         try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
     }
-
-    if (args.test_duration_seconds % std.time.s_per_min == 0) {
-        log.info(
-            "starting test with target runtime of {d}m",
-            .{@divExact(args.test_duration_seconds, std.time.s_per_min)},
-        );
-    } else {
-        log.info(
-            "starting test with target runtime of {d}s",
-            .{args.test_duration_seconds},
-        );
-    }
+    log.info("starting test with target runtime of {}", .{args.test_duration});
 
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
@@ -204,43 +198,22 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
             .{ output_directory, constants.vortex.cluster_id, replica_index },
         );
 
-        const arg_cluster = try std.fmt.allocPrint(
-            allocator,
-            "--cluster={d}",
-            .{constants.vortex.cluster_id},
-        );
-        defer allocator.free(arg_cluster);
-        const arg_replica = try std.fmt.allocPrint(
-            allocator,
-            "--replica={d}",
-            .{replica_index},
-        );
-        defer allocator.free(arg_replica);
-        const arg_replica_count = try std.fmt.allocPrint(
-            allocator,
-            "--replica-count={d}",
-            .{args.replica_count},
-        );
-        defer allocator.free(arg_replica_count);
-
-        // Format each replica's datafile.
-        const result = try std.process.Child.run(.{ .allocator = allocator, .argv = &.{
-            args.tigerbeetle_executable,
-            "format",
-            arg_cluster,
-            arg_replica,
-            arg_replica_count,
-            datafile,
-        } });
-        defer {
-            allocator.free(result.stderr);
-            allocator.free(result.stdout);
-        }
-
-        if (!std.meta.eql(result.term, .{ .Exited = 0 })) {
-            log.err("failed formatting datafile: {s}", .{result.stderr});
+        shell.exec(
+            \\{tigerbeetle_executable} format
+            \\    --cluster={cluster}
+            \\    --replica={replica_index}
+            \\    --replica-count={replica_count}
+            \\    {datafile}
+        , .{
+            .tigerbeetle_executable = args.tigerbeetle_executable,
+            .cluster = constants.vortex.cluster_id,
+            .replica_index = replica_index,
+            .replica_count = args.replica_count,
+            .datafile = datafile,
+        }) catch |err| {
+            log.err("failed formatting datafile: {}", .{err});
             std.process.exit(1);
-        }
+        };
 
         // Start replica.
         var replica = try Replica.create(
@@ -305,7 +278,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .workload = workload,
         .trace = &trace,
         .prng = &prng,
-        .test_duration_seconds = args.test_duration_seconds,
+        .test_duration = args.test_duration,
         .disable_faults = args.disable_faults,
     });
     defer supervisor.destroy(allocator);
@@ -334,13 +307,9 @@ const Supervisor = struct {
         workload: *Workload,
         trace: *TraceWriter,
         prng: *stdx.PRNG,
-        test_duration_seconds: u32,
+        test_duration: stdx.Duration,
         disable_faults: bool,
     }) !*Supervisor {
-        const test_duration_ns = @as(u64, @intCast(options.test_duration_seconds)) *
-            std.time.ns_per_s;
-        const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
-
         const supervisor = try allocator.create(Supervisor);
         errdefer allocator.destroy(supervisor);
 
@@ -351,7 +320,7 @@ const Supervisor = struct {
             .workload = options.workload,
             .trace = options.trace,
             .prng = options.prng,
-            .test_deadline = test_deadline,
+            .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
             .disable_faults = options.disable_faults,
         };
         return supervisor;
@@ -504,7 +473,7 @@ const Supervisor = struct {
                     .replica_terminate => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("terminating replica {d}", .{pick.index});
+                        log.info("{}: terminating replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
                             .process_id = pick.index,
@@ -515,7 +484,7 @@ const Supervisor = struct {
                     .replica_restart => {
                         const pick =
                             terminated_replicas[supervisor.prng.index(terminated_replicas)];
-                        log.info("restarting replica {d}", .{pick.index});
+                        log.info("{}: restarting replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .terminated,
                             .process_id = pick.index,
@@ -526,7 +495,7 @@ const Supervisor = struct {
                     .replica_stop => {
                         const pick =
                             running_replicas[supervisor.prng.index(running_replicas)];
-                        log.info("stopping replica {d}", .{pick.index});
+                        log.info("{}: stopping replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
                             .process_id = pick.index,
@@ -537,7 +506,7 @@ const Supervisor = struct {
                     .replica_resume => {
                         const pick =
                             stopped_replicas[supervisor.prng.index(stopped_replicas)];
-                        log.info("resuming replica {d}", .{pick.index});
+                        log.info("{}: resuming replica", .{pick.index});
                         try supervisor.trace.write(.{
                             .name = .stopped,
                             .process_id = pick.index,
@@ -663,7 +632,7 @@ const Supervisor = struct {
                                 std.posix.SIG.KILL => {},
                                 else => {
                                     log.err(
-                                        "replica {d} terminated unexpectedly with signal {d}",
+                                        "{}: replica terminated unexpectedly with signal {d}",
                                         .{ index, signal },
                                     );
                                     std.process.exit(1);
@@ -671,7 +640,10 @@ const Supervisor = struct {
                             }
                         },
                         else => {
-                            log.err("unexpected replica result: {any}", .{replica_result});
+                            log.err(
+                                "{} unexpected replica result: {any}",
+                                .{ index, replica_result },
+                            );
                             return error.TestFailed;
                         },
                     }
@@ -697,15 +669,9 @@ const Supervisor = struct {
         switch (workload_result) {
             .Signal => |signal| {
                 switch (signal) {
-                    std.posix.SIG.KILL => log.info(
-                        "workload terminated as requested",
-                        .{},
-                    ),
+                    std.posix.SIG.KILL => log.info("workload terminated as requested", .{}),
                     else => {
-                        log.err(
-                            "workload exited unexpectedly with signal {d}",
-                            .{signal},
-                        );
+                        log.err("workload exited unexpectedly with signal {d}", .{signal});
                         std.process.exit(1);
                     },
                 }
@@ -736,42 +702,24 @@ fn replicas_in_state(
     return buffer[0..count];
 }
 
-pub fn comma_separate_ports(
-    allocator: std.mem.Allocator,
-    ports: []const u16,
-) !std.ArrayListUnmanaged(u8) {
+fn comma_separate_ports(allocator: std.mem.Allocator, ports: []const u16) ![]const u8 {
     assert(ports.len > 0);
 
-    var out: std.ArrayListUnmanaged(u8) = .{};
+    var out = std.ArrayList(u8).init(allocator);
+    errdefer out.deinit();
 
-    const first = try std.fmt.allocPrint(allocator, "{d}", .{ports[0]});
-    defer allocator.free(first);
-    try out.appendSlice(allocator, first);
+    const writer = out.writer();
+    try writer.print("{d}", .{ports[0]});
+    for (ports[1..]) |port| try writer.print(",{d}", .{port});
 
-    for (ports[1..]) |port| {
-        const next = try std.fmt.allocPrint(allocator, ",{d}", .{port});
-        defer allocator.free(next);
-        try out.appendSlice(allocator, next);
-    }
-
-    out.shrinkAndFree(allocator, out.items.len);
-
-    assert(std.mem.count(u8, out.items, ",") == ports.len - 1);
-    return out;
+    return out.toOwnedSlice();
 }
 
-// Create a new Vortex-specific temporary directory.
-fn create_tmp_dir(absolute_path_buffer: []u8) ![]const u8 {
-    const working_directory = std.fs.cwd();
+test comma_separate_ports {
+    const formatted = try comma_separate_ports(std.testing.allocator, &.{ 3000, 3001, 3002 });
+    defer std.testing.allocator.free(formatted);
 
-    var relative_path_buffer: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try std.fmt.bufPrint(&relative_path_buffer, ".zig-cache/vortex-{d}", .{
-        std.crypto.random.int(u64),
-    });
-
-    try working_directory.makePath(path);
-
-    return working_directory.realpath(path, absolute_path_buffer);
+    try std.testing.expectEqualStrings("3000,3001,3002", formatted);
 }
 
 const Replica = struct {
@@ -836,16 +784,16 @@ const Replica = struct {
         }
 
         var addresses_buffer: [128]u8 = undefined;
-        var replica_addresses = try replica_addresses_for_replica(
+        const replica_addresses = try replica_addresses_for_replica(
             self.allocator,
             self.replica_count,
             self.replica_index,
         );
-        defer replica_addresses.deinit(self.allocator);
+        defer self.allocator.free(replica_addresses);
         const addresses_arg = try std.fmt.bufPrint(
             addresses_buffer[0..],
             "--addresses={s}",
-            .{replica_addresses.items},
+            .{replica_addresses},
         );
 
         var argv: stdx.BoundedArrayType([]const u8, 16) = .{};
@@ -935,12 +883,12 @@ const Workload = struct {
             .{driver_command_selected},
         );
 
-        var replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
-        defer replica_addresses.deinit(allocator);
+        const replica_addresses = try replica_addresses_for_clients(allocator, args.replica_count);
+        defer allocator.free(replica_addresses);
         const arg_addresses = try std.fmt.allocPrint(
             allocator,
             "--addresses={s}",
-            .{replica_addresses.items},
+            .{replica_addresses},
         );
         defer allocator.free(arg_addresses);
 
