@@ -26,8 +26,7 @@
 //!
 //! Other options:
 //!
-//! * Control the test duration by adding the `--test-duration-seconds=N` option (it's 1 minute
-//!   by default).
+//! * Set the test duration by adding the `--test-duration=XmYs` option (it's 1 minute by default).
 //! * Enable replica debug logging with `--log-debug`.
 //!
 //! If you have permissions troubles with unshare and Ubuntu, see:
@@ -118,7 +117,7 @@ comptime {
 
 pub const CLIArgs = struct {
     tigerbeetle_executable: []const u8,
-    test_duration_seconds: u32 = 60,
+    test_duration: stdx.Duration = .minutes(1),
     driver_command: ?[]const u8 = null,
     replica_count: u8 = 1,
     disable_faults: bool = false,
@@ -145,7 +144,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const shell = try Shell.create(allocator);
     defer shell.destroy();
 
-    // By default, the shell uses project root as cwd, but we want to the actual process cwd.
+    // By default, the shell uses project root as cwd, but we want to use the actual process cwd.
     try shell.pushd_dir(std.fs.cwd());
     defer shell.popd();
 
@@ -154,7 +153,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     const output_directory = args.output_directory orelse try shell.create_tmp_dir();
     defer {
         if (args.output_directory == null) {
-            std.fs.cwd().deleteTree(output_directory) catch |err| {
+            shell.cwd.deleteTree(output_directory) catch |err| {
                 log.err("error deleting tree: {}", .{err});
             };
         }
@@ -173,14 +172,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
     inline for (std.meta.fields(@TypeOf(vortex_process_ids))) |field| {
         try trace.process_name_assign(@field(vortex_process_ids, field.name), field.name);
     }
-
-    log.info(
-        "starting test with target runtime of {d}m{d}s",
-        .{
-            @divFloor(args.test_duration_seconds, std.time.s_per_min),
-            args.test_duration_seconds % std.time.s_per_min,
-        },
-    );
+    log.info("starting test with target runtime of {}", .{args.test_duration});
 
     const seed = std.crypto.random.int(u64);
     var prng = stdx.PRNG.from_seed(seed);
@@ -286,7 +278,7 @@ pub fn main(allocator: std.mem.Allocator, args: CLIArgs) !void {
         .workload = workload,
         .trace = &trace,
         .prng = &prng,
-        .test_duration_seconds = args.test_duration_seconds,
+        .test_duration = args.test_duration,
         .disable_faults = args.disable_faults,
     });
     defer supervisor.destroy(allocator);
@@ -315,13 +307,9 @@ const Supervisor = struct {
         workload: *Workload,
         trace: *TraceWriter,
         prng: *stdx.PRNG,
-        test_duration_seconds: u32,
+        test_duration: stdx.Duration,
         disable_faults: bool,
     }) !*Supervisor {
-        const test_duration_ns = @as(u64, @intCast(options.test_duration_seconds)) *
-            std.time.ns_per_s;
-        const test_deadline = std.time.nanoTimestamp() + test_duration_ns;
-
         const supervisor = try allocator.create(Supervisor);
         errdefer allocator.destroy(supervisor);
 
@@ -332,7 +320,7 @@ const Supervisor = struct {
             .workload = options.workload,
             .trace = options.trace,
             .prng = options.prng,
-            .test_deadline = test_deadline,
+            .test_deadline = std.time.nanoTimestamp() + options.test_duration.ns,
             .disable_faults = options.disable_faults,
         };
         return supervisor;

@@ -27,7 +27,7 @@ pub fn tests(shell: *Shell, gpa: std.mem.Allocator) !void {
                 "--output-directory={vortex_out_dir} " ++
                 "--replica-count=1 " ++
                 "--disable-faults " ++
-                "--test-duration-seconds=1",
+                "--test-duration=1s",
             .{
                 .vortex_bin = vortex_bin,
                 .driver_command = driver_command,
