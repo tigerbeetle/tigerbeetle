@@ -7,7 +7,7 @@ const constants = @import("constants.zig");
 const IO = @import("testing/io.zig").IO;
 const Storage = @import("storage.zig").StorageType(IO);
 const fixtures = @import("testing/fixtures.zig");
-const fuzz = @import("testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const ratio = stdx.PRNG.ratio;
 
 pub fn main(gpa: std.mem.Allocator, args: fuzz.FuzzArgs) !void {

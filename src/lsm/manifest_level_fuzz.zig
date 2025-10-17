@@ -28,7 +28,7 @@ const stdx = @import("stdx");
 const assert = std.debug.assert;
 
 const log = std.log.scoped(.lsm_manifest_level_fuzz);
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const binary_search = @import("binary_search.zig");
 const lsm = @import("tree.zig");
 

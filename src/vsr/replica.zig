@@ -11,7 +11,7 @@ const RingBufferType = stdx.RingBufferType;
 const Ratio = stdx.PRNG.Ratio;
 const Duration = stdx.Duration;
 
-const StaticAllocator = @import("../static_allocator.zig");
+const StaticAllocator = stdx.StaticAllocator;
 const allocate_block = @import("grid.zig").allocate_block;
 const GridType = @import("grid.zig").GridType;
 const BlockPtr = @import("grid.zig").BlockPtr;

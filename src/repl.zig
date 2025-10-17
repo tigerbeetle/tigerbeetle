@@ -6,7 +6,7 @@ const stdx = vsr.stdx;
 const constants = vsr.constants;
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
-const StaticAllocator = @import("static_allocator.zig");
+const StaticAllocator = stdx.StaticAllocator;
 const Storage = vsr.storage.StorageType(IO);
 const StateMachine = vsr.state_machine.StateMachineType(
     Storage,

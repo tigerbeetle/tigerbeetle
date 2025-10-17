@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 
 const constants = @import("../constants.zig");
 const fixtures = @import("../testing/fixtures.zig");
-const fuzz = @import("../testing/fuzz.zig");
+const fuzz = stdx.fuzz;
 const stdx = @import("stdx");
 const vsr = @import("../vsr.zig");
 
