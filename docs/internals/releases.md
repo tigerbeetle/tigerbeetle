@@ -209,5 +209,6 @@ answer is to skip. Skipping is cheap!
 If the release is skipped, the changelog is still written and merged on Monday, using the following
 header: `## TigerBeetle (unreleased)`.
 
-When the next real release happens, it should merge all the previously unreleased changes into a
-single versioned changelog entry, to inform users making upgrades.
+For the next release, you should (1) manually set the next valid version number and (2) merge all 
+previously unreleased changes into a single, versioned changelog entry to inform users 
+who are upgrading.
