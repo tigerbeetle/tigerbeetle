@@ -3,6 +3,52 @@
 Subscribe to the [tracking issue #2231](https://github.com/tigerbeetle/tigerbeetle/issues/2231)
 to receive notifications about breaking changes!
 
+## TigerBeetle 0.16.62
+
+Released: 2025-10-17
+
+### Safety And Performance
+
+- [#3304](https://github.com/tigerbeetle/tigerbeetle/pull/3304)
+
+  Enable VOPR to detect when the message limit is exceeded.
+
+- [#3307](https://github.com/tigerbeetle/tigerbeetle/pull/3307)
+
+  Enable unit tests for deprecated operations.
+
+- [#3309](https://github.com/tigerbeetle/tigerbeetle/pull/3309)
+
+  Improve the release process by publishing to npm via trusted publishers.
+
+### Features
+
+- [#3299](https://github.com/tigerbeetle/tigerbeetle/pull/3299)
+
+  Rephrase the "debits first" explanation in documentation.
+
+### Internals
+
+- [#3300](https://github.com/tigerbeetle/tigerbeetle/pull/3300)
+
+  Refactor the message bus to save memory and tighten explicit `SendQueue` limits.
+
+- [#3296](https://github.com/tigerbeetle/tigerbeetle/pull/3296)
+
+  Implement `BoundedArray` from scratch.
+
+- [#3292](https://github.com/tigerbeetle/tigerbeetle/pull/3292)
+
+  Remove needless use of bounded array from REPL.
+
+- [#3308](https://github.com/tigerbeetle/tigerbeetle/pull/3308)
+
+  Refactor and cleanup Vortex.
+
+### TigerTracks 🎧
+
+- [no goodbye](https://www.youtube.com/watch?v=oWDzTvjoDn4)
+
 ## TigerBeetle (unreleased)
 
 Released: 2025-10-10
