@@ -73,10 +73,7 @@ class _IDGenerator:
 
         randomness = os.urandom(10)
 
-        return int.from_bytes(
-            time_ms.to_bytes(6, "big") + randomness,
-            "big",
-        )
+        return (time_ms << 80) | int.from_bytes(randomness, "little")
 
 # Module-level singleton instance.
 _id_generator = _IDGenerator()
