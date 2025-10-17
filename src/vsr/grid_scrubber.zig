@@ -39,7 +39,7 @@ const BlockPtr = @import("./grid.zig").BlockPtr;
 const ForestTableIteratorType = @import("../lsm/forest_table_iterator.zig").ForestTableIteratorType;
 const TestStorage = @import("../testing/storage.zig").Storage;
 
-pub fn GridScrubberType(comptime Forest: type) type {
+pub fn GridScrubberType(comptime Forest: type, grid_scrubber_reads_max: comptime_int) type {
     return struct {
         const GridScrubber = @This();
         const Grid = GridType(Forest.Storage);
@@ -88,7 +88,7 @@ pub fn GridScrubberType(comptime Forest: type) type {
         forest: *Forest,
         client_sessions_checkpoint: *const CheckpointTrailer,
 
-        reads: IOPSType(Read, constants.grid_scrubber_reads_max) = .{},
+        reads: IOPSType(Read, grid_scrubber_reads_max) = .{},
 
         /// A list of reads that are in progress.
         reads_busy: QueueType(Read) = QueueType(Read).init(.{ .name = "grid_scrubber_reads_busy" }),
@@ -132,6 +132,8 @@ pub fn GridScrubberType(comptime Forest: type) type {
         tour_index_block: BlockPtr,
 
         /// These counters reset after every tour cycle.
+        /// NB: tour_blocks_scrubbed_count will include repeat index blocks reads.
+        /// (See read_next_callback() for more detail.)
         tour_blocks_scrubbed_count: u64,
 
         pub fn init(
@@ -362,6 +364,27 @@ pub fn GridScrubberType(comptime Forest: type) type {
             scrubber.reads_done.push(read);
         }
 
+        /// Like read_fault, but returns information on all reads not just repairs.
+        pub fn read_result_next(scrubber: *GridScrubber) ?union(enum) {
+            ok: u64,
+            repair: u64,
+        } {
+            assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
+                scrubber.reads.executing());
+            defer assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
+                scrubber.reads.executing());
+
+            const read = scrubber.reads_done.pop() orelse return null;
+            defer scrubber.reads.release(read);
+            assert(read.done);
+
+            return switch (read.status) {
+                .ok => .{ .ok = read.read.address },
+                .repair => .{ .repair = read.read.address },
+                else => unreachable,
+            };
+        }
+
         pub fn read_fault(scrubber: *GridScrubber) ?BlockId {
             assert(scrubber.reads_busy.count() + scrubber.reads_done.count() ==
                 scrubber.reads.executing());
@@ -534,11 +557,16 @@ pub fn GridScrubberType(comptime Forest: type) type {
 
             // Wrap around to the next cycle.
             assert(tour.* == .done);
-            tour.* = .init;
+            return null;
+        }
+
+        pub fn wrap(scrubber: *GridScrubber) void {
+            assert(scrubber.tour == .done);
+
+            scrubber.tour = .init;
+
             scrubber.tour_tables = WrappingForestTableIterator.init(scrubber.tour_tables_origin.?);
             scrubber.tour_blocks_scrubbed_count = 0;
-
-            return null;
         }
     };
 }

@@ -237,7 +237,7 @@ test "repl integration" {
     ));
 }
 
-test "benchmark/inspect smoke" {
+test "benchmark/scrub/inspect smoke" {
     const data_file = data_file: {
         var random_bytes: [4]u8 = undefined;
         std.crypto.random.bytes(&random_bytes);
@@ -266,6 +266,11 @@ test "benchmark/inspect smoke" {
             .data_file = data_file,
         },
     );
+
+    try shell.exec("{tigerbeetle} scrub {data_file}", .{
+        .tigerbeetle = tigerbeetle,
+        .data_file = data_file,
+    });
 
     inline for (.{
         "{tigerbeetle} inspect constants",
@@ -327,10 +332,8 @@ test "in-place upgrade" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -387,10 +390,8 @@ test "recover smoke" {
     }
 
     const replica_count = TmpCluster.replica_count;
-    const seed = std.crypto.random.int(u64);
-    log.info("seed = {}", .{seed});
 
-    var cluster = try TmpCluster.init(.{ .seed = seed });
+    var cluster = try TmpCluster.init();
     defer cluster.deinit();
 
     for (0..replica_count) |replica_index| {
@@ -448,9 +449,7 @@ const TmpCluster = struct {
     workload_thread: ?std.Thread = null,
     workload_exit_ok: bool = false,
 
-    fn init(options: struct {
-        seed: u64,
-    }) !TmpCluster {
+    fn init() !TmpCluster {
         const shell = try Shell.create(std.testing.allocator);
         errdefer shell.destroy();
 
@@ -473,7 +472,7 @@ const TmpCluster = struct {
             });
         }
 
-        const prng = stdx.PRNG.from_seed(options.seed);
+        const prng = stdx.PRNG.from_seed_testing();
         return .{
             .shell = shell,
             .tmp = tmp,

@@ -14,6 +14,7 @@ const config = constants.config;
 const benchmark_driver = @import("benchmark_driver.zig");
 const cli = @import("cli.zig");
 const inspect = @import("inspect.zig");
+const command_scrub = @import("scrub.zig").command_scrub;
 
 const IO = vsr.io.IO;
 const Time = vsr.time.Time;
@@ -29,7 +30,7 @@ pub const StateMachine =
 pub const Grid = vsr.GridType(Storage);
 
 const Client = vsr.ClientType(StateMachine, vsr.message_bus.MessageBusClient);
-const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
+pub const Replica = vsr.ReplicaType(StateMachine, MessageBus, Storage, AOF);
 const ReplicaReformat =
     vsr.ReplicaReformatType(StateMachine, vsr.message_bus.MessageBusClient, Storage);
 const data_file_size_min = vsr.superblock.data_file_size_min;
@@ -172,6 +173,7 @@ pub fn main() !void {
             try stdout_buffer.flush();
         },
         .amqp => |*args| try command_amqp(gpa, time, args),
+        .scrub => |*args| try command_scrub(gpa, &io, &tracer, args),
     }
 }
 
