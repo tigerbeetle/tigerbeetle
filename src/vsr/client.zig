@@ -183,12 +183,14 @@ pub fn ClientType(
         }
 
         pub fn deinit(self: *Client, allocator: std.mem.Allocator) void {
+            self.message_bus.io.assert_io_thread();
             if (self.request_inflight) |inflight| self.release_message(inflight.message.base());
             self.message_bus.deinit(allocator);
         }
 
         pub fn on_messages(message_bus: *MessageBus, buffer: *MessageBuffer) void {
             const self: *Client = @fieldParentPtr("message_bus", message_bus);
+            self.message_bus.io.assert_io_thread();
             while (buffer.next_header()) |header| {
                 const message = buffer.consume_message(self.message_bus.pool, &header);
                 defer self.message_bus.unref(message);
@@ -204,6 +206,7 @@ pub fn ClientType(
         }
 
         pub fn on_message(self: *Client, message: *Message) void {
+            self.message_bus.io.assert_io_thread();
             assert(!self.evicted);
 
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
@@ -240,6 +243,7 @@ pub fn ClientType(
         }
 
         pub fn tick(self: *Client) void {
+            self.message_bus.io.assert_io_thread();
             assert(!self.evicted);
 
             self.ticks += 1;
@@ -256,6 +260,7 @@ pub fn ClientType(
 
         /// Registers a session with the cluster for the client, if this has not yet been done.
         pub fn register(self: *Client, callback: Request.RegisterCallback, user_data: u128) void {
+            self.message_bus.io.assert_any_thread();
             assert(!self.evicted);
             assert(self.request_inflight == null);
             assert(self.request_number == 0);
@@ -307,6 +312,7 @@ pub fn ClientType(
             operation: StateMachine.Operation,
             events: []const u8,
         ) void {
+            self.message_bus.io.assert_io_thread();
             const event_size: usize = switch (operation) {
                 inline else => |operation_comptime| @sizeOf(
                     StateMachine.EventType(operation_comptime),
@@ -345,6 +351,7 @@ pub fn ClientType(
             user_data: u128,
             message: *Message.Request,
         ) void {
+            self.message_bus.io.assert_io_thread();
             assert(self.request_inflight == null);
             assert(self.request_number > 0);
             assert(message.header.client == self.id);
@@ -395,15 +402,18 @@ pub fn ClientType(
         /// the reference is not guaranteed to be valid after both actions.
         /// Do NOT use the reference counter function `message.ref()` for storing the message.
         pub fn get_message(self: *Client) *Message {
+            self.message_bus.io.assert_any_thread();
             return self.message_bus.get_message(null);
         }
 
         /// Releases a message back to the message bus.
         pub fn release_message(self: *Client, message: *Message) void {
+            self.message_bus.io.assert_any_thread();
             self.message_bus.unref(message);
         }
 
         fn on_eviction(self: *Client, eviction: *const Message.Eviction) void {
+            self.message_bus.io.assert_io_thread();
             assert(!self.evicted);
             assert(eviction.header.command == .eviction);
             assert(eviction.header.cluster == self.cluster);
@@ -458,6 +468,7 @@ pub fn ClientType(
         }
 
         fn on_pong_client(self: *Client, pong: *const Message.PongClient) void {
+            self.message_bus.io.assert_io_thread();
             assert(pong.header.command == .pong_client);
             assert(pong.header.cluster == self.cluster);
 
@@ -503,6 +514,7 @@ pub fn ClientType(
         }
 
         fn on_reply(self: *Client, reply: *Message.Reply) void {
+            self.message_bus.io.assert_io_thread();
             // We check these checksums again here because this is the last time we get to downgrade
             // a correctness bug into a liveness bug, before we return data back to the application.
             assert(reply.header.valid_checksum());
@@ -630,6 +642,7 @@ pub fn ClientType(
         }
 
         fn on_ping_timeout(self: *Client) void {
+            self.message_bus.io.assert_io_thread();
             self.ping_timeout.reset();
 
             const ping = Header.PingClient{
@@ -648,6 +661,7 @@ pub fn ClientType(
         // - the request message got dropped by the network
         // - there was a view change, and we are not speaking to the primary
         fn on_request_timeout(self: *Client) void {
+            self.message_bus.io.assert_io_thread();
             self.request_timeout.backoff(&self.prng); // Reduce the load.
 
             const message = self.request_inflight.?.message;
@@ -667,6 +681,7 @@ pub fn ClientType(
 
         /// The caller owns the returned message, if any, which has exactly 1 reference.
         fn create_message_from_header(self: *Client, header: *const Header) *Message {
+            self.message_bus.io.assert_any_thread();
             assert(header.cluster == self.cluster);
             assert(header.size == @sizeOf(Header));
 
@@ -681,6 +696,7 @@ pub fn ClientType(
         }
 
         fn send_header_to_replicas(self: *Client, header: *const Header) void {
+            self.message_bus.io.assert_any_thread();
             const message = self.create_message_from_header(header);
             defer self.message_bus.unref(message);
 
@@ -688,12 +704,14 @@ pub fn ClientType(
         }
 
         fn send_message_to_replicas(self: *Client, message: *Message) void {
+            self.message_bus.io.assert_any_thread();
             for (0..self.replica_count) |replica| {
                 self.send_message_to_replica(@intCast(replica), message);
             }
         }
 
         fn send_message_to_replica(self: *Client, replica: u8, message: *Message) void {
+            self.message_bus.io.assert_any_thread();
             // Switch on the header type so that we don't log opaque bytes for the per-command data.
             switch (message.header.into_any()) {
                 inline else => |header| {
@@ -725,6 +743,7 @@ pub fn ClientType(
         // availability of the cluster, i.e., as long the client is connected to a backup that in
         // turn is connected to the primary, the request will be processed by the cluster.
         fn send_request_with_hedging(self: *Client, message: *Message.Request) void {
+            self.message_bus.io.assert_any_thread();
             const primary: u8 = @intCast(self.view % self.replica_count);
             self.send_message_to_replica(primary, message.base());
 
@@ -737,6 +756,7 @@ pub fn ClientType(
         }
 
         fn send_request_for_the_first_time(self: *Client, message: *Message.Request) void {
+            self.message_bus.io.assert_any_thread();
             assert(self.request_inflight.?.message == message);
             assert(self.request_number > 0);
 

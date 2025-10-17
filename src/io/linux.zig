@@ -24,6 +24,7 @@ pub const IO = struct {
     const CompletionList = DoublyLinkedListType(Completion, .awaiting_back, .awaiting_next);
 
     ring: IO_Uring,
+    thread_id: std.Thread.Id,
 
     /// Operations not yet submitted to the kernel and waiting on available space in the
     /// submission queue.
@@ -81,7 +82,10 @@ pub const IO = struct {
             else => {},
         };
 
-        return IO{ .ring = try IO_Uring.init(entries, flags) };
+        return IO{
+            .ring = try IO_Uring.init(entries, flags),
+            .thread_id = undefined,
+        };
     }
 
     pub fn deinit(self: *IO) void {
@@ -1826,5 +1830,17 @@ pub const IO = struct {
                 callback(ctx, completion, result.*);
             }
         }.erased;
+    }
+
+    pub fn set_io_thread(self: *IO) void {
+        self.thread_id = std.Thread.getCurrentId();
+    }
+
+    pub fn assert_io_thread(self: *const IO) void {
+        assert(std.Thread.getCurrentId() == self.thread_id);
+    }
+
+    pub fn assert_any_thread(self: *const IO) void {
+        _ = self;
     }
 };
