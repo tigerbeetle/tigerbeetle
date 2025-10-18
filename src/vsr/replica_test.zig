@@ -2029,6 +2029,60 @@ test "Cluster: broken hash chain within the same view does not stall commit via 
     try expectEqual(b2.commit(), constants.pipeline_prepare_queue_max);
 }
 
+test "Cluster: backups prepare past prepare_max if the next checkpoint is durable" {
+    const t = try TestContext.init(.{ .replica_count = 3 });
+    defer t.deinit();
+
+    var c = t.clients(.{});
+    try c.request(checkpoint_1_trigger - 1, checkpoint_1_trigger - 1);
+
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_1_trigger - 1);
+    try expectEqual(t.replica(.R_).op_checkpoint(), 0);
+
+    const a0 = t.replica(.A0);
+    const b1 = t.replica(.B1);
+    const b2 = t.replica(.B2);
+
+    b2.drop(.R_, .incoming, .start_view);
+    const b2_replica = &t.cluster.replicas[b2.replicas.get(0)];
+
+    // Stall commit pipeline on b2, forcing it to accept prepares but advance its checkpoint past 0.
+    // Meanwhile, the rest of the cluster moves to checkpoint=checkpoint_2.
+    b2_replica.commit_stage = .compact;
+
+    try c.request(checkpoint_2_prepare_max, checkpoint_2_prepare_max);
+
+    try expectEqual(t.replica(.R_).commit_max(), checkpoint_2_prepare_max);
+
+    try expectEqual(a0.op_head(), checkpoint_2_prepare_max);
+    try expectEqual(b1.op_head(), checkpoint_2_prepare_max);
+
+    // Since checkpoint_1 is durable on a0, b1 (a commit quorum of replicas), b2 is able to accept
+    // some prepares from the next checkpoint, overwriting some of its committed prepares.
+    // However, even though ops [checkpoint_1, checkpoint_1_trigger - 1] are committed on b2,
+    // they are not overwritten as they are required during checkpointing & upgrade.
+    try expectEqual(b2.op_head(), checkpoint_1 + constants.journal_slot_count - 1);
+
+    try expectEqual(a0.op_checkpoint(), checkpoint_2);
+    try expectEqual(b1.op_checkpoint(), checkpoint_2);
+    try expectEqual(b2.op_checkpoint(), 0);
+
+    // b2 crashes and restarts, and truncates all prepares that past checkpoint_1_prepare_max,
+    // since all prepares in checkpoint=0 must be replayed after restart.
+    b2.stop();
+    try b2.open();
+
+    try expectEqual(b2.op_head(), checkpoint_1_prepare_max);
+
+    b2.pass(.R_, .incoming, .start_view);
+    t.run();
+
+    try expectEqual(t.replica(.R_).op_head(), checkpoint_2_prepare_max);
+    try expectEqual(t.replica(.R_).commit(), checkpoint_2_prepare_max);
+    try expectEqual(t.replica(.R_).op_checkpoint(), checkpoint_2);
+}
+
 const ProcessSelector = enum {
     __, // all replicas, standbys, and clients
     R_, // all (non-standby) replicas
