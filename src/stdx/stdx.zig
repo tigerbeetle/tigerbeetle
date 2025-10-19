@@ -1087,6 +1087,39 @@ test "Duration.parse_flag_value" {
     }
 }
 
+test "Duration.parse_flag_value fuzz" {
+    const test_count = 1024;
+    const len_max = 32;
+    const alphabet = " \t\n.-e[]0123456789abcdhmuns";
+
+    var prng = PRNG.from_seed_testing();
+
+    var input_max: [len_max]u8 = @splat(0);
+    for (0..test_count) |_| {
+        const len = prng.int_inclusive(usize, len_max);
+        const input = input_max[0..len];
+        for (input) |*c| {
+            c.* = alphabet[prng.index(alphabet)];
+        }
+
+        const result = Duration.parse_flag_value(input);
+        switch (result) {
+            .ok => |duration| {
+                var buffer: [64]u8 = undefined;
+                const formatted = std.fmt.bufPrint(&buffer, "{}", .{duration}) catch unreachable;
+                const result_round_trip = Duration.parse_flag_value(formatted);
+                switch (result_round_trip) {
+                    .ok => |duration_b| {
+                        assert(duration.ns == duration_b.ns);
+                    },
+                    .err => {}, // Formatting can use floating point notation.
+                }
+            },
+            .err => {},
+        }
+    }
+}
+
 /// DateTime in UTC, intended primarily for logging.
 ///
 /// NB: this is a pure function of a timestamp. To convert timestamp to UTC, no knowledge of
