@@ -61,7 +61,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -108,8 +108,8 @@ account = tb.Account(
     timestamp=0,
 )
 
-account_errors = client.create_accounts([account])
-# Error handling omitted.
+accounts_results = client.create_accounts([account])
+# Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -163,21 +163,23 @@ account1 = tb.Account(
     flags=tb.AccountFlags.HISTORY,
 )
 
-account_errors = client.create_accounts([account0, account1])
-# Error handling omitted.
+accounts_results = client.create_accounts([account0, account1])
+# Results handling omitted.
 ```
 
 ### Response and Errors
 
-The response is an empty array if all accounts were
-created successfully. If the response is non-empty, each
-object in the response array contains error information
-for an account that failed. The error object contains an
-error code and the index of the account in the request
-batch.
-
-See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+The response is an array containing the _result code_ and the _timestamp_ of
+each account in the request batch:
+- Successfully created accounts with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  return the timestamp assigned to the `Account` object.
+- Already existing accounts with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  return the timestamp of the original existing object.
+- Failed accounts return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```python
 account0 = tb.Account(
@@ -223,12 +225,14 @@ account2 = tb.Account(
     flags=0,
 )
 
-account_errors = client.create_accounts([account0, account1, account2])
-for error in account_errors:
-    if error.result == tb.CreateAccountResult.EXISTS:
-        print(f"Batch account at {error.index} already exists.")
+accounts_results = client.create_accounts([account0, account1, account2])
+for i, result in enumerate(accounts_results):
+    if result.result == tb.CreateAccountResult.OK:
+        print(f"Batch account at {i} successfully created with timestamp {result.timestamp}.")
+    elif result.result == tb.CreateAccountResult.EXISTS:
+        print(f"Batch account at {i} already exists with timestamp {result.timestamp}.")
     else:
-        print(f"Batch account at ${error.index} failed to create: {error.result}.")
+        print(f"Batch account at {i} failed to create: {result.result}.")
 ```
 
 To handle errors you can compare the result code returned
@@ -274,8 +278,8 @@ transfers = [tb.Transfer(
     timestamp=0,
 )]
 
-transfer_errors = client.create_transfers(transfers)
-# Error handling omitted.
+transfers_results = client.create_transfers(transfers)
+# Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -283,14 +287,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an empty array if all transfers were created
-successfully. If the response is non-empty, each object in the
-response array contains error information for a transfer that
-failed. The error object contains an error code and the index of the
-transfer in the request batch.
-
-See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+The response is an array containing the _result code_ and the _timestamp_ of
+each transfer in the request batch:
+- Successfully created transfers with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  return the timestamp assigned to the `Transfer` object.
+- Already existing transfers with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  return the timestamp of the original existing object.
+- Failed transfers return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```python
 batch = [tb.Transfer(
@@ -339,12 +346,14 @@ batch = [tb.Transfer(
     timestamp=0,
 )]
 
-transfer_errors = client.create_transfers(batch)
-for error in transfer_errors:
-    if error.result == tb.CreateTransferResult.EXISTS:
-        print(f"Batch transfer at {error.index} already exists.")
+transfers_results = client.create_transfers(batch)
+for i, item in enumerate(transfers_results):
+    if item.result == tb.CreateTransferResult.OK:
+        print(f"Batch transfer at {i} successfully created with timestamp {item.timestamp}.")
+    elif item.result == tb.CreateTransferResult.EXISTS:
+        print(f"Batch transfer at {i} already exists with timestamp {item.timestamp}.")
     else:
-        print(f"Batch transfer at {error.index} failed to create: {error.result}.")
+        print(f"Batch transfer at {i} failed to create: {item.result}.")
 ```
 
 To handle errors you can compare the result code returned
@@ -355,31 +364,26 @@ from `client.create_transfers` with enum values in the
 
 TigerBeetle performance is maximized when you batch
 API requests.
+
 A client instance shared across multiple threads/tasks can automatically
 batch concurrent requests, but the application must still send as many events
 as possible in a single call.
+
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```python
-batch = [] # Array of transfer to create.
-for transfer in batch:
-    transfer_errors = client.create_transfers([transfer])
-    # Error handling omitted.
-```
-
 Instead, **always batch as much as you can**.
+
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```python
 batch = [] # Array of transfer to create.
 BATCH_SIZE = 8189 #FIXME
 for i in range(0, len(batch), BATCH_SIZE):
-    transfer_errors = client.create_transfers(
+    transfers_results = client.create_transfers(
         batch[i:min(len(batch), i + BATCH_SIZE)],
     )
-    # Error handling omitted.
+    # Results handling omitted.
 ```
 
 ### Queues and Workers
@@ -439,8 +443,8 @@ transfer1 = tb.Transfer(
 )
 
 # Create the transfer
-transfer_errors = client.create_transfers([transfer0, transfer1])
-# Error handling omitted.
+transfers_results = client.create_transfers([transfer0, transfer1])
+# Results handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -476,8 +480,8 @@ transfer0 = tb.Transfer(
     timestamp=0,
 )
 
-transfer_errors = client.create_transfers([transfer0])
-# Error handling omitted.
+transfers_results = client.create_transfers([transfer0])
+# Results handling omitted.
 
 transfer1 = tb.Transfer(
     id=7,
@@ -496,8 +500,8 @@ transfer1 = tb.Transfer(
     timestamp=0,
 )
 
-transfer_errors = client.create_transfers([transfer1])
-# Error handling omitted.
+transfers_results = client.create_transfers([transfer1])
+# Results handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -525,8 +529,8 @@ transfer0 = tb.Transfer(
     timestamp=0,
 )
 
-transfer_errors = client.create_transfers([transfer0])
-# Error handling omitted.
+transfers_results = client.create_transfers([transfer0])
+# Results handling omitted.
 
 transfer1 = tb.Transfer(
     id=9,
@@ -544,8 +548,8 @@ transfer1 = tb.Transfer(
     timestamp=0,
 )
 
-transfer_errors = client.create_transfers([transfer1])
-# Error handling omitted.
+transfers_results = client.create_transfers([transfer1])
+# Results handling omitted.
 ```
 
 ## Transfer Lookup
@@ -724,8 +728,8 @@ batch.append(tb.Transfer(id=3, flags=0))
 batch.append(tb.Transfer(id=3, flags=linkedFlag))
 batch.append(tb.Transfer(id=4, flags=0))
 
-transfer_errors = client.create_transfers(batch)
-# Error handling omitted.
+transfers_results = client.create_transfers(batch)
+# Results handling omitted.
 ```
 
 ## Imported Events
@@ -763,8 +767,8 @@ for index, account in enumerate(historical_accounts):
 
     accounts.append(account)
 
-account_errors = client.create_accounts(accounts)
-# Error handling omitted.
+accounts_results = client.create_accounts(accounts)
+# Results handling omitted.
 
 # The, load and import all transfers with their timestamps from the historical source.
 transfers = []
@@ -781,8 +785,8 @@ for index, transfer in enumerate(historical_transfers):
 
     transfers.append(transfer)
 
-transfer_errors = client.create_transfers(transfers)
-# Error handling omitted.
+transfers_results = client.create_transfers(transfers)
+# Results handling omitted.
 
 # Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 # with the same historical timestamps without regressing the cluster timestamp.

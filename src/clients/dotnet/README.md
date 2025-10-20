@@ -31,7 +31,6 @@ Now, create `Program.cs` and copy this into it:
 
 ```cs
 using System;
-
 using TigerBeetle;
 
 // Validate import works.
@@ -66,7 +65,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -111,8 +110,8 @@ var accounts = new[] {
     },
 };
 
-var accountErrors = client.CreateAccounts(accounts);
-// Error handling omitted.
+var accountsResults = client.CreateAccounts(accounts);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -160,21 +159,23 @@ var account1 = new Account
     Flags = AccountFlags.History,
 };
 
-var accountErrors = client.CreateAccounts(new[] { account0, account1 });
-// Error handling omitted.
+var accountsResults = client.CreateAccounts(new[] { account0, account1 });
+// Results handling omitted.
 ```
 
 ### Response and Errors
 
-The response is an empty array if all accounts were
-created successfully. If the response is non-empty, each
-object in the response array contains error information
-for an account that failed. The error object contains an
-error code and the index of the account in the request
-batch.
-
-See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+The response is an array containing the _result code_ and the _timestamp_ of
+each account in the request batch:
+- Successfully created accounts with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  return the timestamp assigned to the `Account` object.
+- Already existing accounts with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  return the timestamp of the original existing object.
+- Failed accounts return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```cs
 var account0 = new Account
@@ -199,19 +200,21 @@ var account2 = new Account
     Flags = AccountFlags.None,
 };
 
-var accountErrors = client.CreateAccounts(new[] { account0, account1, account2 });
-foreach (var error in accountErrors)
+var accountsResults = client.CreateAccounts(new[] { account0, account1, account2 });
+for (int i = 0; i < accountsResults.Length; i++)
 {
-    switch (error.Result)
+    switch (accountsResults[i].Result)
     {
+        case CreateAccountResult.Ok:
+            Console.WriteLine($"Batch account at {i} successfully created with timestamp {accountsResults[i].Timestamp}.");
+            break;
         case CreateAccountResult.Exists:
-            Console.WriteLine($"Batch account at ${error.Index} already exists.");
+            Console.WriteLine($"Batch account at {i} already exists with timestamp {accountsResults[i].Timestamp}.");
             break;
         default:
-            Console.WriteLine($"Batch account at ${error.Index} failed to create ${error.Result}");
+            Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Result}");
             break;
     }
-    return;
 }
 ```
 
@@ -256,8 +259,8 @@ var transfers = new[] {
     }
 };
 
-var transferErrors = client.CreateTransfers(transfers);
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(transfers);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -265,14 +268,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an empty array if all transfers were created
-successfully. If the response is non-empty, each object in the
-response array contains error information for a transfer that
-failed. The error object contains an error code and the index of the
-transfer in the request batch.
-
-See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+The response is an array containing the _result code_ and the _timestamp_ of
+each transfer in the request batch:
+- Successfully created transfers with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  return the timestamp assigned to the `Transfer` object.
+- Already existing transfers with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  return the timestamp of the original existing object.
+- Failed transfers return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```cs
 var transfers = new[] {
@@ -308,16 +314,19 @@ var transfers = new[] {
     },
 };
 
-var transferErrors = client.CreateTransfers(transfers);
-foreach (var error in transferErrors)
+var transfersResults = client.CreateTransfers(transfers);
+for (int i = 0; i < transfersResults.Length; i++)
 {
-    switch (error.Result)
+    switch (transfersResults[i].Result)
     {
+        case CreateTransferResult.Ok:
+            Console.WriteLine($"Batch transfer at {i} successfully created with timestamp {transfersResults[i].Timestamp}.");
+            break;
         case CreateTransferResult.Exists:
-            Console.WriteLine($"Batch transfer at ${error.Index} already exists.");
+            Console.WriteLine($"Batch transfer at {i} already exists with timestamp {transfersResults[i].Timestamp}.");
             break;
         default:
-            Console.WriteLine($"Batch transfer at ${error.Index} failed to create: ${error.Result}");
+            Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Result}");
             break;
     }
 }
@@ -327,23 +336,16 @@ foreach (var error in transferErrors)
 
 TigerBeetle performance is maximized when you batch
 API requests.
+
 A client instance shared across multiple threads/tasks can automatically
 batch concurrent requests, but the application must still send as many events
 as possible in a single call.
+
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```cs
-var batch = new Transfer[] { }; // Array of transfer to create.
-foreach (var t in batch)
-{
-    var transferErrors = client.CreateTransfer(t);
-    // Error handling omitted.
-}
-```
-
 Instead, **always batch as much as you can**.
+
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```cs
@@ -356,8 +358,8 @@ for (int firstIndex = 0; firstIndex < batch.Length; firstIndex += BATCH_SIZE)
     {
         lastIndex = batch.Length;
     }
-    var transferErrors = client.CreateTransfers(batch[firstIndex..lastIndex]);
-    // Error handling omitted.
+    var transfersResults = client.CreateTransfers(batch[firstIndex..lastIndex]);
+    // Results handling omitted.
 }
 ```
 
@@ -408,8 +410,8 @@ var transfer1 = new Transfer
     Flags = TransferFlags.None,
 };
 
-var transferErrors = client.CreateTransfers(new[] { transfer0, transfer1 });
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(new[] { transfer0, transfer1 });
+// Results handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -440,8 +442,8 @@ var transfer0 = new Transfer
     Flags = TransferFlags.Pending,
 };
 
-var transferErrors = client.CreateTransfers(new[] { transfer0 });
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(new[] { transfer0 });
+// Results handling omitted.
 
 var transfer1 = new Transfer
 {
@@ -452,8 +454,8 @@ var transfer1 = new Transfer
     Flags = TransferFlags.PostPendingTransfer,
 };
 
-transferErrors = client.CreateTransfers(new[] { transfer1 });
-// Error handling omitted.
+transfersResults = client.CreateTransfers(new[] { transfer1 });
+// Results handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -476,8 +478,8 @@ var transfer0 = new Transfer
     Flags = TransferFlags.Pending,
 };
 
-var transferErrors = client.CreateTransfers(new[] { transfer0 });
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(new[] { transfer0 });
+// Results handling omitted.
 
 var transfer1 = new Transfer
 {
@@ -487,8 +489,8 @@ var transfer1 = new Transfer
     Flags = TransferFlags.VoidPendingTransfer,
 };
 
-transferErrors = client.CreateTransfers(new[] { transfer1 });
-// Error handling omitted.
+transfersResults = client.CreateTransfers(new[] { transfer1 });
+// Results handling omitted.
 ```
 
 ## Transfer Lookup
@@ -669,8 +671,8 @@ batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ });
 batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
 batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 
-var transferErrors = client.CreateTransfers(batch.ToArray());
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(batch.ToArray());
+// Results handling omitted.
 ```
 
 ## Imported Events
@@ -713,8 +715,8 @@ for (var index = 0; index < historicalAccounts.Length; index++)
     accountsBatch.Add(account);
 }
 
-var accountErrors = client.CreateAccounts(accountsBatch.ToArray());
-// Error handling omitted.
+var accountsResults = client.CreateAccounts(accountsBatch.ToArray());
+// Results handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
 var transfersBatch = new System.Collections.Generic.List<Transfer>();
@@ -737,8 +739,8 @@ for (var index = 0; index < historicalTransfers.Length; index++)
     transfersBatch.Add(transfer);
 }
 
-var transferErrors = client.CreateTransfers(transfersBatch.ToArray());
-// Error handling omitted.
+var transfersResults = client.CreateTransfers(transfersBatch.ToArray());
+// Results handling omitted.
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
 ```

@@ -172,7 +172,7 @@ fn readme_root(ctx: *Context) !void {
             \\starts the TigerBeetle cluster.
             \\
             \\Clients are thread-safe and a single instance should be shared
-            \\between multiple concurrent tasks. This allows events to be 
+            \\between multiple concurrent tasks. This allows events to be
             \\[automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
             \\
             \\Multiple clients are useful when connecting to more than
@@ -224,15 +224,17 @@ fn readme_root(ctx: *Context) !void {
 
         ctx.header(3, "Response and Errors");
         ctx.paragraph(
-            \\The response is an empty array if all accounts were
-            \\created successfully. If the response is non-empty, each
-            \\object in the response array contains error information
-            \\for an account that failed. The error object contains an
-            \\error code and the index of the account in the request
-            \\batch.
-            \\
-            \\See all error conditions in the [create_accounts
-            \\reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+            \\The response is an array containing the _result code_ and the _timestamp_ of
+            \\each account in the request batch:
+            \\- Successfully created accounts with the result
+            \\  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+            \\  return the timestamp assigned to the `Account` object.
+            \\- Already existing accounts with the result
+            \\  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+            \\  return the timestamp of the original existing object.
+            \\- Failed accounts return the error code along with the timestamp when the validation
+            \\  occurred. See all error conditions in the
+            \\  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
         );
 
         ctx.code_section("create-accounts-errors");
@@ -272,14 +274,17 @@ fn readme_root(ctx: *Context) !void {
 
         ctx.header(3, "Response and Errors");
         ctx.paragraph(
-            \\The response is an empty array if all transfers were created
-            \\successfully. If the response is non-empty, each object in the
-            \\response array contains error information for a transfer that
-            \\failed. The error object contains an error code and the index of the
-            \\transfer in the request batch.
-            \\
-            \\See all error conditions in the [create_transfers
-            \\reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+            \\The response is an array containing the _result code_ and the _timestamp_ of
+            \\each transfer in the request batch:
+            \\- Successfully created transfers with the result
+            \\  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+            \\  return the timestamp assigned to the `Transfer` object.
+            \\- Already existing transfers with the result
+            \\  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+            \\  return the timestamp of the original existing object.
+            \\- Failed transfers return the error code along with the timestamp when the validation
+            \\  occurred. See all error conditions in the
+            \\  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
         );
         ctx.code_section("create-transfers-errors");
 
@@ -291,16 +296,16 @@ fn readme_root(ctx: *Context) !void {
         ctx.paragraph(
             \\TigerBeetle performance is maximized when you batch
             \\API requests.
+            \\
             \\A client instance shared across multiple threads/tasks can automatically
             \\batch concurrent requests, but the application must still send as many events
             \\as possible in a single call.
+            \\
             \\For example, if you insert 1 million transfers sequentially, one at a time,
             \\the insert rate will be a *fraction* of the potential, because the client will
             \\wait for a reply between each one.
-        );
-        ctx.code_section("no-batch");
-        ctx.paragraph(
             \\Instead, **always batch as much as you can**.
+            \\
             \\The maximum batch size is set in the TigerBeetle server. The default is 8189.
         );
         ctx.code_section("batch");

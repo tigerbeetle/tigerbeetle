@@ -65,7 +65,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -109,8 +109,8 @@ const account = {
   timestamp: 0n,
 };
 
-const account_errors = await client.createAccounts([account]);
-// Error handling omitted.
+const accounts_results = await client.createAccounts([account]);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -167,21 +167,23 @@ const account1 = {
   flags: AccountFlags.history,
 };
 
-const account_errors = await client.createAccounts([account0, account1]);
-// Error handling omitted.
+const accounts_results = await client.createAccounts([account0, account1]);
+// Results handling omitted.
 ```
 
 ### Response and Errors
 
-The response is an empty array if all accounts were
-created successfully. If the response is non-empty, each
-object in the response array contains error information
-for an account that failed. The error object contains an
-error code and the index of the account in the request
-batch.
-
-See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+The response is an array containing the _result code_ and the _timestamp_ of
+each account in the request batch:
+- Successfully created accounts with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  return the timestamp assigned to the `Account` object.
+- Already existing accounts with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  return the timestamp of the original existing object.
+- Failed accounts return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```javascript
 const account0 = {
@@ -230,18 +232,18 @@ const account2 = {
   flags: 0,
 };
 
-const account_errors = await client.createAccounts([account0, account1, account2]);
-for (const error of account_errors) {
-  switch (error.result) {
-    case CreateAccountError.exists:
-      console.error(`Batch account at ${error.index} already exists.`);
+const accounts_results = await client.createAccounts([account0, account1, account2]);
+for (let i = 0; i < accounts_results.length; i++) {
+  switch (accounts_results[i].result) {
+    case CreateAccountResult.ok:
+      console.error(`Batch account at ${i} successfully created with timestamp ${accounts_results[i].timestamp}.`);
+      break;
+    case CreateAccountResult.exists:
+      console.error(`Batch account at ${i} already exists with timestamp ${accounts_results[i].timestamp}.`);
       break;
     default:
-      console.error(
-        `Batch account at ${error.index} failed to create: ${
-          CreateAccountError[error.result]
-        }.`,
-      );
+      console.error(`Batch account at ${i} failed to create: ${accounts_results[i].result}`);
+      break;
   }
 }
 ```
@@ -290,8 +292,8 @@ const transfers = [{
   timestamp: 0n,
 }];
 
-const transfer_errors = await client.createTransfers(transfers);
-// Error handling omitted.
+const transfers_results = await client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -299,14 +301,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an empty array if all transfers were created
-successfully. If the response is non-empty, each object in the
-response array contains error information for a transfer that
-failed. The error object contains an error code and the index of the
-transfer in the request batch.
-
-See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+The response is an array containing the _result code_ and the _timestamp_ of
+each transfer in the request batch:
+- Successfully created transfers with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  return the timestamp assigned to the `Transfer` object.
+- Already existing transfers with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  return the timestamp of the original existing object.
+- Failed transfers return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```javascript
 const transfers = [{
@@ -355,18 +360,18 @@ const transfers = [{
   timestamp: 0n,
 }];
 
-const transfer_errors = await client.createTransfers(batch);
-for (const error of transfer_errors) {
-  switch (error.result) {
-    case CreateTransferError.exists:
-      console.error(`Batch transfer at ${error.index} already exists.`);
+const transfers_results = await client.createTransfers(batch);
+for (let i = 0; i < transfers_results.length; i++) {
+  switch (transfers_results[i].result) {
+    case CreateTransferResult.ok:
+      console.error(`Batch transfer at ${i} successfully created with timestamp ${transfers_results[i].timestamp}.`);
+      break;
+    case CreateTransferResult.exists:
+      console.error(`Batch transfer at ${i} already exists with timestamp ${transfers_results[i].timestamp}.`);
       break;
     default:
-      console.error(
-        `Batch transfer at ${error.index} failed to create: ${
-          CreateTransferError[error.result]
-        }.`,
-      );
+      console.error(`Batch transfer at ${i} failed to create: ${transfers_results[i].result}`);
+      break;
   }
 }
 ```
@@ -380,32 +385,26 @@ the `CreateTransferError` object for a human-readable string.
 
 TigerBeetle performance is maximized when you batch
 API requests.
+
 A client instance shared across multiple threads/tasks can automatically
 batch concurrent requests, but the application must still send as many events
 as possible in a single call.
+
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```javascript
-const batch = []; // Array of transfer to create.
-for (let i = 0; i < batch.len; i++) {
-  const transfer_errors = await client.createTransfers(batch[i]);
-  // Error handling omitted.
-}
-```
-
 Instead, **always batch as much as you can**.
+
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```javascript
 const batch = []; // Array of transfer to create.
 const BATCH_SIZE = 8189;
 for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-  const transfer_errors = await client.createTransfers(
+  const transfers_results = await client.createTransfers(
     batch.slice(i, Math.min(batch.length, BATCH_SIZE)),
   );
-  // Error handling omitted.
+  // Results handling omitted.
 }
 ```
 
@@ -467,8 +466,8 @@ const transfer1 = {
 };
 
 // Create the transfer
-const transfer_errors = await client.createTransfers([transfer0, transfer1]);
-// Error handling omitted.
+const transfers_results = await client.createTransfers([transfer0, transfer1]);
+// Results handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -504,8 +503,8 @@ const transfer0 = {
   timestamp: 0n,
 };
 
-let transfer_errors = await client.createTransfers([transfer0]);
-// Error handling omitted.
+let transfers_results = await client.createTransfers([transfer0]);
+// Results handling omitted.
 
 const transfer1 = {
   id: 7n,
@@ -524,8 +523,8 @@ const transfer1 = {
   timestamp: 0n,
 };
 
-transfer_errors = await client.createTransfers([transfer1]);
-// Error handling omitted.
+transfers_results = await client.createTransfers([transfer1]);
+// Results handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -553,8 +552,8 @@ const transfer0 = {
   timestamp: 0n,
 };
 
-let transfer_errors = await client.createTransfers([transfer0]);
-// Error handling omitted.
+let transfers_results = await client.createTransfers([transfer0]);
+// Results handling omitted.
 
 const transfer1 = {
   id: 9n,
@@ -572,8 +571,8 @@ const transfer1 = {
   timestamp: 0n,
 };
 
-transfer_errors = await client.createTransfers([transfer1]);
-// Error handling omitted.
+transfers_results = await client.createTransfers([transfer1]);
+// Results handling omitted.
 ```
 
 ## Transfer Lookup
@@ -752,8 +751,8 @@ batch.push({ id: 3n, /* ..., */ flags: 0 });
 batch.push({ id: 3n, /* ..., */ flags: linkedFlag });
 batch.push({ id: 4n, /* ..., */ flags: 0 });
 
-const transfer_errors = await client.createTransfers(batch);
-// Error handling omitted.
+const transfers_results = await client.createTransfers(batch);
+// Results handling omitted.
 ```
 
 ## Imported Events
@@ -794,8 +793,8 @@ for (let index = 0; i < historical_accounts.length; i++) {
   accounts.push(account);
 }
 
-const account_errors = await client.createAccounts(accounts);
-// Error handling omitted.
+const accounts_results = await client.createAccounts(accounts);
+// Results handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
 const transfers = [];
@@ -815,8 +814,8 @@ for (let index = 0; i < historical_transfers.length; i++) {
   transfers.push(transfer);
 }
 
-const transfer_errors = await client.createTransfers(transfers);
-// Error handling omitted.
+const transfers_results = await client.createTransfers(transfers);
+// Results handling omitted.
 
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
