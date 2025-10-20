@@ -147,7 +147,7 @@ pub const TransferFlags = packed struct(u16) {
     }
 };
 
-/// Error codes are ordered by descending precedence.
+/// Result codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateAccountResult = enum(u32) {
@@ -206,7 +206,7 @@ pub const CreateAccountResult = enum(u32) {
     }
 };
 
-/// Error codes are ordered by descending precedence.
+/// Result codes are ordered by descending precedence.
 /// When errors do not have an obvious/natural precedence (e.g. "*_must_not_be_zero"),
 /// the ordering matches struct field order.
 pub const CreateTransferResult = enum(u32) {
@@ -448,22 +448,48 @@ pub const CreateTransferResult = enum(u32) {
 };
 
 pub const CreateAccountsResult = extern struct {
-    index: u32,
+    timestamp: u64,
     result: CreateAccountResult,
+    reserved: u32 = 0,
 
     comptime {
-        assert(@sizeOf(CreateAccountsResult) == 8);
+        assert(@sizeOf(CreateAccountsResult) == 16);
+        assert(@alignOf(CreateAccountsResult) == 8);
         assert(stdx.no_padding(CreateAccountsResult));
     }
 };
 
 pub const CreateTransfersResult = extern struct {
+    timestamp: u64,
+    result: CreateTransferResult,
+    reserved: u32 = 0,
+
+    comptime {
+        assert(@sizeOf(CreateTransfersResult) == 16);
+        assert(@alignOf(CreateTransfersResult) == 8);
+        assert(stdx.no_padding(CreateTransfersResult));
+    }
+};
+
+// Deprecated: sparse results containing only error codes.
+pub const CreateAccountsErrorResult = extern struct {
+    index: u32,
+    result: CreateAccountResult,
+
+    comptime {
+        assert(@sizeOf(CreateAccountsErrorResult) == 8);
+        assert(stdx.no_padding(CreateAccountsErrorResult));
+    }
+};
+
+// Deprecated: sparse results containing only error codes.
+pub const CreateTransfersErrorResult = extern struct {
     index: u32,
     result: CreateTransferResult,
 
     comptime {
-        assert(@sizeOf(CreateTransfersResult) == 8);
-        assert(stdx.no_padding(CreateTransfersResult));
+        assert(@sizeOf(CreateTransfersErrorResult) == 8);
+        assert(stdx.no_padding(CreateTransfersErrorResult));
     }
 };
 
@@ -634,10 +660,11 @@ pub const ChangeEventsFilter = extern struct {
     }
 };
 
-// Looking to make backwards incompatible changes here? Make sure to check release.zig for
-// `release_triple_client_min`.
+/// Operations exported by TigerBeetle.
 pub const Operation = enum(u8) {
-    /// Operations exported by TigerBeetle:
+    // Looking to make backwards incompatible changes here?
+    // Make sure to check release.zig for `release_triple_client_min`.
+
     pulse = constants.vsr_operations_reserved + 0,
 
     // Deprecated operations not encoded as multi-batch:
@@ -652,8 +679,10 @@ pub const Operation = enum(u8) {
 
     get_change_events = constants.vsr_operations_reserved + 9,
 
-    create_accounts = constants.vsr_operations_reserved + 10,
-    create_transfers = constants.vsr_operations_reserved + 11,
+    // `create_*` operations that return sparse results containing only errors.
+    deprecated_create_accounts_sparse = constants.vsr_operations_reserved + 10,
+    deprecated_create_transfers_sparse = constants.vsr_operations_reserved + 11,
+
     lookup_accounts = constants.vsr_operations_reserved + 12,
     lookup_transfers = constants.vsr_operations_reserved + 13,
     get_account_transfers = constants.vsr_operations_reserved + 14,
@@ -661,11 +690,16 @@ pub const Operation = enum(u8) {
     query_accounts = constants.vsr_operations_reserved + 16,
     query_transfers = constants.vsr_operations_reserved + 17,
 
+    // TODO: Remove the `with_results` suffix.
+    // These are only temporary to make renaming and refactoring easier.
+    create_accounts_with_results = constants.vsr_operations_reserved + 18,
+    create_transfers_with_results = constants.vsr_operations_reserved + 19,
+
     pub fn EventType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
-            .create_accounts => Account,
-            .create_transfers => Transfer,
+            .create_accounts_with_results => Account,
+            .create_transfers_with_results => Transfer,
             .lookup_accounts => u128,
             .lookup_transfers => u128,
             .get_account_transfers => AccountFilter,
@@ -673,6 +707,9 @@ pub const Operation = enum(u8) {
             .query_accounts => QueryFilter,
             .query_transfers => QueryFilter,
             .get_change_events => ChangeEventsFilter,
+
+            .deprecated_create_accounts_sparse => Account,
+            .deprecated_create_transfers_sparse => Transfer,
 
             .deprecated_create_accounts_unbatched => Account,
             .deprecated_create_transfers_unbatched => Transfer,
@@ -688,8 +725,8 @@ pub const Operation = enum(u8) {
     pub fn ResultType(comptime operation: Operation) type {
         return switch (operation) {
             .pulse => void,
-            .create_accounts => CreateAccountsResult,
-            .create_transfers => CreateTransfersResult,
+            .create_accounts_with_results => CreateAccountsResult,
+            .create_transfers_with_results => CreateTransfersResult,
             .lookup_accounts => Account,
             .lookup_transfers => Transfer,
             .get_account_transfers => Transfer,
@@ -698,8 +735,11 @@ pub const Operation = enum(u8) {
             .query_transfers => Transfer,
             .get_change_events => ChangeEvent,
 
-            .deprecated_create_accounts_unbatched => CreateAccountsResult,
-            .deprecated_create_transfers_unbatched => CreateTransfersResult,
+            .deprecated_create_accounts_sparse => CreateAccountsErrorResult,
+            .deprecated_create_transfers_sparse => CreateTransfersErrorResult,
+
+            .deprecated_create_accounts_unbatched => CreateAccountsErrorResult,
+            .deprecated_create_transfers_unbatched => CreateTransfersErrorResult,
             .deprecated_lookup_accounts_unbatched => Account,
             .deprecated_lookup_transfers_unbatched => Transfer,
             .deprecated_get_account_transfers_unbatched => Transfer,
@@ -730,8 +770,8 @@ pub const Operation = enum(u8) {
             // Pulse does not take any input.
             .pulse => false,
             // Operations that take multiple events as input:
-            .create_accounts => true,
-            .create_transfers => true,
+            .create_accounts_with_results => true,
+            .create_transfers_with_results => true,
             .lookup_accounts => true,
             .lookup_transfers => true,
             // Operations that take a single event as input:
@@ -740,6 +780,9 @@ pub const Operation = enum(u8) {
             .query_accounts => false,
             .query_transfers => false,
             .get_change_events => false,
+
+            .deprecated_create_accounts_sparse => true,
+            .deprecated_create_transfers_sparse => true,
 
             .deprecated_create_accounts_unbatched => true,
             .deprecated_create_transfers_unbatched => true,
@@ -758,8 +801,8 @@ pub const Operation = enum(u8) {
         return switch (operation) {
             .pulse => false,
 
-            .create_accounts,
-            .create_transfers,
+            .create_accounts_with_results,
+            .create_transfers_with_results,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
@@ -769,6 +812,10 @@ pub const Operation = enum(u8) {
             => true,
 
             .get_change_events => false,
+
+            .deprecated_create_accounts_sparse,
+            .deprecated_create_transfers_sparse,
+            => true,
 
             .deprecated_create_accounts_unbatched,
             .deprecated_create_transfers_unbatched,
@@ -873,10 +920,12 @@ pub const Operation = enum(u8) {
     ) u32 {
         return switch (operation) {
             .pulse => 0,
-            inline .create_accounts,
-            .create_transfers,
+            inline .create_accounts_with_results,
+            .create_transfers_with_results,
             .lookup_accounts,
             .lookup_transfers,
+            .deprecated_create_accounts_sparse,
+            .deprecated_create_transfers_sparse,
             .deprecated_create_accounts_unbatched,
             .deprecated_create_transfers_unbatched,
             .deprecated_lookup_accounts_unbatched,
