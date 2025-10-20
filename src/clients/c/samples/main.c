@@ -15,7 +15,7 @@
 #include "../tb_client.h"
 
 // config.message_size_max - @sizeOf(vsr.Header):
-#define MAX_MESSAGE_SIZE (1024 * 1024) - 256
+#define MAX_MESSAGE_SIZE ((1024 * 1024) - 256)
 
 // Synchronization context between the callback and the main thread.
 typedef struct completion_context {
@@ -105,11 +105,11 @@ int main(int argc, char **argv) {
     accounts[1].code = 2;
     accounts[1].ledger = 777;
 
-    packet.operation = TB_OPERATION_CREATE_ACCOUNTS;  // The operation to be performed.
-    packet.data = accounts;                           // The data to be sent.
-    packet.data_size = ACCOUNTS_SIZE;                 //
-    packet.user_data = &ctx;                          // User-defined context.
-    packet.status = TB_PACKET_OK;                     // Will be set when the reply arrives.
+    packet.operation = TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS; // The operation to execute.
+    packet.data = accounts;                                       // The data to be sent.
+    packet.data_size = ACCOUNTS_SIZE;                             //
+    packet.user_data = &ctx;                                      // User-defined context.
+    packet.status = TB_PACKET_OK;                                 // Set when the reply arrives.
 
     printf("Creating accounts...\n");
 
@@ -125,15 +125,13 @@ int main(int argc, char **argv) {
         exit(-1);
     }
 
-    if (ctx.size != 0) {
-        // Checking for errors creating the accounts:
-        tb_create_accounts_result_t *results = (tb_create_accounts_result_t*)ctx.reply;
-        int results_len = ctx.size / sizeof(tb_create_accounts_result_t);
-        printf("create_account results:\n");
-        for(int i=0;i<results_len;i++) {
-            printf("index=%d, ret=%d\n", results[i].index, results[i].result);
-        }
-        exit(-1);
+    // Checking for errors creating the accounts:
+    tb_create_accounts_result_t *create_accounts_result = (tb_create_accounts_result_t*)ctx.reply;
+    int results_len = ctx.size / sizeof(tb_create_accounts_result_t);
+    printf("create_account results:\n");
+    for(int i=0;i<results_len;i++) {
+        printf("timestamp=%lu, ret=%d\n", create_accounts_result[i].timestamp, create_accounts_result[i].result);
+        if (create_accounts_result[i].result != TB_CREATE_ACCOUNT_OK) exit(-1);
     }
 
     printf("Accounts created successfully\n");
@@ -144,7 +142,7 @@ int main(int argc, char **argv) {
 
     printf("Creating transfers...\n");
     #define MAX_BATCHES 100
-    #define TRANSFERS_PER_BATCH ((MAX_MESSAGE_SIZE) / sizeof(tb_transfer_t))
+    #define TRANSFERS_PER_BATCH ((MAX_MESSAGE_SIZE / sizeof(tb_transfer_t)) - 1)
     #define TRANSFERS_SIZE (sizeof(tb_transfer_t) * TRANSFERS_PER_BATCH)
     long max_latency_ms = 0;
     long total_time_ms = 0;
@@ -163,11 +161,11 @@ int main(int argc, char **argv) {
             transfers[j].amount = 1;
         }
 
-        packet.operation = TB_OPERATION_CREATE_TRANSFERS;  // The operation to be performed.
-        packet.data = transfers;                           // The data to be sent.
-        packet.data_size = MAX_MESSAGE_SIZE;               //
-        packet.user_data = &ctx;                           // User-defined context.
-        packet.status = TB_PACKET_OK;                      // Will be set when the reply arrives.
+        packet.operation = TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS; // The operation to execute.
+        packet.data = transfers;                                       // The data to be sent.
+        packet.data_size = TRANSFERS_SIZE;                             //
+        packet.user_data = &ctx;                                       // User-defined context.
+        packet.status = TB_PACKET_OK;                                  // Set when the reply arrives.
 
         long long now = get_time_ms();
 
@@ -176,7 +174,6 @@ int main(int argc, char **argv) {
             printf("Failed to send the request\n");
             exit(-1);
         }
-
 
         long elapsed_ms = get_time_ms() - now;
         if (elapsed_ms > max_latency_ms) max_latency_ms = elapsed_ms;
@@ -188,15 +185,13 @@ int main(int argc, char **argv) {
             exit(-1);
         }
 
-        if (ctx.size != 0) {
-            // Checking for errors creating the accounts:
-            tb_create_transfers_result_t *results = (tb_create_transfers_result_t*)ctx.reply;
-            int results_len = ctx.size / sizeof(tb_create_transfers_result_t);
-            printf("create_transfers results:\n");
-            for(int i=0;i<results_len;i++) {
-                printf("index=%d, ret=%d\n", results[i].index, results[i].result);
-            }
-            exit(-1);
+        // Checking for errors creating transfers:
+        tb_create_transfers_result_t *create_transfers_result = (tb_create_transfers_result_t*)ctx.reply;
+        int results_len = ctx.size / sizeof(tb_create_transfers_result_t);
+        printf("create_transfers results:\n");
+        for(int i=0;i<results_len;i++) {
+            printf("timestamp=%lu, ret=%d\n", create_transfers_result[i].timestamp, create_transfers_result[i].result);
+            if (create_transfers_result[i].result != TB_CREATE_TRANSFER_OK) exit(-1);
         }
     }
 

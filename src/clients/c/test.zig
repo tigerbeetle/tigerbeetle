@@ -113,8 +113,8 @@ test "tb_client echo" {
 
     // Test multiple operations to prevent all requests from ending up in the same batch.
     const operations = [_]tb_client.Operation{
-        tb_client.Operation.create_accounts,
-        tb_client.Operation.create_transfers,
+        tb_client.Operation.create_accounts_with_results,
+        tb_client.Operation.create_transfers_with_results,
         tb_client.Operation.lookup_accounts,
         tb_client.Operation.lookup_transfers,
         tb_client.Operation.get_account_transfers,
@@ -169,11 +169,11 @@ test "tb_client echo" {
 
         const event_size: u32, const event_request_max: u32 = switch (operation) {
             // All multi-batched operations require a minimum trailer size of one element:
-            .create_accounts => .{
+            .create_accounts_with_results => .{
                 @sizeOf(tb.Account),
                 @divExact(constants.message_body_size_max, @sizeOf(tb.Account)) - 1,
             },
-            .create_transfers => .{
+            .create_transfers_with_results => .{
                 @sizeOf(tb.Transfer),
                 @divExact(constants.message_body_size_max, @sizeOf(tb.Transfer)) - 1,
             },
@@ -311,7 +311,7 @@ test "tb_client client status" {
     };
 
     const packet = &request.packet;
-    packet.operation = @intFromEnum(tb_client.Operation.create_accounts);
+    packet.operation = @intFromEnum(tb_client.Operation.create_accounts_with_results);
     packet.user_data = &request;
     packet.data = null;
     packet.data_size = 0;
@@ -391,7 +391,7 @@ test "tb_client PacketStatus" {
     // Messages larger than constants.message_body_size_max should return "too_much_data":
     try assert_result(
         &client_out,
-        @intFromEnum(tb_client.Operation.create_transfers),
+        @intFromEnum(tb_client.Operation.create_transfers_with_results),
         constants.message_body_size_max + @sizeOf(tb_client.exports.tb_transfer_t),
         .too_much_data,
     );
@@ -426,7 +426,7 @@ test "tb_client PacketStatus" {
     // should return "invalid_data_size":
     try assert_result(
         &client_out,
-        @intFromEnum(tb_client.Operation.create_transfers),
+        @intFromEnum(tb_client.Operation.create_transfers_with_results),
         @sizeOf(tb_client.exports.tb_transfer_t) - 1,
         .invalid_data_size,
     );
@@ -446,19 +446,19 @@ test "tb_client PacketStatus" {
     // Messages with zero length or multiple of the event size are valid.
     try assert_result(
         &client_out,
-        @intFromEnum(tb_client.Operation.create_accounts),
+        @intFromEnum(tb_client.Operation.create_accounts_with_results),
         0,
         .ok,
     );
     try assert_result(
         &client_out,
-        @intFromEnum(tb_client.Operation.create_accounts),
+        @intFromEnum(tb_client.Operation.create_accounts_with_results),
         @sizeOf(tb_client.exports.tb_account_t),
         .ok,
     );
     try assert_result(
         &client_out,
-        @intFromEnum(tb_client.Operation.create_accounts),
+        @intFromEnum(tb_client.Operation.create_accounts_with_results),
         @sizeOf(tb_client.exports.tb_account_t) * 2,
         .ok,
     );

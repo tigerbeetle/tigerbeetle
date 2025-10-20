@@ -155,8 +155,8 @@ pub fn ContextType(
 
         const StateMachine = Client.StateMachine;
         const allowed_operations = [_]StateMachine.Operation{
-            .create_accounts,
-            .create_transfers,
+            .create_accounts_with_results,
+            .create_transfers_with_results,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
