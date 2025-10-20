@@ -26,14 +26,14 @@ if sys.version_info >= (3, 10):
 class Operation(enum.IntEnum):
     PULSE = 128
     GET_CHANGE_EVENTS = 137
-    CREATE_ACCOUNTS = 138
-    CREATE_TRANSFERS = 139
     LOOKUP_ACCOUNTS = 140
     LOOKUP_TRANSFERS = 141
     GET_ACCOUNT_TRANSFERS = 142
     GET_ACCOUNT_BALANCES = 143
     QUERY_ACCOUNTS = 144
     QUERY_TRANSFERS = 145
+    CREATE_ACCOUNTS_WITH_RESULTS = 146
+    CREATE_TRANSFERS_WITH_RESULTS = 147
 
 
 class PacketStatus(enum.IntEnum):
@@ -246,13 +246,13 @@ class Transfer:
 
 @dataclass
 class CreateAccountsResult:
-    index: int = 0
+    timestamp: int = 0
     result: CreateAccountResult = CreateAccountResult.OK
 
 
 @dataclass
 class CreateTransfersResult:
-    index: int = 0
+    timestamp: int = 0
     result: CreateTransferResult = CreateTransferResult.OK
 
 
@@ -462,44 +462,46 @@ CTransfer._fields_ = [ # noqa: SLF001
 class CCreateAccountsResult(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=32, name="index", number=obj.index)
+        validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
-            index=obj.index,
+            timestamp=obj.timestamp,
             result=obj.result,
         )
 
 
     def to_python(self) -> CreateAccountsResult:
         return CreateAccountsResult(
-            index=self.index,
+            timestamp=self.timestamp,
             result=CreateAccountResult(self.result),
         )
 
 CCreateAccountsResult._fields_ = [ # noqa: SLF001
-    ("index", ctypes.c_uint32),
+    ("timestamp", ctypes.c_uint64),
     ("result", ctypes.c_uint32),
+    ("reserved", ctypes.c_uint32),
 ]
 
 
 class CCreateTransfersResult(ctypes.Structure):
     @classmethod
     def from_param(cls, obj: Any) -> Self:
-        validate_uint(bits=32, name="index", number=obj.index)
+        validate_uint(bits=64, name="timestamp", number=obj.timestamp)
         return cls(
-            index=obj.index,
+            timestamp=obj.timestamp,
             result=obj.result,
         )
 
 
     def to_python(self) -> CreateTransfersResult:
         return CreateTransfersResult(
-            index=self.index,
+            timestamp=self.timestamp,
             result=CreateTransferResult(self.result),
         )
 
 CCreateTransfersResult._fields_ = [ # noqa: SLF001
-    ("index", ctypes.c_uint32),
+    ("timestamp", ctypes.c_uint64),
     ("result", ctypes.c_uint32),
+    ("reserved", ctypes.c_uint32),
 ]
 
 
@@ -696,7 +698,7 @@ class AsyncStateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     async def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
         return await self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_ACCOUNTS,
+            Operation.CREATE_ACCOUNTS_WITH_RESULTS,
             accounts,
             CAccount,
             CCreateAccountsResult,
@@ -704,7 +706,7 @@ class AsyncStateMachineMixin:
 
     async def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return await self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_TRANSFERS,
+            Operation.CREATE_TRANSFERS_WITH_RESULTS,
             transfers,
             CTransfer,
             CCreateTransfersResult,
@@ -764,7 +766,7 @@ class StateMachineMixin:
     _submit: Callable[[Operation, Any, Any, Any], Any]
     def create_accounts(self, accounts: list[Account]) -> list[CreateAccountsResult]:
         return self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_ACCOUNTS,
+            Operation.CREATE_ACCOUNTS_WITH_RESULTS,
             accounts,
             CAccount,
             CCreateAccountsResult,
@@ -772,7 +774,7 @@ class StateMachineMixin:
 
     def create_transfers(self, transfers: list[Transfer]) -> list[CreateTransfersResult]:
         return self._submit(  # type: ignore[no-any-return]
-            Operation.CREATE_TRANSFERS,
+            Operation.CREATE_TRANSFERS_WITH_RESULTS,
             transfers,
             CTransfer,
             CCreateTransfersResult,

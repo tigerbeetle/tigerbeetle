@@ -3,7 +3,7 @@ import os
 import tigerbeetle as tb
 
 with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
-    account_errors = client.create_accounts([
+    accounts_results = client.create_accounts([
         tb.Account(
             id=1,
             ledger=1,
@@ -16,10 +16,12 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         ),
     ])
 
-    print(account_errors)
-    assert len(account_errors) == 0
+    print(accounts_results)
+    assert len(accounts_results) == 2
+    assert accounts_results[0].result == tb.CreateAccountResult.OK
+    assert accounts_results[1].result == tb.CreateAccountResult.OK
 
-    transfer_errors = client.create_transfers([
+    transfers_results = client.create_transfers([
         tb.Transfer(
             id=1,
             debit_account_id=1,
@@ -30,8 +32,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         ),
     ])
 
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([1, 2])
     assert len(accounts) == 2
