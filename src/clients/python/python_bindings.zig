@@ -362,7 +362,7 @@ fn emit_method(
     buffer.print(
         \\    {[prefix_fn]s}def {[fn_name]s}(self, {[event_name]s}: {[event_type]s}) -> {[result_type]s}:
         \\        return {[prefix_call]s}self._submit(  # type: ignore[no-any-return]
-        \\            Operation.{[uppercase_name]s},
+        \\            Operation.{[operation_name]s},
         \\            {[event_name_or_list]s},
         \\            {[event_type_c]s},
         \\            {[result_type_c]s},
@@ -372,13 +372,13 @@ fn emit_method(
     ,
         .{
             .prefix_fn = if (options.is_async) "async " else "",
-            .fn_name = @tagName(operation),
+            .fn_name = function_name(operation),
             .event_name = event_name(operation),
             .event_type = event_type,
             .result_type = result_type,
             .event_name_or_list = event_name_or_list,
             .prefix_call = if (options.is_async) "await " else "",
-            .uppercase_name = to_uppercase(@tagName(operation)),
+            .operation_name = to_uppercase(@tagName(operation)),
             .event_type_c = ctype_type_name(StateMachine.EventType(operation)),
             .result_type_c = ctype_type_name(StateMachine.ResultType(operation)),
         },
@@ -556,8 +556,8 @@ pub fn main() !void {
         , .{prefix_class});
 
         const operations: []const StateMachine.Operation = &.{
-            .create_accounts,
-            .create_transfers,
+            .create_accounts_with_results,
+            .create_transfers_with_results,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
@@ -580,14 +580,28 @@ pub fn main() !void {
 /// Inline function so that `operation` can be known at comptime.
 fn event_name(comptime operation: StateMachine.Operation) []const u8 {
     return switch (operation) {
-        .create_accounts => "accounts",
-        .create_transfers => "transfers",
+        .create_accounts_with_results => "accounts",
+        .create_transfers_with_results => "transfers",
         .lookup_accounts => "accounts",
         .lookup_transfers => "transfers",
         .get_account_transfers => "filter",
         .get_account_balances => "filter",
         .query_accounts => "query_filter",
         .query_transfers => "query_filter",
+        else => comptime unreachable,
+    };
+}
+
+fn function_name(comptime operation: StateMachine.Operation) []const u8 {
+    return switch (operation) {
+        .create_accounts_with_results => "create_accounts",
+        .create_transfers_with_results => "create_transfers",
+        .lookup_accounts => "lookup_accounts",
+        .lookup_transfers => "lookup_transfers",
+        .get_account_transfers => "get_account_transfers",
+        .get_account_balances => "get_account_balances",
+        .query_accounts => "query_accounts",
+        .query_transfers => "query_transfers",
         else => comptime unreachable,
     };
 }

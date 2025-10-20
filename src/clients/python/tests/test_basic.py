@@ -57,24 +57,26 @@ def test_range_check_code_on_account_to_be_u16(client):
     assert accounts == []
 
 def test_create_accounts(client):
-    errors = client.create_accounts([account_a])
-    assert errors == []
+    results = client.create_accounts([account_a])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateAccountResult.OK
 
 def test_return_error_on_account(client):
-    errors = client.create_accounts([account_a, account_b])
-
-    assert len(errors) == 1
-    assert errors[0] == tb.CreateAccountsResult(index=0, result=tb.CreateAccountResult.EXISTS)
+    results = client.create_accounts([account_a, account_b])
+    assert len(results) == 2
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateAccountResult.EXISTS
+    assert results[1].timestamp > 0
+    assert results[1].result == tb.CreateAccountResult.OK
 
 def test_error_if_timestamp_is_not_set_to_0_on_account(client):
     account = { **asdict(account_a), "timestamp": 2, "id": 3 }
-    errors = client.create_accounts([tb.Account(**account)])
-
-    assert len(errors) == 1
-    assert errors[0] == tb.CreateAccountsResult(
-        index=0,
-        result=tb.CreateAccountResult.TIMESTAMP_MUST_BE_ZERO
-    )
+    results = client.create_accounts([tb.Account(**account)])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].timestamp != 2
+    assert results[0].result == tb.CreateAccountResult.TIMESTAMP_MUST_BE_ZERO
 
 def test_lookup_accounts(client):
     accounts = client.lookup_accounts([account_a.id, account_b.id])
@@ -125,8 +127,10 @@ def test_create_a_transfer(client):
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([transfer])
-    assert errors == []
+    results = client.create_transfers([transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -157,8 +161,10 @@ def test_create_a_two_phase_transfer(client):
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([transfer])
-    assert errors == []
+    results = client.create_transfers([transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -185,7 +191,7 @@ def test_create_a_two_phase_transfer(client):
     assert transfers[0].timeout > 0
     assert transfers[0].code == 1
     assert transfers[0].flags == 2
-    assert transfers[0].timestamp > 0
+    assert transfers[0].timestamp == results[0].timestamp
 
 def test_post_a_two_phase_transfer(client):
     commit = tb.Transfer(
@@ -204,8 +210,10 @@ def test_post_a_two_phase_transfer(client):
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([commit])
-    assert errors == []
+    results = client.create_transfers([commit])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -236,8 +244,10 @@ def test_reject_a_two_phase_transfer(client):
         flags=tb.TransferFlags.PENDING,
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
-    transfer_errors = client.create_transfers([transfer])
-    assert transfer_errors == []
+    results = client.create_transfers([transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     # send in the reject
     reject = tb.Transfer(
@@ -256,8 +266,10 @@ def test_reject_a_two_phase_transfer(client):
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([reject])
-    assert errors == []
+    results = client.create_transfers([reject])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -305,16 +317,12 @@ def test_link_transfers(client):
         timestamp=0, # will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([transfer1, transfer2])
-    assert len(errors) == 2
-    assert errors[0] == tb.CreateTransfersResult(
-        index=0,
-        result=tb.CreateTransferResult.LINKED_EVENT_FAILED
-    )
-    assert errors[1] == tb.CreateTransfersResult(
-        index=1,
-        result=tb.CreateTransferResult.EXISTS_WITH_DIFFERENT_FLAGS
-    )
+    results = client.create_transfers([transfer1, transfer2])
+    assert len(results) == 2
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.LINKED_EVENT_FAILED
+    assert results[1].timestamp > 0
+    assert results[1].result == tb.CreateTransferResult.EXISTS_WITH_DIFFERENT_FLAGS
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -345,8 +353,10 @@ def test_cannot_void_an_expired_transfer(client):
         flags=tb.TransferFlags.PENDING,
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
-    transfer_errors = client.create_transfers([transfer])
-    assert transfer_errors == []
+    results = client.create_transfers([transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -396,12 +406,10 @@ def test_cannot_void_an_expired_transfer(client):
         timestamp=0, # this will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([reject])
-    assert len(errors) == 1
-    assert errors[0] == tb.CreateTransfersResult(
-        index=0,
-        result=tb.CreateTransferResult.PENDING_TRANSFER_EXPIRED
-    )
+    results = client.create_transfers([reject])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.PENDING_TRANSFER_EXPIRED
 
 def test_close_accounts(client):
     closing_transfer = tb.Transfer(
@@ -419,8 +427,10 @@ def test_close_accounts(client):
         flags=tb.TransferFlags.CLOSING_DEBIT | tb.TransferFlags.CLOSING_CREDIT | tb.TransferFlags.PENDING,
         timestamp=0, # will be set correctly by the TigerBeetle server
     )
-    errors = client.create_transfers([closing_transfer])
-    assert len(errors) == 0
+    results = client.create_transfers([closing_transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -446,8 +456,10 @@ def test_close_accounts(client):
         timestamp=0, # will be set correctly by the TigerBeetle server
     )
 
-    errors = client.create_transfers([voiding_transfer])
-    assert len(errors) == 0
+    results = client.create_transfers([voiding_transfer])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateTransferResult.OK
 
     accounts = client.lookup_accounts([account_a.id, account_b.id])
     assert len(accounts) == 2
@@ -472,8 +484,10 @@ def test_get_account_transfers(client):
         flags=tb.AccountFlags.HISTORY,
         timestamp=0
     )
-    account_errors = client.create_accounts([accountC])
-    assert account_errors == []
+    account_results = client.create_accounts([accountC])
+    assert len(account_results) == 1
+    assert account_results[0].timestamp > 0
+    assert account_results[0].result == tb.CreateAccountResult.OK
 
     transfers_created = []
     # Create transfers where the new account is either the debit or credit account:
@@ -494,8 +508,11 @@ def test_get_account_transfers(client):
             timestamp=0,
         ))
 
-    transfers_created_result = client.create_transfers(transfers_created)
-    assert transfers_created_result == []
+    transfers_results = client.create_transfers(transfers_created)
+    assert len(transfers_results) == len(transfers_created)
+    for result in transfers_results:
+        assert result.timestamp > 0
+        assert result.result == tb.CreateAccountResult.OK
 
     # Query all transfers for accountC:
     filter = tb.AccountFilter(
@@ -516,6 +533,7 @@ def test_get_account_transfers(client):
 
     timestamp = 0
     for i, transfer in enumerate(transfers):
+        assert transfer.timestamp == transfers_results[i].timestamp
         assert timestamp < transfer.timestamp
         timestamp = transfer.timestamp
 
@@ -830,8 +848,12 @@ def test_query_accounts(client):
             timestamp=0,
         ))
 
-    create_accounts_result = client.create_accounts(accounts)
-    assert create_accounts_result == []
+    accounts_results = client.create_accounts(accounts)
+    assert len(accounts) == len(accounts_results)
+    for result in accounts_results:
+        assert result.timestamp > 0
+        assert result.result == tb.CreateAccountResult.OK
+
 
     # Querying accounts where:
     # `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
@@ -983,8 +1005,10 @@ def test_query_transfers(client):
         flags=tb.AccountFlags.NONE,
         timestamp=0
     )
-    create_accounts_result = client.create_accounts([account])
-    assert create_accounts_result == []
+    accounts_results = client.create_accounts([account])
+    assert len(accounts_results) == 1
+    accounts_results[0].timestamp > 0
+    accounts_results[0].result == tb.CreateAccountResult.OK
 
     transfers_created = []
     # Create transfers:
@@ -1005,8 +1029,11 @@ def test_query_transfers(client):
             timestamp=0,
         ))
 
-    create_transfers_result = client.create_transfers(transfers_created)
-    assert create_transfers_result == []
+    transfers_results = client.create_transfers(transfers_created)
+    assert len(transfers_results) == len(transfers_created)
+    for result in transfers_results:
+        assert result.timestamp > 0
+        assert result.result == tb.CreateTransferResult.OK
 
     # Querying transfers where:
     # `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
@@ -1234,12 +1261,12 @@ def test_import_accounts_and_transfers(client):
         flags=0,
         timestamp=0
     )
-    accounts_errors = client.create_accounts([account_tmp])
-    assert accounts_errors == []
+    accounts_results = client.create_accounts([account_tmp])
+    assert len(accounts_results) == 1
+    accounts_results[0].timestamp > 0
+    accounts_results[0].result == tb.CreateAccountResult.OK
 
-    account_lookup = client.lookup_accounts([account_tmp.id])
-    assert len(account_lookup) == 1
-    timestamp_max = account_lookup[0].timestamp
+    timestamp_max = accounts_results[0].timestamp
 
     # Wait 10 ms so we can use the account's timestamp as the reference for past time
     # after the last object inserted.
@@ -1273,8 +1300,12 @@ def test_import_accounts_and_transfers(client):
         flags=tb.AccountFlags.IMPORTED,
         timestamp=timestamp_max + 2 # user-defined timestamp
     )
-    accounts_errors = client.create_accounts([account_a, account_b])
-    assert accounts_errors == []
+    accounts_results = client.create_accounts([account_a, account_b])
+    assert len(accounts_results) == 2
+    accounts_results[0].timestamp == account_a.timestamp
+    accounts_results[0].result == tb.CreateAccountResult.OK
+    accounts_results[1].timestamp == account_b.timestamp
+    accounts_results[1].result == tb.CreateAccountResult.OK
 
     account_lookup = client.lookup_accounts([account_a.id, account_b.id])
     assert len(account_lookup) == 2
@@ -1297,20 +1328,22 @@ def test_import_accounts_and_transfers(client):
         timestamp=timestamp_max + 3, # user-defined timestamp.
     )
 
-    errors = client.create_transfers([transfer])
-    assert errors == []
+    transfers_results = client.create_transfers([transfer])
+    assert len(transfers_results) == 1
+    assert transfers_results[0].timestamp == transfer.timestamp
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     transfers = client.lookup_transfers([transfer.id])
     assert len(transfers) == 1
-    assert transfers[0].timestamp == timestamp_max + 3
+    assert transfers[0].timestamp == transfers_results[0].timestamp
 
 def test_accept_zero_length_create_accounts(client):
-    errors = client.create_accounts([])
-    assert errors == []
+    results = client.create_accounts([])
+    assert results == []
 
 def test_accept_zero_length_create_transfers(client):
-    errors = client.create_transfers([])
-    assert errors == []
+    results = client.create_transfers([])
+    assert results == []
 
 def test_accept_zero_length_lookup_accounts(client):
     accounts = client.lookup_accounts([])
@@ -1331,8 +1364,10 @@ def test_uint128(client):
         ledger=1,
         code=1
     )
-    result = client.create_accounts([account])
-    assert len(result) == 0
+    results = client.create_accounts([account])
+    assert len(results) == 1
+    assert results[0].timestamp > 0
+    assert results[0].result == tb.CreateAccountResult.OK
 
     accounts = client.lookup_accounts([account.id])
     assert len(accounts) == 1
@@ -1347,7 +1382,7 @@ def test_uint128(client):
         user_data_32=0,
         ledger=1,
         code=1,
-        timestamp=accounts[0].timestamp,
+        timestamp=results[0].timestamp,
         flags=tb.AccountFlags.NONE
     )
 
@@ -1364,7 +1399,7 @@ def test_uint128(client):
         "code": "1",
         "flags": [],
     }
-    expected_repl_response["timestamp"] = str(accounts[0].timestamp)
+    expected_repl_response["timestamp"] = str(results[0].timestamp)
 
     expected_repl_response_as_account = tb.Account()
     for k, v in expected_repl_response.items():
