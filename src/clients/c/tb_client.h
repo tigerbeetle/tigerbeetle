@@ -171,13 +171,15 @@ typedef enum TB_CREATE_TRANSFER_RESULT {
 } TB_CREATE_TRANSFER_RESULT;
 
 typedef struct tb_create_accounts_result_t {
-    uint32_t index;
+    uint64_t timestamp;
     uint32_t result;
+    uint32_t reserved;
 } tb_create_accounts_result_t;
 
 typedef struct tb_create_transfers_result_t {
-    uint32_t index;
+    uint64_t timestamp;
     uint32_t result;
+    uint32_t reserved;
 } tb_create_transfers_result_t;
 
 typedef struct tb_account_filter_t {
@@ -248,14 +250,14 @@ typedef struct tb_packet_t {
 typedef enum TB_OPERATION {
     TB_OPERATION_PULSE = 128,
     TB_OPERATION_GET_CHANGE_EVENTS = 137,
-    TB_OPERATION_CREATE_ACCOUNTS = 138,
-    TB_OPERATION_CREATE_TRANSFERS = 139,
     TB_OPERATION_LOOKUP_ACCOUNTS = 140,
     TB_OPERATION_LOOKUP_TRANSFERS = 141,
     TB_OPERATION_GET_ACCOUNT_TRANSFERS = 142,
     TB_OPERATION_GET_ACCOUNT_BALANCES = 143,
     TB_OPERATION_QUERY_ACCOUNTS = 144,
     TB_OPERATION_QUERY_TRANSFERS = 145,
+    TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS = 146,
+    TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS = 147,
 } TB_OPERATION;
 
 typedef enum TB_PACKET_STATUS {
