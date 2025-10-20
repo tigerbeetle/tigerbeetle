@@ -2,8 +2,8 @@ export * from './bindings'
 import {
   Account,
   Transfer,
-  CreateAccountsError,
-  CreateTransfersError,
+  CreateAccountsResult,
+  CreateTransfersResult,
   Operation,
   AccountFilter,
   AccountBalance,
@@ -70,7 +70,7 @@ export type Context = object // tb_client
 export type AccountID = bigint // u128
 export type TransferID = bigint // u128
 export type Event = Account | Transfer | AccountID | TransferID | AccountFilter | QueryFilter
-export type Result = CreateAccountsError | CreateTransfersError | Account | Transfer | AccountBalance
+export type Result = CreateAccountsResult | CreateTransfersResult | Account | Transfer | AccountBalance
 export type ResultCallback = (error: Error | null, results: Result[] | null) => void
 
 export const amount_max: bigint = (2n ** 128n) - 1n
@@ -92,8 +92,8 @@ export interface ClientInitArgs {
 }
 
 export interface Client {
-  createAccounts: (batch: Account[]) => Promise<CreateAccountsError[]>
-  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersError[]>
+  createAccounts: (batch: Account[]) => Promise<CreateAccountsResult[]>
+  createTransfers: (batch: Transfer[]) => Promise<CreateTransfersResult[]>
   lookupAccounts: (batch: AccountID[]) => Promise<Account[]>
   lookupTransfers: (batch: TransferID[]) => Promise<Transfer[]>
   getAccountTransfers: (filter: AccountFilter) => Promise<Transfer[]>
@@ -136,8 +136,8 @@ export function createClient (args: ClientInitArgs): Client {
   }
 
   return {
-    createAccounts(batch) { return request(Operation.create_accounts, batch) },
-    createTransfers(batch) { return request(Operation.create_transfers, batch) },
+    createAccounts(batch) { return request(Operation.create_accounts_with_results, batch) },
+    createTransfers(batch) { return request(Operation.create_transfers_with_results, batch) },
     lookupAccounts(batch) { return request(Operation.lookup_accounts, batch) },
     lookupTransfers(batch) { return request(Operation.lookup_transfers, batch) },
     getAccountTransfers(filter) { return request(Operation.get_account_transfers, [filter]) },
