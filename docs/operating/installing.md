@@ -47,6 +47,19 @@ You can download prebuilt binaries for the latest release here:
 [tigerbeetle-x86_64-windows.zip]:
   https://github.com/tigerbeetle/tigerbeetle/releases/latest/download/tigerbeetle-x86_64-windows.zip
 
+### Linux Community
+
+When installing a third-party package please be aware that it may not be completely up to date.
+
+The packages in this section provide binary installs for TigerBeetle but are not official packages within the associated distributions. These packages are maintained by community members and as such a higher level of caution should be taken when installing them.
+
+#### Debian
+
+TigerBeetle is available in [this community-maintained repository](https://debian.griffo.io/).
+
+Instructions for each version are available in the README of the repository where packages are built.
+Build, packaging and instructions for each version are available in the README of the [repository](https://github.com/dariogriffo/tigerbeetle-debian)
+
 ## Past Releases
 
 The releases page lists all past and current releases:
