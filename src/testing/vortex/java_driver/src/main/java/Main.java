@@ -132,7 +132,7 @@ class Driver {
     }
   }
 
-  void createAccounts(Reader reader, Writer writer, int count) throws IOException {
+  void createAccounts(Reader reader, Writer writer, int count) throws IOException, InterruptedException {
     reader.read(Driver.Operation.CREATE_ACCOUNTS.eventSize() * count);
     var batch = new AccountBatch(count);
     for (int index = 0; index < count; index++) {
@@ -224,7 +224,7 @@ class Driver {
     writer.flush();
   }
 
-  void createTransfers(Reader reader, Writer writer, int count) throws IOException {
+  void createTransfers(Reader reader, Writer writer, int count) throws IOException, InterruptedException {
     reader.read(Driver.Operation.CREATE_TRANSFERS.eventSize() * count);
     var batch = new TransferBatch(count);
     for (int index = 0; index < count; index++) {
@@ -316,7 +316,7 @@ class Driver {
     writer.flush();
   }
 
-  void lookupAccounts(Reader reader, Writer writer, int count) throws IOException {
+  void lookupAccounts(Reader reader, Writer writer, int count) throws IOException, InterruptedException {
     reader.read(Driver.Operation.LOOKUP_ACCOUNTS.eventSize() * count);
     var batch = new IdBatch(count);
     for (int index = 0; index < count; index++) {
@@ -432,7 +432,7 @@ class Driver {
     writer.flush();
   }
 
-  void lookupTransfers(Reader reader, Writer writer, int count) throws IOException {
+  void lookupTransfers(Reader reader, Writer writer, int count) throws IOException, InterruptedException {
     reader.read(Driver.Operation.LOOKUP_TRANSFERS.eventSize() * count);
     var batch = new IdBatch(count);
     for (int index = 0; index < count; index++) {
