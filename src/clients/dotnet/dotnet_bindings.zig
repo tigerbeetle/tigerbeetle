@@ -94,10 +94,12 @@ const type_mappings = .{
     .{ tb.CreateAccountsResult, TypeMapping{
         .name = "CreateAccountsResult",
         .visibility = .public,
+        .private_fields = &.{"reserved"},
     } },
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransfersResult",
         .visibility = .public,
+        .private_fields = &.{"reserved"},
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilter",

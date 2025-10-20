@@ -26,12 +26,10 @@ using (var client = new Client(
     },
     };
 
-    var createAccountsError = client.CreateAccounts(accounts);
-    foreach (var error in createAccountsError)
-    {
-        Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-        return;
-    }
+    var accountsResults = client.CreateAccounts(accounts);
+    Debug.Assert(accountsResults.Length == 2);
+    Debug.Assert(accountsResults[0].Result == CreateAccountResult.Ok);
+    Debug.Assert(accountsResults[1].Result == CreateAccountResult.Ok);
 
     var transfers = new[] {
     new Transfer
@@ -45,12 +43,9 @@ using (var client = new Client(
     }
     };
 
-    var createTransfersError = client.CreateTransfers(transfers);
-    foreach (var error in createTransfersError)
-    {
-        Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-        return;
-    }
+    var transfersResults = client.CreateTransfers(transfers);
+    Debug.Assert(transfersResults.Length == 1);
+    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
 
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
     Debug.Assert(accounts.Length == 2);
@@ -71,6 +66,4 @@ using (var client = new Client(
             throw new Exception("Unexpected account");
         }
     }
-
-    Console.WriteLine("ok");
 }

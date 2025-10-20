@@ -1,6 +1,5 @@
 // section:imports
 using System;
-
 using TigerBeetle;
 
 // Validate import works.
@@ -41,8 +40,8 @@ using (var client = new Client(clusterID, addresses))
             },
         };
 
-        var accountErrors = client.CreateAccounts(accounts);
-        // Error handling omitted.
+        var accountsResults = client.CreateAccounts(accounts);
+        // Results handling omitted.
         // endsection:create-accounts
     }
     catch { }
@@ -65,8 +64,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = AccountFlags.History,
         };
 
-        var accountErrors = client.CreateAccounts(new[] { account0, account1 });
-        // Error handling omitted.
+        var accountsResults = client.CreateAccounts(new[] { account0, account1 });
+        // Results handling omitted.
         // endsection:account-flags
     }
     catch { }
@@ -96,19 +95,21 @@ using (var client = new Client(clusterID, addresses))
             Flags = AccountFlags.None,
         };
 
-        var accountErrors = client.CreateAccounts(new[] { account0, account1, account2 });
-        foreach (var error in accountErrors)
+        var accountsResults = client.CreateAccounts(new[] { account0, account1, account2 });
+        for (int i = 0; i < accountsResults.Length; i++)
         {
-            switch (error.Result)
+            switch (accountsResults[i].Result)
             {
+                case CreateAccountResult.Ok:
+                    Console.WriteLine($"Batch account at {i} successfully created with timestamp {accountsResults[i].Timestamp}.");
+                    break;
                 case CreateAccountResult.Exists:
-                    Console.WriteLine($"Batch account at ${error.Index} already exists.");
+                    Console.WriteLine($"Batch account at {i} already exists with timestamp {accountsResults[i].Timestamp}.");
                     break;
                 default:
-                    Console.WriteLine($"Batch account at ${error.Index} failed to create ${error.Result}");
+                    Console.WriteLine($"Batch account at {i} failed to create: {accountsResults[i].Result}");
                     break;
             }
-            return;
         }
         // endsection:create-accounts-errors
     }
@@ -143,8 +144,8 @@ using (var client = new Client(clusterID, addresses))
             }
         };
 
-        var transferErrors = client.CreateTransfers(transfers);
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(transfers);
+        // Results handling omitted.
         // endsection:create-transfers
     }
     catch { }
@@ -185,33 +186,23 @@ using (var client = new Client(clusterID, addresses))
             },
         };
 
-        var transferErrors = client.CreateTransfers(transfers);
-        foreach (var error in transferErrors)
+        var transfersResults = client.CreateTransfers(transfers);
+        for (int i = 0; i < transfersResults.Length; i++)
         {
-            switch (error.Result)
+            switch (transfersResults[i].Result)
             {
+                case CreateTransferResult.Ok:
+                    Console.WriteLine($"Batch transfer at {i} successfully created with timestamp {transfersResults[i].Timestamp}.");
+                    break;
                 case CreateTransferResult.Exists:
-                    Console.WriteLine($"Batch transfer at ${error.Index} already exists.");
+                    Console.WriteLine($"Batch transfer at {i} already exists with timestamp {transfersResults[i].Timestamp}.");
                     break;
                 default:
-                    Console.WriteLine($"Batch transfer at ${error.Index} failed to create: ${error.Result}");
+                    Console.WriteLine($"Batch transfer at {i} failed to create: {transfersResults[i].Result}");
                     break;
             }
         }
         // endsection:create-transfers-errors
-    }
-    catch { }
-
-    try
-    {
-        // section:no-batch
-        var batch = new Transfer[] { }; // Array of transfer to create.
-        foreach (var t in batch)
-        {
-            var transferErrors = client.CreateTransfer(t);
-            // Error handling omitted.
-        }
-        // endsection:no-batch
     }
     catch { }
 
@@ -227,8 +218,8 @@ using (var client = new Client(clusterID, addresses))
             {
                 lastIndex = batch.Length;
             }
-            var transferErrors = client.CreateTransfers(batch[firstIndex..lastIndex]);
-            // Error handling omitted.
+            var transfersResults = client.CreateTransfers(batch[firstIndex..lastIndex]);
+            // Results handling omitted.
         }
         // endsection:batch
     }
@@ -258,8 +249,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = TransferFlags.None,
         };
 
-        var transferErrors = client.CreateTransfers(new[] { transfer0, transfer1 });
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(new[] { transfer0, transfer1 });
+        // Results handling omitted.
         // endsection:transfer-flags-link
     }
     catch { }
@@ -278,8 +269,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = TransferFlags.Pending,
         };
 
-        var transferErrors = client.CreateTransfers(new[] { transfer0 });
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(new[] { transfer0 });
+        // Results handling omitted.
 
         var transfer1 = new Transfer
         {
@@ -290,8 +281,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = TransferFlags.PostPendingTransfer,
         };
 
-        transferErrors = client.CreateTransfers(new[] { transfer1 });
-        // Error handling omitted.
+        transfersResults = client.CreateTransfers(new[] { transfer1 });
+        // Results handling omitted.
         // endsection:transfer-flags-post
     }
     catch { }
@@ -310,8 +301,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = TransferFlags.Pending,
         };
 
-        var transferErrors = client.CreateTransfers(new[] { transfer0 });
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(new[] { transfer0 });
+        // Results handling omitted.
 
         var transfer1 = new Transfer
         {
@@ -321,8 +312,8 @@ using (var client = new Client(clusterID, addresses))
             Flags = TransferFlags.VoidPendingTransfer,
         };
 
-        transferErrors = client.CreateTransfers(new[] { transfer1 });
-        // Error handling omitted.
+        transfersResults = client.CreateTransfers(new[] { transfer1 });
+        // Results handling omitted.
         // endsection:transfer-flags-void
     }
     catch { }
@@ -449,8 +440,8 @@ using (var client = new Client(clusterID, addresses))
         batch.Add(new Transfer { Id = 3, /* ... rest of transfer ... */ Flags = TransferFlags.Linked });
         batch.Add(new Transfer { Id = 4, /* ... rest of transfer ... */ });
 
-        var transferErrors = client.CreateTransfers(batch.ToArray());
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(batch.ToArray());
+        // Results handling omitted.
         // endsection:linked-events
     }
     catch { }
@@ -484,8 +475,8 @@ using (var client = new Client(clusterID, addresses))
             accountsBatch.Add(account);
         }
 
-        var accountErrors = client.CreateAccounts(accountsBatch.ToArray());
-        // Error handling omitted.
+        var accountsResults = client.CreateAccounts(accountsBatch.ToArray());
+        // Results handling omitted.
 
         // Then, load and import all transfers with their timestamps from the historical source.
         var transfersBatch = new System.Collections.Generic.List<Transfer>();
@@ -508,8 +499,8 @@ using (var client = new Client(clusterID, addresses))
             transfersBatch.Add(transfer);
         }
 
-        var transferErrors = client.CreateTransfers(transfersBatch.ToArray());
-        // Error handling omitted.
+        var transfersResults = client.CreateTransfers(transfersBatch.ToArray());
+        // Results handling omitted.
         // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
         // with the same historical timestamps without regressing the cluster timestamp.
         // endsection:imported-events
