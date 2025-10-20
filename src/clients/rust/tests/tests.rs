@@ -157,13 +157,16 @@ fn smoke() -> anyhow::Result<()> {
                     timestamp: 0,
                 },
             ]);
-            let result = assert_send(fut).await?;
+            let results = assert_send(fut).await?;
 
-            assert_eq!(result.len(), 0);
+            assert_eq!(results.len(), 2);
+            assert!(results.iter().all(|result| {
+                result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+            }));
         }
 
         {
-            let result = client
+            let results = client
                 .create_transfers(&[tb::Transfer {
                     id: transfer_id1,
                     debit_account_id: account_id1,
@@ -181,15 +184,18 @@ fn smoke() -> anyhow::Result<()> {
                 }])
                 .await?;
 
-            assert_eq!(result.len(), 0);
+            assert_eq!(results.len(), 1);
+            assert!(results.iter().all(|result| {
+                result.timestamp > 0 && result.result == tb::CreateTransferResult::Ok
+            }));
         }
 
         {
-            let result = client.lookup_accounts(&[account_id1, account_id2]).await?;
+            let results = client.lookup_accounts(&[account_id1, account_id2]).await?;
 
-            assert_eq!(result.len(), 2);
-            let res_account1 = result[0];
-            let res_account2 = result[1];
+            assert_eq!(results.len(), 2);
+            let res_account1 = results[0];
+            let res_account2 = results[1];
 
             assert_eq!(res_account1.id, account_id1);
             assert_eq!(res_account1.debits_posted, 10);
@@ -200,10 +206,10 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let result = client.lookup_transfers(&[transfer_id1]).await?;
+            let results = client.lookup_transfers(&[transfer_id1]).await?;
 
-            assert_eq!(result.len(), 1);
-            let res_transfer1 = result[0];
+            assert_eq!(results.len(), 1);
+            let res_transfer1 = results[0];
 
             assert_eq!(res_transfer1.id, transfer_id1);
             assert_eq!(res_transfer1.debit_account_id, account_id1);
@@ -212,7 +218,7 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let result = client
+            let results = client
                 .get_account_transfers(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
@@ -227,9 +233,9 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(result.len(), 1);
+            assert_eq!(results.len(), 1);
 
-            let res_transfer = &result[0];
+            let res_transfer = &results[0];
 
             assert_eq!(res_transfer.id, transfer_id1);
             assert_eq!(res_transfer.debit_account_id, account_id1);
@@ -238,7 +244,7 @@ fn smoke() -> anyhow::Result<()> {
         }
 
         {
-            let result = client
+            let results = client
                 .get_account_balances(tb::AccountFilter {
                     account_id: account_id1,
                     user_data_128: 0,
@@ -253,16 +259,16 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(result.len(), 1);
+            assert_eq!(results.len(), 1);
 
-            let res_balance_1 = &result[0];
+            let res_balance_1 = &results[0];
 
             assert_eq!(res_balance_1.debits_posted, 10);
             assert_eq!(res_balance_1.credits_posted, 0);
         }
 
         {
-            let result = client
+            let results = client
                 .query_accounts(tb::QueryFilter {
                     user_data_128: account_id2_user_data_128,
                     user_data_64: 0,
@@ -277,15 +283,15 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(result.len(), 1);
+            assert_eq!(results.len(), 1);
 
-            let res_account = &result[0];
+            let res_account = &results[0];
 
             assert_eq!(res_account.id, account_id2);
         }
 
         {
-            let result = client
+            let results = client
                 .query_transfers(tb::QueryFilter {
                     user_data_128: transfer_id1_user_data_128,
                     user_data_64: 0,
@@ -300,9 +306,9 @@ fn smoke() -> anyhow::Result<()> {
                 })
                 .await?;
 
-            assert_eq!(result.len(), 1);
+            assert_eq!(results.len(), 1);
 
-            let res_transfer = &result[0];
+            let res_transfer = &results[0];
 
             assert_eq!(res_transfer.id, transfer_id1);
         }
@@ -555,7 +561,10 @@ fn multithread() -> anyhow::Result<()> {
                         }])
                         .await?;
 
-                    assert_eq!(results.len(), 0);
+                    assert_eq!(results.len(), 1);
+                    assert!(results.iter().all(|result| {
+                        result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+                    }));
                 }
 
                 Ok(())
@@ -606,8 +615,11 @@ fn concurrent_requests() -> anyhow::Result<()> {
     }
 
     for response in responses {
-        let response = block_on(async { response.await })?;
-        assert_eq!(response.len(), 0);
+        let results = block_on(async { response.await })?;
+        assert_eq!(results.len(), 1);
+        assert!(results.iter().all(|result| {
+            result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+        }));
     }
 
     Ok(())
@@ -784,11 +796,17 @@ fn make_paging_test_transfers(client: &tb::Client) -> anyhow::Result<PagingTestP
 
     block_on(async {
         let account_results = client.create_accounts(&[account1, account2]).await?;
-        assert_eq!(account_results.len(), 0);
+        assert_eq!(account_results.len(), 2);
+        assert!(account_results.iter().all(|result| {
+            result.timestamp > 0 && result.result == tb::CreateAccountResult::Ok
+        }));
 
         for transfers in transfers.chunks(batch_size) {
             let transfer_results = client.create_transfers(transfers).await?;
-            assert_eq!(transfer_results.len(), 0);
+            assert_eq!(transfer_results.len(), transfers.len());
+            assert!(transfer_results.iter().all(|result| {
+                result.timestamp > 0 && result.result == tb::CreateTransferResult::Ok
+            }));
         }
 
         Ok(PagingTestParams {
@@ -872,10 +890,14 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
         accounts: &[tb::Account],
     ) -> Result<(), Box<dyn std::error::Error>> {
         let create_accounts_results = client.create_accounts(accounts).await?;
-        let create_accounts_results_merged =
-            merge_create_accounts_results(accounts, create_accounts_results);
-        for (account, create_account_result) in create_accounts_results_merged {
-            match create_account_result {
+        assert_eq!(accounts.len(), create_accounts_results.len());
+        let it = accounts
+            .iter()
+            .enumerate()
+            .map(move |(i, account)| (account, create_accounts_results[i]));
+
+        for (account, create_account_result) in it {
+            match create_account_result.result {
                 tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
                     handle_create_account_success(account, create_account_result).await?;
                 }
@@ -887,34 +909,16 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
-    /// An iterator over both successful and unsuccessful `create_account` results.
-    fn merge_create_accounts_results(
-        accounts: &[tb::Account],
-        results: Vec<tb::CreateAccountsResult>,
-    ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + '_ {
-        let mut results = results.into_iter().peekable();
-        accounts
-            .iter()
-            .enumerate()
-            .map(move |(i, account)| match results.peek().copied() {
-                Some(result) if result.index == i => {
-                    let _ = results.next();
-                    (account, result.result)
-                }
-                _ => (account, tb::CreateAccountResult::Ok),
-            })
-    }
-
     async fn handle_create_account_success(
         _account: &tb::Account,
-        _result: tb::CreateAccountResult,
+        _result: tb::CreateAccountsResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_account_failure(
         _account: &tb::Account,
-        _result: tb::CreateAccountResult,
+        _result: tb::CreateAccountsResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
@@ -944,16 +948,6 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
             ]
         };
         let results_expected = &[
-            tb::CreateAccountsResult {
-                index: 1,
-                result: tb::CreateAccountResult::Exists,
-            },
-            tb::CreateAccountsResult {
-                index: 2,
-                result: tb::CreateAccountResult::CodeMustNotBeZero,
-            },
-        ];
-        let merged_results_expected = &[
             tb::CreateAccountResult::Ok,
             tb::CreateAccountResult::Exists,
             tb::CreateAccountResult::CodeMustNotBeZero,
@@ -965,20 +959,12 @@ fn example_create_accounts() -> Result<(), Box<dyn std::error::Error>> {
         make_create_accounts_request(&client, &gen_accounts()).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.create_accounts(&gen_accounts()).await?;
-        assert_eq!(results_expected, &results_actual[..]);
-
-        // Test `merge_create_accounts_results`
         let accounts = gen_accounts();
-        let results_actual = client.create_accounts(&accounts).await?;
-        let results_merged: Vec<_> =
-            merge_create_accounts_results(&accounts, results_actual).collect();
-        let results_expected: Vec<(&tb::Account, tb::CreateAccountResult)> = accounts
-            .iter()
-            .zip(merged_results_expected)
-            .map(|(account, create_account_result)| (account, *create_account_result))
-            .collect();
-        assert_eq!(results_expected, results_merged);
+        let results = client.create_accounts(&accounts).await?;
+        assert_eq!(accounts.len(), results.len());
+        let results_actual: Vec<tb::CreateAccountResult> =
+            results.iter().map(|result| result.result).collect();
+        assert_eq!(results_expected, &results_actual[..]);
 
         Ok(())
     })
@@ -992,11 +978,13 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
         client: &tb::Client,
         transfers: &[tb::Transfer],
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let create_transfers_results = client.create_transfers(transfers).await?;
-        let create_transfers_results_merged =
-            merge_create_transfers_results(transfers, create_transfers_results);
-        for (transfer, create_transfer_result) in create_transfers_results_merged {
-            match create_transfer_result {
+        let results = client.create_transfers(transfers).await?;
+        let it = transfers
+            .iter()
+            .enumerate()
+            .map(move |(i, transfer)| (transfer, results[i]));
+        for (transfer, create_transfer_result) in it {
+            match create_transfer_result.result {
                 tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
                     handle_create_transfer_success(transfer, create_transfer_result).await?;
                 }
@@ -1008,33 +996,16 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
-    fn merge_create_transfers_results(
-        transfers: &[tb::Transfer],
-        results: Vec<tb::CreateTransfersResult>,
-    ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + '_ {
-        let mut results = results.into_iter().peekable();
-        transfers
-            .iter()
-            .enumerate()
-            .map(move |(i, transfer)| match results.peek().copied() {
-                Some(result) if result.index == i => {
-                    let _ = results.next();
-                    (transfer, result.result)
-                }
-                _ => (transfer, tb::CreateTransferResult::Ok),
-            })
-    }
-
     async fn handle_create_transfer_success(
         _transfer: &tb::Transfer,
-        _result: tb::CreateTransferResult,
+        _result: tb::CreateTransfersResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
 
     async fn handle_create_transfer_failure(
         _transfer: &tb::Transfer,
-        _result: tb::CreateTransferResult,
+        _result: tb::CreateTransfersResult,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
@@ -1094,21 +1065,20 @@ fn example_create_transfers() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let results_expected = &[
-            tb::CreateTransfersResult {
-                index: 1,
-                result: tb::CreateTransferResult::Exists,
-            },
-            tb::CreateTransfersResult {
-                index: 2,
-                result: tb::CreateTransferResult::CodeMustNotBeZero,
-            },
+            tb::CreateTransferResult::Ok,
+            tb::CreateTransferResult::Exists,
+            tb::CreateTransferResult::CodeMustNotBeZero,
         ];
 
         // Test the example.
         make_create_transfers_request(&client, &gen_transfers()).await?;
 
         // Also test that the results are what we expect.
-        let results_actual = client.create_transfers(&gen_transfers()).await?;
+        let transfers = gen_transfers();
+        let results = client.create_transfers(&transfers).await?;
+        assert_eq!(transfers.len(), results.len());
+        let results_actual: Vec<tb::CreateTransferResult> =
+            results.iter().map(|result| result.result).collect();
         assert_eq!(results_expected, &results_actual[..]);
 
         Ok(())

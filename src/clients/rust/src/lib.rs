@@ -441,9 +441,14 @@ impl Client {
     ///     accounts: &[tb::Account],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
     ///     let create_accounts_results = client.create_accounts(accounts).await?;
-    ///     let create_accounts_results_merged = merge_create_accounts_results(accounts, create_accounts_results);
-    ///     for (account, create_account_result) in create_accounts_results_merged {
-    ///         match create_account_result {
+    ///     assert_eq!(accounts.len(), create_accounts_results.len());
+    ///     let it = accounts
+    ///         .iter()
+    ///         .enumerate()
+    ///         .map(move |(i, account)| (account, create_accounts_results[i]));
+    ///
+    ///     for (account, create_account_result) in it {
+    ///         match create_account_result.result {
     ///             tb::CreateAccountResult::Ok | tb::CreateAccountResult::Exists => {
     ///                 handle_create_account_success(account, create_account_result).await?;
     ///             }
@@ -455,35 +460,19 @@ impl Client {
     ///     Ok(())
     /// }
     ///
-    /// fn merge_create_accounts_results(
-    ///     accounts: &[tb::Account],
-    ///     results: Vec<tb::CreateAccountsResult>,
-    /// ) -> impl Iterator<Item = (&tb::Account, tb::CreateAccountResult)> + '_ {
-    ///     let mut results = results.into_iter().peekable();
-    ///     accounts.iter().enumerate().map(move |(i, account)| {
-    ///         match results.peek().copied() {
-    ///             Some(result) if result.index == i => {
-    ///                 let _ = results.next();
-    ///                 (account, result.result)
-    ///             }
-    ///             _ => (account, tb::CreateAccountResult::Ok),
-    ///         }
-    ///     })
+    /// async fn handle_create_account_success(
+    ///     _account: &tb::Account,
+    ///     _result: tb::CreateAccountsResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
     /// }
     ///
-    /// # async fn handle_create_account_success(
-    /// #     _account: &tb::Account,
-    /// #     _result: tb::CreateAccountResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
-    /// #
-    /// # async fn handle_create_account_failure(
-    /// #     _account: &tb::Account,
-    /// #     _result: tb::CreateAccountResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
+    /// async fn handle_create_account_failure(
+    ///     _account: &tb::Account,
+    ///     _result: tb::CreateAccountsResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// # Maximum batch size
@@ -500,8 +489,10 @@ impl Client {
         &self,
         events: &[Account],
     ) -> impl Future<Output = Result<Vec<CreateAccountsResult>, PacketStatus>> {
-        let (packet, rx) =
-            create_packet::<Account>(tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS, events);
+        let (packet, rx) = create_packet::<Account>(
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS,
+            events,
+        );
 
         unsafe {
             let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -516,7 +507,7 @@ impl Client {
             Ok(responses
                 .iter()
                 .map(|result| CreateAccountsResult {
-                    index: usize::try_from(result.index).expect("usize"),
+                    timestamp: result.timestamp,
                     result: CreateAccountResult::from(result.result),
                 })
                 .collect())
@@ -572,10 +563,13 @@ impl Client {
     ///     client: &tb::Client,
     ///     transfers: &[tb::Transfer],
     /// ) -> Result<(), Box<dyn std::error::Error>> {
-    ///     let create_transfers_results = client.create_transfers(transfers).await?;
-    ///     let create_transfers_results_merged = merge_create_transfers_results(transfers, create_transfers_results);
-    ///     for (transfer, create_transfer_result) in create_transfers_results_merged {
-    ///         match create_transfer_result {
+    ///     let results = client.create_transfers(transfers).await?;
+    ///     let it = transfers
+    ///         .iter()
+    ///         .enumerate()
+    ///         .map(move |(i, transfer)| (transfer, results[i]));
+    ///     for (transfer, create_transfer_result) in it {
+    ///         match create_transfer_result.result {
     ///             tb::CreateTransferResult::Ok | tb::CreateTransferResult::Exists => {
     ///                 handle_create_transfer_success(transfer, create_transfer_result).await?;
     ///             }
@@ -587,35 +581,19 @@ impl Client {
     ///     Ok(())
     /// }
     ///
-    /// fn merge_create_transfers_results(
-    ///     transfers: &[tb::Transfer],
-    ///     results: Vec<tb::CreateTransfersResult>,
-    /// ) -> impl Iterator<Item = (&tb::Transfer, tb::CreateTransferResult)> + '_ {
-    ///     let mut results = results.into_iter().peekable();
-    ///     transfers.iter().enumerate().map(move |(i, transfer)| {
-    ///         match results.peek().copied() {
-    ///             Some(result) if result.index == i => {
-    ///                 let _ = results.next();
-    ///                 (transfer, result.result)
-    ///             }
-    ///             _ => (transfer, tb::CreateTransferResult::Ok),
-    ///         }
-    ///     })
+    /// async fn handle_create_transfer_success(
+    ///     _transfer: &tb::Transfer,
+    ///     _result: tb::CreateTransfersResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
     /// }
     ///
-    /// # async fn handle_create_transfer_success(
-    /// #     _transfer: &tb::Transfer,
-    /// #     _result: tb::CreateTransferResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
-    /// #
-    /// # async fn handle_create_transfer_failure(
-    /// #     _transfer: &tb::Transfer,
-    /// #     _result: tb::CreateTransferResult,
-    /// # ) -> Result<(), Box<dyn std::error::Error>> {
-    /// #     Ok(())
-    /// # }
+    /// async fn handle_create_transfer_failure(
+    ///     _transfer: &tb::Transfer,
+    ///     _result: tb::CreateTransfersResult,
+    /// ) -> Result<(), Box<dyn std::error::Error>> {
+    ///     Ok(())
+    /// }
     /// ```
     ///
     /// # Maximum batch size
@@ -632,8 +610,10 @@ impl Client {
         &self,
         events: &[Transfer],
     ) -> impl Future<Output = Result<Vec<CreateTransfersResult>, PacketStatus>> {
-        let (packet, rx) =
-            create_packet::<Transfer>(tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS, events);
+        let (packet, rx) = create_packet::<Transfer>(
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS,
+            events,
+        );
 
         unsafe {
             let status = tbc::tb_client_submit(self.client, Box::into_raw(packet));
@@ -648,7 +628,7 @@ impl Client {
             Ok(responses
                 .iter()
                 .map(|result| CreateTransfersResult {
-                    index: usize::try_from(result.index).expect("usize"),
+                    timestamp: result.timestamp,
                     result: CreateTransferResult::from(result.result),
                 })
                 .collect())
@@ -1348,7 +1328,7 @@ pub enum CreateAccountResult {
 /// [`CreateAccountResult`](https://docs.tigerbeetle.com/reference/requests/create_accounts/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct CreateAccountsResult {
-    pub index: usize,
+    pub timestamp: u64,
     pub result: CreateAccountResult,
 }
 
@@ -1493,7 +1473,7 @@ pub enum CreateTransferResult {
 /// [`CreateTransferResult`](https://docs.tigerbeetle.com/reference/requests/create_transfers/#result).
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct CreateTransfersResult {
-    pub index: usize,
+    pub timestamp: u64,
     pub result: CreateTransferResult,
 }
 
