@@ -34,8 +34,8 @@ public final class Main {
                 accounts.setFlags(AccountFlags.NONE);
                 accounts.setTimestamp(0);
 
-                CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-                // Error handling omitted.
+                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                // Results handling omitted.
                 // endsection:create-accounts
             } catch (Throwable any) {}
 
@@ -55,8 +55,8 @@ public final class Main {
                 accounts.setCode(718);
                 accounts.setFlags(AccountFlags.HISTORY);
 
-                CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-                // Error handling omitted.
+                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                // Results handling omitted.
                 // endsection:account-flags
             } catch (Throwable any) {}
 
@@ -82,17 +82,20 @@ public final class Main {
                 accounts.setCode(718);
                 accounts.setFlags(AccountFlags.NONE);
 
-                CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-                while (accountErrors.next()) {
-                    switch (accountErrors.getResult()) {
-                        case Exists:
-                            System.err.printf("Batch account at %d already exists.\n",
-                                    accountErrors.getIndex());
+                CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                while (accountsResults.next()) {
+                    switch (accountsResults.getResult()) {
+                        case Ok:
+                            System.out.printf("Batch account at %d successfully created with timestamp %d.\n",
+                                    accountsResults.getPosition(), accountsResults.getTimestamp());
                             break;
-
+                        case Exists:
+                            System.err.printf("Batch account at %d already exists with timestamp %d.\n",
+                                    accountsResults.getPosition(), accountsResults.getTimestamp());
+                            break;
                         default:
-                            System.err.printf("Batch account at %d failed to create %s.\n",
-                                    accountErrors.getIndex(), accountErrors.getResult());
+                            System.err.printf("Batch account at %d failed to create: %s.\n",
+                                    accountsResults.getPosition(), accountsResults.getResult());
                             break;
                     }
                 }
@@ -127,8 +130,8 @@ public final class Main {
                 transfers.setFlags(TransferFlags.NONE);
                 transfers.setTimeout(0);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
                 // endsection:create-transfers
             } catch (Throwable any) {}
 
@@ -160,41 +163,24 @@ public final class Main {
                 transfers.setLedger(1);
                 transfers.setCode(1);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                while (transferErrors.next()) {
-                    switch (transferErrors.getResult()) {
-                        case ExceedsCredits:
-                            System.err.printf("Batch transfer at %d already exists.\n",
-                                    transferErrors.getIndex());
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                while (transfersResults.next()) {
+                    switch (transfersResults.getResult()) {
+                        case Ok:
+                            System.out.printf("Batch transfer at %d successfully created with timestamp %d.\n",
+                                    transfersResults.getPosition(), transfersResults.getTimestamp());
                             break;
-
+                        case Exists:
+                            System.err.printf("Batch transfer at %d already exists with timestamp %d.\n",
+                                    transfersResults.getPosition(), transfersResults.getTimestamp());
+                            break;
                         default:
                             System.err.printf("Batch transfer at %d failed to create: %s\n",
-                                    transferErrors.getIndex(), transferErrors.getResult());
+                                    transfersResults.getPosition(), transfersResults.getResult());
                             break;
                     }
                 }
                 // endsection:create-transfers-errors
-            } catch (Throwable any) {}
-
-            try {
-                // section:no-batch
-                ResultSet dataSource = null; /* Loaded from an external source. */;
-                while(dataSource.next()) {
-                    TransferBatch batch = new TransferBatch(1);
-
-                    batch.add();
-                    batch.setId(dataSource.getBytes("id"));
-                    batch.setDebitAccountId(dataSource.getBytes("debit_account_id"));
-                    batch.setCreditAccountId(dataSource.getBytes("credit_account_id"));
-                    batch.setAmount(dataSource.getBigDecimal("amount").toBigInteger());
-                    batch.setLedger(dataSource.getInt("ledger"));
-                    batch.setCode(dataSource.getInt("code"));
-
-                    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-                    // Error handling omitted.
-                }
-                // endsection:no-batch
             } catch (Throwable any) {}
 
             try {
@@ -213,8 +199,8 @@ public final class Main {
                     batch.setCode(dataSource.getInt("code"));
 
                     if (batch.getLength() == BATCH_SIZE) {
-                        CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-                        // Error handling omitted.
+                        CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+                        // Results handling omitted.
 
                         // Reset the batch for the next iteration.
                         batch.beforeFirst();
@@ -223,8 +209,8 @@ public final class Main {
 
                 if (batch.getLength() > 0) {
                     // Send the remaining items.
-                    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-                    // Error handling omitted.
+                    CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+                    // Results handling omitted.
                 }
 
                 // endsection:batch
@@ -253,8 +239,8 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.NONE);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
                 // endsection:transfer-flags-link
             } catch (Throwable any) {}
 
@@ -271,8 +257,8 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.PENDING);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
 
                 transfers = new TransferBatch(1);
 
@@ -282,8 +268,8 @@ public final class Main {
                 transfers.setPendingId(6);
                 transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-                transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
                 // endsection:transfer-flags-post
             } catch (Throwable any) {}
 
@@ -300,8 +286,8 @@ public final class Main {
                 transfers.setCode(1);
                 transfers.setFlags(TransferFlags.PENDING);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
 
                 transfers = new TransferBatch(1);
 
@@ -311,8 +297,8 @@ public final class Main {
                 transfers.setPendingId(8);
                 transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-                transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
                 // endsection:transfer-flags-void
             } catch (Throwable any) {}
 
@@ -453,8 +439,8 @@ public final class Main {
                 // ... rest of transfer ...
                 transfers.setFlags(TransferFlags.NONE);
 
-                CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                // Error handling omitted.
+                CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                // Results handling omitted.
                 // endsection:linked-events
             } catch (Throwable any) {}
 
@@ -487,8 +473,8 @@ public final class Main {
                     } else {
                         accounts.setFlags(AccountFlags.IMPORTED);
 
-                        CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
-                        // Error handling omitted.
+                        CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                        // Results handling omitted.
 
                         // Reset the batch for the next iteration.
                         accounts.beforeFirst();
@@ -497,8 +483,8 @@ public final class Main {
 
                 if (accounts.getLength() > 0) {
                     // Send the remaining items.
-                    CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
-                    // Error handling omitted.
+                    CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+                    // Results handling omitted.
                 }
 
                 // Then, load and import all transfers with their timestamps from the historical source.
@@ -524,8 +510,8 @@ public final class Main {
                     } else {
                         transfers.setFlags(TransferFlags.IMPORTED);
 
-                        CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                        // Error handling omitted.
+                        CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                        // Results handling omitted.
 
                         // Reset the batch for the next iteration.
                         transfers.beforeFirst();
@@ -534,8 +520,8 @@ public final class Main {
 
                 if (transfers.getLength() > 0) {
                     // Send the remaining items.
-                    CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-                    // Error handling omitted.
+                    CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+                    // Results handling omitted.
                 }
 
                 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried

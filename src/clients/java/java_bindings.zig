@@ -122,11 +122,13 @@ const type_mappings = .{
     } },
     .{ tb.CreateAccountsResult, TypeMapping{
         .name = "CreateAccountResultBatch",
-        .readonly_fields = &.{ "index", "result" },
+        .private_fields = &.{"reserved"},
+        .readonly_fields = &.{ "timestamp", "result" },
     } },
     .{ tb.CreateTransfersResult, TypeMapping{
         .name = "CreateTransferResultBatch",
-        .readonly_fields = &.{ "index", "result" },
+        .private_fields = &.{"reserved"},
+        .readonly_fields = &.{ "timestamp", "result" },
     } },
     .{ tb.AccountFilter, TypeMapping{
         .name = "AccountFilterBatch",
