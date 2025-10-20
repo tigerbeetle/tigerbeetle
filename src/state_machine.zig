@@ -33,11 +33,13 @@ const Transfer = tb.Transfer;
 const TransferFlags = tb.TransferFlags;
 const TransferPendingStatus = tb.TransferPendingStatus;
 
-const CreateAccountsResult = tb.CreateAccountsResult;
-const CreateTransfersResult = tb.CreateTransfersResult;
-
 const CreateAccountResult = tb.CreateAccountResult;
 const CreateTransferResult = tb.CreateTransferResult;
+
+const CreateAccountsResult = tb.CreateAccountsResult;
+const CreateTransfersResult = tb.CreateTransfersResult;
+const CreateAccountsErrorResult = tb.CreateAccountsErrorResult;
+const CreateTransfersErrorResult = tb.CreateTransfersErrorResult;
 
 const AccountFilter = tb.AccountFilter;
 const QueryFilter = tb.QueryFilter;
@@ -110,14 +112,28 @@ pub fn StateMachineType(
 
             pub const batch_max = struct {
                 pub const create_accounts: u32 = @max(
-                    operation_event_max(.create_accounts, message_body_size_max),
+                    operation_event_max(
+                        .create_accounts_with_results,
+                        message_body_size_max,
+                    ),
+                    operation_event_max(
+                        .deprecated_create_accounts_sparse,
+                        message_body_size_max,
+                    ),
                     operation_event_max(
                         .deprecated_create_accounts_unbatched,
                         message_body_size_max,
                     ),
                 );
                 pub const create_transfers: u32 = @max(
-                    operation_event_max(.create_transfers, message_body_size_max),
+                    operation_event_max(
+                        .create_transfers_with_results,
+                        message_body_size_max,
+                    ),
+                    operation_event_max(
+                        .deprecated_create_transfers_sparse,
+                        message_body_size_max,
+                    ),
                     operation_event_max(
                         .deprecated_create_transfers_unbatched,
                         message_body_size_max,
@@ -530,8 +546,8 @@ pub fn StateMachineType(
         pub fn EventType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts => Account,
-                .create_transfers => Transfer,
+                .create_accounts_with_results => Account,
+                .create_transfers_with_results => Transfer,
                 .lookup_accounts => u128,
                 .lookup_transfers => u128,
                 .get_account_transfers => AccountFilter,
@@ -539,6 +555,9 @@ pub fn StateMachineType(
                 .query_accounts => QueryFilter,
                 .query_transfers => QueryFilter,
                 .get_change_events => ChangeEventsFilter,
+
+                .deprecated_create_accounts_sparse => Account,
+                .deprecated_create_transfers_sparse => Transfer,
 
                 .deprecated_create_accounts_unbatched => Account,
                 .deprecated_create_transfers_unbatched => Transfer,
@@ -554,8 +573,8 @@ pub fn StateMachineType(
         pub fn ResultType(comptime operation: Operation) type {
             return switch (operation) {
                 .pulse => void,
-                .create_accounts => CreateAccountsResult,
-                .create_transfers => CreateTransfersResult,
+                .create_accounts_with_results => CreateAccountsResult,
+                .create_transfers_with_results => CreateTransfersResult,
                 .lookup_accounts => Account,
                 .lookup_transfers => Transfer,
                 .get_account_transfers => Transfer,
@@ -564,8 +583,11 @@ pub fn StateMachineType(
                 .query_transfers => Transfer,
                 .get_change_events => ChangeEvent,
 
-                .deprecated_create_accounts_unbatched => CreateAccountsResult,
-                .deprecated_create_transfers_unbatched => CreateTransfersResult,
+                .deprecated_create_accounts_sparse => CreateAccountsErrorResult,
+                .deprecated_create_transfers_sparse => CreateTransfersErrorResult,
+
+                .deprecated_create_accounts_unbatched => CreateAccountsErrorResult,
+                .deprecated_create_transfers_unbatched => CreateTransfersErrorResult,
                 .deprecated_lookup_accounts_unbatched => Account,
                 .deprecated_lookup_transfers_unbatched => Transfer,
                 .deprecated_get_account_transfers_unbatched => Transfer,
@@ -596,8 +618,8 @@ pub fn StateMachineType(
                 // Pulse does not take any input.
                 .pulse => false,
                 // Operations that take multiple events as input:
-                .create_accounts => true,
-                .create_transfers => true,
+                .create_accounts_with_results => true,
+                .create_transfers_with_results => true,
                 .lookup_accounts => true,
                 .lookup_transfers => true,
                 // Operations that take a single event as input:
@@ -606,6 +628,9 @@ pub fn StateMachineType(
                 .query_accounts => false,
                 .query_transfers => false,
                 .get_change_events => false,
+
+                .deprecated_create_accounts_sparse => true,
+                .deprecated_create_transfers_sparse => true,
 
                 .deprecated_create_accounts_unbatched => true,
                 .deprecated_create_transfers_unbatched => true,
@@ -623,9 +648,8 @@ pub fn StateMachineType(
         pub inline fn operation_is_multi_batch(operation: Operation) bool {
             return switch (operation) {
                 .pulse => false,
-
-                .create_accounts,
-                .create_transfers,
+                .create_accounts_with_results,
+                .create_transfers_with_results,
                 .lookup_accounts,
                 .lookup_transfers,
                 .get_account_transfers,
@@ -635,6 +659,10 @@ pub fn StateMachineType(
                 => true,
 
                 .get_change_events => false,
+
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_transfers_sparse,
+                => true,
 
                 .deprecated_create_accounts_unbatched,
                 .deprecated_create_transfers_unbatched,
@@ -742,10 +770,14 @@ pub fn StateMachineType(
         ) u32 {
             return switch (operation) {
                 .pulse => 0,
-                inline .create_accounts,
-                .create_transfers,
+                inline .create_accounts_with_results,
+                .create_transfers_with_results,
                 .lookup_accounts,
                 .lookup_transfers,
+
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_transfers_sparse,
+
                 .deprecated_create_accounts_unbatched,
                 .deprecated_create_transfers_unbatched,
                 .deprecated_lookup_accounts_unbatched,
@@ -955,11 +987,13 @@ pub fn StateMachineType(
 
             fn from_operation(comptime operation: Operation) MetricEnum {
                 return switch (operation) {
-                    .create_accounts,
+                    .create_accounts_with_results,
+                    .deprecated_create_accounts_sparse,
                     .deprecated_create_accounts_unbatched,
                     => .create_accounts,
 
-                    .create_transfers,
+                    .create_transfers_with_results,
+                    .deprecated_create_transfers_sparse,
                     .deprecated_create_transfers_unbatched,
                     => .create_transfers,
 
@@ -1307,8 +1341,8 @@ pub fn StateMachineType(
             assert(batch.len <= self.batch_size_limit);
             return switch (operation) {
                 .pulse => machine_constants.batch_max.create_transfers, // Max transfers to expire.
-                .create_accounts => @divExact(batch.len, @sizeOf(Account)),
-                .create_transfers => @divExact(batch.len, @sizeOf(Transfer)),
+                .create_accounts_with_results => @divExact(batch.len, @sizeOf(Account)),
+                .create_transfers_with_results => @divExact(batch.len, @sizeOf(Transfer)),
                 .lookup_accounts => 0,
                 .lookup_transfers => 0,
                 .get_account_transfers => 0,
@@ -1316,6 +1350,9 @@ pub fn StateMachineType(
                 .query_accounts => 0,
                 .query_transfers => 0,
                 .get_change_events => 0,
+
+                .deprecated_create_accounts_sparse => @divExact(batch.len, @sizeOf(Account)),
+                .deprecated_create_transfers_sparse => @divExact(batch.len, @sizeOf(Transfer)),
 
                 .deprecated_create_accounts_unbatched => @divExact(batch.len, @sizeOf(Account)),
                 .deprecated_create_transfers_unbatched => @divExact(batch.len, @sizeOf(Transfer)),
@@ -1387,8 +1424,8 @@ pub fn StateMachineType(
 
             switch (operation) {
                 .pulse => self.prefetch_expire_pending_transfers(),
-                .create_accounts => self.prefetch_create_accounts(),
-                .create_transfers => self.prefetch_create_transfers(),
+                .create_accounts_with_results => self.prefetch_create_accounts(),
+                .create_transfers_with_results => self.prefetch_create_transfers(),
                 .lookup_accounts => self.prefetch_lookup_accounts(),
                 .lookup_transfers => self.prefetch_lookup_transfers(),
                 .get_account_transfers => self.prefetch_get_account_transfers(),
@@ -1397,30 +1434,21 @@ pub fn StateMachineType(
                 .query_transfers => self.prefetch_query_transfers(),
                 .get_change_events => self.prefetch_get_change_events(),
 
-                .deprecated_create_accounts_unbatched => {
-                    self.prefetch_create_accounts();
-                },
-                .deprecated_create_transfers_unbatched => {
-                    self.prefetch_create_transfers();
-                },
-                .deprecated_lookup_accounts_unbatched => {
-                    self.prefetch_lookup_accounts();
-                },
-                .deprecated_lookup_transfers_unbatched => {
-                    self.prefetch_lookup_transfers();
-                },
+                .deprecated_create_accounts_sparse => self.prefetch_create_accounts(),
+                .deprecated_create_transfers_sparse => self.prefetch_create_transfers(),
+
+                .deprecated_create_accounts_unbatched => self.prefetch_create_accounts(),
+                .deprecated_create_transfers_unbatched => self.prefetch_create_transfers(),
+                .deprecated_lookup_accounts_unbatched => self.prefetch_lookup_accounts(),
+                .deprecated_lookup_transfers_unbatched => self.prefetch_lookup_transfers(),
                 .deprecated_get_account_transfers_unbatched => {
                     self.prefetch_get_account_transfers();
                 },
                 .deprecated_get_account_balances_unbatched => {
                     self.prefetch_get_account_balances();
                 },
-                .deprecated_query_accounts_unbatched => {
-                    self.prefetch_query_accounts();
-                },
-                .deprecated_query_transfers_unbatched => {
-                    self.prefetch_query_transfers();
-                },
+                .deprecated_query_accounts_unbatched => self.prefetch_query_accounts(),
+                .deprecated_query_transfers_unbatched => self.prefetch_query_transfers(),
             }
         }
 
@@ -1440,7 +1468,8 @@ pub fn StateMachineType(
 
         fn prefetch_create_accounts(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts or
+            assert(self.prefetch_operation == .create_accounts_with_results or
+                self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             const accounts = stdx.bytes_as_slice(
@@ -1463,7 +1492,8 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts or
+            assert(self.prefetch_operation == .create_accounts_with_results or
+                self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
@@ -1494,7 +1524,8 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_accounts or
+            assert(self.prefetch_operation == .create_accounts_with_results or
+                self.prefetch_operation == .deprecated_create_accounts_sparse or
                 self.prefetch_operation == .deprecated_create_accounts_unbatched);
 
             self.prefetch_context = .null;
@@ -1503,7 +1534,8 @@ pub fn StateMachineType(
 
         fn prefetch_create_transfers(self: *StateMachine) void {
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers or
+            assert(self.prefetch_operation == .create_transfers_with_results or
+                self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             const transfers = stdx.bytes_as_slice(
@@ -1530,7 +1562,8 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers or
+            assert(self.prefetch_operation == .create_transfers_with_results or
+                self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
@@ -1577,7 +1610,8 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.accounts, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers or
+            assert(self.prefetch_operation == .create_transfers_with_results or
+                self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
@@ -1592,7 +1626,8 @@ pub fn StateMachineType(
         ) void {
             const self: *StateMachine = PrefetchContext.parent(.transfers_pending, completion);
             assert(self.prefetch_input != null);
-            assert(self.prefetch_operation == .create_transfers or
+            assert(self.prefetch_operation == .create_transfers_with_results or
+                self.prefetch_operation == .deprecated_create_transfers_sparse or
                 self.prefetch_operation == .deprecated_create_transfers_unbatched);
 
             self.prefetch_context = .null;
@@ -2427,14 +2462,20 @@ pub fn StateMachineType(
                     );
                     // Also constrained by the maximum number of available prefetches.
                     const prefetch_transfers = @max(
-                        operation_event_max(.lookup_transfers, self.batch_size_limit),
+                        operation_event_max(
+                            .lookup_transfers,
+                            self.batch_size_limit,
+                        ),
                         operation_event_max(
                             .deprecated_lookup_transfers_unbatched,
                             self.batch_size_limit,
                         ),
                     );
                     const prefetch_accounts = @max(
-                        operation_event_max(.lookup_accounts, self.batch_size_limit),
+                        operation_event_max(
+                            .lookup_accounts,
+                            self.batch_size_limit,
+                        ),
                         operation_event_max(
                             .deprecated_lookup_accounts_unbatched,
                             self.batch_size_limit,
@@ -2616,8 +2657,18 @@ pub fn StateMachineType(
 
             // We must be constrained to the same limit as `create_transfers`.
             const scan_buffer_size = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                operation_event_max(
+                    .create_transfers_with_results,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_sparse,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    self.batch_size_limit,
+                ),
             ) * @sizeOf(Transfer);
 
             const scan_lookup_buffer = stdx.bytes_as_slice(
@@ -2678,8 +2729,18 @@ pub fn StateMachineType(
             if (result_count == 0) return self.prefetch_finish();
 
             const result_max: u32 = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                operation_event_max(
+                    .create_transfers_with_results,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_sparse,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    self.batch_size_limit,
+                ),
             );
             assert(result_count <= result_max);
             assert(self.scan_lookup_buffer_index == result_count * @sizeOf(Transfer));
@@ -2757,10 +2818,12 @@ pub fn StateMachineType(
 
             const result: usize = switch (operation) {
                 .pulse => self.execute_expire_pending_transfers(timestamp),
-                inline .create_accounts,
-                .create_transfers,
+                inline .create_accounts_with_results,
+                .create_transfers_with_results,
                 .lookup_accounts,
                 .lookup_transfers,
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_transfers_sparse,
                 => |operation_comptime| self.execute_multi_batch(
                     timestamp,
                     operation_comptime,
@@ -2900,8 +2963,10 @@ pub fn StateMachineType(
                     batch, // The batch's body.
                 );
                 const bytes_written: usize = switch (operation) {
-                    .create_accounts,
-                    .create_transfers,
+                    .create_accounts_with_results,
+                    .create_transfers_with_results,
+                    .deprecated_create_accounts_sparse,
+                    .deprecated_create_transfers_sparse,
                     => self.execute_create(
                         operation,
                         execute_timestamp,
@@ -3123,12 +3188,14 @@ pub fn StateMachineType(
 
         fn scope_open(self: *StateMachine, operation: Operation) void {
             switch (operation) {
-                .create_accounts,
+                .create_accounts_with_results,
+                .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_open();
                 },
-                .create_transfers,
+                .create_transfers_with_results,
+                .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_open();
@@ -3142,12 +3209,14 @@ pub fn StateMachineType(
 
         fn scope_close(self: *StateMachine, operation: Operation, mode: ScopeCloseMode) void {
             switch (operation) {
-                .create_accounts,
+                .create_accounts_with_results,
+                .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
                 },
-                .create_transfers,
+                .create_transfers_with_results,
+                .deprecated_create_transfers_sparse,
                 .deprecated_create_transfers_unbatched,
                 => {
                     self.forest.grooves.accounts.scope_close(mode);
@@ -3166,8 +3235,10 @@ pub fn StateMachineType(
             batch: []const u8,
             output_buffer: []u8,
         ) usize {
-            comptime assert(operation == .create_accounts or
-                operation == .create_transfers or
+            comptime assert(operation == .create_accounts_with_results or
+                operation == .create_transfers_with_results or
+                operation == .deprecated_create_accounts_sparse or
+                operation == .deprecated_create_transfers_sparse or
                 operation == .deprecated_create_accounts_unbatched or
                 operation == .deprecated_create_transfers_unbatched);
 
@@ -3185,50 +3256,80 @@ pub fn StateMachineType(
             // importing events with past timestamp.
             const batch_imported = events.len > 0 and events[0].flags.imported;
             for (events, 0..) |*event, index| {
-                const result = result: {
+                const result_code, const timestamp_actual = result: {
+                    const timestamp_event = timestamp - events.len + index + 1;
+                    assert(TimestampRange.valid(timestamp_event));
                     if (event.flags.linked) {
                         if (chain == null) {
                             chain = index;
                             assert(chain_broken == false);
                             self.scope_open(operation);
                         }
-
-                        if (index == events.len - 1) break :result .linked_event_chain_open;
+                        if (index == events.len - 1) break :result .{
+                            .linked_event_chain_open,
+                            timestamp_event,
+                        };
                     }
 
-                    if (chain_broken) break :result .linked_event_failed;
+                    if (chain_broken) break :result .{
+                        .linked_event_failed,
+                        timestamp_event,
+                    };
 
+                    // The first event determines the batch behavior for
+                    // importing events with past timestamp.
                     if (batch_imported != event.flags.imported) {
                         if (event.flags.imported) {
-                            break :result .imported_event_not_expected;
+                            break :result .{
+                                .imported_event_not_expected,
+                                timestamp_event,
+                            };
                         } else {
-                            break :result .imported_event_expected;
+                            break :result .{
+                                .imported_event_expected,
+                                timestamp_event,
+                            };
                         }
                     }
 
-                    const timestamp_event = timestamp: {
-                        if (event.flags.imported) {
-                            if (!TimestampRange.valid(event.timestamp)) {
-                                break :result .imported_event_timestamp_out_of_range;
-                            }
-                            if (event.timestamp >= timestamp) {
-                                break :result .imported_event_timestamp_must_not_advance;
-                            }
-                            break :timestamp event.timestamp;
+                    if (event.flags.imported) {
+                        if (!TimestampRange.valid(event.timestamp)) {
+                            break :result .{
+                                .imported_event_timestamp_out_of_range,
+                                timestamp_event,
+                            };
                         }
-                        if (event.timestamp != 0) break :result .timestamp_must_be_zero;
-                        break :timestamp timestamp - events.len + index + 1;
-                    };
-                    assert(TimestampRange.valid(timestamp_event));
+                        if (event.timestamp >= timestamp) {
+                            break :result .{
+                                .imported_event_timestamp_must_not_advance,
+                                timestamp_event,
+                            };
+                        }
+                    } else {
+                        if (event.timestamp != 0) break :result .{
+                            .timestamp_must_be_zero,
+                            timestamp_event,
+                        };
+                    }
 
-                    break :result switch (operation) {
+                    const create_result = switch (operation) {
+                        .create_accounts_with_results,
+                        .deprecated_create_accounts_sparse,
                         .deprecated_create_accounts_unbatched,
-                        .create_accounts,
                         => self.create_account(timestamp_event, event),
+                        .create_transfers_with_results,
+                        .deprecated_create_transfers_sparse,
                         .deprecated_create_transfers_unbatched,
-                        .create_transfers,
                         => self.create_transfer(timestamp_event, event),
                         else => comptime unreachable,
+                    };
+
+                    break :result .{
+                        std.meta.activeTag(create_result),
+                        switch (create_result) {
+                            .ok, .exists => |timestamp_actual| timestamp_actual,
+                            else => timestamp_event,
+                        },
                     };
                 };
                 if (self.log_trace) {
@@ -3237,11 +3338,11 @@ pub fn StateMachineType(
                         @tagName(operation),
                         index + 1,
                         events.len,
-                        result,
+                        result_code,
                         event,
                     });
                 }
-                if (result != .ok) {
+                if (result_code != .ok) {
                     if (chain) |chain_start_index| {
                         if (!chain_broken) {
                             chain_broken = true;
@@ -3251,23 +3352,79 @@ pub fn StateMachineType(
                             // Add errors for rolled back events in FIFO order:
                             var chain_index = chain_start_index;
                             while (chain_index < index) : (chain_index += 1) {
-                                results[count] = .{
-                                    .index = @intCast(chain_index),
-                                    .result = .linked_event_failed,
-                                };
-                                count += 1;
+                                switch (operation) {
+                                    .create_accounts_with_results,
+                                    .create_transfers_with_results,
+                                    => {
+                                        results[chain_index].result = .linked_event_failed;
+                                    },
+                                    .deprecated_create_accounts_sparse,
+                                    .deprecated_create_transfers_sparse,
+                                    .deprecated_create_accounts_unbatched,
+                                    .deprecated_create_transfers_unbatched,
+                                    => {
+                                        results[count] = .{
+                                            .index = @intCast(chain_index),
+                                            .result = .linked_event_failed,
+                                        };
+                                        count += 1;
+                                    },
+                                    else => comptime unreachable,
+                                }
                             }
                         } else {
-                            assert(result == .linked_event_failed or
-                                result == .linked_event_chain_open);
+                            assert(result_code == .linked_event_failed or
+                                result_code == .linked_event_chain_open);
                         }
                     }
-                    results[count] = .{ .index = @intCast(index), .result = result };
-                    count += 1;
 
-                    self.transient_error(operation, event.id, result);
+                    switch (operation) {
+                        .deprecated_create_accounts_sparse,
+                        .deprecated_create_transfers_sparse,
+                        .deprecated_create_accounts_unbatched,
+                        .deprecated_create_transfers_unbatched,
+                        => {
+                            results[count] = .{
+                                .index = @intCast(index),
+                                .result = result_code,
+                            };
+                            count += 1;
+                        },
+                        .create_accounts_with_results,
+                        .create_transfers_with_results,
+                        => {
+                            // The result is always added to the results buffer,
+                            // it will be handled below.
+                        },
+                        else => comptime unreachable,
+                    }
+                    self.transient_error(operation, event.id, result_code);
                 }
-                if (chain != null and (!event.flags.linked or result == .linked_event_chain_open)) {
+
+                switch (operation) {
+                    .create_accounts_with_results,
+                    .create_transfers_with_results,
+                    => {
+                        results[count] = .{
+                            .timestamp = timestamp_actual,
+                            .result = result_code,
+                        };
+                        count += 1;
+                    },
+                    .deprecated_create_accounts_sparse,
+                    .deprecated_create_transfers_sparse,
+                    .deprecated_create_accounts_unbatched,
+                    .deprecated_create_transfers_unbatched,
+                    => {
+                        // The result is only added to the results buffer in case of error,
+                        // it was already handled above.
+                    },
+                    else => comptime unreachable,
+                }
+
+                if (chain != null and
+                    (!event.flags.linked or result_code == .linked_event_chain_open))
+                {
                     if (!chain_broken) {
                         // We've finished this linked chain, and all events have applied
                         // successfully.
@@ -3288,30 +3445,36 @@ pub fn StateMachineType(
             self: *StateMachine,
             comptime operation: Operation,
             id: u128,
-            result: anytype,
+            result_code: switch (operation) {
+                .create_accounts_with_results,
+                .deprecated_create_accounts_sparse,
+                .deprecated_create_accounts_unbatched,
+                => CreateAccountResult,
+                .create_transfers_with_results,
+                .deprecated_create_transfers_sparse,
+                .deprecated_create_transfers_unbatched,
+                => CreateTransferResult,
+                else => unreachable,
+            },
         ) void {
-            assert(result != .ok);
+            assert(result_code != .ok);
 
             switch (operation) {
-                .create_accounts,
+                // The `create_accounts` error codes do not depend on transient system status.
+                .create_accounts_with_results,
+                .deprecated_create_accounts_sparse,
                 .deprecated_create_accounts_unbatched,
-                => {
-                    comptime assert(@TypeOf(result) == CreateAccountResult);
-                    // The `create_accounts` error codes do not depend on transient system status.
-                    return;
-                },
-                .create_transfers,
-                .deprecated_create_transfers_unbatched,
-                => {
-                    comptime assert(@TypeOf(result) == CreateTransferResult);
+                => return,
 
-                    // Transfers that fail with transient codes cannot reuse the same `id`,
-                    // ensuring strong idempotency guarantees.
-                    // Once a transfer fails with a transient error, it must be retried
-                    // with a different `id`.
-                    if (result.transient()) {
-                        self.forest.grooves.transfers.insert_orphaned_id(id);
-                    }
+                // Transfers that fail with transient codes cannot reuse the same `id`,
+                // ensuring strong idempotency guarantees.
+                // Once a transfer fails with a transient error, it must be retried
+                // with a different `id`.
+                .create_transfers_with_results,
+                .deprecated_create_transfers_sparse,
+                .deprecated_create_transfers_unbatched,
+                => if (result_code.transient()) {
+                    self.forest.grooves.transfers.insert_orphaned_id(id);
                 },
                 else => comptime unreachable,
             }
@@ -3664,19 +3827,29 @@ pub fn StateMachineType(
             };
         }
 
+        /// Generates a comptime union tagged by `CreateAccountResult`,
+        /// adding the timestamp `u64` payload to the `.ok` and `.exists` variants.
+        const CreateAccountResultUnion = stdx.EnumUnionType(
+            CreateAccountResult,
+            struct {
+                fn Type(comptime result: CreateAccountResult) type {
+                    return switch (result) {
+                        .ok, .exists => u64,
+                        else => void,
+                    };
+                }
+            }.Type,
+        );
+
         fn create_account(
             self: *StateMachine,
             timestamp: u64,
             a: *const Account,
-        ) CreateAccountResult {
+        ) CreateAccountResultUnion {
+            assert(timestamp != 0);
             assert(timestamp > self.commit_timestamp or
                 a.flags.imported or
                 constants.aof_recovery);
-            if (a.flags.imported) {
-                assert(a.timestamp == timestamp);
-            } else {
-                assert(a.timestamp == 0);
-            }
 
             if (a.reserved != 0) return .reserved_field;
             if (a.flags.padding != 0) return .reserved_flag;
@@ -3701,20 +3874,27 @@ pub fn StateMachineType(
             if (a.ledger == 0) return .ledger_must_not_be_zero;
             if (a.code == 0) return .code_must_not_be_zero;
 
-            if (a.flags.imported) {
-                // Allows past timestamp, but validates whether it regressed from the last
-                // inserted account.
-                // This validation must be called _after_ the idempotency checks so the user
-                // can still handle `exists` results when importing.
-                if (self.forest.grooves.accounts.objects.key_range) |*key_range| {
-                    if (timestamp <= key_range.key_max) {
+            const timestamp_actual = timestamp: {
+                if (a.flags.imported) {
+                    assert(a.timestamp > 0);
+                    assert(a.timestamp <= timestamp);
+                    // Allows past timestamp, but validates whether it regressed from the last
+                    // inserted account.
+                    // This validation must be called _after_ the idempotency checks so the user
+                    // can still handle `exists` results when importing.
+                    if (self.forest.grooves.accounts.objects.key_range) |*key_range| {
+                        if (a.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+                    if (self.forest.grooves.transfers.exists(a.timestamp)) {
                         return .imported_event_timestamp_must_not_regress;
                     }
+                    break :timestamp a.timestamp;
                 }
-                if (self.forest.grooves.transfers.exists(timestamp)) {
-                    return .imported_event_timestamp_must_not_regress;
-                }
-            }
+                assert(a.timestamp == 0);
+                break :timestamp timestamp;
+            };
 
             self.forest.grooves.accounts.insert(&.{
                 .id = a.id,
@@ -3729,13 +3909,13 @@ pub fn StateMachineType(
                 .ledger = a.ledger,
                 .code = a.code,
                 .flags = a.flags,
-                .timestamp = timestamp,
+                .timestamp = timestamp_actual,
             });
-            self.commit_timestamp = timestamp;
-            return .ok;
+            self.commit_timestamp = timestamp_actual;
+            return .{ .ok = timestamp_actual };
         }
 
-        fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResult {
+        fn create_account_exists(a: *const Account, e: *const Account) CreateAccountResultUnion {
             assert(a.id == e.id);
             if (@as(u16, @bitCast(a.flags)) != @as(u16, @bitCast(e.flags))) {
                 return .exists_with_different_flags;
@@ -3746,22 +3926,32 @@ pub fn StateMachineType(
             assert(a.reserved == 0 and e.reserved == 0);
             if (a.ledger != e.ledger) return .exists_with_different_ledger;
             if (a.code != e.code) return .exists_with_different_code;
-            return .exists;
+            return .{ .exists = e.timestamp };
         }
+
+        /// Generates a comptime union tagged by `CreateTransferResult`,
+        /// adding the timestamp `u64` payload to the `.ok` and `.exists` variants.
+        const CreateTransferResultUnion = stdx.EnumUnionType(
+            CreateTransferResult,
+            struct {
+                fn Type(comptime result: CreateTransferResult) type {
+                    return switch (result) {
+                        .ok, .exists => u64,
+                        else => void,
+                    };
+                }
+            }.Type,
+        );
 
         fn create_transfer(
             self: *StateMachine,
-            timestamp: u64,
+            timestamp_event: u64,
             t: *const Transfer,
-        ) CreateTransferResult {
-            assert(timestamp > self.commit_timestamp or
+        ) CreateTransferResultUnion {
+            assert(timestamp_event != 0);
+            assert(timestamp_event > self.commit_timestamp or
                 t.flags.imported or
                 constants.aof_recovery);
-            if (t.flags.imported) {
-                assert(t.timestamp == timestamp);
-            } else {
-                assert(t.timestamp == 0);
-            }
 
             if (t.flags.padding != 0) return .reserved_flag;
 
@@ -3775,7 +3965,7 @@ pub fn StateMachineType(
             }
 
             if (t.flags.post_pending_transfer or t.flags.void_pending_transfer) {
-                return self.post_or_void_pending_transfer(timestamp, t);
+                return self.post_or_void_pending_transfer(timestamp_event, t);
             }
 
             if (t.debit_account_id == 0) return .debit_account_id_must_not_be_zero;
@@ -3816,33 +4006,41 @@ pub fn StateMachineType(
                 return .transfer_must_have_the_same_ledger_as_accounts;
             }
 
-            if (t.flags.imported) {
-                // Allows past timestamp, but validates whether it regressed from the last
-                // inserted event.
-                // This validation must be called _after_ the idempotency checks so the user
-                // can still handle `exists` results when importing.
-                if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
-                    if (timestamp <= key_range.key_max) {
+            const timestamp_actual = timestamp: {
+                if (t.flags.imported) {
+                    assert(t.timestamp != 0);
+                    assert(t.timestamp <= timestamp_event);
+                    // Allows past timestamp, but validates whether it regressed from the last
+                    // inserted event.
+                    // This validation must be called _after_ the idempotency checks so the user
+                    // can still handle `exists` results when importing.
+                    if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+                    if (self.forest.grooves.accounts.exists(t.timestamp)) {
                         return .imported_event_timestamp_must_not_regress;
                     }
-                }
-                if (self.forest.grooves.accounts.exists(timestamp)) {
-                    return .imported_event_timestamp_must_not_regress;
-                }
 
-                if (timestamp <= dr_account.timestamp) {
-                    return .imported_event_timestamp_must_postdate_debit_account;
+                    if (t.timestamp <= dr_account.timestamp) {
+                        return .imported_event_timestamp_must_postdate_debit_account;
+                    }
+                    if (t.timestamp <= cr_account.timestamp) {
+                        return .imported_event_timestamp_must_postdate_credit_account;
+                    }
+                    if (t.timeout != 0) {
+                        assert(t.flags.pending);
+                        return .imported_event_timeout_must_be_zero;
+                    }
+                    break :timestamp t.timestamp;
                 }
-                if (timestamp <= cr_account.timestamp) {
-                    return .imported_event_timestamp_must_postdate_credit_account;
-                }
-                if (t.timeout != 0) {
-                    assert(t.flags.pending);
-                    return .imported_event_timeout_must_be_zero;
-                }
-            }
-            assert(timestamp > dr_account.timestamp);
-            assert(timestamp > cr_account.timestamp);
+                assert(t.timestamp == 0);
+                break :timestamp timestamp_event;
+            };
+
+            assert(timestamp_actual > dr_account.timestamp);
+            assert(timestamp_actual > cr_account.timestamp);
 
             if (dr_account.flags.closed) return .debit_account_already_closed;
             if (cr_account.flags.closed) return .credit_account_already_closed;
@@ -3904,7 +4102,7 @@ pub fn StateMachineType(
             )));
             if (sum_overflows(
                 u63,
-                @intCast(timestamp),
+                @intCast(timestamp_actual),
                 @as(u63, t.timeout) * std.time.ns_per_s,
             )) {
                 return .overflows_timeout;
@@ -3914,7 +4112,7 @@ pub fn StateMachineType(
             if (cr_account.credits_exceed_debits(amount_actual)) return .exceeds_debits;
 
             // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == timestamp);
+            defer assert(self.commit_timestamp == timestamp_actual);
 
             self.forest.grooves.transfers.insert(&.{
                 .id = t.id,
@@ -3929,7 +4127,7 @@ pub fn StateMachineType(
                 .ledger = t.ledger,
                 .code = t.code,
                 .flags = t.flags,
-                .timestamp = timestamp,
+                .timestamp = timestamp_actual,
             });
 
             var dr_account_new = dr_account;
@@ -3939,7 +4137,7 @@ pub fn StateMachineType(
                 cr_account_new.credits_pending += amount_actual;
 
                 self.forest.grooves.transfers_pending.insert(&.{
-                    .timestamp = timestamp,
+                    .timestamp = timestamp_actual,
                     .status = .pending,
                 });
             } else {
@@ -3972,7 +4170,7 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = timestamp,
+                .event_timestamp = timestamp_actual,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
                 .transfer_flags = t.flags,
@@ -3985,21 +4183,21 @@ pub fn StateMachineType(
             if (t.timeout > 0) {
                 assert(t.flags.pending);
                 assert(!t.flags.imported);
-                const expires_at = timestamp + t.timeout_ns();
+                const expires_at = timestamp_actual + t.timeout_ns();
                 if (expires_at < self.expire_pending_transfers.pulse_next_timestamp) {
                     self.expire_pending_transfers.pulse_next_timestamp = expires_at;
                 }
             }
 
-            self.commit_timestamp = timestamp;
-            return .ok;
+            self.commit_timestamp = timestamp_actual;
+            return .{ .ok = timestamp_actual };
         }
 
         fn create_transfer_exists(
             self: *const StateMachine,
             t: *const Transfer,
             e: *const Transfer,
-        ) CreateTransferResult {
+        ) CreateTransferResultUnion {
             assert(t.id == e.id);
             // The flags change the behavior of the remaining comparisons,
             // so compare the flags first.
@@ -4056,25 +4254,21 @@ pub fn StateMachineType(
                     return .exists_with_different_code;
                 }
 
-                return .exists;
+                return .{ .exists = e.timestamp };
             }
         }
 
         fn post_or_void_pending_transfer(
             self: *StateMachine,
-            timestamp: u64,
+            timestamp_event: u64,
             t: *const Transfer,
-        ) CreateTransferResult {
+        ) CreateTransferResultUnion {
             assert(t.id != 0);
             assert(t.id != std.math.maxInt(u128));
             assert(self.forest.grooves.transfers.get(t.id) == .not_found);
             assert(t.flags.padding == 0);
-            assert(timestamp > self.commit_timestamp or t.flags.imported);
-            if (t.flags.imported) {
-                assert(t.timestamp == timestamp);
-            } else {
-                assert(t.timestamp == 0);
-            }
+            assert(timestamp_event != 0);
+            assert(timestamp_event > self.commit_timestamp or t.flags.imported);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
 
             if (t.flags.post_pending_transfer and t.flags.void_pending_transfer) {
@@ -4093,7 +4287,7 @@ pub fn StateMachineType(
 
             const p = self.get_transfer(t.pending_id) orelse return .pending_transfer_not_found;
             assert(p.id == t.pending_id);
-            assert(p.timestamp < timestamp);
+            assert(p.timestamp < timestamp_event);
             if (!p.flags.pending) return .pending_transfer_not_pending;
 
             const dr_account = self.get_account(p.debit_account_id).?;
@@ -4143,7 +4337,7 @@ pub fn StateMachineType(
                 .expired => {
                     assert(p.timeout > 0);
                     assert(!p.flags.imported);
-                    assert(timestamp >= p.timestamp + p.timeout_ns());
+                    assert(timestamp_event >= p.timestamp + p.timeout_ns());
                     return .pending_transfer_expired;
                 },
             }
@@ -4151,7 +4345,7 @@ pub fn StateMachineType(
             const expires_at: ?u64 = if (p.timeout == 0) null else expires_at: {
                 assert(!p.flags.imported);
                 const expires_at: u64 = p.timestamp + p.timeout_ns();
-                if (expires_at <= timestamp) {
+                if (expires_at <= timestamp_event) {
                     // TODO: It's still possible for an operation to see an expired transfer
                     // if there's more than one batch of transfers to expire in a single `pulse`
                     // and the current operation was pipelined before the expiration commits.
@@ -4161,22 +4355,29 @@ pub fn StateMachineType(
                 break :expires_at expires_at;
             };
 
-            if (t.flags.imported) {
-                // Allows past timestamp, but validates whether it regressed from the last
-                // inserted transfer.
-                // This validation must be called _after_ the idempotency checks so the user
-                // can still handle `exists` results when importing.
-                if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
-                    if (timestamp <= key_range.key_max) {
+            const timestamp_actual: u64 = timestamp: {
+                if (t.flags.imported) {
+                    assert(t.timestamp != 0);
+                    assert(t.timestamp <= timestamp_event);
+                    // Allows past timestamp, but validates whether it regressed from the last
+                    // inserted transfer.
+                    // This validation must be called _after_ the idempotency checks so the user
+                    // can still handle `exists` results when importing.
+                    if (self.forest.grooves.transfers.objects.key_range) |*key_range| {
+                        if (t.timestamp <= key_range.key_max) {
+                            return .imported_event_timestamp_must_not_regress;
+                        }
+                    }
+                    if (self.forest.grooves.accounts.exists(t.timestamp)) {
                         return .imported_event_timestamp_must_not_regress;
                     }
+                    break :timestamp t.timestamp;
                 }
-                if (self.forest.grooves.accounts.exists(timestamp)) {
-                    return .imported_event_timestamp_must_not_regress;
-                }
-            }
-            assert(timestamp > dr_account.timestamp);
-            assert(timestamp > cr_account.timestamp);
+                assert(t.timestamp == 0);
+                break :timestamp timestamp_event;
+            };
+            assert(timestamp_actual > dr_account.timestamp);
+            assert(timestamp_actual > cr_account.timestamp);
 
             // The only movement allowed in a closed account is voiding a pending transfer.
             if (dr_account.flags.closed and !t.flags.void_pending_transfer) {
@@ -4187,12 +4388,13 @@ pub fn StateMachineType(
             }
 
             // After this point, the transfer must succeed.
-            defer assert(self.commit_timestamp == timestamp);
+            defer assert(self.commit_timestamp == timestamp_actual);
 
             self.forest.grooves.transfers.insert(&.{
                 .id = t.id,
                 .debit_account_id = p.debit_account_id,
                 .credit_account_id = p.credit_account_id,
+                .amount = amount_actual,
                 .user_data_128 = if (t.user_data_128 > 0) t.user_data_128 else p.user_data_128,
                 .user_data_64 = if (t.user_data_64 > 0) t.user_data_64 else p.user_data_64,
                 .user_data_32 = if (t.user_data_32 > 0) t.user_data_32 else p.user_data_32,
@@ -4200,13 +4402,13 @@ pub fn StateMachineType(
                 .code = p.code,
                 .pending_id = t.pending_id,
                 .timeout = 0,
-                .timestamp = timestamp,
                 .flags = t.flags,
-                .amount = amount_actual,
+                .timestamp = timestamp_actual,
             });
 
             if (expires_at) |expiry| {
-                assert(expiry > timestamp);
+                assert(!t.flags.imported);
+                assert(expiry > timestamp_event);
                 // Removing the pending `expires_at` index.
                 self.forest.grooves.transfers.indexes.expires_at.remove(&.{
                     .field = expiry,
@@ -4274,7 +4476,7 @@ pub fn StateMachineType(
             }
 
             self.account_event(.{
-                .event_timestamp = timestamp,
+                .event_timestamp = timestamp_actual,
                 .dr_account = &dr_account_new,
                 .cr_account = &cr_account_new,
                 .transfer_flags = t.flags,
@@ -4284,16 +4486,16 @@ pub fn StateMachineType(
                 .amount = amount_actual,
             });
 
-            self.commit_timestamp = timestamp;
+            self.commit_timestamp = timestamp_actual;
 
-            return .ok;
+            return .{ .ok = timestamp_actual };
         }
 
         fn post_or_void_pending_transfer_exists(
             t: *const Transfer,
             e: *const Transfer,
             p: *const Transfer,
-        ) CreateTransferResult {
+        ) CreateTransferResultUnion {
             assert(t.id == e.id);
             assert(t.id != p.id);
             assert(t.flags.post_pending_transfer or t.flags.void_pending_transfer);
@@ -4369,7 +4571,7 @@ pub fn StateMachineType(
                 return .exists_with_different_code;
             }
 
-            return .exists;
+            return .{ .exists = e.timestamp };
         }
 
         fn account_event(
@@ -4514,8 +4716,18 @@ pub fn StateMachineType(
             if (result_count == 0) return 0;
 
             const result_max: u32 = @max(
-                operation_event_max(.create_transfers, self.batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, self.batch_size_limit),
+                operation_event_max(
+                    .create_transfers_with_results,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_sparse,
+                    self.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    self.batch_size_limit,
+                ),
             );
             assert(result_count <= result_max);
 
@@ -4617,7 +4829,14 @@ pub fn StateMachineType(
 
         pub fn forest_options(options: Options) Forest.GroovesOptions {
             const prefetch_create_accounts_limit: u32 = @max(
-                operation_event_max(.create_accounts, options.batch_size_limit),
+                operation_event_max(
+                    .create_accounts_with_results,
+                    options.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_accounts_sparse,
+                    options.batch_size_limit,
+                ),
                 operation_event_max(
                     .deprecated_create_accounts_unbatched,
                     options.batch_size_limit,
@@ -4638,7 +4857,14 @@ pub fn StateMachineType(
             assert(prefetch_create_accounts_limit <= machine_constants.batch_max.lookup_accounts);
 
             const prefetch_create_transfers_limit: u32 = @max(
-                operation_event_max(.create_transfers, options.batch_size_limit),
+                operation_event_max(
+                    .create_transfers_with_results,
+                    options.batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_sparse,
+                    options.batch_size_limit,
+                ),
                 operation_event_max(
                     .deprecated_create_transfers_unbatched,
                     options.batch_size_limit,
@@ -4648,7 +4874,10 @@ pub fn StateMachineType(
             assert(prefetch_create_transfers_limit <= machine_constants.batch_max.create_transfers);
 
             const prefetch_lookup_transfers_limit: u32 = @max(
-                operation_event_max(.lookup_transfers, options.batch_size_limit),
+                operation_event_max(
+                    .lookup_transfers,
+                    options.batch_size_limit,
+                ),
                 operation_event_max(
                     .deprecated_lookup_transfers_unbatched,
                     options.batch_size_limit,
@@ -4803,15 +5032,35 @@ pub fn StateMachineType(
             assert(batch_size_limit <= machine_constants.message_body_size_max);
 
             const batch_create_accounts: u32 = @max(
-                operation_event_max(.create_accounts, batch_size_limit),
-                operation_event_max(.deprecated_create_accounts_unbatched, batch_size_limit),
+                operation_event_max(
+                    .create_accounts_with_results,
+                    batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_accounts_sparse,
+                    batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_accounts_unbatched,
+                    batch_size_limit,
+                ),
             );
             assert(batch_create_accounts > 0);
             assert(batch_create_accounts <= machine_constants.batch_max.create_accounts);
 
             const batch_create_transfers: u32 = @max(
-                operation_event_max(.create_transfers, batch_size_limit),
-                operation_event_max(.deprecated_create_transfers_unbatched, batch_size_limit),
+                operation_event_max(
+                    .create_transfers_with_results,
+                    batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_sparse,
+                    batch_size_limit,
+                ),
+                operation_event_max(
+                    .deprecated_create_transfers_unbatched,
+                    batch_size_limit,
+                ),
             );
             assert(batch_create_transfers > 0);
             assert(batch_create_transfers <= machine_constants.batch_max.create_transfers);
