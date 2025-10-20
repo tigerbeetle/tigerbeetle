@@ -152,11 +152,12 @@ class Driver {
       reader.u64(); // `timestamp`
     }
     var results = client.createAccounts(batch);
-    writer.allocate(4 + Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.getLength());
+    writer.allocate(4 + (Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.getLength()));
     writer.u32(results.getLength());
     while (results.next()) {
-      writer.u32(results.getIndex());
+      writer.u64(results.getTimestamp());
       writer.u32(results.getResult().value);
+      writer.u32(0);
     }
     writer.flush();
   }
@@ -165,19 +166,7 @@ class Driver {
       throws IOException, InterruptedException, ExecutionException {
     reader.read(Driver.Operation.CREATE_ACCOUNTS.eventSize() * count);
 
-    class Request {
-      private final CompletableFuture<CreateAccountResultBatch> future;
-      private final int eventCount;
-
-      public Request(CompletableFuture<CreateAccountResultBatch> future, int eventCount) {
-        this.future = future;
-        this.eventCount = eventCount;
-      }
-
-      public CompletableFuture<CreateAccountResultBatch> future() { return future; }
-      public int eventCount() { return eventCount; }
-    }
-    final var requests = new ArrayList<Request>(count);
+    final var requests = new ArrayList<CompletableFuture<CreateAccountResultBatch>>(count);
     var batch = new AccountBatch(count);
     for (int index = 0; index < count; index++) {
       batch.add();
@@ -196,45 +185,41 @@ class Driver {
       reader.u64(); // `timestamp`
 
       if (!AccountFlags.hasLinked(batch.getFlags())) {
-        requests.add(new Request(client.createAccountsAsync(batch), batch.getLength()));
+        requests.add(client.createAccountsAsync(batch));
         batch = new AccountBatch(count - index);
       }
     }
 
     // Sending any eventual non-closed linked chain.
     if (batch.getLength() > 0) {
-      requests.add(new Request(client.createAccountsAsync(batch), batch.getLength()));
+      requests.add(client.createAccountsAsync(batch));
     }
 
     class Result {
-      private final int index;
+      private final long timestamp;
       private final CreateAccountResult result;
 
-      public Result(int index, CreateAccountResult result) {
-        this.index = index;
+      public Result(long timestamp, CreateAccountResult result) {
+        this.timestamp = timestamp;
         this.result = result;
       }
-
-      public int index() { return index; }
-      public CreateAccountResult result() { return result; }
     }
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
-    int index = 0;
     for (final var request : requests) {
-      final var result = request.future.get();
+      final var result = request.get();
       while (result.next()) {
-        results.add(new Result(result.getIndex() + index, result.getResult()));
+        results.add(new Result(result.getTimestamp(), result.getResult()));
       }
-      index += request.eventCount;
     }
 
-    writer.allocate(4 + Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.size());
+    writer.allocate(4 + (Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.size()));
     writer.u32(results.size());
     for (final var result : results) {
-      writer.u32(result.index);
+      writer.u64(result.timestamp);
       writer.u32(result.result.value);
+      writer.u32(0);
     }
     writer.flush();
   }
@@ -259,11 +244,12 @@ class Driver {
       batch.setTimestamp(reader.u64());
     }
     var results = client.createTransfers(batch);
-    writer.allocate(4 + Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.getLength());
+    writer.allocate(4 + (Driver.Operation.CREATE_TRANSFERS.resultSize() * results.getLength()));
     writer.u32(results.getLength());
     while (results.next()) {
-      writer.u32(results.getIndex());
+      writer.u64(results.getTimestamp());
       writer.u32(results.getResult().value);
+      writer.u32(0);
     }
     writer.flush();
   }
@@ -272,19 +258,7 @@ class Driver {
       throws IOException, InterruptedException, ExecutionException {
     reader.read(Driver.Operation.CREATE_TRANSFERS.eventSize() * count);
 
-    class Request {
-      private final CompletableFuture<CreateTransferResultBatch> future;
-      private final int eventCount;
-
-      public Request(CompletableFuture<CreateTransferResultBatch> future, int eventCount) {
-        this.future = future;
-        this.eventCount = eventCount;
-      }
-
-      public CompletableFuture<CreateTransferResultBatch> future() { return future; }
-      public int eventCount() { return eventCount; }
-    }
-    final var requests = new ArrayList<Request>(count);
+    final var requests = new ArrayList<CompletableFuture<CreateTransferResultBatch>>(count);
     var batch = new TransferBatch(count);
     for (int index = 0; index < count; index++) {
       batch.add();
@@ -303,45 +277,41 @@ class Driver {
       batch.setTimestamp(reader.u64());
 
       if (!TransferFlags.hasLinked(batch.getFlags())) {
-        requests.add(new Request(client.createTransfersAsync(batch), batch.getLength()));
+        requests.add(client.createTransfersAsync(batch));
         batch = new TransferBatch(count - index);
       }
     }
 
     // Sending any eventual non-closed linked chain.
     if (batch.getLength() > 0) {
-      requests.add(new Request(client.createTransfersAsync(batch), batch.getLength()));
+      requests.add(client.createTransfersAsync(batch));
     }
 
     class Result {
-      private final int index;
+      private final long timestamp;
       private final CreateTransferResult result;
 
-      public Result(int index, CreateTransferResult result) {
-        this.index = index;
+      public Result(long timestamp, CreateTransferResult result) {
+        this.timestamp = timestamp;
         this.result = result;
       }
-
-      public int index() { return index; }
-      public CreateTransferResult result() { return result; }
     }
     var results = new ArrayList<Result>(count);
 
     // Wait for all tasks.
-    int index = 0;
     for (final var request : requests) {
-      final var result = request.future.get();
+      final var result = request.get();
       while (result.next()) {
-        results.add(new Result(result.getIndex() + index, result.getResult()));
+        results.add(new Result(result.getTimestamp(), result.getResult()));
       }
-      index += request.eventCount;
     }
 
-    writer.allocate(4 + Driver.Operation.CREATE_ACCOUNTS.resultSize() * results.size());
+    writer.allocate(4 + (Driver.Operation.CREATE_TRANSFERS.resultSize() * results.size()));
     writer.u32(results.size());
     for (final var result : results) {
-      writer.u32(result.index);
+      writer.u64(result.timestamp);
       writer.u32(result.result.value);
+      writer.u32(0);
     }
     writer.flush();
   }
@@ -354,7 +324,7 @@ class Driver {
       batch.setId(reader.u128());
     }
     var results = client.lookupAccounts(batch);
-    writer.allocate(4 + Driver.Operation.LOOKUP_ACCOUNTS.resultSize() * results.getLength());
+    writer.allocate(4 + (Driver.Operation.LOOKUP_ACCOUNTS.resultSize() * results.getLength()));
     writer.u32(results.getLength());
     while (results.next()) {
       writer.u128(results.getId());
@@ -418,19 +388,6 @@ class Driver {
         this.flags = flags;
         this.timestamp = timestamp;
       }
-
-      public byte[] id() { return id; }
-      public BigInteger debitsPending() { return debitsPending; }
-      public BigInteger debitsPosted() { return debitsPosted; }
-      public BigInteger creditsPending() { return creditsPending; }
-      public BigInteger creditsPosted() { return creditsPosted; }
-      public byte[] userData128() { return userData128; }
-      public long userData64() { return userData64; }
-      public int userData32() { return userData32; }
-      public int ledger() { return ledger; }
-      public int code() { return code; }
-      public int flags() { return flags; }
-      public long timestamp() { return timestamp; }
     }
     var results = new ArrayList<Result>(count);
 
@@ -455,7 +412,7 @@ class Driver {
       }
     }
 
-    writer.allocate(4 + Driver.Operation.LOOKUP_ACCOUNTS.resultSize() * results.size());
+    writer.allocate(4 + (Driver.Operation.LOOKUP_ACCOUNTS.resultSize() * results.size()));
     writer.u32(results.size());
     for (final var result : results) {
       writer.u128(result.id);
@@ -483,7 +440,7 @@ class Driver {
       batch.setId(reader.u128());
     }
     var results = client.lookupTransfers(batch);
-    writer.allocate(4 + Driver.Operation.LOOKUP_TRANSFERS.resultSize() * results.getLength());
+    writer.allocate(4 + (Driver.Operation.LOOKUP_TRANSFERS.resultSize() * results.getLength()));
     writer.u32(results.getLength());
     while (results.next()) {
       writer.u128(results.getId());
@@ -549,20 +506,6 @@ class Driver {
         this.flags = flags;
         this.timestamp = timestamp;
       }
-
-      public byte[] id() { return id; }
-      public byte[] debitAccountId() { return debitAccountId; }
-      public byte[] creditAccountId() { return creditAccountId; }
-      public BigInteger amount() { return amount; }
-      public byte[] pendingId() { return pendingId; }
-      public byte[] userData128() { return userData128; }
-      public long userData64() { return userData64; }
-      public int userData32() { return userData32; }
-      public int timeout() { return timeout; }
-      public int ledger() { return ledger; }
-      public int code() { return code; }
-      public int flags() { return flags; }
-      public long timestamp() { return timestamp; }
     }
     var results = new ArrayList<Result>(count);
 
@@ -588,7 +531,7 @@ class Driver {
       }
     }
 
-    writer.allocate(4 + Driver.Operation.LOOKUP_TRANSFERS.resultSize() * results.size());
+    writer.allocate(4 + (Driver.Operation.LOOKUP_TRANSFERS.resultSize() * results.size()));
     writer.u32(results.size());
     for (final var result : results) {
       writer.u128(result.id);
@@ -610,8 +553,8 @@ class Driver {
 
   // Based off `Operation` in `src/state_machine.zig`.
   enum Operation {
-    CREATE_ACCOUNTS(138),
-    CREATE_TRANSFERS(139),
+    CREATE_ACCOUNTS(146),
+    CREATE_TRANSFERS(147),
     LOOKUP_ACCOUNTS(140),
     LOOKUP_TRANSFERS(141),
     GET_ACCOUNT_TRANSFERS(142),
@@ -662,9 +605,9 @@ class Driver {
     int resultSize() {
       switch (this) {
         case CREATE_ACCOUNTS:
-          return 8;
+          return 16;
         case CREATE_TRANSFERS:
-          return 8;
+          return 16;
         case LOOKUP_ACCOUNTS:
           return 128;
         case LOOKUP_TRANSFERS:
