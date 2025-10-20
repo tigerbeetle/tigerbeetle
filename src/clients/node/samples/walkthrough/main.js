@@ -9,8 +9,8 @@ console.log("Import ok!");
 const {
   AccountFlags,
   TransferFlags,
-  CreateTransferError,
-  CreateAccountError,
+  CreateTransferResult,
+  CreateAccountResult,
   AccountFilterFlags,
   QueryFilterFlags,
   amount_max,
@@ -47,8 +47,8 @@ async function main() {
       timestamp: 0n,
     };
 
-    const account_errors = await client.createAccounts([account]);
-    // Error handling omitted.
+    const accounts_results = await client.createAccounts([account]);
+    // Results handling omitted.
     // endsection:create-accounts
   } catch (exception) {}
 
@@ -85,8 +85,8 @@ async function main() {
       flags: AccountFlags.history,
     };
 
-    const account_errors = await client.createAccounts([account0, account1]);
-    // Error handling omitted.
+    const accounts_results = await client.createAccounts([account0, account1]);
+    // Results handling omitted.
     // endsection:account-flags
   } catch (exception) {}
 
@@ -138,18 +138,18 @@ async function main() {
       flags: 0,
     };
 
-    const account_errors = await client.createAccounts([account0, account1, account2]);
-    for (const error of account_errors) {
-      switch (error.result) {
-        case CreateAccountError.exists:
-          console.error(`Batch account at ${error.index} already exists.`);
+    const accounts_results = await client.createAccounts([account0, account1, account2]);
+    for (let i = 0; i < accounts_results.length; i++) {
+      switch (accounts_results[i].result) {
+        case CreateAccountResult.ok:
+          console.error(`Batch account at ${i} successfully created with timestamp ${accounts_results[i].timestamp}.`);
+          break;
+        case CreateAccountResult.exists:
+          console.error(`Batch account at ${i} already exists with timestamp ${accounts_results[i].timestamp}.`);
           break;
         default:
-          console.error(
-            `Batch account at ${error.index} failed to create: ${
-              CreateAccountError[error.result]
-            }.`,
-          );
+          console.error(`Batch account at ${i} failed to create: ${accounts_results[i].result}`);
+          break;
       }
     }
     // endsection:create-accounts-errors
@@ -179,8 +179,8 @@ async function main() {
       timestamp: 0n,
     }];
 
-    const transfer_errors = await client.createTransfers(transfers);
-    // Error handling omitted.
+    const transfers_results = await client.createTransfers(transfers);
+    // Results handling omitted.
     // endsection:create-transfers
   } catch (exception) {}
 
@@ -232,31 +232,21 @@ async function main() {
       timestamp: 0n,
     }];
 
-    const transfer_errors = await client.createTransfers(batch);
-    for (const error of transfer_errors) {
-      switch (error.result) {
-        case CreateTransferError.exists:
-          console.error(`Batch transfer at ${error.index} already exists.`);
+    const transfers_results = await client.createTransfers(batch);
+    for (let i = 0; i < transfers_results.length; i++) {
+      switch (transfers_results[i].result) {
+        case CreateTransferResult.ok:
+          console.error(`Batch transfer at ${i} successfully created with timestamp ${transfers_results[i].timestamp}.`);
+          break;
+        case CreateTransferResult.exists:
+          console.error(`Batch transfer at ${i} already exists with timestamp ${transfers_results[i].timestamp}.`);
           break;
         default:
-          console.error(
-            `Batch transfer at ${error.index} failed to create: ${
-              CreateTransferError[error.result]
-            }.`,
-          );
+          console.error(`Batch transfer at ${i} failed to create: ${transfers_results[i].result}`);
+          break;
       }
     }
     // endsection:create-transfers-errors
-  } catch (exception) {}
-
-  try {
-    // section:no-batch
-    const batch = []; // Array of transfer to create.
-    for (let i = 0; i < batch.len; i++) {
-      const transfer_errors = await client.createTransfers(batch[i]);
-      // Error handling omitted.
-    }
-    // endsection:no-batch
   } catch (exception) {}
 
   try {
@@ -264,10 +254,10 @@ async function main() {
     const batch = []; // Array of transfer to create.
     const BATCH_SIZE = 8189;
     for (let i = 0; i < batch.length; i += BATCH_SIZE) {
-      const transfer_errors = await client.createTransfers(
+      const transfers_results = await client.createTransfers(
         batch.slice(i, Math.min(batch.length, BATCH_SIZE)),
       );
-      // Error handling omitted.
+      // Results handling omitted.
     }
     // endsection:batch
   } catch (exception) {}
@@ -306,8 +296,8 @@ async function main() {
     };
 
     // Create the transfer
-    const transfer_errors = await client.createTransfers([transfer0, transfer1]);
-    // Error handling omitted.
+    const transfers_results = await client.createTransfers([transfer0, transfer1]);
+    // Results handling omitted.
     // endsection:transfer-flags-link
   } catch (exception) {}
 
@@ -329,8 +319,8 @@ async function main() {
       timestamp: 0n,
     };
 
-    let transfer_errors = await client.createTransfers([transfer0]);
-    // Error handling omitted.
+    let transfers_results = await client.createTransfers([transfer0]);
+    // Results handling omitted.
 
     const transfer1 = {
       id: 7n,
@@ -349,8 +339,8 @@ async function main() {
       timestamp: 0n,
     };
 
-    transfer_errors = await client.createTransfers([transfer1]);
-    // Error handling omitted.
+    transfers_results = await client.createTransfers([transfer1]);
+    // Results handling omitted.
     // endsection:transfer-flags-post
   } catch (exception) {}
 
@@ -372,8 +362,8 @@ async function main() {
       timestamp: 0n,
     };
 
-    let transfer_errors = await client.createTransfers([transfer0]);
-    // Error handling omitted.
+    let transfers_results = await client.createTransfers([transfer0]);
+    // Results handling omitted.
 
     const transfer1 = {
       id: 9n,
@@ -391,8 +381,8 @@ async function main() {
       timestamp: 0n,
     };
 
-    transfer_errors = await client.createTransfers([transfer1]);
-    // Error handling omitted.
+    transfers_results = await client.createTransfers([transfer1]);
+    // Results handling omitted.
     // endsection:transfer-flags-void
   } catch (exception) {}
 
@@ -505,8 +495,8 @@ async function main() {
       batch.push({ id: 3n, /* ..., */ flags: linkedFlag });
       batch.push({ id: 4n, /* ..., */ flags: 0 });
 
-      const transfer_errors = await client.createTransfers(batch);
-      // Error handling omitted.
+      const transfers_results = await client.createTransfers(batch);
+      // Results handling omitted.
       // endsection:linked-events
     } catch (exception) {}
 
@@ -536,8 +526,8 @@ async function main() {
         accounts.push(account);
       }
 
-      const account_errors = await client.createAccounts(accounts);
-      // Error handling omitted.
+      const accounts_results = await client.createAccounts(accounts);
+      // Results handling omitted.
 
       // Then, load and import all transfers with their timestamps from the historical source.
       const transfers = [];
@@ -557,8 +547,8 @@ async function main() {
         transfers.push(transfer);
       }
 
-      const transfer_errors = await client.createTransfers(transfers);
-      // Error handling omitted.
+      const transfers_results = await client.createTransfers(transfers);
+      // Results handling omitted.
 
       // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
       // with the same historical timestamps without regressing the cluster timestamp.

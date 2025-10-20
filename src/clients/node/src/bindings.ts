@@ -276,9 +276,9 @@ export type Transfer = {
 
 
 /**
-* See [CreateAccountError](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
+* See [CreateAccountResult](https://docs.tigerbeetle.com/reference/requests/create_accounts#)
 */
-export enum CreateAccountError {
+export enum CreateAccountResult {
 
   /**
   * See [ok](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
@@ -418,9 +418,9 @@ export enum CreateAccountError {
 
 
 /**
-* See [CreateTransferError](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
+* See [CreateTransferResult](https://docs.tigerbeetle.com/reference/requests/create_transfers#)
 */
-export enum CreateTransferError {
+export enum CreateTransferResult {
 
   /**
   * See [ok](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
@@ -763,14 +763,14 @@ export enum CreateTransferError {
   exceeds_debits = 55,
 }
 
-export type CreateAccountsError = {
-  index: number
-  result: CreateAccountError
+export type CreateAccountsResult = {
+  timestamp: bigint
+  result: CreateAccountResult
 }
 
-export type CreateTransfersError = {
-  index: number
-  result: CreateTransferError
+export type CreateTransfersResult = {
+  timestamp: bigint
+  result: CreateTransferResult
 }
 
 
@@ -912,13 +912,13 @@ export type AccountBalance = {
 export enum Operation {
   pulse = 128,
   get_change_events = 137,
-  create_accounts = 138,
-  create_transfers = 139,
   lookup_accounts = 140,
   lookup_transfers = 141,
   get_account_transfers = 142,
   get_account_balances = 143,
   query_accounts = 144,
   query_transfers = 145,
+  create_accounts_with_results = 146,
+  create_transfers_with_results = 147,
 }
 
