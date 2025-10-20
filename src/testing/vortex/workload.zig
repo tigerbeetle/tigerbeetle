@@ -150,8 +150,8 @@ fn execute(command: Command, driver: *const DriverStdio) !?Result {
 /// enum values from command to operation.
 fn operation_from_command(tag: std.meta.Tag(Command)) StateMachine.Operation {
     return switch (tag) {
-        .create_accounts => .create_accounts,
-        .create_transfers => .create_transfers,
+        .create_accounts => .create_accounts_with_results,
+        .create_transfers => .create_transfers_with_results,
         .lookup_all_accounts => .lookup_accounts,
         .lookup_latest_transfers => .lookup_transfers,
     };
@@ -161,27 +161,18 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
     switch (result) {
         .create_accounts => |entries| {
             const accounts_new = command.create_accounts;
-
-            // Track results for all new accounts, assuming `.ok` if response from driver is
-            // omitted.
-            var accounts_results: [accounts_count_max]tb.CreateAccountResult = undefined;
-            @memset(accounts_results[0..accounts_new.len], .ok);
-
-            // Fill in non-ok results.
-            for (entries) |entry| {
-                accounts_results[entry.index] = entry.result;
-            }
+            assert(entries.len == accounts_new.len);
 
             for (
-                accounts_results[0..accounts_new.len],
                 accounts_new,
+                entries,
                 0..,
-            ) |account_result, account, index| {
-                if (account_result == .ok) {
+            ) |account, account_result, index| {
+                if (account_result.result == .ok) {
                     model.accounts.appendAssumeCapacity(account);
                 } else {
                     log.err("got result {s} for event {d}: {any}", .{
-                        @tagName(account_result),
+                        @tagName(account_result.result),
                         index,
                         account,
                     });
@@ -191,37 +182,25 @@ fn reconcile(result: Result, command: *const Command, model: *Model) !void {
         },
         .create_transfers => |entries| {
             const transfers = command.create_transfers;
-
-            // Track results for all new transfers, assuming `.ok` if response from driver is
-            // omitted.
-            var transfers_results: [events_count_max]tb.CreateTransferResult = undefined;
-            @memset(transfers_results[0..transfers.len], .ok);
-
-            // Fill in non-ok results.
-            for (entries) |entry| {
-                transfers_results[entry.index] = entry.result;
-            }
-
             // Collect all successful transfer IDs.
             var successful_transfer_ids: stdx.BoundedArrayType(u128, events_count_max) = .{};
 
             for (
                 transfers,
-                transfers_results[0..transfers.len],
+                entries,
                 0..,
-            ) |transfer, transfer_result, transfer_index| {
+            ) |transfer, transfer_result, index| {
                 // Check that linked transfers fail together.
-                if (transfer_index > 0) {
-                    const preceding_transfer = transfers[transfer_index - 1];
+                if (index > 0) {
+                    const preceding_transfer = transfers[index - 1];
                     if (preceding_transfer.flags.linked) {
-                        const preceding_entry = entries[transfer_index - 1];
-                        try testing.expect(preceding_entry.index == transfer_index - 1);
+                        const preceding_entry = entries[index - 1];
                         try testing.expect(preceding_entry.result != .ok);
                     }
                 }
 
                 // No further validation needed for failed transfers.
-                if (transfer_result != .ok) {
+                if (transfer_result.result != .ok) {
                     continue;
                 }
 

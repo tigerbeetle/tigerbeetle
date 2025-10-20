@@ -127,7 +127,7 @@ impl Input {
         };
 
         match op {
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS => {
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];
@@ -137,7 +137,7 @@ impl Input {
                 }
                 Ok(Some(Request::CreateAccounts(events)))
             }
-            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS => {
+            tbc::TB_OPERATION_TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS => {
                 let mut events = Vec::with_capacity(event_count as usize);
                 for i in 0..event_count {
                     let mut bytes = [0; mem::size_of::<tb::Account>()];
@@ -192,8 +192,9 @@ impl Output {
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
                     let result = tbc::tb_create_accounts_result_t {
-                        index: u32::try_from(result.index)?,
+                        timestamp: result.timestamp,
                         result: u32::from(result.result),
+                        reserved: 0,
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_accounts_result_t>()] =
                         unsafe { mem::transmute(result) };
@@ -205,8 +206,9 @@ impl Output {
                 self.writer.write_all(&results_length.to_le_bytes())?;
                 for result in results {
                     let result = tbc::tb_create_transfers_result_t {
-                        index: u32::try_from(result.index)?,
+                        timestamp: result.timestamp,
                         result: u32::from(result.result),
+                        reserved: 0,
                     };
                     let bytes: [u8; mem::size_of::<tbc::tb_create_transfers_result_t>()] =
                         unsafe { mem::transmute(result) };
