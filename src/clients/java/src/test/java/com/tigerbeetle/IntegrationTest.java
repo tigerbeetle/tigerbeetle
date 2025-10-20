@@ -1015,6 +1015,8 @@ public class IntegrationTest {
                                 new Client(clusterId, new String[] {server.getAddress()})) {
                             var accounts = client.lookupAccounts(new IdBatch(UInt128.id()));
                             assertTrue(accounts.getLength() == 0);
+                        } catch (InterruptedException e) {
+                            return;
                         } finally {
                             barrier.countDown();
                         }
@@ -1333,7 +1335,7 @@ public class IntegrationTest {
                 for (int i = 0; i < 1000; i++) {
                     try {
                         client.createAccounts(generateAccounts(UInt128.id()));
-                    } catch (IllegalStateException e) {
+                    } catch (IllegalStateException | InterruptedException e) {
                         break;
                     }
                 }
@@ -1457,11 +1459,7 @@ public class IntegrationTest {
                 assertTrue(task.getState() == Thread.State.TERMINATED);
                 assertTrue(task.result == null);
                 assertTrue(task.exception != null);
-                assertTrue(task.exception instanceof InterruptedException ||
-                // TODO: Interrupted operations throw unchecked `AssertionError`.
-                // We should change the client API adding `throws InterruptedException` instead.
-                        (task.exception instanceof AssertionError
-                                && task.exception.getCause() instanceof InterruptedException));
+                assertTrue(task.exception instanceof InterruptedException);
             }
         }
     }
@@ -2490,7 +2488,7 @@ public class IntegrationTest {
         }
     }
 
-    private long getTimestampLast() {
+    private long getTimestampLast() throws InterruptedException {
         final var id = UInt128.id();
         final var accounts = generateAccounts(id);
 
