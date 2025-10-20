@@ -7,6 +7,7 @@ import (
 	"reflect"
 
 	. "github.com/tigerbeetle/tigerbeetle-go"
+	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
@@ -31,7 +32,7 @@ func main() {
 	defer client.Close()
 
 	// Create two accounts
-	res, err := client.CreateAccounts([]Account{
+	accountsRes, err := client.CreateAccounts([]Account{
 		{
 			ID:     ToUint128(1),
 			Ledger: 1,
@@ -47,12 +48,17 @@ func main() {
 		log.Fatalf("Error creating accounts: %s", err)
 	}
 
-	for _, err := range res {
-		log.Fatalf("Error creating account %d: %s", err.Index, err.Result)
+	assert(len(accountsRes), 2, "accountsRes")
+	for i, item := range accountsRes {
+		switch item.Result {
+		case types.AccountOK:
+		default:
+			log.Fatalf("Error creating account %d: %s", i, item.Result)
+		}
 	}
 
 	// Start a pending transfer
-	transferRes, err := client.CreateTransfers([]Transfer{
+	transfersRes, err := client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(1),
 			DebitAccountID:  ToUint128(1),
@@ -67,8 +73,13 @@ func main() {
 		log.Fatalf("Error creating transfer: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate accounts pending and posted debits/credits before finishing the two-phase transfer
@@ -95,7 +106,7 @@ func main() {
 	}
 
 	// Create a second transfer simply posting the first transfer
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(2),
 			DebitAccountID:  ToUint128(1),
@@ -111,8 +122,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate the contents of all transfers
