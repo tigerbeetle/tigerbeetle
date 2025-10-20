@@ -46,8 +46,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )
 
-        account_errors = client.create_accounts([account])
-        # Error handling omitted.
+        accounts_results = client.create_accounts([account])
+        # Results handling omitted.
         # endsection:create-accounts
     except:
         raise
@@ -83,8 +83,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.AccountFlags.HISTORY,
         )
 
-        account_errors = client.create_accounts([account0, account1])
-        # Error handling omitted.
+        accounts_results = client.create_accounts([account0, account1])
+        # Results handling omitted.
         # endsection:account-flags
     except:
         raise
@@ -134,12 +134,14 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=0,
         )
 
-        account_errors = client.create_accounts([account0, account1, account2])
-        for error in account_errors:
-            if error.result == tb.CreateAccountResult.EXISTS:
-                print(f"Batch account at {error.index} already exists.")
+        accounts_results = client.create_accounts([account0, account1, account2])
+        for i, result in enumerate(accounts_results):
+            if result.result == tb.CreateAccountResult.OK:
+                print(f"Batch account at {i} successfully created with timestamp {result.timestamp}.")
+            elif result.result == tb.CreateAccountResult.EXISTS:
+                print(f"Batch account at {i} already exists with timestamp {result.timestamp}.")
             else:
-                print(f"Batch account at ${error.index} failed to create: {error.result}.")
+                print(f"Batch account at {i} failed to create: {result.result}.")
         # endsection:create-accounts-errors
     except:
         raise
@@ -169,8 +171,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )]
 
-        transfer_errors = client.create_transfers(transfers)
-        # Error handling omitted.
+        transfers_results = client.create_transfers(transfers)
+        # Results handling omitted.
         # endsection:create-transfers
     except:
         raise
@@ -223,23 +225,15 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )]
 
-        transfer_errors = client.create_transfers(batch)
-        for error in transfer_errors:
-            if error.result == tb.CreateTransferResult.EXISTS:
-                print(f"Batch transfer at {error.index} already exists.")
+        transfers_results = client.create_transfers(batch)
+        for i, item in enumerate(transfers_results):
+            if item.result == tb.CreateTransferResult.OK:
+                print(f"Batch transfer at {i} successfully created with timestamp {item.timestamp}.")
+            elif item.result == tb.CreateTransferResult.EXISTS:
+                print(f"Batch transfer at {i} already exists with timestamp {item.timestamp}.")
             else:
-                print(f"Batch transfer at {error.index} failed to create: {error.result}.")
+                print(f"Batch transfer at {i} failed to create: {item.result}.")
         # endsection:create-transfers-errors
-    except:
-        raise
-
-    try:
-        # section:no-batch
-        batch = [] # Array of transfer to create.
-        for transfer in batch:
-            transfer_errors = client.create_transfers([transfer])
-            # Error handling omitted.
-        # endsection:no-batch
     except:
         raise
 
@@ -248,10 +242,10 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         batch = [] # Array of transfer to create.
         BATCH_SIZE = 8189 #FIXME
         for i in range(0, len(batch), BATCH_SIZE):
-            transfer_errors = client.create_transfers(
+            transfers_results = client.create_transfers(
                 batch[i:min(len(batch), i + BATCH_SIZE)],
             )
-            # Error handling omitted.
+            # Results handling omitted.
         # endsection:batch
     except:
         raise
@@ -290,8 +284,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         )
 
         # Create the transfer
-        transfer_errors = client.create_transfers([transfer0, transfer1])
-        # Error handling omitted.
+        transfers_results = client.create_transfers([transfer0, transfer1])
+        # Results handling omitted.
         # endsection:transfer-flags-link
     except:
         raise
@@ -314,8 +308,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )
 
-        transfer_errors = client.create_transfers([transfer0])
-        # Error handling omitted.
+        transfers_results = client.create_transfers([transfer0])
+        # Results handling omitted.
 
         transfer1 = tb.Transfer(
             id=7,
@@ -334,8 +328,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )
 
-        transfer_errors = client.create_transfers([transfer1])
-        # Error handling omitted.
+        transfers_results = client.create_transfers([transfer1])
+        # Results handling omitted.
         # endsection:transfer-flags-post
     except:
         raise
@@ -358,8 +352,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )
 
-        transfer_errors = client.create_transfers([transfer0])
-        # Error handling omitted.
+        transfers_results = client.create_transfers([transfer0])
+        # Results handling omitted.
 
         transfer1 = tb.Transfer(
             id=9,
@@ -377,8 +371,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             timestamp=0,
         )
 
-        transfer_errors = client.create_transfers([transfer1])
-        # Error handling omitted.
+        transfers_results = client.create_transfers([transfer1])
+        # Results handling omitted.
         # endsection:transfer-flags-void
     except:
         raise
@@ -497,8 +491,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         batch.append(tb.Transfer(id=3, flags=linkedFlag))
         batch.append(tb.Transfer(id=4, flags=0))
 
-        transfer_errors = client.create_transfers(batch)
-        # Error handling omitted.
+        transfers_results = client.create_transfers(batch)
+        # Results handling omitted.
         # endsection:linked-events
     except:
         raise
@@ -526,8 +520,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
             accounts.append(account)
 
-        account_errors = client.create_accounts(accounts)
-        # Error handling omitted.
+        accounts_results = client.create_accounts(accounts)
+        # Results handling omitted.
 
         # The, load and import all transfers with their timestamps from the historical source.
         transfers = []
@@ -544,8 +538,8 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
             transfers.append(transfer)
 
-        transfer_errors = client.create_transfers(transfers)
-        # Error handling omitted.
+        transfers_results = client.create_transfers(transfers)
+        # Results handling omitted.
 
         # Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
         # with the same historical timestamps without regressing the cluster timestamp.

@@ -4,7 +4,7 @@ import tigerbeetle as tb
 
 with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000")) as client:
     # Create two accounts.
-    account_errors = client.create_accounts([
+    accounts_results = client.create_accounts([
         tb.Account(
             id=1,
             ledger=1,
@@ -17,8 +17,10 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
         ),
     ])
 
-    print(account_errors)
-    assert len(account_errors) == 0
+    print(accounts_results)
+    assert len(accounts_results) == 2
+    assert accounts_results[0].result == tb.CreateAccountResult.OK
+    assert accounts_results[1].result == tb.CreateAccountResult.OK
 
     # Start five pending transfers.
     transfers = [
@@ -68,10 +70,11 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.PENDING,
         ),
     ]
-    transfer_errors = client.create_transfers(transfers)
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
-
+    transfers_results = client.create_transfers(transfers)
+    print(transfers_results)
+    assert len(transfers_results) == len(transfers)
+    for result in transfers_results:
+        assert result.result == tb.CreateTransferResult.OK
 
     # Validate accounts pending and posted debits/credits before
     # finishing the two-phase transfer.
@@ -93,7 +96,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
 
 
     # Create a 6th transfer posting the 1st transfer.
-    transfer_errors = client.create_transfers([
+    transfers_results = client.create_transfers([
         tb.Transfer(
             id=6,
             debit_account_id=1,
@@ -105,8 +108,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.POST_PENDING_TRANSFER,
         )
     ])
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     # Validate account balances after posting 1st pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -126,7 +130,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             raise Exception("Unexpected account: " + account)
 
     # Create a 7th transfer voiding the 2d transfer.
-    transfer_errors = client.create_transfers([
+    transfers_results = client.create_transfers([
         tb.Transfer(
             id=7,
             debit_account_id=1,
@@ -138,8 +142,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.VOID_PENDING_TRANSFER,
         )
     ])
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     # Validate account balances after voiding 2d pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -159,7 +164,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             raise Exception("Unexpected account: " + account)
 
     # Create a 8th transfer posting the 3rd transfer.
-    transfer_errors = client.create_transfers([
+    transfers_results = client.create_transfers([
         tb.Transfer(
             id=8,
             debit_account_id=1,
@@ -171,8 +176,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.POST_PENDING_TRANSFER,
         )
     ])
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     # Validate account balances after posting 3rd pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -192,7 +198,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             raise Exception("Unexpected account: " + account)
 
     # Create a 9th transfer voiding the 4th transfer.
-    transfer_errors = client.create_transfers([
+    transfer_results = client.create_transfers([
         tb.Transfer(
             id=9,
             debit_account_id=1,
@@ -204,8 +210,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.VOID_PENDING_TRANSFER,
         )
     ])
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     # Validate account balances after voiding 4th pending transfer.
     accounts = client.lookup_accounts([1, 2])
@@ -225,7 +232,7 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             raise Exception("Unexpected account: " + account)
 
     # Create a 10th transfer posting the 5th transfer.
-    transfer_errors = client.create_transfers([
+    transfers_results = client.create_transfers([
         tb.Transfer(
             id=10,
             debit_account_id=1,
@@ -237,8 +244,9 @@ with tb.ClientSync(cluster_id=0, replica_addresses=os.getenv("TB_ADDRESS", "3000
             flags=tb.TransferFlags.POST_PENDING_TRANSFER,
         )
     ])
-    print(transfer_errors)
-    assert len(transfer_errors) == 0
+    print(transfers_results)
+    assert len(transfers_results) == 1
+    assert transfers_results[0].result == tb.CreateTransferResult.OK
 
     # Validate account balances after posting 5th pending transfer.
     accounts = client.lookup_accounts([1, 2])
