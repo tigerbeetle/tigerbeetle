@@ -26,15 +26,13 @@ using (var client = new Client(
     },
     };
 
-    var createAccountsError = client.CreateAccounts(accounts);
-    foreach (var error in createAccountsError)
-    {
-        Console.WriteLine("Error creating account {0}: {1}", error.Index, error.Result);
-        throw new Exception("Unexpected error");
-    }
+    var accountsResults = client.CreateAccounts(accounts);
+    Debug.Assert(accountsResults.Length == 2);
+    Debug.Assert(accountsResults[0].Result == CreateAccountResult.Ok);
+    Debug.Assert(accountsResults[1].Result == CreateAccountResult.Ok);
 
     // Start a pending transfer
-    var createTransfersError = client.CreateTransfers(new[] {
+    var transfersResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 1,
@@ -46,11 +44,8 @@ using (var client = new Client(
         Flags = TransferFlags.Pending,
     }
     });
-    foreach (var error in createTransfersError)
-    {
-        Console.WriteLine("Error creating transfer {0}: {1}", error.Index, error.Result);
-        throw new Exception("Unexpected error");
-    }
+    Debug.Assert(transfersResults.Length == 1);
+    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
 
     // Validate accounts pending and posted debits/credits before finishing the two-phase transfer
     accounts = client.LookupAccounts(new UInt128[] { 1, 2 });
@@ -78,7 +73,7 @@ using (var client = new Client(
     }
 
     // Create a second transfer simply posting the first transfer
-    createTransfersError = client.CreateTransfers(new[] {
+    transfersResults = client.CreateTransfers(new[] {
     new Transfer
     {
         Id = 2,
@@ -91,11 +86,8 @@ using (var client = new Client(
         Flags = TransferFlags.PostPendingTransfer,
     }
     });
-    foreach (var error in createTransfersError)
-    {
-        Console.WriteLine("Error creating transfer {0}: {1}", error.Index, error.Result);
-        throw new Exception("Unexpected error");
-    }
+    Debug.Assert(transfersResults.Length == 1);
+    Debug.Assert(transfersResults[0].Result == CreateTransferResult.Ok);
 
     // Validate the contents of all transfers
     var transfers = client.LookupTransfers(new UInt128[] { 1, 2 });
@@ -140,6 +132,4 @@ using (var client = new Client(
             throw new Exception("Unexpected account");
         }
     }
-
-    Console.WriteLine("ok");
 }

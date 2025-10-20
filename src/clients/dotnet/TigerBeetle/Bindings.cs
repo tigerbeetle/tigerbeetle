@@ -816,32 +816,40 @@ public enum CreateTransferResult : uint
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct CreateAccountsResult
 {
-    public const int SIZE = 8;
+    public const int SIZE = 16;
 
 
-    private uint index;
+    private ulong timestamp;
 
     private CreateAccountResult result;
 
-    public uint Index { get => index; set => index = value; }
+    private uint reserved;
+
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
     public CreateAccountResult Result { get => result; set => result = value; }
+
+    internal uint Reserved { get => reserved; set => reserved = value; }
 
 }
 
 [StructLayout(LayoutKind.Sequential, Size = SIZE)]
 public struct CreateTransfersResult
 {
-    public const int SIZE = 8;
+    public const int SIZE = 16;
 
 
-    private uint index;
+    private ulong timestamp;
 
     private CreateTransferResult result;
 
-    public uint Index { get => index; set => index = value; }
+    private uint reserved;
+
+    public ulong Timestamp { get => timestamp; set => timestamp = value; }
 
     public CreateTransferResult Result { get => result; set => result = value; }
+
+    internal uint Reserved { get => reserved; set => reserved = value; }
 
 }
 
@@ -1202,10 +1210,6 @@ internal enum TBOperation : byte
 
     GetChangeEvents = 137,
 
-    CreateAccounts = 138,
-
-    CreateTransfers = 139,
-
     LookupAccounts = 140,
 
     LookupTransfers = 141,
@@ -1217,6 +1221,10 @@ internal enum TBOperation : byte
     QueryAccounts = 144,
 
     QueryTransfers = 145,
+
+    CreateAccountsWithResults = 146,
+
+    CreateTransfersWithResults = 147,
 
 }
 
