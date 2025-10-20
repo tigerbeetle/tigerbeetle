@@ -411,25 +411,13 @@ impl Client {
     ///
     /// The results of events are represented individually. There are two
     /// related event result types: `CreateAccountResult` is the enum of
-    /// possible outcomes, while `CreateAccountsResult` includes the index to
-    /// map back to input events.
-    ///
-    /// _This function does not return a result for all input events_. Instead
-    /// it only returns results that would not be [`CreateAccountResult::Ok`].
-    /// In other words, this function does not return results for successful
-    /// events, only unsuccessful events (though note the case of
-    /// [`CreateAccountResult::Exists`], described below). This behavior
-    /// reflects optimizations in the underlying protocol. This client will
-    /// never return a `CreateAccountResult::Ok`; that variant is defined in
-    /// case it is useful for clients to materialize omitted request results. To
-    /// relate a `CreateAccountsResult` to its input event, the
-    /// [`CreateAccountsResult::index`] field is an index into the input event
-    /// slice. An example of efficiently materializing all results is included
-    /// below.
+    /// possible outcomes, and `CreateAccountsResult` which includes both the
+    /// `result` enum and the `timestamp` when the event was processed.
     ///
     /// Note that a result of `CreateAccountResult::Exists` should often be treated
-    /// the same as `CreateAccountResult::Ok`. This result can happen in cases of
-    /// application crashes or other scenarios where requests have been replayed.
+    /// the same as `CreateAccountResult::Ok`, as it also returns the same `timestamp`
+    //  of the original account. This result can happen in cases of application crashes
+    /// or other scenarios where requests have been replayed.
     ///
     /// # Example
     ///
@@ -531,28 +519,13 @@ impl Client {
     ///
     /// The results of events are represented individually. There are two
     /// related event result types: `CreateTransferResult` is the enum of
-    /// possible outcomes, while `CreateTransfersResult` includes the index to
-    /// map back to input events.
-    ///
-    /// _This function does not return a result for all input events_. Instead
-    /// it only returns results that would not be [`CreateTransferResult::Ok`].
-    /// In other words, this function does not return results for successful
-    /// events, only unsuccessful events (though note the case of
-    /// [`CreateTransferResult::Exists`], described below). This behavior
-    /// reflects optimizations in the underlying protocol. This client will
-    /// never return a `CreateTransferResult::Ok`; that variant is defined in
-    /// case it is useful for clients to materialize omitted request results. To
-    /// relate a `CreateTransfersResult` to its input event, the
-    /// [`CreateTransfersResult::index`] field is an index into the input event
-    /// slice. An example of efficiently materializing all results is included
-    /// below.
-    ///
-    /// To relate a `CreateTransfersResult` to its input event, the [`CreateTransfersResult::index`] field
-    /// is an index into the input event slice.
+    /// possible outcomes, and `CreateTransfersResult` which includes both the
+    /// `result` enum and the `timestamp` when the event was processed.
     ///
     /// Note that a result of `CreateTransferResult::Exists` should often be treated
-    /// the same as `CreateTransferResult::Ok`. This result can happen in cases of
-    /// application crashes or other scenarios where requests have been replayed.
+    /// the same as `CreateTransferResult::Ok`, as it also returns the same `timestamp`
+    /// of the original transfer. This result can happen in cases of application crashes
+    /// or other scenarios where requests have been replayed.
     ///
     /// # Example
     ///

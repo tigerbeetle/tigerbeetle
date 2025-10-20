@@ -116,7 +116,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -157,8 +157,8 @@ accounts.setCode(718);
 accounts.setFlags(AccountFlags.NONE);
 accounts.setTimestamp(0);
 
-CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-// Error handling omitted.
+CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -208,21 +208,23 @@ accounts.setLedger(1);
 accounts.setCode(718);
 accounts.setFlags(AccountFlags.HISTORY);
 
-CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-// Error handling omitted.
+CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+// Results handling omitted.
 ```
 
 ### Response and Errors
 
-The response is an empty array if all accounts were
-created successfully. If the response is non-empty, each
-object in the response array contains error information
-for an account that failed. The error object contains an
-error code and the index of the account in the request
-batch.
-
-See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+The response is an array containing the _result code_ and the _timestamp_ of
+each account in the request batch:
+- Successfully created accounts with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  return the timestamp assigned to the `Account` object.
+- Already existing accounts with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  return the timestamp of the original existing object.
+- Failed accounts return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```java
 AccountBatch accounts = new AccountBatch(3);
@@ -245,17 +247,20 @@ accounts.setLedger(1);
 accounts.setCode(718);
 accounts.setFlags(AccountFlags.NONE);
 
-CreateAccountResultBatch accountErrors = client.createAccounts(accounts);
-while (accountErrors.next()) {
-    switch (accountErrors.getResult()) {
-        case Exists:
-            System.err.printf("Batch account at %d already exists.\n",
-                    accountErrors.getIndex());
+CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+while (accountsResults.next()) {
+    switch (accountsResults.getResult()) {
+        case Ok:
+            System.out.printf("Batch account at %d successfully created with timestamp %d.\n",
+                    accountsResults.getPosition(), accountsResults.getTimestamp());
             break;
-
+        case Exists:
+            System.err.printf("Batch account at %d already exists with timestamp %d.\n",
+                    accountsResults.getPosition(), accountsResults.getTimestamp());
+            break;
         default:
-            System.err.printf("Batch account at %d failed to create %s.\n",
-                    accountErrors.getIndex(), accountErrors.getResult());
+            System.err.printf("Batch account at %d failed to create: %s.\n",
+                    accountsResults.getPosition(), accountsResults.getResult());
             break;
     }
 }
@@ -304,8 +309,8 @@ transfers.setCode(1);
 transfers.setFlags(TransferFlags.NONE);
 transfers.setTimeout(0);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -313,14 +318,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an empty array if all transfers were created
-successfully. If the response is non-empty, each object in the
-response array contains error information for a transfer that
-failed. The error object contains an error code and the index of the
-transfer in the request batch.
-
-See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+The response is an array containing the _result code_ and the _timestamp_ of
+each transfer in the request batch:
+- Successfully created transfers with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  return the timestamp assigned to the `Transfer` object.
+- Already existing transfers with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  return the timestamp of the original existing object.
+- Failed transfers return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```java
 TransferBatch transfers = new TransferBatch(3);
@@ -349,17 +357,20 @@ transfers.setAmount(10);
 transfers.setLedger(1);
 transfers.setCode(1);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-while (transferErrors.next()) {
-    switch (transferErrors.getResult()) {
-        case ExceedsCredits:
-            System.err.printf("Batch transfer at %d already exists.\n",
-                    transferErrors.getIndex());
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+while (transfersResults.next()) {
+    switch (transfersResults.getResult()) {
+        case Ok:
+            System.out.printf("Batch transfer at %d successfully created with timestamp %d.\n",
+                    transfersResults.getPosition(), transfersResults.getTimestamp());
             break;
-
+        case Exists:
+            System.err.printf("Batch transfer at %d already exists with timestamp %d.\n",
+                    transfersResults.getPosition(), transfersResults.getTimestamp());
+            break;
         default:
             System.err.printf("Batch transfer at %d failed to create: %s\n",
-                    transferErrors.getIndex(), transferErrors.getResult());
+                    transfersResults.getPosition(), transfersResults.getResult());
             break;
     }
 }
@@ -369,32 +380,16 @@ while (transferErrors.next()) {
 
 TigerBeetle performance is maximized when you batch
 API requests.
+
 A client instance shared across multiple threads/tasks can automatically
 batch concurrent requests, but the application must still send as many events
 as possible in a single call.
+
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```java
-ResultSet dataSource = null; /* Loaded from an external source. */;
-while(dataSource.next()) {
-    TransferBatch batch = new TransferBatch(1);
-
-    batch.add();
-    batch.setId(dataSource.getBytes("id"));
-    batch.setDebitAccountId(dataSource.getBytes("debit_account_id"));
-    batch.setCreditAccountId(dataSource.getBytes("credit_account_id"));
-    batch.setAmount(dataSource.getBigDecimal("amount").toBigInteger());
-    batch.setLedger(dataSource.getInt("ledger"));
-    batch.setCode(dataSource.getInt("code"));
-
-    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-    // Error handling omitted.
-}
-```
-
 Instead, **always batch as much as you can**.
+
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```java
@@ -412,8 +407,8 @@ while(dataSource.next()) {
     batch.setCode(dataSource.getInt("code"));
 
     if (batch.getLength() == BATCH_SIZE) {
-        CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-        // Error handling omitted.
+        CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+        // Results handling omitted.
 
         // Reset the batch for the next iteration.
         batch.beforeFirst();
@@ -422,8 +417,8 @@ while(dataSource.next()) {
 
 if (batch.getLength() > 0) {
     // Send the remaining items.
-    CreateTransferResultBatch transferErrors = client.createTransfers(batch);
-    // Error handling omitted.
+    CreateTransferResultBatch transfersResults = client.createTransfers(batch);
+    // Results handling omitted.
 }
 
 ```
@@ -475,8 +470,8 @@ transfers.setLedger(1);
 transfers.setCode(1);
 transfers.setFlags(TransferFlags.NONE);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -507,8 +502,8 @@ transfers.setLedger(1);
 transfers.setCode(1);
 transfers.setFlags(TransferFlags.PENDING);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 
 transfers = new TransferBatch(1);
 
@@ -518,8 +513,8 @@ transfers.setAmount(TransferBatch.AMOUNT_MAX);
 transfers.setPendingId(6);
 transfers.setFlags(TransferFlags.POST_PENDING_TRANSFER);
 
-transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -542,8 +537,8 @@ transfers.setLedger(1);
 transfers.setCode(1);
 transfers.setFlags(TransferFlags.PENDING);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 
 transfers = new TransferBatch(1);
 
@@ -553,8 +548,8 @@ transfers.setAmount(0);
 transfers.setPendingId(8);
 transfers.setFlags(TransferFlags.VOID_PENDING_TRANSFER);
 
-transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 ## Transfer Lookup
@@ -761,8 +756,8 @@ transfers.setId(4);
 // ... rest of transfer ...
 transfers.setFlags(TransferFlags.NONE);
 
-CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-// Error handling omitted.
+CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+// Results handling omitted.
 ```
 
 ## Imported Events
@@ -806,8 +801,8 @@ while (historicalAccounts.next()) {
     } else {
         accounts.setFlags(AccountFlags.IMPORTED);
 
-        CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
-        // Error handling omitted.
+        CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+        // Results handling omitted.
 
         // Reset the batch for the next iteration.
         accounts.beforeFirst();
@@ -816,8 +811,8 @@ while (historicalAccounts.next()) {
 
 if (accounts.getLength() > 0) {
     // Send the remaining items.
-    CreateAccountResultBatch accountsErrors = client.createAccounts(accounts);
-    // Error handling omitted.
+    CreateAccountResultBatch accountsResults = client.createAccounts(accounts);
+    // Results handling omitted.
 }
 
 // Then, load and import all transfers with their timestamps from the historical source.
@@ -843,8 +838,8 @@ while (historicalTransfers.next()) {
     } else {
         transfers.setFlags(TransferFlags.IMPORTED);
 
-        CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-        // Error handling omitted.
+        CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+        // Results handling omitted.
 
         // Reset the batch for the next iteration.
         transfers.beforeFirst();
@@ -853,8 +848,8 @@ while (historicalTransfers.next()) {
 
 if (transfers.getLength() > 0) {
     // Send the remaining items.
-    CreateTransferResultBatch transferErrors = client.createTransfers(transfers);
-    // Error handling omitted.
+    CreateTransferResultBatch transfersResults = client.createTransfers(transfers);
+    // Results handling omitted.
 }
 
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried

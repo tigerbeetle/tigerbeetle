@@ -78,7 +78,7 @@ ID and replica addresses are both chosen by the system that
 starts the TigerBeetle cluster.
 
 Clients are thread-safe and a single instance should be shared
-between multiple concurrent tasks. This allows events to be 
+between multiple concurrent tasks. This allows events to be
 [automatically batched](https://docs.tigerbeetle.com/coding/requests/#batching-events).
 
 Multiple clients are useful when connecting to more than
@@ -112,7 +112,7 @@ See details for account fields in the [Accounts
 reference](https://docs.tigerbeetle.com/reference/account).
 
 ```go
-accountErrors, err := client.CreateAccounts([]Account{
+accountsRes, err := client.CreateAccounts([]Account{
 	{
 		ID:          ID(), // TigerBeetle time-based ID.
 		UserData128: ToUint128(0),
@@ -124,7 +124,7 @@ accountErrors, err := client.CreateAccounts([]Account{
 		Timestamp:   0,
 	},
 })
-// Error handling omitted.
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -174,21 +174,23 @@ account1 := Account{
 	}.ToUint16(),
 }
 
-accountErrors, err := client.CreateAccounts([]Account{account0, account1})
-// Error handling omitted.
+accountsRes, err := client.CreateAccounts([]Account{account0, account1})
+// Results handling omitted.
 ```
 
 ### Response and Errors
 
-The response is an empty array if all accounts were
-created successfully. If the response is non-empty, each
-object in the response array contains error information
-for an account that failed. The error object contains an
-error code and the index of the account in the request
-batch.
-
-See all error conditions in the [create_accounts
-reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
+The response is an array containing the _result code_ and the _timestamp_ of
+each account in the request batch:
+- Successfully created accounts with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_accounts#ok)
+  return the timestamp assigned to the `Account` object.
+- Already existing accounts with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_accounts#exists)
+  return the timestamp of the original existing object.
+- Failed accounts return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_accounts reference](https://docs.tigerbeetle.com/reference/requests/create_accounts).
 
 ```go
 account0 := Account{
@@ -210,18 +212,20 @@ account2 := Account{
 	Flags:  0,
 }
 
-accountErrors, err := client.CreateAccounts([]Account{account0, account1, account2})
+accountsRes, err := client.CreateAccounts([]Account{account0, account1, account2})
 if err != nil {
 	log.Printf("Error creating accounts: %s", err)
 	return
 }
 
-for _, err := range accountErrors {
-	switch err.Index {
-	case uint32(AccountExists):
-		log.Printf("Batch account at %d already exists.", err.Index)
+for i, item := range accountsRes {
+	switch item.Result {
+	case AccountOK:
+		log.Printf("Batch account at %d successfully created with timestamp %d.", i, item.Timestamp)
+	case AccountExists:
+		log.Printf("Batch account at %d already exists with timestamp %d.", i, item.Timestamp)
 	default:
-		log.Printf("Batch account at %d failed to create: %s", err.Index, err.Result)
+		log.Printf("Batch account at %d failed to create: %s", i, item.Timestamp)
 	}
 }
 ```
@@ -265,8 +269,8 @@ transfers := []Transfer{{
 	Timestamp:       0,
 }}
 
-transferErrors, err := client.CreateTransfers(transfers)
-// Error handling omitted.
+transfersRes, err := client.CreateTransfers(transfers)
+// Results handling omitted.
 ```
 
 See details for the recommended ID scheme in
@@ -274,14 +278,17 @@ See details for the recommended ID scheme in
 
 ### Response and Errors
 
-The response is an empty array if all transfers were created
-successfully. If the response is non-empty, each object in the
-response array contains error information for a transfer that
-failed. The error object contains an error code and the index of the
-transfer in the request batch.
-
-See all error conditions in the [create_transfers
-reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
+The response is an array containing the _result code_ and the _timestamp_ of
+each transfer in the request batch:
+- Successfully created transfers with the result
+  [`ok`](https://docs.tigerbeetle.com/reference/requests/create_transfers#ok)
+  return the timestamp assigned to the `Transfer` object.
+- Already existing transfers with the result
+  [`exists`](https://docs.tigerbeetle.com/reference/requests/create_transfers#exists)
+  return the timestamp of the original existing object.
+- Failed transfers return the error code along with the timestamp when the validation
+  occurred. See all error conditions in the
+  [create_transfers reference](https://docs.tigerbeetle.com/reference/requests/create_transfers).
 
 ```go
 transfers := []Transfer{{
@@ -310,18 +317,20 @@ transfers := []Transfer{{
 	Flags:           0,
 }}
 
-transferErrors, err := client.CreateTransfers(transfers)
+transfersRes, err := client.CreateTransfers(transfers)
 if err != nil {
 	log.Printf("Error creating transfers: %s", err)
 	return
 }
 
-for _, err := range transferErrors {
-	switch err.Index {
-	case uint32(TransferExists):
-		log.Printf("Batch transfer at %d already exists.", err.Index)
+for i, item := range transfersRes {
+	switch item.Result {
+	case TransferOK:
+		log.Printf("Batch transfer at %d successfully created with timestamp %d.", i, item.Timestamp)
+	case TransferExists:
+		log.Printf("Batch transfer at %d already exists with timestamp %d.", i, item.Timestamp)
 	default:
-		log.Printf("Batch transfer at %d failed to create: %s", err.Index, err.Result)
+		log.Printf("Batch transfer at %d failed to create: %s", i, item.Result)
 	}
 }
 ```
@@ -330,22 +339,16 @@ for _, err := range transferErrors {
 
 TigerBeetle performance is maximized when you batch
 API requests.
+
 A client instance shared across multiple threads/tasks can automatically
 batch concurrent requests, but the application must still send as many events
 as possible in a single call.
+
 For example, if you insert 1 million transfers sequentially, one at a time,
 the insert rate will be a *fraction* of the potential, because the client will
 wait for a reply between each one.
-
-```go
-batch := []Transfer{}
-for i := 0; i < len(batch); i++ {
-	transferErrors, err := client.CreateTransfers([]Transfer{batch[i]})
-	_, _ = transferErrors, err // Error handling omitted.
-}
-```
-
 Instead, **always batch as much as you can**.
+
 The maximum batch size is set in the TigerBeetle server. The default is 8189.
 
 ```go
@@ -356,8 +359,9 @@ for i := 0; i < len(batch); i += BATCH_SIZE {
 	if i+BATCH_SIZE > len(batch) {
 		size = len(batch) - i
 	}
-	transferErrors, err := client.CreateTransfers(batch[i : i+size])
-	_, _ = transferErrors, err // Error handling omitted.
+	transfersRes, err := client.CreateTransfers(batch[i : i+size])
+	// Results handling omitted.
+	_, _ = transfersRes, err
 }
 ```
 
@@ -406,8 +410,8 @@ transfer1 := Transfer{
 	Flags:           0,
 }
 
-transferErrors, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
-// Error handling omitted.
+transfersRes, err := client.CreateTransfers([]Transfer{transfer0, transfer1})
+// Results handling omitted.
 ```
 
 ### Two-Phase Transfers
@@ -437,8 +441,8 @@ transfer0 := Transfer{
 	Flags:           0,
 }
 
-transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
-// Error handling omitted.
+transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+// Results handling omitted.
 
 transfer1 := Transfer{
 	ID: ToUint128(7),
@@ -448,8 +452,8 @@ transfer1 := Transfer{
 	Flags:     TransferFlags{PostPendingTransfer: true}.ToUint16(),
 }
 
-transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
-// Error handling omitted.
+transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+// Results handling omitted.
 ```
 
 #### Void a Pending Transfer
@@ -472,8 +476,8 @@ transfer0 := Transfer{
 	Flags:           0,
 }
 
-transferErrors, err := client.CreateTransfers([]Transfer{transfer0})
-// Error handling omitted.
+transfersRes, err := client.CreateTransfers([]Transfer{transfer0})
+// Results handling omitted.
 
 transfer1 := Transfer{
 	ID:        ToUint128(9),
@@ -482,8 +486,8 @@ transfer1 := Transfer{
 	Flags:     TransferFlags{VoidPendingTransfer: true}.ToUint16(),
 }
 
-transferErrors, err = client.CreateTransfers([]Transfer{transfer1})
-// Error handling omitted.
+transfersRes, err = client.CreateTransfers([]Transfer{transfer1})
+// Results handling omitted.
 ```
 
 ## Transfer Lookup
@@ -669,8 +673,8 @@ batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */})
 batch = append(batch, Transfer{ID: ToUint128(3) /* ... rest of transfer ... */, Flags: linkedFlag})
 batch = append(batch, Transfer{ID: ToUint128(4) /* ... rest of transfer ... */})
 
-transferErrors, err := client.CreateTransfers(batch)
-// Error handling omitted.
+transfersRes, err := client.CreateTransfers(batch)
+// Results handling omitted.
 ```
 
 ## Imported Events
@@ -710,8 +714,8 @@ for index, account := range historicalAccounts {
 	accountsBatch = append(accountsBatch, account)
 }
 
-accountErrors, err := client.CreateAccounts(accountsBatch)
-// Error handling omitted.
+accountsRes, err := client.CreateAccounts(accountsBatch)
+// Results handling omitted.
 
 // Then, load and import all transfers with their timestamps from the historical source.
 transfersBatch := []Transfer{}
@@ -731,8 +735,8 @@ for index, transfer := range historicalTransfers {
 	transfersBatch = append(transfersBatch, transfer)
 }
 
-transferErrors, err := client.CreateTransfers(transfersBatch)
-// Error handling omitted..
+transfersRes, err := client.CreateTransfers(transfersBatch)
+// Results handling omitted..
 // Since it is a linked chain, in case of any error the entire batch is rolled back and can be retried
 // with the same historical timestamps without regressing the cluster timestamp.
 ```
