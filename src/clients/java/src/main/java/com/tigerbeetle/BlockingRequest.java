@@ -103,9 +103,9 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
         return result != null || exception != null;
     }
 
-    public TResponse waitForResult() {
+    public TResponse waitForResult() throws InterruptedException {
 
-        waitForCompletionUninterruptibly();
+        waitForCompletion();
         return getResult();
     }
 
@@ -143,22 +143,13 @@ final class BlockingRequest<TResponse extends Batch> extends Request<TResponse> 
 
     }
 
-    private void waitForCompletionUninterruptibly() {
-        try {
-
-            if (!isDone()) {
-                synchronized (this) {
-                    while (!isDone()) {
-                        wait();
-                    }
+    private void waitForCompletion() throws InterruptedException {
+        if (!isDone()) {
+            synchronized (this) {
+                while (!isDone()) {
+                    wait();
                 }
             }
-
-        } catch (InterruptedException interruptedException) {
-            // Since we don't support canceling an ongoing request
-            // this exception should never exposed by the API to be handled by the user
-            throw new AssertionError(interruptedException,
-                    "Unexpected thread interruption on waitForCompletion.");
         }
     }
 

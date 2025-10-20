@@ -2,7 +2,6 @@ package com.tigerbeetle;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -84,7 +83,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidOperation() {
+    public void testEndRequestWithInvalidOperation() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -104,7 +103,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithUnknownOperation() {
+    public void testEndRequestWithUnknownOperation() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -125,7 +124,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testEndRequestWithNullBuffer() {
+    public void testEndRequestWithNullBuffer() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -144,7 +143,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithInvalidBufferSize() {
+    public void testEndRequestWithInvalidBufferSize() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -179,7 +178,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testEndRequestWithRequestException() {
+    public void testEndRequestWithRequestException() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(1);
         batch.add();
@@ -204,7 +203,8 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = AssertionError.class)
-    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests() {
+    public void testEndRequestWithAmountOfResultsGreaterThanAmountOfRequests()
+            throws InterruptedException {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -225,7 +225,7 @@ public class BlockingRequestTest {
     }
 
     @Test(expected = IllegalStateException.class)
-    public void testEndRequestTwice() {
+    public void testEndRequestTwice() throws InterruptedException {
         var client = getDummyClient();
 
         // A batch with only 1 item
@@ -262,7 +262,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testCreateAccountEndRequest() {
+    public void testCreateAccountEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new AccountBatch(2);
         batch.add();
@@ -298,7 +298,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testCreateTransferEndRequest() {
+    public void testCreateTransferEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new TransferBatch(2);
         batch.add();
@@ -334,7 +334,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testLookupAccountEndRequest() {
+    public void testLookupAccountEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -366,7 +366,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testLookupTransferEndRequest() {
+    public void testLookupTransferEndRequest() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
@@ -398,7 +398,7 @@ public class BlockingRequestTest {
     }
 
     @Test
-    public void testSuccessCompletion() {
+    public void testSuccessCompletion() throws InterruptedException {
         var client = getDummyClient();
         var batch = new IdBatch(2);
         batch.add();
