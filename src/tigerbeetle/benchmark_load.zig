@@ -387,23 +387,27 @@ const Benchmark = struct {
             &b.client_requests[client_index],
         )[0..account_count];
         b.build_accounts(accounts);
-        b.request(client_index, .create_accounts, .{
+        b.request(client_index, .create_accounts_with_results, .{
             .batch_count = account_count,
             .event_size = @sizeOf(tb.Account),
         });
     }
 
-    fn create_accounts_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+    fn create_accounts_callback(b: *Benchmark, client_index: u32, results: []const u8) void {
         assert(b.stage == .create_accounts);
 
         const create_accounts_results = stdx.bytes_as_slice(
             .exact,
             tb.CreateAccountsResult,
-            result,
+            results,
         );
-        if (create_accounts_results.len > 0) {
-            panic("CreateAccountsResults: {any}", .{create_accounts_results});
+        for (create_accounts_results) |result| {
+            assert(result.timestamp > 0);
+            if (result.result != .ok) {
+                panic("CreateAccountsResults: {any}", .{result.result});
+            }
         }
+        if (create_accounts_results.len != 0) {}
         b.create_accounts(client_index);
     }
 
@@ -427,21 +431,24 @@ const Benchmark = struct {
             &b.client_requests[client_index],
         )[0..transfer_count];
         b.build_transfers(transfers);
-        b.request(client_index, .create_transfers, .{
+        b.request(client_index, .create_transfers_with_results, .{
             .batch_count = transfer_count,
             .event_size = @sizeOf(tb.Transfer),
         });
     }
 
-    fn create_transfers_callback(b: *Benchmark, client_index: u32, result: []const u8) void {
+    fn create_transfers_callback(b: *Benchmark, client_index: u32, results: []const u8) void {
         assert(!b.clients_busy.is_set(client_index));
         const create_transfers_results = stdx.bytes_as_slice(
             .exact,
             tb.CreateTransfersResult,
-            result,
+            results,
         );
-        if (create_transfers_results.len > 0) {
-            panic("CreateTransfersResults: {any}", .{create_transfers_results});
+        for (create_transfers_results) |result| {
+            assert(result.timestamp > 0);
+            if (result.result != .ok) {
+                panic("CreateTransfersResults: {any}", .{result.result});
+            }
         }
 
         const requests_complete = b.request_index - b.clients_busy.count();
@@ -820,8 +827,8 @@ const Benchmark = struct {
         };
 
         switch (operation) {
-            .create_accounts => b.create_accounts_callback(client, input),
-            .create_transfers => b.create_transfers_callback(client, input),
+            .create_accounts_with_results => b.create_accounts_callback(client, input),
+            .create_transfers_with_results => b.create_transfers_callback(client, input),
             .lookup_accounts => b.validate_accounts_callback(client, input),
             .lookup_transfers => b.validate_transfers_callback(client, input),
             .get_account_transfers => b.get_account_transfers_callback(client, input),

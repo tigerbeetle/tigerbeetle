@@ -348,6 +348,7 @@ pub const Operation = enum(u8) {
 
     fn check_state_machine_operations(comptime StateMachine: type) void {
         comptime {
+            @setEvalBranchQuota(20_000);
             assert(@typeInfo(StateMachine.Operation).@"enum".is_exhaustive);
             assert(@typeInfo(StateMachine.Operation).@"enum".tag_type ==
                 @typeInfo(Operation).@"enum".tag_type);
