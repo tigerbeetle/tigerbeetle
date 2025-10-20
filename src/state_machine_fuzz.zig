@@ -120,17 +120,20 @@ fn build_batch(
         .pulse => 0,
 
         // No payload, `create_*` require compaction to be hooked up.
-        .create_accounts, .create_transfers => 0,
+        .create_accounts_with_results,
+        .create_transfers_with_results,
+        => 0,
+        .deprecated_create_accounts_sparse,
+        .deprecated_create_transfers_sparse,
+        => 0,
+        .deprecated_create_accounts_unbatched,
+        .deprecated_create_transfers_unbatched,
+        => 0,
 
         .lookup_accounts, .lookup_transfers => build_lookup(prng, buffer),
         .get_account_transfers, .get_account_balances => build_account_filter(prng, buffer),
         .query_accounts, .query_transfers => build_query_filter(prng, buffer),
         .get_change_events => build_get_change_events_filter(prng, buffer),
-
-        // No payload, `create_*` require compaction to be hooked up.
-        .deprecated_create_accounts_unbatched,
-        .deprecated_create_transfers_unbatched,
-        => 0,
 
         .deprecated_lookup_accounts_unbatched,
         .deprecated_lookup_transfers_unbatched,

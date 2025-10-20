@@ -493,174 +493,276 @@ pub const AccountingAuditor = struct {
         }
     }
 
-    pub fn on_create_accounts(
+    pub fn on_create_accounts_sparse(
         self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         accounts: []const tb.Account,
-        results: []const tb.CreateAccountsResult,
+        results_sparse: []const tb.CreateAccountsErrorResult,
     ) void {
-        assert(accounts.len >= results.len);
+        assert(accounts.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
             // Zero-sized batches packed in a multi-batch message:
             (accounts.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_accounts;
-        var results_iterator = IteratorForCreateType(tb.CreateAccountsResult).init(results);
-        defer assert(results_iterator.results.len == 0);
+        var iterator: ResultsSparseIteratorType(tb.CreateAccountsErrorResult) = .init(
+            results_sparse,
+        );
+        defer assert(iterator.results.len == 0);
 
         for (accounts, 0..) |*account, i| {
             const account_timestamp = timestamp - accounts.len + i + 1;
 
-            const result_actual = results_iterator.take(i) orelse .ok;
+            const result_actual = iterator.take(i) orelse .ok;
             if (!results_expect[i].contains(result_actual)) {
-                log.err("on_create_accounts: account={} expect={} result={}", .{
+                log.err("on_create_accounts_sparse: account={} expect={} result={}", .{
                     account.*,
                     results_expect[i],
                     result_actual,
                 });
-                @panic("on_create_accounts: unexpected result");
+                @panic("on_create_accounts_sparse: unexpected result");
             }
 
-            const account_index = self.account_id_to_index(account.id);
             if (result_actual == .ok) {
-                assert(!self.accounts_state[account_index].created);
-                self.accounts_state[account_index].created = true;
-                self.accounts[account_index] = account.*;
-                self.accounts[account_index].timestamp = account_timestamp;
-
-                const query_intersection_index = account.code - 1;
-                const query_intersection = &self.query_intersections[query_intersection_index];
-                assert(account.user_data_64 == query_intersection.user_data_64);
-                assert(account.user_data_32 == query_intersection.user_data_32);
-                assert(account.code == query_intersection.code);
-                query_intersection.accounts.count += 1;
-                if (query_intersection.accounts.timestamp_min == 0) {
-                    query_intersection.accounts.timestamp_min = account_timestamp;
-                }
-                query_intersection.accounts.timestamp_max = account_timestamp;
-            }
-
-            if (account_index >= self.accounts.len) {
-                assert(result_actual != .ok);
+                self.on_create_account_ok(account_timestamp, account);
             }
         }
     }
 
-    pub fn on_create_transfers(
+    pub fn on_create_accounts_with_results(
+        self: *AccountingAuditor,
+        client_index: usize,
+        timestamp: u64,
+        accounts: []const tb.Account,
+        results: []const tb.CreateAccountsResult,
+    ) void {
+        assert(accounts.len == results.len);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (accounts.len == 0 and self.timestamp == timestamp));
+        defer self.timestamp = timestamp;
+
+        const results_expect = self.take_in_flight(client_index).create_accounts;
+        for (accounts, results, 0..) |
+            *account,
+            *outcome,
+            i,
+        | {
+            const account_timestamp = timestamp - accounts.len + i + 1;
+
+            if (!results_expect[i].contains(outcome.result)) {
+                log.err("on_create_accounts_with_results: account={} expect={} result={}", .{
+                    account.*,
+                    results_expect[i],
+                    outcome,
+                });
+                @panic("on_create_accounts_with_results: unexpected result");
+            }
+
+            switch (outcome.result) {
+                .ok => {
+                    assert(outcome.timestamp == account_timestamp);
+                    self.on_create_account_ok(account_timestamp, account);
+                },
+                .exists => assert(outcome.timestamp == self.get_account(account.id).?.timestamp),
+                else => assert(outcome.timestamp > 0),
+            }
+        }
+    }
+
+    fn on_create_account_ok(
+        self: *AccountingAuditor,
+        timestamp: u64,
+        account: *const tb.Account,
+    ) void {
+        const account_index = self.account_id_to_index(account.id);
+        assert(account_index < self.accounts.len);
+        assert(!self.accounts_state[account_index].created);
+        self.accounts_state[account_index].created = true;
+        self.accounts[account_index] = account.*;
+        self.accounts[account_index].timestamp = timestamp;
+
+        const query_intersection_index = account.code - 1;
+        const query_intersection = &self.query_intersections[query_intersection_index];
+        assert(account.user_data_64 == query_intersection.user_data_64);
+        assert(account.user_data_32 == query_intersection.user_data_32);
+        assert(account.code == query_intersection.code);
+        query_intersection.accounts.count += 1;
+        if (query_intersection.accounts.timestamp_min == 0) {
+            query_intersection.accounts.timestamp_min = timestamp;
+        }
+        query_intersection.accounts.timestamp_max = timestamp;
+    }
+
+    pub fn on_create_transfers_sparse(
         self: *AccountingAuditor,
         client_index: usize,
         timestamp: u64,
         transfers: []const tb.Transfer,
-        results: []const tb.CreateTransfersResult,
+        results_sparse: []const tb.CreateTransfersErrorResult,
     ) void {
-        assert(transfers.len >= results.len);
+        assert(transfers.len >= results_sparse.len);
         assert(self.timestamp < timestamp or
             // Zero-sized batches packed in a multi-batch message:
             (transfers.len == 0 and self.timestamp == timestamp));
         defer self.timestamp = timestamp;
 
         const results_expect = self.take_in_flight(client_index).create_transfers;
-        var results_iterator = IteratorForCreateType(tb.CreateTransfersResult).init(results);
-        defer assert(results_iterator.results.len == 0);
+        var iterator: ResultsSparseIteratorType(tb.CreateTransfersErrorResult) = .init(
+            results_sparse,
+        );
+        defer assert(iterator.results.len == 0);
 
         for (transfers, 0..) |*transfer, i| {
             const transfer_timestamp = timestamp - transfers.len + i + 1;
 
-            const result_actual = results_iterator.take(i) orelse .ok;
+            const result_actual = iterator.take(i) orelse .ok;
             if (!results_expect[i].contains(result_actual.to_ordered())) {
-                log.err("on_create_transfers: transfer={} expect={} result={}", .{
+                log.err("on_create_transfers_sparse: transfer={} expect={} result={}", .{
                     transfer.*,
                     results_expect[i],
                     result_actual,
                 });
-                @panic("on_create_transfers: unexpected result");
+                @panic("on_create_transfers_sparse: unexpected result");
             }
 
-            if (result_actual != .ok) continue;
-            self.changes_tracker.update(.{ .transfer = .{
-                .timestamp = transfer_timestamp,
-                .flags = transfer.flags,
-            } });
+            if (result_actual == .ok) self.on_create_transfer_ok(
+                transfer_timestamp,
+                transfer,
+            );
+        }
+    }
 
-            const query_intersection_index = transfer.code - 1;
-            const query_intersection = &self.query_intersections[query_intersection_index];
-            assert(transfer.user_data_64 == query_intersection.user_data_64);
-            assert(transfer.user_data_32 == query_intersection.user_data_32);
-            assert(transfer.code == query_intersection.code);
-            query_intersection.transfers.count += 1;
-            if (query_intersection.transfers.timestamp_min == 0) {
-                query_intersection.transfers.timestamp_min = transfer_timestamp;
+    pub fn on_create_transfers_with_results(
+        self: *AccountingAuditor,
+        client_index: usize,
+        timestamp: u64,
+        transfers: []const tb.Transfer,
+        results: []const tb.CreateTransfersResult,
+    ) void {
+        assert(transfers.len == results.len);
+        assert(self.timestamp < timestamp or
+            // Zero-sized batches packed in a multi-batch message:
+            (transfers.len == 0 and self.timestamp == timestamp));
+        defer self.timestamp = timestamp;
+
+        const results_expect = self.take_in_flight(client_index).create_transfers;
+        for (transfers, results, 0..) |
+            *transfer,
+            outcome,
+            i,
+        | {
+            const transfer_timestamp = timestamp - transfers.len + i + 1;
+
+            if (!results_expect[i].contains(outcome.result.to_ordered())) {
+                log.err("on_create_transfers_with_results: transfer={} expect={} result={}", .{
+                    transfer.*,
+                    results_expect[i],
+                    outcome,
+                });
+                @panic("on_create_transfers_with_results: unexpected result");
             }
-            query_intersection.transfers.timestamp_max = transfer_timestamp;
 
-            if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
-                const p = self.pending_transfers.get(transfer.pending_id).?;
-                const dr_state = &self.accounts_state[p.debit_account_index];
-                const cr_state = &self.accounts_state[p.credit_account_index];
-                dr_state.update(.dr, transfer_timestamp);
-                cr_state.update(.cr, transfer_timestamp);
+            assert(outcome.timestamp > 0);
+            switch (outcome.result) {
+                .ok => {
+                    assert(outcome.timestamp == transfer_timestamp);
+                    self.on_create_transfer_ok(transfer_timestamp, transfer);
+                },
+                .exists => assert(outcome.timestamp < transfer_timestamp),
+                else => {},
+            }
+        }
+    }
 
-                const dr = &self.accounts[p.debit_account_index];
-                const cr = &self.accounts[p.credit_account_index];
+    fn on_create_transfer_ok(
+        self: *AccountingAuditor,
+        timestamp: u64,
+        transfer: *const tb.Transfer,
+    ) void {
+        self.changes_tracker.update(.{ .transfer = .{
+            .timestamp = timestamp,
+            .flags = transfer.flags,
+        } });
 
-                assert(self.pending_transfers.remove(transfer.pending_id));
-                // The transfer may still be in `pending_expiries` — removal would be O(n),
-                // so don't bother.
+        const query_intersection_index = transfer.code - 1;
+        const query_intersection = &self.query_intersections[query_intersection_index];
+        assert(transfer.user_data_64 == query_intersection.user_data_64);
+        assert(transfer.user_data_32 == query_intersection.user_data_32);
+        assert(transfer.code == query_intersection.code);
+        query_intersection.transfers.count += 1;
+        if (query_intersection.transfers.timestamp_min == 0) {
+            query_intersection.transfers.timestamp_min = timestamp;
+        }
+        query_intersection.transfers.timestamp_max = timestamp;
 
-                dr.debits_pending -= p.amount;
-                cr.credits_pending -= p.amount;
-                if (transfer.flags.post_pending_transfer) {
-                    const amount = @min(transfer.amount, p.amount);
-                    dr.debits_posted += amount;
-                    cr.credits_posted += amount;
+        if (transfer.flags.post_pending_transfer or transfer.flags.void_pending_transfer) {
+            const p = self.pending_transfers.get(transfer.pending_id).?;
+            const dr_state = &self.accounts_state[p.debit_account_index];
+            const cr_state = &self.accounts_state[p.credit_account_index];
+            dr_state.update(.dr, timestamp);
+            cr_state.update(.cr, timestamp);
+
+            const dr = &self.accounts[p.debit_account_index];
+            const cr = &self.accounts[p.credit_account_index];
+
+            assert(self.pending_transfers.remove(transfer.pending_id));
+            // The transfer may still be in `pending_expiries` — removal would be O(n),
+            // so don't bother.
+
+            dr.debits_pending -= p.amount;
+            cr.credits_pending -= p.amount;
+            if (transfer.flags.post_pending_transfer) {
+                const amount = @min(transfer.amount, p.amount);
+                dr.debits_posted += amount;
+                cr.credits_posted += amount;
+            }
+
+            assert(!dr.debits_exceed_credits(0));
+            assert(!dr.credits_exceed_debits(0));
+            assert(!cr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
+        } else {
+            const dr_index = self.account_id_to_index(transfer.debit_account_id);
+            const cr_index = self.account_id_to_index(transfer.credit_account_id);
+            const dr_state = &self.accounts_state[dr_index];
+            const cr_state = &self.accounts_state[cr_index];
+            dr_state.update(.dr, timestamp);
+            cr_state.update(.cr, timestamp);
+
+            const dr = &self.accounts[dr_index];
+            const cr = &self.accounts[cr_index];
+
+            if (transfer.flags.pending) {
+                if (transfer.timeout > 0) {
+                    self.pending_transfers.putAssumeCapacity(transfer.id, .{
+                        .amount = transfer.amount,
+                        .debit_account_index = dr_index,
+                        .credit_account_index = cr_index,
+                        .query_intersection_index = transfer.code - 1,
+                    });
+                    self.pending_expiries.add(.{
+                        .transfer_id = transfer.id,
+                        .transfer_timestamp = timestamp,
+                        .expires_at = timestamp + transfer.timeout_ns(),
+                    }) catch unreachable;
+                    // PriorityQueue lacks an "unmanaged" API, so verify that the workload
+                    // hasn't created more pending transfers than permitted.
+                    assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
                 }
-
-                assert(!dr.debits_exceed_credits(0));
-                assert(!dr.credits_exceed_debits(0));
-                assert(!cr.debits_exceed_credits(0));
-                assert(!cr.credits_exceed_debits(0));
+                dr.debits_pending += transfer.amount;
+                cr.credits_pending += transfer.amount;
             } else {
-                const dr_index = self.account_id_to_index(transfer.debit_account_id);
-                const cr_index = self.account_id_to_index(transfer.credit_account_id);
-                const dr_state = &self.accounts_state[dr_index];
-                const cr_state = &self.accounts_state[cr_index];
-                dr_state.update(.dr, transfer_timestamp);
-                cr_state.update(.cr, transfer_timestamp);
-
-                const dr = &self.accounts[dr_index];
-                const cr = &self.accounts[cr_index];
-
-                if (transfer.flags.pending) {
-                    if (transfer.timeout > 0) {
-                        self.pending_transfers.putAssumeCapacity(transfer.id, .{
-                            .amount = transfer.amount,
-                            .debit_account_index = dr_index,
-                            .credit_account_index = cr_index,
-                            .query_intersection_index = transfer.code - 1,
-                        });
-                        self.pending_expiries.add(.{
-                            .transfer_id = transfer.id,
-                            .transfer_timestamp = transfer_timestamp,
-                            .expires_at = transfer_timestamp + transfer.timeout_ns(),
-                        }) catch unreachable;
-                        // PriorityQueue lacks an "unmanaged" API, so verify that the workload
-                        // hasn't created more pending transfers than permitted.
-                        assert(self.pending_expiries.count() <= self.options.transfers_pending_max);
-                    }
-                    dr.debits_pending += transfer.amount;
-                    cr.credits_pending += transfer.amount;
-                } else {
-                    dr.debits_posted += transfer.amount;
-                    cr.credits_posted += transfer.amount;
-                }
-
-                assert(!dr.debits_exceed_credits(0));
-                assert(!dr.credits_exceed_debits(0));
-                assert(!cr.debits_exceed_credits(0));
-                assert(!cr.credits_exceed_debits(0));
+                dr.debits_posted += transfer.amount;
+                cr.credits_posted += transfer.amount;
             }
+
+            assert(!dr.debits_exceed_credits(0));
+            assert(!dr.credits_exceed_debits(0));
+            assert(!cr.debits_exceed_credits(0));
+            assert(!cr.credits_exceed_debits(0));
         }
     }
 
@@ -859,8 +961,8 @@ pub const AccountingAuditor = struct {
     }
 };
 
-pub fn IteratorForCreateType(comptime Result: type) type {
-    assert(Result == tb.CreateAccountsResult or Result == tb.CreateTransfersResult);
+pub fn ResultsSparseIteratorType(comptime Result: type) type {
+    assert(Result == tb.CreateAccountsErrorResult or Result == tb.CreateTransfersErrorResult);
 
     return struct {
         const IteratorForCreate = @This();

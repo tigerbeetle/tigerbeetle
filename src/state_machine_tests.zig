@@ -69,8 +69,19 @@ pub const TestContext = struct {
         /// including deprecated ones used by old clients.
         const versions: []const VersionMap = &.{
             .init(.{
-                .create_accounts = .create_accounts,
-                .create_transfers = .create_transfers,
+                .create_accounts = .create_accounts_with_results,
+                .create_transfers = .create_transfers_with_results,
+                .lookup_accounts = .lookup_accounts,
+                .lookup_transfers = .lookup_transfers,
+                .get_account_transfers = .get_account_transfers,
+                .get_account_balances = .get_account_balances,
+                .query_accounts = .query_accounts,
+                .query_transfers = .query_transfers,
+                .get_change_events = .get_change_events,
+            }),
+            .init(.{
+                .create_accounts = .deprecated_create_accounts_sparse,
+                .create_transfers = .deprecated_create_transfers_sparse,
                 .lookup_accounts = .lookup_accounts,
                 .lookup_transfers = .lookup_transfers,
                 .get_account_transfers = .get_account_transfers,
@@ -632,6 +643,15 @@ fn check_version(
     var transfers = std.AutoHashMap(u128, Transfer).init(allocator);
     defer transfers.deinit();
 
+    // The result code `.exists` always returns the timestamp of the original event.
+    // Even if the existing event was created within a linked chain and rolled back.
+    // For example, the linked chain:
+    //  events:  { id=1, flags=linked; id=1 }
+    //  results: { result=linked_event_failed, timestamp=100; result=exists, timestamp=100 }
+    //                                                   ^^^                           ^^^
+    var linked_events_failed = std.AutoHashMap(u128, u64).init(allocator);
+    defer linked_events_failed.deinit();
+
     var request = std.ArrayListAligned(u8, 16).init(allocator);
     defer request.deinit();
     try request.ensureTotalCapacity(TestContext.message_body_size_max);
@@ -688,19 +708,51 @@ fn check_version(
 
                 var event = a.event();
                 try request.appendSlice(std.mem.asBytes(&event));
-                if (a.result == .ok) {
-                    if (a.timestamp == 0) {
-                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
-                            @divExact(request.items.len, @sizeOf(Account));
-                    }
 
+                const timestamp_commit = context.state_machine.prepare_timestamp + 1 +
+                    @divExact(request.items.len, @sizeOf(Account));
+                if (event.timestamp == 0) event.timestamp = timestamp_commit;
+                if (a.result == .ok) {
                     try accounts.put(a.id, event);
-                } else {
-                    const result = CreateAccountsResult{
-                        .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
-                        .result = a.result,
-                    };
-                    try reply.appendSlice(std.mem.asBytes(&result));
+                }
+
+                switch (version_map.get(.create_accounts)) {
+                    .create_accounts_with_results => {
+                        const result = CreateAccountsResult{
+                            .timestamp = timestamp_expected: {
+                                if (a.result == .ok or a.result == .linked_event_failed) {
+                                    break :timestamp_expected event.timestamp;
+                                }
+                                if (a.result == .exists) {
+                                    break :timestamp_expected if (accounts.get(a.id)) |exists|
+                                        exists.timestamp
+                                    else
+                                        linked_events_failed.get(a.id).?;
+                                }
+                                break :timestamp_expected timestamp_commit;
+                            },
+                            .result = a.result,
+                        };
+                        try reply.appendSlice(std.mem.asBytes(&result));
+
+                        if (event.flags.linked) {
+                            if (a.result == .linked_event_failed) {
+                                try linked_events_failed.putNoClobber(event.id, event.timestamp);
+                            }
+                        } else {
+                            linked_events_failed.clearRetainingCapacity();
+                        }
+                    },
+                    .deprecated_create_accounts_sparse,
+                    .deprecated_create_accounts_unbatched,
+                    => if (a.result != .ok) {
+                        const result = tb.CreateAccountsErrorResult{
+                            .index = @intCast(@divExact(request.items.len, @sizeOf(Account)) - 1),
+                            .result = a.result,
+                        };
+                        try reply.appendSlice(std.mem.asBytes(&result));
+                    },
+                    else => unreachable,
                 }
             },
             .transfer => |t| {
@@ -709,12 +761,11 @@ fn check_version(
 
                 var event = t.event();
                 try request.appendSlice(std.mem.asBytes(&event));
-                if (t.result == .ok) {
-                    if (t.timestamp == 0) {
-                        event.timestamp = context.state_machine.prepare_timestamp + 1 +
-                            @divExact(request.items.len, @sizeOf(Transfer));
-                    }
 
+                const timestamp_commit = context.state_machine.prepare_timestamp + 1 +
+                    @divExact(request.items.len, @sizeOf(Transfer));
+                if (t.timestamp == 0) event.timestamp = timestamp_commit;
+                if (t.result == .ok) {
                     if (event.pending_id != 0) {
                         // Fill in default values.
                         const t_pending = transfers.get(event.pending_id).?;
@@ -737,12 +788,45 @@ fn check_version(
                         }
                     }
                     try transfers.put(t.id, event);
-                } else {
-                    const result = CreateTransfersResult{
-                        .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
-                        .result = t.result,
-                    };
-                    try reply.appendSlice(std.mem.asBytes(&result));
+                }
+
+                switch (version_map.get(.create_transfers)) {
+                    .create_transfers_with_results => {
+                        const result: CreateTransfersResult = .{
+                            .timestamp = timestamp_expected: {
+                                if (t.result == .ok or t.result == .linked_event_failed) {
+                                    break :timestamp_expected event.timestamp;
+                                }
+                                if (t.result == .exists) {
+                                    break :timestamp_expected if (transfers.get(t.id)) |exists|
+                                        exists.timestamp
+                                    else
+                                        linked_events_failed.get(t.id).?;
+                                }
+                                break :timestamp_expected timestamp_commit;
+                            },
+                            .result = t.result,
+                        };
+                        try reply.appendSlice(std.mem.asBytes(&result));
+
+                        if (event.flags.linked) {
+                            if (t.result == .linked_event_failed) {
+                                try linked_events_failed.putNoClobber(event.id, event.timestamp);
+                            }
+                        } else {
+                            linked_events_failed.clearRetainingCapacity();
+                        }
+                    },
+                    .deprecated_create_transfers_sparse,
+                    .deprecated_create_transfers_unbatched,
+                    => if (t.result != .ok) {
+                        const result: tb.CreateTransfersErrorResult = .{
+                            .index = @intCast(@divExact(request.items.len, @sizeOf(Transfer)) - 1),
+                            .result = t.result,
+                        };
+                        try reply.appendSlice(std.mem.asBytes(&result));
+                    },
+                    else => unreachable,
                 }
             },
             .lookup_account => |a| {
