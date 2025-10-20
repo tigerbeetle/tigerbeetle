@@ -7,6 +7,7 @@ import (
 	"reflect"
 
 	. "github.com/tigerbeetle/tigerbeetle-go"
+	"github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 	. "github.com/tigerbeetle/tigerbeetle-go/pkg/types"
 )
 
@@ -64,7 +65,7 @@ func main() {
 	defer client.Close()
 
 	// Create two accounts.
-	res, err := client.CreateAccounts([]Account{
+	accountsRes, err := client.CreateAccounts([]Account{
 		{
 			ID:     ToUint128(1),
 			Ledger: 1,
@@ -80,8 +81,13 @@ func main() {
 		log.Fatalf("Error creating accounts: %s", err)
 	}
 
-	for _, err := range res {
-		log.Fatalf("Error creating account %d: %s", err.Index, err.Result)
+	assert(len(accountsRes), 2, "accountsRes")
+	for i, item := range accountsRes {
+		switch item.Result {
+		case types.AccountOK:
+		default:
+			log.Fatalf("Error creating account %d: %s", i, item.Result)
+		}
 	}
 
 	// Start five pending transfers.
@@ -132,13 +138,18 @@ func main() {
 			Flags:           TransferFlags{Pending: true}.ToUint16(),
 		},
 	}
-	transferRes, err := client.CreateTransfers(transfers)
+	transfersRes, err := client.CreateTransfers(transfers)
 	if err != nil {
 		log.Fatalf("Error creating transfer: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), len(transfers), "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate accounts pending and posted debits/credits before finishing the two-phase transfer.
@@ -160,7 +171,7 @@ func main() {
 	}, "after starting 5 pending transfers")
 
 	// Create a 6th transfer posting the 1st transfer.
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(6),
 			DebitAccountID:  ToUint128(1),
@@ -176,8 +187,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate account balances after posting 1st pending transfer.
@@ -199,7 +215,7 @@ func main() {
 	}, "after completing 1 pending transfer")
 
 	// Create a 7th transfer voiding the 2nd transfer.
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(7),
 			DebitAccountID:  ToUint128(1),
@@ -215,8 +231,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate account balances after voiding 2nd pending transfer.
@@ -238,7 +259,7 @@ func main() {
 	}, "after completing 2 pending transfers")
 
 	// Create a 8th transfer posting the 3rd transfer.
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(8),
 			DebitAccountID:  ToUint128(1),
@@ -254,8 +275,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate account balances after posting 3rd pending transfer.
@@ -277,7 +303,7 @@ func main() {
 	}, "after completing 3 pending transfers")
 
 	// Create a 9th transfer voiding the 4th transfer.
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(9),
 			DebitAccountID:  ToUint128(1),
@@ -293,8 +319,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate account balances after voiding 4th pending transfer.
@@ -316,7 +347,7 @@ func main() {
 	}, "after completing 4 pending transfers")
 
 	// Create a 10th transfer posting the 5th transfer.
-	transferRes, err = client.CreateTransfers([]Transfer{
+	transfersRes, err = client.CreateTransfers([]Transfer{
 		{
 			ID:              ToUint128(10),
 			DebitAccountID:  ToUint128(1),
@@ -332,8 +363,13 @@ func main() {
 		log.Fatalf("Error creating transfers: %s", err)
 	}
 
-	for _, err := range transferRes {
-		log.Fatalf("Error creating transfer: %s", err.Result)
+	assert(len(transfersRes), 1, "transfersRes")
+	for i, item := range transfersRes {
+		switch item.Result {
+		case types.TransferOK:
+		default:
+			log.Fatalf("Error creating transfer %d: %s", i, item.Result)
+		}
 	}
 
 	// Validate account balances after posting 5th pending transfer.
@@ -353,6 +389,4 @@ func main() {
 			CreditsPending: ToUint128(0),
 		},
 	}, "after completing 5 pending transfers")
-
-	fmt.Println("ok")
 }

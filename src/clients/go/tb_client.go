@@ -46,8 +46,8 @@ var AmountMax = types.BytesToUint128([16]byte{
 })
 
 type Client interface {
-	CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error)
-	CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error)
+	CreateAccounts(accounts []types.Account) ([]types.CreateAccountsResult, error)
+	CreateTransfers(transfers []types.Transfer) ([]types.CreateTransfersResult, error)
 	LookupAccounts(accountIDs []types.Uint128) ([]types.Account, error)
 	LookupTransfers(transferIDs []types.Uint128) ([]types.Transfer, error)
 	GetAccountTransfers(filter types.AccountFilter) ([]types.Transfer, error)
@@ -124,9 +124,9 @@ func (c *c_client) Close() {
 
 func getEventSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS:
+	case C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS:
 		return unsafe.Sizeof(types.Account{})
-	case C.TB_OPERATION_CREATE_TRANSFERS:
+	case C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS:
 		return unsafe.Sizeof(types.Transfer{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		fallthrough
@@ -149,10 +149,10 @@ func getEventSize(op C.TB_OPERATION) uintptr {
 
 func getResultSize(op C.TB_OPERATION) uintptr {
 	switch op {
-	case C.TB_OPERATION_CREATE_ACCOUNTS:
-		return unsafe.Sizeof(types.AccountEventResult{})
-	case C.TB_OPERATION_CREATE_TRANSFERS:
-		return unsafe.Sizeof(types.TransferEventResult{})
+	case C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS:
+		return unsafe.Sizeof(types.CreateAccountsResult{})
+	case C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS:
+		return unsafe.Sizeof(types.CreateTransfersResult{})
 	case C.TB_OPERATION_LOOKUP_ACCOUNTS:
 		return unsafe.Sizeof(types.Account{})
 	case C.TB_OPERATION_LOOKUP_TRANSFERS:
@@ -279,7 +279,7 @@ func onGoPacketCompletion(
 	req.ready <- reply
 }
 
-func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEventResult, error) {
+func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.CreateAccountsResult, error) {
 	count := len(accounts)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -289,7 +289,7 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 	}
 
 	reply, err := c.doRequest(
-		C.TB_OPERATION_CREATE_ACCOUNTS,
+		C.TB_OPERATION_CREATE_ACCOUNTS_WITH_RESULTS,
 		count,
 		dataPtr,
 	)
@@ -299,15 +299,15 @@ func (c *c_client) CreateAccounts(accounts []types.Account) ([]types.AccountEven
 	}
 
 	if reply == nil {
-		return make([]types.AccountEventResult, 0), nil
+		return make([]types.CreateAccountsResult, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.AccountEventResult{}))
-	results := unsafe.Slice((*types.AccountEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.CreateAccountsResult{}))
+	results := unsafe.Slice((*types.CreateAccountsResult)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
-func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.TransferEventResult, error) {
+func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.CreateTransfersResult, error) {
 	count := len(transfers)
 	var dataPtr unsafe.Pointer
 	if count > 0 {
@@ -317,7 +317,7 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 	}
 
 	reply, err := c.doRequest(
-		C.TB_OPERATION_CREATE_TRANSFERS,
+		C.TB_OPERATION_CREATE_TRANSFERS_WITH_RESULTS,
 		count,
 		dataPtr,
 	)
@@ -327,11 +327,11 @@ func (c *c_client) CreateTransfers(transfers []types.Transfer) ([]types.Transfer
 	}
 
 	if reply == nil {
-		return make([]types.TransferEventResult, 0), nil
+		return make([]types.CreateTransfersResult, 0), nil
 	}
 
-	resultsCount := len(reply) / int(unsafe.Sizeof(types.TransferEventResult{}))
-	results := unsafe.Slice((*types.TransferEventResult)(unsafe.Pointer(&reply[0])), resultsCount)
+	resultsCount := len(reply) / int(unsafe.Sizeof(types.CreateTransfersResult{}))
+	results := unsafe.Slice((*types.CreateTransfersResult)(unsafe.Pointer(&reply[0])), resultsCount)
 	return results, nil
 }
 
