@@ -506,14 +506,16 @@ func (i CreateTransferResult) String() string {
 	return "CreateTransferResult(" + strconv.FormatInt(int64(i+1), 10) + ")"
 }
 
-type AccountEventResult struct {
-	Index  uint32
-	Result CreateAccountResult
+type CreateAccountsResult struct {
+	Timestamp uint64
+	Result    CreateAccountResult
+	Reserved  uint32
 }
 
-type TransferEventResult struct {
-	Index  uint32
-	Result CreateTransferResult
+type CreateTransfersResult struct {
+	Timestamp uint64
+	Result    CreateTransferResult
+	Reserved  uint32
 }
 
 type AccountFilter struct {

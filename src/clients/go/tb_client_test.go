@@ -121,7 +121,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Empty(t, results)
+		assertCreateAccountsOK(t, results, 2)
 
 		return accountA, accountB
 	}
@@ -209,8 +209,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		assert.Empty(t, results)
+		assertCreateTransfersOK(t, results, 1)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -261,9 +260,10 @@ func doTestClient(t *testing.T, client Client) {
 			t.Fatal(err)
 		}
 		assert.Len(t, results, 2)
-		assert.Equal(t, unsafe.Sizeof(transfer1), 128)
-		assert.Equal(t, types.TransferEventResult{Index: 0, Result: types.TransferLinkedEventFailed}, results[0])
-		assert.Equal(t, types.TransferEventResult{Index: 1, Result: types.TransferExistsWithDifferentFlags}, results[1])
+		assert.True(t, results[0].Timestamp > 0)
+		assert.Equal(t, results[0].Result, types.TransferLinkedEventFailed)
+		assert.True(t, results[1].Timestamp > 0)
+		assert.Equal(t, results[1].Result, types.TransferExistsWithDifferentFlags)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -305,7 +305,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, results, 0)
+		assertCreateTransfersOK(t, results, 1)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -335,7 +335,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, results, 0)
+		assertCreateTransfersOK(t, results, 1)
 
 		accounts, err = client.LookupAccounts([]types.Uint128{accountA.ID, accountB.ID})
 		if err != nil {
@@ -356,7 +356,6 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		assert.Empty(t, results)
 	})
 
@@ -366,7 +365,6 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
 		assert.Empty(t, results)
 	})
 
@@ -422,7 +420,7 @@ func doTestClient(t *testing.T, client Client) {
 						t.Error(err)
 						return
 					}
-					assert.Empty(t, results)
+					assertCreateTransfersOK(t, results, 1)
 				} else {
 					results, err := client.LookupAccounts([]types.Uint128{accountA.ID})
 					if err != nil {
@@ -482,17 +480,17 @@ func doTestClient(t *testing.T, client Client) {
 						Flags:           flags,
 					},
 				})
-
 				if err != nil {
 					t.Error(err)
 					return
 				}
 
+				assert.Len(t, results, 1)
+				assert.True(t, results[0].Timestamp > 0)
 				if i%10 == 0 {
-					assert.Len(t, results, 1)
 					assert.Equal(t, results[0].Result, types.TransferLinkedEventChainOpen)
 				} else {
-					assert.Empty(t, results)
+					assert.Equal(t, results[0].Result, types.TransferOK)
 				}
 			}(i)
 		}
@@ -518,7 +516,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, account_results, 0)
+		assertCreateAccountsOK(t, account_results, 1)
 
 		// Create transfers where the new account is either the debit or credit account:
 		transfers_created := make([]types.Transfer, 10)
@@ -552,7 +550,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, transfer_results, 0)
+		assertCreateTransfersOK(t, transfer_results, len(transfers_created))
 
 		// Query all transfers for accountC:
 		filter := types.AccountFilter{
@@ -1021,7 +1019,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, account_results, 0)
+		assertCreateAccountsOK(t, account_results, len(accounts_created))
 
 		// Querying accounts where:
 		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
@@ -1213,7 +1211,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, account_results, 0)
+		assertCreateAccountsOK(t, account_results, 1)
 
 		// Creating transfers:
 		transfers_created := make([]types.Transfer, 10)
@@ -1252,7 +1250,7 @@ func doTestClient(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Len(t, transfer_results, 0)
+		assertCreateTransfersOK(t, transfer_results, len(transfers_created))
 
 		// Querying transfers where:
 		// `user_data_128=1000 AND user_data_64=100 AND user_data_32=10
@@ -1559,7 +1557,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Empty(t, tmpResults)
+		assertCreateAccountsOK(t, tmpResults, 1)
 
 		tmpAccounts, err := client.LookupAccounts([]types.Uint128{tmpAccount})
 		if err != nil {
@@ -1598,7 +1596,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Empty(t, accountResults)
+		assertCreateAccountsOK(t, accountResults, 2)
 
 		transfersResults, err := client.CreateTransfers([]types.Transfer{
 			{
@@ -1617,7 +1615,7 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		assert.Empty(t, transfersResults)
+		assertCreateTransfersOK(t, transfersResults, 1)
 
 		accounts, err := client.LookupAccounts([]types.Uint128{accountA, accountB})
 		if err != nil {
@@ -1634,6 +1632,22 @@ func doTestImportedFlag(t *testing.T, client Client) {
 		assert.Len(t, transfers, 1)
 		assert.Equal(t, timestampMax+3, transfers[0].Timestamp)
 	})
+}
+
+func assertCreateAccountsOK(t *testing.T, results []types.CreateAccountsResult, expected int) {
+	assert.Len(t, results, expected)
+	for _, result := range results {
+		assert.True(t, result.Timestamp > 0)
+		assert.Equal(t, result.Result, types.AccountOK)
+	}
+}
+
+func assertCreateTransfersOK(t *testing.T, results []types.CreateTransfersResult, expected int) {
+	assert.Len(t, results, expected)
+	for _, result := range results {
+		assert.True(t, result.Timestamp > 0)
+		assert.Equal(t, result.Result, types.TransferOK)
+	}
 }
 
 func BenchmarkNop(b *testing.B) {
