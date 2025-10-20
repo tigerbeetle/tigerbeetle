@@ -164,8 +164,8 @@ pub fn ContextType(
 
         const Operation = Client.Operation;
         const allowed_operations = [_]Operation{
-            .create_accounts,
-            .create_transfers,
+            .create_accounts_with_results,
+            .create_transfers_with_results,
             .lookup_accounts,
             .lookup_transfers,
             .get_account_transfers,
