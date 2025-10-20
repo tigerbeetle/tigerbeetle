@@ -255,10 +255,12 @@ public class AsyncRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateAccountResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(100);
         dummyReplyBuffer.putInt(CreateAccountResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
+        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(101);
         dummyReplyBuffer.putInt(CreateAccountResult.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         var callback = new CallbackSimulator<CreateAccountResultBatch>(
                 AsyncRequest.createAccounts(client, batch),
@@ -275,11 +277,11 @@ public class AsyncRequestTest {
         assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
+        assertEquals(100, result.getTimestamp());
         assertEquals(CreateAccountResult.IdMustNotBeZero, result.getResult());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
+        assertEquals(101, result.getTimestamp());
         assertEquals(CreateAccountResult.Exists, result.getResult());
     }
 
@@ -293,10 +295,12 @@ public class AsyncRequestTest {
         // A dummy ByteBuffer simulating some simple reply
         var dummyReplyBuffer = ByteBuffer.allocate(CreateTransferResultBatch.Struct.SIZE * 2)
                 .order(ByteOrder.LITTLE_ENDIAN);
-        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(100);
         dummyReplyBuffer.putInt(CreateTransferResult.IdMustNotBeZero.value);
-        dummyReplyBuffer.putInt(1);
+        dummyReplyBuffer.putInt(0);
+        dummyReplyBuffer.putLong(101);
         dummyReplyBuffer.putInt(CreateTransferResult.Exists.value);
+        dummyReplyBuffer.putInt(0);
 
         var callback = new CallbackSimulator<CreateTransferResultBatch>(
                 AsyncRequest.createTransfers(client, batch),
@@ -313,11 +317,11 @@ public class AsyncRequestTest {
         assertTrue(result.getHeader().getTimestamp() != 0L);
 
         assertTrue(result.next());
-        assertEquals(0, result.getIndex());
+        assertEquals(100, result.getTimestamp());
         assertEquals(CreateTransferResult.IdMustNotBeZero, result.getResult());
 
         assertTrue(result.next());
-        assertEquals(1, result.getIndex());
+        assertEquals(101, result.getTimestamp());
         assertEquals(CreateTransferResult.Exists, result.getResult());
     }
 
