@@ -7,6 +7,15 @@ const fuzz = @import("./testing/fuzz.zig");
 
 const log = std.log.scoped(.fuzz);
 
+// This enables `constants.verify` for this file.
+pub const vsr_options = .{
+    .config_verify = true,
+    .git_commit = @import("vsr_options").git_commit,
+    .release = @import("vsr_options").release,
+    .release_client_min = @import("vsr_options").release_client_min,
+    .config_aof_recovery = @import("vsr_options").config_aof_recovery,
+};
+
 // NB: this changes values in `constants.zig`!
 pub const tigerbeetle_config = @import("config.zig").configs.test_min;
 comptime {
@@ -57,6 +66,8 @@ const CLIArgs = struct {
 };
 
 pub fn main() !void {
+    comptime assert(constants.verify);
+
     fuzz.limit_ram();
 
     var gpa_allocator: std.heap.GeneralPurposeAllocator(.{}) = .{};

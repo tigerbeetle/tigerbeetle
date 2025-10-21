@@ -14,7 +14,15 @@ const vsr = @import("vsr.zig");
 const fuzz = @import("./testing/fuzz.zig");
 const Header = vsr.Header;
 
+pub const vsr_options = .{
+    .config_verify = true,
+    .git_commit = @import("vsr_options").git_commit,
+    .release = @import("vsr_options").release,
+    .release_client_min = @import("vsr_options").release_client_min,
+    .config_aof_recovery = @import("vsr_options").config_aof_recovery,
+};
 const vsr_vopr_options = @import("vsr_vopr_options");
+
 const state_machine = vsr_vopr_options.state_machine;
 const StateMachineType = switch (state_machine) {
     .accounting => @import("state_machine.zig").StateMachineType,
@@ -86,6 +94,7 @@ const CLIArgs = struct {
 };
 
 pub fn main() !void {
+    comptime assert(constants.verify);
     // This must be initialized at runtime as stderr is not comptime known on e.g. Windows.
     log_buffer.unbuffered_writer = std.io.getStdErr().writer();
     fuzz.limit_ram();
