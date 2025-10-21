@@ -231,10 +231,7 @@ fn build(shell: *Shell, languages: LanguageSet, info: VersionInfo, devhub: bool)
     }
 
     if (languages.contains(.rust)) {
-        var dist_dir_rust = try dist_dir.makeOpenPath("rust", .{});
-        defer dist_dir_rust.close();
-
-        try build_rust(shell, info, dist_dir_rust);
+        // Currently disabled.
     }
 }
 
