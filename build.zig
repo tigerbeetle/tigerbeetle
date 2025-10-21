@@ -96,6 +96,8 @@ pub fn build(b: *std.Build) !void {
         .vopr_build = b.step("vopr:build", "Build the VOPR"),
     };
 
+    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
+
     // Build options passed with `-D` flags.
     const build_options = .{
         .target = b.option([]const u8, "target", "The CPU architecture and OS to build for"),
@@ -109,7 +111,9 @@ pub fn build(b: *std.Build) !void {
             "multiversion-file",
             "Past version to include for upgrades (local binary file)",
         ),
-        .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse true,
+        .config_verify = b.option(bool, "config_verify", "Enable extra assertions.") orelse
+            // If `config_verify` isn't set, disable it for `release` builds; otherwise, enable it.
+            if (mode == .ReleaseSafe) false else true,
         .config_aof_recovery = b.option(
             bool,
             "config-aof-recovery",
@@ -149,9 +153,8 @@ pub fn build(b: *std.Build) !void {
             "Build tasks print the path of the executable",
         ) orelse false,
     };
-    const target = try resolve_target(b, build_options.target);
-    const mode = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
 
+    const target = try resolve_target(b, build_options.target);
     const stdx_module = b.addModule("stdx", .{ .root_source_file = b.path("src/stdx/stdx.zig") });
 
     assert(build_options.git_commit.len == 40);
@@ -1008,7 +1011,7 @@ fn build_test_jni(
             // the stack size and causes a SEGV that is handled by Zig's panic handler.
             // https://bugzilla.redhat.com/show_bug.cgi?id=1572811#c7
             //
-            // The workaround is run the tests in "ReleaseFast" mode.
+            // The workaround is run the tests boolReleaseFast" mode.
             .optimize = if (builtin.os.tag == .windows) .ReleaseFast else options.mode,
         }),
     });
