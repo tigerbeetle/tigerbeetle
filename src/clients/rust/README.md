@@ -10,7 +10,7 @@ The TigerBeetle client for Rust.
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Rust 1.63+
+* Rust 1.68+
 
 ## Setup
 

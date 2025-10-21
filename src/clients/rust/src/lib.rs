@@ -1014,10 +1014,12 @@ impl Client {
 impl Drop for Client {
     fn drop(&mut self) {
         if !self.client.is_null() {
-            _ = Client {
+            let close_future = Client {
                 client: self.client,
             }
             .close();
+            // NB: Rust 1.68 clippy - specifically - want's an explicit drop for this future.
+            drop(close_future);
         }
     }
 }

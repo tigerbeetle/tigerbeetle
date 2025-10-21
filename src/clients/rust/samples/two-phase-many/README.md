@@ -7,7 +7,7 @@ Code for this sample is in [./src/main.rs](./src/main.rs).
 
 Linux >= 5.6 is the only production environment we
 support. But for ease of development we also support macOS and Windows.
-* Rust 1.63+
+* Rust 1.68+
 
 ## Setup
 

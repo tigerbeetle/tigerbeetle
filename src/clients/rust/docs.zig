@@ -18,7 +18,7 @@ pub const RustDocs = Docs{
     ,
 
     .prerequisites =
-    \\* Rust 1.63+
+    \\* Rust 1.68+
     ,
 
     .project_file_name = "Cargo.toml",

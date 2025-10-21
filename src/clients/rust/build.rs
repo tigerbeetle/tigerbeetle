@@ -63,8 +63,8 @@ fn prepare_dependencies(manifest_dir: &str) -> anyhow::Result<()> {
         let tb_client_dest = format!("{manifest_dir}/assets");
         let tb_client_h_dest = format!("{manifest_dir}/assets/tb_client.h");
 
-        fs::create_dir_all(&tb_client_dest)?;
-        fs::copy(&tb_client_h, tb_client_h_dest)?;
+        fs::create_dir_all(tb_client_dest)?;
+        fs::copy(tb_client_h, tb_client_h_dest)?;
 
         emit_tigerbeetle_rerun_if_changed(manifest_dir)?;
 
