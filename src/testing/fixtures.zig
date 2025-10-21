@@ -51,11 +51,18 @@ pub fn init_time(options: struct {
     return result;
 }
 
-pub fn init_tracer(gpa: std.mem.Allocator, init: Time, options: struct {
-    writer: ?std.io.AnyWriter = null,
-    process_id: Tracer.ProcessID = .{ .replica = .{ .cluster = cluster, .replica = replica } },
-}) !Tracer {
-    return Tracer.init(gpa, init, options.process_id, .{ .writer = options.writer });
+pub fn init_tracer(
+    comptime StateMachine: type,
+    gpa: std.mem.Allocator,
+    init: Time,
+    options: struct {
+        writer: ?std.io.AnyWriter = null,
+        process_id: Tracer.ProcessID = .{
+            .replica = .{ .cluster = cluster, .replica = replica },
+        },
+    },
+) !Tracer {
+    return Tracer.init(StateMachine, gpa, init, options.process_id, .{ .writer = options.writer });
 }
 
 pub fn init_storage(gpa: std.mem.Allocator, options: Storage.Options) !Storage {

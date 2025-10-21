@@ -117,6 +117,8 @@ const trace_span_size_max = 1 * KiB;
 
 pub const Tracer = @This();
 
+pub const tree_id_max = 64;
+
 time: Time,
 process_id: ProcessID,
 options: Options,
@@ -174,6 +176,17 @@ pub const Options = struct {
 };
 
 pub fn init(
+    comptime StateMachine: type,
+    allocator: std.mem.Allocator,
+    time: Time,
+    process_id: ProcessID,
+    options: Options,
+) !Tracer {
+    comptime assert(StateMachine.Forest.tree_id_range.max <= tree_id_max);
+    return init_inner(allocator, time, process_id, options);
+}
+
+pub fn init_inner(
     allocator: std.mem.Allocator,
     time: Time,
     process_id: ProcessID,
@@ -265,6 +278,13 @@ pub fn count(tracer: *Tracer, event: EventMetric, value: u64) void {
 }
 
 pub fn start(tracer: *Tracer, event: Event) void {
+    switch (event) {
+        inline else => |payload| if (@TypeOf(payload) != void and
+            @hasField(@TypeOf(payload), "tree"))
+        {
+            assert(@intFromEnum(payload.tree) <= @as(u16, tree_id_max));
+        },
+    }
     const event_tracing = event.as(EventTracing);
     const event_timing = event.as(EventTiming);
     const stack = event_tracing.stack();
@@ -464,7 +484,15 @@ test "trace json" {
 
     var time_sim = fixtures.init_time(.{});
 
-    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{
+    const StateMachine = struct {
+        pub const Forest = struct {
+            pub const tree_id_range = struct {
+                pub const max = 8;
+            };
+        };
+    };
+
+    var trace = try fixtures.init_tracer(StateMachine, gpa, time_sim.time(), .{
         .writer = trace_buffer.writer(gpa).any(),
         .process_id = .unknown,
     });
@@ -490,7 +518,7 @@ test "trace json" {
         \\{"pid":0,"tid":208,"ph":"B","ts":0,"cat":"metrics_emit","name":"metrics_emit  ","args":""},
         \\{"pid":0,"tid":208,"ph":"E","ts":10000},
         \\{"pid":1,"tid":0,"ph":"B","ts":10000,"cat":"replica_commit","name":"replica_commit  stage=idle","args":{"stage":"idle","op":123}},
-        \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=Account.id","args":{"tree":"Account.id","level_b":1}},
+        \\{"pid":1,"tid":8,"ph":"B","ts":20000,"cat":"compact_beat","name":"compact_beat  tree=trace.event.TreeEnum(1)","args":{"tree":1,"level_b":1}},
         \\{"pid":1,"tid":8,"ph":"E","ts":40000},
         \\{"pid":1,"tid":0,"ph":"E","ts":70000},
         \\
@@ -501,7 +529,14 @@ test "timing overflow" {
     const gpa = std.testing.allocator;
 
     var time_sim = fixtures.init_time(.{});
-    var trace = try fixtures.init_tracer(gpa, time_sim.time(), .{});
+    const StateMachine = struct {
+        pub const Forest = struct {
+            pub const tree_id_range = struct {
+                pub const max = 8;
+            };
+        };
+    };
+    var trace = try fixtures.init_tracer(StateMachine, gpa, time_sim.time(), .{});
     defer trace.deinit(gpa);
 
     trace.set_replica(.{ .cluster = 0, .replica = 0 });

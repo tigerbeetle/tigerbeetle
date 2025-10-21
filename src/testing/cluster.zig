@@ -271,7 +271,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             for (replica_tracers, 0..) |*tracer, replica_index| {
                 errdefer for (replica_tracers[0..replica_index]) |*t| t.deinit(allocator);
                 const time = replica_times[replica_index].time();
-                tracer.* = try Tracer.init(allocator, time, .{ .replica = .{
+                tracer.* = try Tracer.init(StateMachine, allocator, time, .{ .replica = .{
                     .cluster = options.cluster.cluster_id,
                     .replica = @intCast(replica_index),
                 } }, .{});
@@ -716,6 +716,7 @@ pub fn ClusterType(comptime StateMachineType: anytype) type {
             // Re-initialize the trace to get a clean state.
             cluster.replica_tracers[replica_index].deinit(cluster.allocator);
             cluster.replica_tracers[replica_index] = try Tracer.init(
+                StateMachine,
                 cluster.allocator,
                 cluster.replica_times[replica_index].time(),
                 .{ .replica = .{

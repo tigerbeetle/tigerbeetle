@@ -10,27 +10,9 @@ const CommitStage = @import("../vsr/replica.zig").CommitStage;
 const Operation = @import("../tigerbeetle.zig").Operation;
 const Duration = stdx.Duration;
 
-const TreeEnum = tree_enum: {
-    const tree_ids = @import("../state_machine.zig").tree_ids;
-    var tree_fields: []const std.builtin.Type.EnumField = &[_]std.builtin.Type.EnumField{};
+const tree_id_max = @import("../trace.zig").tree_id_max;
 
-    for (std.meta.declarations(tree_ids)) |groove_field| {
-        const tree_ids_groove = @field(tree_ids, groove_field.name);
-        for (std.meta.fieldNames(@TypeOf(tree_ids_groove))) |field_name| {
-            tree_fields = tree_fields ++ &[_]std.builtin.Type.EnumField{.{
-                .name = groove_field.name ++ "." ++ field_name,
-                .value = @field(tree_ids_groove, field_name),
-            }};
-        }
-    }
-
-    break :tree_enum @Type(.{ .@"enum" = .{
-        .tag_type = u32,
-        .fields = tree_fields,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
-};
+const TreeEnum = enum(u16) { undefined = 0, _ };
 
 /// Returns the count of an exhaustive enum.
 fn enum_count(EnumOrUnion: type) u8 {
@@ -195,15 +177,15 @@ pub const EventTiming = union(Event.Tag) {
         .replica_request = enum_count(Operation),
         .replica_request_execute = enum_count(Operation),
         .replica_request_local = enum_count(Operation),
-        .compact_beat = enum_count(TreeEnum),
-        .compact_beat_merge = enum_count(TreeEnum),
+        .compact_beat = tree_id_max,
+        .compact_beat_merge = tree_id_max,
         .compact_manifest = 1,
-        .compact_mutable = enum_count(TreeEnum),
-        .compact_mutable_suffix = enum_count(TreeEnum),
-        .lookup = enum_count(TreeEnum),
-        .lookup_worker = enum_count(TreeEnum),
-        .scan_tree = enum_count(TreeEnum),
-        .scan_tree_level = enum_count(TreeEnum),
+        .compact_mutable = tree_id_max,
+        .compact_mutable_suffix = tree_id_max,
+        .lookup = tree_id_max,
+        .lookup_worker = tree_id_max,
+        .scan_tree = tree_id_max,
+        .scan_tree_level = tree_id_max,
         .grid_read = 1,
         .grid_write = 1,
         .metrics_emit = 1,
@@ -262,20 +244,20 @@ pub const EventTiming = union(Event.Tag) {
             .lookup_worker,
             .scan_tree,
             => |data| {
-                const tree_id = index_from_enum(data.tree);
+                const tree_id = @intFromEnum(data.tree);
                 assert(tree_id < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + tree_id;
             },
             inline .compact_beat, .compact_beat_merge => |data| {
-                const tree_id = index_from_enum(data.tree);
+                const tree_id = @intFromEnum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
                 return slot_bases.get(event.*) + offset;
             },
             inline .scan_tree_level => |data| {
-                const tree_id = index_from_enum(data.tree);
+                const tree_id = @intFromEnum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
@@ -475,8 +457,8 @@ pub const EventMetric = union(enum) {
     release,
 
     pub const slot_limits = std.enums.EnumArray(Tag, u32).init(.{
-        .table_count_visible = enum_count(TreeEnum),
-        .table_count_visible_max = enum_count(TreeEnum),
+        .table_count_visible = tree_id_max,
+        .table_count_visible_max = tree_id_max,
         .replica_status = 1,
         .replica_view = 1,
         .replica_log_view = 1,
@@ -523,7 +505,7 @@ pub const EventMetric = union(enum) {
     pub fn slot(event: *const EventMetric) u32 {
         switch (event.*) {
             inline .table_count_visible, .table_count_visible_max => |data| {
-                const tree_id = index_from_enum(data.tree);
+                const tree_id = @intFromEnum(data.tree);
                 const offset = tree_id;
                 assert(offset < slot_limits.get(event.*));
 
@@ -561,7 +543,8 @@ pub fn format_data(
         try writer.writeAll(data_field.name);
         try writer.writeByte('=');
 
-        if (@typeInfo(data_field.type) == .@"enum" or
+        if ((@typeInfo(data_field.type) == .@"enum" and
+            @typeInfo(data_field.type).@"enum".is_exhaustive) or
             @typeInfo(data_field.type) == .@"union")
         {
             try writer.print("{s}", .{@tagName(data_field_value)});

@@ -104,7 +104,7 @@ const packet_count_max = stdx.div_ceil(
 comptime {
     // Sanity-check:
     assert(packet_count_max > 0);
-    assert(packet_count_max < 256);
+    assert(packet_count_max < 512);
 }
 
 pub const StatsD = struct {
@@ -380,8 +380,8 @@ fn format_metric(
                             try writer.writeByte(',');
                             try writer.writeAll(data_field.name);
                             try writer.writeByte(':');
-
-                            if (@typeInfo(data_field.type) == .@"enum" or
+                            if ((@typeInfo(data_field.type) == .@"enum" and
+                                @typeInfo(data_field.type).@"enum".is_exhaustive) or
                                 @typeInfo(data_field.type) == .@"union")
                             {
                                 try writer.print("{s}", .{@tagName(data_field_value)});

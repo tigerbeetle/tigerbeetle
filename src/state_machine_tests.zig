@@ -68,7 +68,7 @@ pub const TestContext = struct {
 
         ctx.time_sim = fixtures.init_time(.{});
 
-        ctx.trace = try fixtures.init_tracer(allocator, ctx.time_sim.time(), .{});
+        ctx.trace = try fixtures.init_tracer(StateMachine, allocator, ctx.time_sim.time(), .{});
         errdefer ctx.trace.deinit(allocator);
 
         ctx.superblock = try fixtures.init_superblock(allocator, &ctx.storage, .{

@@ -118,7 +118,7 @@ pub fn main() !void {
         },
     }
 
-    var tracer = try Tracer.init(gpa, time, .unknown, .{
+    var tracer = try Tracer.init(StateMachine, gpa, time, .unknown, .{
         .writer = if (trace_file) |file| file.writer().any() else null,
         .statsd_options = if (statsd_address) |address| .{
             .udp = .{
